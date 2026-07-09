@@ -3,11 +3,11 @@
 Implements ``EmbedderPort`` using the BAAI/bge-m3 model (1024-dim).
 
 Key contracts:
-- C3 (Task2_Task3_Integration_Contract): ``embed()`` embeds ChunkRecord.text
+-``embed()`` embeds ChunkRecord.text
   **verbatim** — no prefix, no summarization, no trimming.
 - ``embed_query()`` applies the bge-m3 query instruction prefix so retrieval
   uses the correct asymmetric encoding.
-- The same model instance must be used for both ingest and query (Task 4.6).
+- The same model instance must be used for both ingest and query
 """
 
 from __future__ import annotations
