@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 
+from knowledgenexus.foundation.domain.rules.hashing_constants import (
+    HASH_ENCODING,
+    ID_DIGEST_HEX_LENGTH,
+    ID_FIELD_SEPARATOR,
+)
+
 
 class ChunkIdGenerator:
     """Deterministic chunk ID generation for already-normalized chunk text."""
-
-    _SEPARATOR = "\x1f"
 
     @classmethod
     def generate_chunk_id(
@@ -21,10 +25,12 @@ class ChunkIdGenerator:
         cls._require_non_empty_string("unit_key", unit_key)
         cls._require_non_empty_string("normalized_text", normalized_text)
 
-        digest_input = cls._SEPARATOR.join(
+        digest_input = ID_FIELD_SEPARATOR.join(
             [document_stable_key, unit_key, normalized_text]
         )
-        hex16 = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+        hex16 = hashlib.sha256(digest_input.encode(HASH_ENCODING)).hexdigest()[
+            :ID_DIGEST_HEX_LENGTH
+        ]
 
         return f"chunk:{source_system}:{hex16}"
 

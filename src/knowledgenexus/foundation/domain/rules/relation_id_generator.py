@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 
+from knowledgenexus.foundation.domain.rules.hashing_constants import (
+    HASH_ENCODING,
+    ID_DIGEST_HEX_LENGTH,
+    ID_FIELD_SEPARATOR,
+)
+
 
 class RelationIdGenerator:
     """Deterministic relation ID generation for Foundation relation records."""
-
-    _SEPARATOR = "\x1f"
 
     @classmethod
     def generate_relation_id(
@@ -19,8 +23,10 @@ class RelationIdGenerator:
         cls._require_non_empty_string("relation_type", relation_type)
         cls._require_non_empty_string("target_id", target_id)
 
-        digest_input = cls._SEPARATOR.join([source_id, relation_type, target_id])
-        hex16 = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+        digest_input = ID_FIELD_SEPARATOR.join([source_id, relation_type, target_id])
+        hex16 = hashlib.sha256(digest_input.encode(HASH_ENCODING)).hexdigest()[
+            :ID_DIGEST_HEX_LENGTH
+        ]
 
         return f"rel:{hex16}"
 
