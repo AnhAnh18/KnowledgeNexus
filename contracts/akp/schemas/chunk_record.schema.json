@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/chunk_record.schema.json",
+  "title": "ChunkRecord",
+  "description": "One retrievable chunk. The single payload contract to Task 2 (master spec \u00a716.3, \u00a717). Produced per CHUNKING_SPEC.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "chunk_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/chunkId"
+    },
+    "document_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "source_system": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sourceSystem"
+    },
+    "source_type": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/chunkSourceType"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content_kind": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/contentKind"
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Natural-language or code language tag; MVP may emit 'unknown' (master spec \u00a720.3)."
+    },
+    "token_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Token count of `text` measured with the configured embedding model's tokenizer; see CHUNKING_SPEC.md \u00a71 and the active embedding profile."
+    },
+    "heading_path": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "space_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "page_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repo": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "symbol": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "line_start": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "line_end": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "part_index": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "part_total": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "jira_keys": {
+      "type": "array",
+      "items": {
+        "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/jiraKey"
+      }
+    },
+    "relation_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/relationId"
+      }
+    },
+    "acl_tags": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/aclTags"
+    },
+    "source_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "content_hash": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sha256"
+    },
+    "chunker_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/chunkerVersion"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "chunk_id",
+    "document_id",
+    "source_system",
+    "source_type",
+    "text",
+    "content_kind",
+    "language",
+    "token_count",
+    "acl_tags",
+    "content_hash",
+    "chunker_version"
+  ]
+}

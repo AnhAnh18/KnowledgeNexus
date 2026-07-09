@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/media_asset.schema.json",
+  "title": "MediaAsset",
+  "description": "A Confluence attachment / embedded media asset. Metadata-first policy (master spec \u00a711).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "media_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "parent_document_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "source_system": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sourceSystem"
+    },
+    "filename": {
+      "type": "string"
+    },
+    "mime_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "size_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "download_status": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/downloadStatus"
+    },
+    "processing_status": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/processingStatus"
+    },
+    "relevance": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/relevance"
+    },
+    "extracted_text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/confidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "raw_uri": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "content_hash": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sha256OrNull"
+    },
+    "source_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "crawled_at": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "schema_version",
+    "media_id",
+    "parent_document_id",
+    "source_system",
+    "filename",
+    "download_status",
+    "processing_status",
+    "crawled_at"
+  ]
+}

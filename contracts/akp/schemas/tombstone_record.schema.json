@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/tombstone_record.schema.json",
+  "title": "TombstoneRecord",
+  "description": "Marks a previously exported entity as removed/invalidated so Task 2 can purge it (master spec \u00a716.2).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "tombstone_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/tombstoneId"
+    },
+    "entity_type": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/tombstoneEntityType"
+    },
+    "entity_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "reason": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/tombstoneReason"
+    },
+    "detail": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "detected_at": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+    },
+    "dataset_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_version_last_seen": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "tombstone_id",
+    "entity_type",
+    "entity_id",
+    "reason",
+    "detected_at",
+    "dataset_version"
+  ]
+}

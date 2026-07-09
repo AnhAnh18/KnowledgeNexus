@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/canonical_document.schema.json",
+  "title": "CanonicalDocument",
+  "description": "One normalized source document (a Confluence page or a Git source file). Illustrative shape; body text is chunked into ChunkRecords.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "document_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "source_system": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sourceSystem"
+    },
+    "source_type": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/chunkSourceType"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "space_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "page_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repo": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Confluence version.number, or Git commit hash for code files."
+    },
+    "content_hash": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sha256OrNull"
+    },
+    "acl_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/aclId"
+    },
+    "jira_keys": {
+      "type": "array",
+      "items": {
+        "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/jiraKey"
+      }
+    },
+    "relation_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/relationId"
+      }
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "crawled_at": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "source_system",
+    "source_type",
+    "content_hash",
+    "acl_id",
+    "crawled_at"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/relation_record.schema.json",
+  "title": "RelationRecord",
+  "description": "A typed edge between entities. relation_id is deterministic: 'rel:'+sha256(source_id+US+relation_type+US+target_id)[:16] (master spec \u00a713).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "relation_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/relationId"
+    },
+    "source_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "target_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "relation_type": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/relationType"
+    },
+    "evidence": {
+      "type": "string"
+    },
+    "confidence": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/confidence"
+    },
+    "resolution_status": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/resolutionStatus"
+    },
+    "created_at": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "schema_version",
+    "relation_id",
+    "source_id",
+    "target_id",
+    "relation_type",
+    "resolution_status",
+    "created_at"
+  ]
+}

@@ -9,14 +9,24 @@ build/
 .ruff_cache/
 .mypy_cache/
 
+# Local/context bundles
+*.zip
+akp_context_bundle_*.zip
+
 # Environment
 .env
+.env.*
+!.env.example
 
 # Runtime data
-data/
+data/raw/
+data/work/
+data/index/
+data/exports/
 *.db
 
 # IDE
+.settings/
 .idea/
 .vscode/
 *.swp
