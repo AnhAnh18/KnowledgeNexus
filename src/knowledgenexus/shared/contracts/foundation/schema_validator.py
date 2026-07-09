@@ -1,4 +1,4 @@
-"""Shared AKP JSON Schema validation utilities."""
+"""Shared Foundation JSON Schema validation utilities."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from typing import Any, Mapping
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError
 
-from knowledgenexus.shared.akp.contract_loader import (
-    AKPContractSchemas,
-    load_contract_schemas,
+from knowledgenexus.shared.contracts.foundation.contract_loader import (
+    FoundationContractSchemas,
+    load_foundation_contract_schemas,
 )
 
 try:
@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - compatibility path for older jsonschem
 
 
 @dataclass(frozen=True)
-class AKPValidationError(ValueError):
+class FoundationValidationError(ValueError):
     """Validation failure with enough context for export/import diagnostics."""
 
     schema_name: str
@@ -42,24 +42,24 @@ class AKPValidationError(ValueError):
             location = f"{location} at line {self.line_number}"
 
         return (
-            f"AKP schema validation failed for '{self.schema_name}'{location}: "
+            f"Foundation schema validation failed for '{self.schema_name}'{location}: "
             f"{self.message} (path: {self.error_path})"
         )
 
 
-class AKPSchemaValidator:
-    """Validate AKP records against schemas loaded from ``contracts/akp``."""
+class FoundationSchemaValidator:
+    """Validate Foundation records against schemas loaded from ``contracts/foundation``."""
 
-    def __init__(self, contract_schemas: AKPContractSchemas | None = None) -> None:
-        self.contract_schemas = contract_schemas or load_contract_schemas()
-
-    @classmethod
-    def from_contract_root(cls, contract_root: str | Path) -> "AKPSchemaValidator":
-        return cls(load_contract_schemas(contract_root=contract_root))
+    def __init__(self, contract_schemas: FoundationContractSchemas | None = None) -> None:
+        self.contract_schemas = contract_schemas or load_foundation_contract_schemas()
 
     @classmethod
-    def from_schema_dir(cls, schema_dir: str | Path) -> "AKPSchemaValidator":
-        return cls(load_contract_schemas(schema_dir=schema_dir))
+    def from_contract_root(cls, contract_root: str | Path) -> "FoundationSchemaValidator":
+        return cls(load_foundation_contract_schemas(contract_root=contract_root))
+
+    @classmethod
+    def from_schema_dir(cls, schema_dir: str | Path) -> "FoundationSchemaValidator":
+        return cls(load_foundation_contract_schemas(schema_dir=schema_dir))
 
     def validate_record(
         self,
@@ -98,7 +98,7 @@ class AKPSchemaValidator:
                 try:
                     record = json.loads(raw_line)
                 except json.JSONDecodeError as exc:
-                    raise AKPValidationError(
+                    raise FoundationValidationError(
                         schema_name=schema_name,
                         message=f"Invalid JSON: {exc.msg}",
                         error_path="<json>",
@@ -107,7 +107,7 @@ class AKPSchemaValidator:
                     ) from exc
 
                 if not isinstance(record, dict):
-                    raise AKPValidationError(
+                    raise FoundationValidationError(
                         schema_name=schema_name,
                         message="JSONL record must be an object",
                         error_path="<root>",
@@ -162,9 +162,9 @@ class AKPSchemaValidator:
         *,
         file_path: Path | None,
         line_number: int | None,
-    ) -> AKPValidationError:
+    ) -> FoundationValidationError:
         error_path = _format_error_path(error)
-        return AKPValidationError(
+        return FoundationValidationError(
             schema_name=schema_name,
             message=error.message,
             error_path=error_path,
@@ -174,15 +174,15 @@ class AKPSchemaValidator:
 
 
 def validate_record(schema_name: str, record: Mapping[str, Any]) -> None:
-    """Validate one record using the default AKP contract root."""
+    """Validate one record using the default Foundation contract root."""
 
-    AKPSchemaValidator().validate_record(schema_name, record)
+    FoundationSchemaValidator().validate_record(schema_name, record)
 
 
 def validate_jsonl_file(schema_name: str, file_path: str | Path) -> int:
-    """Validate a JSONL file using the default AKP contract root."""
+    """Validate a JSONL file using the default Foundation contract root."""
 
-    return AKPSchemaValidator().validate_jsonl_file(schema_name, file_path)
+    return FoundationSchemaValidator().validate_jsonl_file(schema_name, file_path)
 
 
 def _format_error_path(error: ValidationError) -> str:

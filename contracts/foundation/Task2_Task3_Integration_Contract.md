@@ -165,15 +165,15 @@ The KnowledgeNexus milestones stay largely intact; the ingestion path is what ch
 Folder / module layout and dependency direction are governed by **`AI_Knowledge_Platform_v7_5_Update.md`** (the layout authority); this section states only what the consumer side must do. The full trees are in v7.5 and are not duplicated here.
 
 - **Single product repository (preferred, v7.5 D23).** KnowledgeNexus **is the product repo**. Foundation, Indexing, Retrieval, Chat, and Presentation are **bounded contexts / modules inside it**, not separate products. The Part 1 ↔ Part 2/3 boundary is an **in-repo module boundary**, enforced by dependency rules and CI import checks (v7.5 D34), not by repository separation. Indexing/Retrieval/Chat still do **not** import Foundation Python modules — they consume the export snapshot via the importer adapter.
-- **Contracts are a single in-repo location:** `contracts/akp/` (`schemas/`, `CHUNKING_SPEC.md`, `embedding_profile.yaml`, the v7.4/v7.5 logs, this contract). Foundation validates against it before writing the export; Indexing validates against the same copy before importing (shared validator, v7.5 D31). No second/vendored copy. Indexing still asserts `manifest.schemas_version` matches at import time and aborts on mismatch.
+- **Contracts are a single in-repo location:** `contracts/foundation/` (`schemas/`, `CHUNKING_SPEC.md`, `embedding_profile.yaml`, the v7.4/v7.5 logs, this contract). Foundation validates against it before writing the export; Indexing validates against the same copy before importing (shared validator, v7.5 D31). No second/vendored copy. Indexing still asserts `manifest.schemas_version` matches at import time and aborts on mismatch.
 - **Components to add (v7.5 D24/D31):**
-  - `shared/akp/contract_loader.py` and `shared/akp/schema_validator.py` — the shared validator used by both Foundation (pre-export) and Indexing (pre-import).
+  - `shared/contracts/foundation/contract_loader.py` and `shared/contracts/foundation/schema_validator.py` — the shared validator used by both Foundation (pre-export) and Indexing (pre-import).
   - `indexing/infrastructure/importers/` — the export-snapshot reader (streams the JSONL files).
   - `indexing/application/use_cases/import_akp_snapshot.py` — orchestrates resolve → validate (C2) → tombstone (C7) → upsert (C4/C5), exposed via `presentation/api/v1/import_snapshot.py`.
 - **Runtime configuration boundary (v7.5 D27):**
 
 ```
-AKP_CONTRACT_ROOT=./contracts/akp
+AKP_CONTRACT_ROOT=./contracts/foundation
 AKP_EXPORT_ROOT=./data/exports
 AKP_DATASET_NAME=spen_knowledge_poc
 AKP_USE_LATEST=true
@@ -195,4 +195,4 @@ Resolution: if `AKP_USE_LATEST=true`, read `${AKP_EXPORT_ROOT}/${AKP_DATASET_NAM
 - **Retrieval benchmark ownership** — Part 1 supplies the corpus and real anchors for the 37-item template; who runs Round 1 (dense sweep) / Round 2 (hybrid) and stamps the winning bge-m3 profile back into CHUNKING_SPEC §1 + `chunker_version 1.2.0`?
 - **API citation shape** — define the fields a Part 3 chat citation returns: at least `title`, `url`/`page_id` or `repo:file_path`, `chunk_id`, and `source_version`, so answers are traceable to a specific snapshot version.
 - **dataset handshake** — confirm the importer resolves the snapshot via `LATEST.txt` and records the consumed `dataset_version` in the ingest job (Section 1).
-- **Export transport** — in local single-repo development, `AKP_EXPORT_ROOT` resolves to `./data/exports`. For remote/dev-server deployment, decide whether snapshots are exchanged by shared mount, artifact download, or object storage. No second copy of `contracts/akp` is introduced.
+- **Export transport** — in local single-repo development, `AKP_EXPORT_ROOT` resolves to `./data/exports`. For remote/dev-server deployment, decide whether snapshots are exchanged by shared mount, artifact download, or object storage. No second copy of `contracts/foundation` is introduced.

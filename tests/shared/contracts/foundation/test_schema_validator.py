@@ -6,10 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from knowledgenexus.shared.akp.contract_loader import load_contract_schemas
-from knowledgenexus.shared.akp.schema_validator import (
-    AKPSchemaValidator,
-    AKPValidationError,
+from knowledgenexus.shared.contracts.foundation.contract_loader import (
+    load_foundation_contract_schemas,
+)
+from knowledgenexus.shared.contracts.foundation.schema_validator import (
+    FoundationSchemaValidator,
+    FoundationValidationError,
 )
 
 
@@ -47,7 +49,7 @@ def valid_chunk_record() -> dict[str, object]:
 
 
 def test_loader_can_load_all_contract_schemas() -> None:
-    contract = load_contract_schemas()
+    contract = load_foundation_contract_schemas()
     schema_files = sorted(contract.schema_dir.glob("*.json"))
     schema_ids = {
         schema_id
@@ -55,7 +57,9 @@ def test_loader_can_load_all_contract_schemas() -> None:
         if (schema_id := json.loads(schema_path.read_text(encoding="utf-8")).get("$id"))
     }
 
-    assert contract.schema_dir == (Path.cwd() / "contracts" / "akp" / "schemas").resolve()
+    assert contract.schema_dir == (
+        Path.cwd() / "contracts" / "foundation" / "schemas"
+    ).resolve()
     assert set(contract.schemas_by_id) == schema_ids
     assert "ChunkRecord" in contract.schemas_by_name
     assert "https://svmc.samsung/knowledge/schemas/defs.schema.json" in contract.schemas_by_id
@@ -65,7 +69,7 @@ def test_valid_chunk_record_passes() -> None:
     record = valid_chunk_record()
     original = copy.deepcopy(record)
 
-    AKPSchemaValidator().validate_record("ChunkRecord", record)
+    FoundationSchemaValidator().validate_record("ChunkRecord", record)
 
     assert record == original
 
@@ -74,8 +78,8 @@ def test_chunk_record_missing_acl_tags_fails() -> None:
     record = valid_chunk_record()
     del record["acl_tags"]
 
-    with pytest.raises(AKPValidationError) as raised:
-        AKPSchemaValidator().validate_record("ChunkRecord", record)
+    with pytest.raises(FoundationValidationError) as raised:
+        FoundationSchemaValidator().validate_record("ChunkRecord", record)
 
     message = str(raised.value)
     assert "ChunkRecord" in message
@@ -87,8 +91,8 @@ def test_chunk_record_with_unknown_top_level_field_fails() -> None:
     record = valid_chunk_record()
     record["unexpected"] = True
 
-    with pytest.raises(AKPValidationError) as raised:
-        AKPSchemaValidator().validate_record("ChunkRecord", record)
+    with pytest.raises(FoundationValidationError) as raised:
+        FoundationSchemaValidator().validate_record("ChunkRecord", record)
 
     message = str(raised.value)
     assert "Additional properties are not allowed" in message
@@ -103,8 +107,8 @@ def test_invalid_jsonl_line_fails_with_line_number(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(AKPValidationError) as raised:
-        AKPSchemaValidator().validate_jsonl_file("ChunkRecord", jsonl_path)
+    with pytest.raises(FoundationValidationError) as raised:
+        FoundationSchemaValidator().validate_jsonl_file("ChunkRecord", jsonl_path)
 
     message = str(raised.value)
     assert "line 2" in message
@@ -123,6 +127,6 @@ def test_valid_jsonl_file_returns_record_count(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    count = AKPSchemaValidator().validate_jsonl_file("ChunkRecord", jsonl_path)
+    count = FoundationSchemaValidator().validate_jsonl_file("ChunkRecord", jsonl_path)
 
     assert count == 2

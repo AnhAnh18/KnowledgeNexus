@@ -1,4 +1,4 @@
-"""Load AKP JSON Schemas from the in-repo contract root."""
+"""Load Foundation JSON Schemas from the in-repo contract root."""
 
 from __future__ import annotations
 
@@ -9,20 +9,20 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 
-DEFAULT_SCHEMA_DIR = Path("contracts") / "akp" / "schemas"
+DEFAULT_SCHEMA_DIR = Path("contracts") / "foundation" / "schemas"
 
 
-class AKPContractLoadError(RuntimeError):
-    """Raised when AKP schemas cannot be loaded from disk."""
+class FoundationContractLoadError(RuntimeError):
+    """Raised when Foundation schemas cannot be loaded from disk."""
 
 
-class AKPSchemaNotFoundError(KeyError):
+class FoundationSchemaNotFoundError(KeyError):
     """Raised when a requested schema name is not loaded."""
 
 
 @dataclass(frozen=True)
-class AKPContractSchemas:
-    """Loaded AKP schema documents and lookup indexes."""
+class FoundationContractSchemas:
+    """Loaded Foundation schema documents and lookup indexes."""
 
     schema_dir: Path
     schemas_by_id: Mapping[str, Mapping[str, Any]]
@@ -34,8 +34,8 @@ class AKPContractSchemas:
             return self.schemas_by_name[schema_name]
         except KeyError as exc:
             available = ", ".join(sorted(self.schemas_by_name))
-            raise AKPSchemaNotFoundError(
-                f"Unknown AKP schema '{schema_name}'. Available schemas: {available}"
+            raise FoundationSchemaNotFoundError(
+                f"Unknown Foundation schema '{schema_name}'. Available schemas: {available}"
             ) from exc
 
     def get_schema_path(self, schema_name: str) -> Path | None:
@@ -49,24 +49,24 @@ def default_contract_root(start: Path | None = None) -> Path:
     candidates = [search_start, *search_start.parents]
 
     for candidate in candidates:
-        contract_root = candidate / "contracts" / "akp"
+        contract_root = candidate / "contracts" / "foundation"
         if (contract_root / "schemas").is_dir():
             return contract_root
 
     package_root = Path(__file__).resolve()
     for candidate in package_root.parents:
-        contract_root = candidate / "contracts" / "akp"
+        contract_root = candidate / "contracts" / "foundation"
         if (contract_root / "schemas").is_dir():
             return contract_root
 
-    return Path("contracts") / "akp"
+    return Path("contracts") / "foundation"
 
 
-def load_contract_schemas(
+def load_foundation_contract_schemas(
     contract_root: str | Path | None = None,
     schema_dir: str | Path | None = None,
-) -> AKPContractSchemas:
-    """Load every ``*.json`` schema from ``contracts/akp/schemas``.
+) -> FoundationContractSchemas:
+    """Load every ``*.json`` schema from ``contracts/foundation/schemas``.
 
     Schemas are indexed by ``$id`` when present. Convenience names are also
     registered from schema metadata so callers can use names like
@@ -75,13 +75,15 @@ def load_contract_schemas(
 
     resolved_schema_dir = _resolve_schema_dir(contract_root, schema_dir)
     if not resolved_schema_dir.is_dir():
-        raise AKPContractLoadError(
-            f"AKP schema directory does not exist: {resolved_schema_dir}"
+        raise FoundationContractLoadError(
+            f"Foundation schema directory does not exist: {resolved_schema_dir}"
         )
 
     schema_paths = sorted(resolved_schema_dir.glob("*.json"))
     if not schema_paths:
-        raise AKPContractLoadError(f"No AKP schema files found in {resolved_schema_dir}")
+        raise FoundationContractLoadError(
+            f"No Foundation schema files found in {resolved_schema_dir}"
+        )
 
     schemas_by_id: dict[str, Mapping[str, Any]] = {}
     schemas_by_name: dict[str, Mapping[str, Any]] = {}
@@ -97,7 +99,7 @@ def load_contract_schemas(
             schemas_by_name[name] = schema
             schema_paths_by_name[name] = schema_path
 
-    return AKPContractSchemas(
+    return FoundationContractSchemas(
         schema_dir=resolved_schema_dir,
         schemas_by_id=MappingProxyType(schemas_by_id),
         schemas_by_name=MappingProxyType(schemas_by_name),
@@ -120,12 +122,14 @@ def _read_schema(schema_path: Path) -> Mapping[str, Any]:
     try:
         loaded = json.loads(schema_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise AKPContractLoadError(
+        raise FoundationContractLoadError(
             f"Invalid JSON schema file {schema_path}: line {exc.lineno}, column {exc.colno}: {exc.msg}"
         ) from exc
 
     if not isinstance(loaded, dict):
-        raise AKPContractLoadError(f"Schema file must contain a JSON object: {schema_path}")
+        raise FoundationContractLoadError(
+            f"Schema file must contain a JSON object: {schema_path}"
+        )
 
     return loaded
 
@@ -146,3 +150,5 @@ def _schema_names(schema_path: Path, schema: Mapping[str, Any]) -> set[str]:
 
     return names
 
+
+load_contract_schemas = load_foundation_contract_schemas
