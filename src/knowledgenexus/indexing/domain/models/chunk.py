@@ -28,8 +28,8 @@ class ChunkPayload:
 @dataclass
 class Chunk:
     id: str     # chunk PK - UUID string or AKP chunk_id
-    vector: list[float] | None = None
     payload: ChunkPayload
+    vector: list[float] | None = None
     
     @property
     def document_id(self) -> UUID:

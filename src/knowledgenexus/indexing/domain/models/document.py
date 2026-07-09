@@ -7,11 +7,11 @@ from knowledgenexus.indexing.domain.enums import SourceType
 
 @dataclass
 class Document:
-    id: UUID = field(default_factory=uuid4)
     title: str
     content: str
     source_type: SourceType
     source_id: str
+    id: UUID = field(default_factory=uuid4)
     url: str | None = None
     metadata: dict[str, object] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
