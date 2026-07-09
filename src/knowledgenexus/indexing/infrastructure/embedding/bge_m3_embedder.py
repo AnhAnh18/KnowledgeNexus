@@ -9,17 +9,21 @@ from knowledgenexus.indexing.domain.value_objects.embedding_vector import Embedd
 
 logger = logging.getLogger(__name__)
 
+_MODEL_NAME = "BAAI/bge-m3"
 _QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
-
+_DEFAULT_DEVICE = "cpu"
 _DEFAULT_BATCH_SIZE = 32
+_VECTOR_DIMENSION = 1024
+_MAX_CONTEXT_LENGTH = 8192
+_DENSE_VECS_KEY = "dense_vecs"
 
 
 class BgeM3Embedder(EmbedderPort):
 
     def __init__(
         self,
-        model_name: str = "BAAI/bge-m3",
-        device: str = "cpu",
+        model_name: str = _MODEL_NAME,
+        device: str = _DEFAULT_DEVICE,
         normalize_embeddings: bool = True,
         batch_size: int = _DEFAULT_BATCH_SIZE,
     ) -> None:
@@ -32,14 +36,15 @@ class BgeM3Embedder(EmbedderPort):
             ) from exc
 
         self._model_name = model_name
-        self._dimension = 1024
+        self._dimension = _VECTOR_DIMENSION
         self._normalize = normalize_embeddings
         self._batch_size = batch_size
         self._model = BGEM3FlagModel(
             model_name,
-            use_fp16=(device != "cpu"),
+            use_fp16=(device != _DEFAULT_DEVICE),
             device=device,
         )
+
         logger.info(
             "BgeM3Embedder initialized: model=%s, device=%s, dim=%d",
             model_name,
@@ -96,12 +101,13 @@ class BgeM3Embedder(EmbedderPort):
             output = self._model.encode(
                 texts,
                 batch_size=self._batch_size,
-                max_length=8192,
+                max_length=_MAX_CONTEXT_LENGTH,
                 return_dense=True,
                 return_sparse=False,
                 return_colbert_vecs=False,
             )
-            dense = output["dense_vecs"]
+            dense = output[_DENSE_VECS_KEY]
+
             vectors = [list(v) for v in dense]
 
             if self._normalize:
