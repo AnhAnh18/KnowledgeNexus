@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from knowledgenexus.indexing.domain.models.document import Document
 from knowledgenexus.indexing.domain.ports.document_repository_port import DocumentRepositoryPort
-from knowledgenexus.retrieval.ports.retrieval_document_port import RetrievalDocumentPort
+from knowledgenexus.retrieval.domain.ports.retrieval_document_port import RetrievalDocumentPort
+
 
 
 class IndexingDocumentAdapter(RetrievalDocumentPort):

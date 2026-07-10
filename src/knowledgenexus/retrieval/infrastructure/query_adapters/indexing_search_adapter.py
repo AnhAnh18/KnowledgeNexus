@@ -4,7 +4,8 @@ from typing import Any
 
 from knowledgenexus.indexing.domain.ports.vector_store_port import VectorStorePort
 from knowledgenexus.indexing.domain.value_objects.scored_chunk import ScoredChunk
-from knowledgenexus.retrieval.ports.retrieval_search_port import RetrievalSearchPort
+from knowledgenexus.retrieval.domain.ports.retrieval_search_port import RetrievalSearchPort
+
 
 
 class IndexingSearchAdapter(RetrievalSearchPort):

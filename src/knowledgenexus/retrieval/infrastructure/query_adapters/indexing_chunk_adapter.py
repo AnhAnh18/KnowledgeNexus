@@ -3,7 +3,8 @@ from __future__ import annotations
 from knowledgenexus.indexing.domain.models.chunk import Chunk
 from knowledgenexus.indexing.domain.ports.chunk_repository_port import ChunkRepositoryPort
 from knowledgenexus.indexing.domain.value_objects.scored_chunk import ScoredChunk
-from knowledgenexus.retrieval.ports.retrieval_chunk_port import RetrievalChunkPort
+from knowledgenexus.retrieval.domain.ports.retrieval_chunk_port import RetrievalChunkPort
+
 
 
 class IndexingChunkAdapter(RetrievalChunkPort):

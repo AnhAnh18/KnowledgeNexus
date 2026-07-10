@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from knowledgenexus.indexing.domain.ports.embedder_port import EmbedderPort
 from knowledgenexus.indexing.domain.value_objects.embedding_vector import EmbeddingVector
-from knowledgenexus.retrieval.ports.query_embedder_port import QueryEmbedderPort
+from knowledgenexus.retrieval.domain.ports.query_embedder_port import QueryEmbedderPort
 
 
 class IndexingEmbedderAdapter(QueryEmbedderPort):
