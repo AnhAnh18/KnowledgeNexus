@@ -18,8 +18,7 @@ akp_context_bundle_*.zip
 
 # Environment
 .env
-.env.*
-!.env.example
+.env.local
 
 # Runtime data
 data/raw/

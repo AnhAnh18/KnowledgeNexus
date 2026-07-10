@@ -1,0 +1,4 @@
+embedding_model: "BAAI/bge-m3"
+embedding_dimension: 1024
+chunk_size: 1500
+chunk_overlap: 150
