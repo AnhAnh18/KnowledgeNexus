@@ -1,3 +1,6 @@
+from knowledgenexus.foundation.domain.records.acl_record_builder import (
+    ACLRecordBuilder,
+)
 from knowledgenexus.foundation.domain.records.canonical_document_record_builder import (
     CanonicalDocumentRecordBuilder,
 )
@@ -9,6 +12,7 @@ from knowledgenexus.foundation.domain.records.relation_record_builder import (
 )
 
 __all__ = [
+    "ACLRecordBuilder",
     "CanonicalDocumentRecordBuilder",
     "ChunkRecordBuilder",
     "RelationRecordBuilder",
