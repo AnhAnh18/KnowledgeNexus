@@ -1,7 +1,7 @@
 from knowledgenexus.shared.contracts.foundation.contract_loader import (
-    FoundationContractLoadError,
+    ContractLoadError,
     FoundationContractSchemas,
-    FoundationSchemaNotFoundError,
+    ContractSchemaNotFoundError,
     load_foundation_contract_schemas,
 )
 from knowledgenexus.shared.contracts.foundation.schema_validator import (
@@ -12,9 +12,9 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
 )
 
 __all__ = [
-    "FoundationContractLoadError",
+    "ContractLoadError",
     "FoundationContractSchemas",
-    "FoundationSchemaNotFoundError",
+    "ContractSchemaNotFoundError",
     "FoundationSchemaValidator",
     "FoundationValidationError",
     "load_foundation_contract_schemas",

@@ -8,16 +8,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from knowledgenexus.shared.errors import ContractLoadError, ContractSchemaNotFoundError
+
 
 DEFAULT_SCHEMA_DIR = Path("contracts") / "foundation" / "schemas"
-
-
-class FoundationContractLoadError(RuntimeError):
-    """Raised when Foundation schemas cannot be loaded from disk."""
-
-
-class FoundationSchemaNotFoundError(KeyError):
-    """Raised when a requested schema name is not loaded."""
 
 
 @dataclass(frozen=True)
@@ -34,7 +28,7 @@ class FoundationContractSchemas:
             return self.schemas_by_name[schema_name]
         except KeyError as exc:
             available = ", ".join(sorted(self.schemas_by_name))
-            raise FoundationSchemaNotFoundError(
+            raise ContractSchemaNotFoundError(
                 f"Unknown Foundation schema '{schema_name}'. Available schemas: {available}"
             ) from exc
 
@@ -75,13 +69,13 @@ def load_foundation_contract_schemas(
 
     resolved_schema_dir = _resolve_schema_dir(contract_root, schema_dir)
     if not resolved_schema_dir.is_dir():
-        raise FoundationContractLoadError(
+        raise ContractLoadError(
             f"Foundation schema directory does not exist: {resolved_schema_dir}"
         )
 
     schema_paths = sorted(resolved_schema_dir.glob("*.json"))
     if not schema_paths:
-        raise FoundationContractLoadError(
+        raise ContractLoadError(
             f"No Foundation schema files found in {resolved_schema_dir}"
         )
 
@@ -122,12 +116,12 @@ def _read_schema(schema_path: Path) -> Mapping[str, Any]:
     try:
         loaded = json.loads(schema_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise FoundationContractLoadError(
+        raise ContractLoadError(
             f"Invalid JSON schema file {schema_path}: line {exc.lineno}, column {exc.colno}: {exc.msg}"
         ) from exc
 
     if not isinstance(loaded, dict):
-        raise FoundationContractLoadError(
+        raise ContractLoadError(
             f"Schema file must contain a JSON object: {schema_path}"
         )
 
