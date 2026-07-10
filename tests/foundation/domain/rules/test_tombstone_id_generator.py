@@ -12,7 +12,7 @@ def _generate(
     *,
     entity_type: str = "chunk",
     entity_id: str = "chunk:confluence:abc123",
-    reason: str = "deleted",
+    reason: str = "content_updated",
     dataset_version: str = "2026-07-09T10-00-00Z",
 ) -> str:
     return TombstoneIdGenerator.generate_tombstone_id(
@@ -36,7 +36,7 @@ def test_different_entity_id_changes_tombstone_id() -> None:
 
 
 def test_different_reason_changes_tombstone_id() -> None:
-    assert _generate(reason="deleted") != _generate(reason="out_of_scope")
+    assert _generate(reason="content_updated") != _generate(reason="moved_out_of_scope")
 
 
 def test_different_dataset_version_changes_tombstone_id() -> None:
@@ -57,7 +57,7 @@ def test_digest_part_is_16_lowercase_hex_chars() -> None:
 def test_generated_value_matches_sha256_digest_contract() -> None:
     entity_type = "chunk"
     entity_id = "chunk:confluence:abc123"
-    reason = "deleted"
+    reason = "content_updated"
     dataset_version = "2026-07-09T10-00-00Z"
     digest_input = f"{entity_type}\x1f{entity_id}\x1f{reason}\x1f{dataset_version}"
     expected_hex16 = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
@@ -78,7 +78,7 @@ def test_non_string_input_fails(field_name: str) -> None:
     values = {
         "entity_type": "chunk",
         "entity_id": "chunk:confluence:abc123",
-        "reason": "deleted",
+        "reason": "source_deleted",
         "dataset_version": "2026-07-09T10-00-00Z",
     }
     values[field_name] = 123  # type: ignore[assignment]
@@ -95,7 +95,7 @@ def test_empty_string_input_fails(field_name: str) -> None:
     values = {
         "entity_type": "chunk",
         "entity_id": "chunk:confluence:abc123",
-        "reason": "deleted",
+        "reason": "source_deleted",
         "dataset_version": "2026-07-09T10-00-00Z",
     }
     values[field_name] = ""
