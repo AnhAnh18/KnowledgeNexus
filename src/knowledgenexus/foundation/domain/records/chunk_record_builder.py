@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
 from knowledgenexus.foundation.domain.rules import ContentHasher
 
 
 class ChunkRecordBuilder:
     """Build plain ChunkRecord dicts shaped by the Foundation schema."""
-
-    SCHEMA_VERSION = "1.0"
 
     @classmethod
     def build(
@@ -78,7 +77,7 @@ class ChunkRecordBuilder:
         cls._require_optional_list("relation_ids", relation_ids)
 
         record: dict[str, object] = {
-            "schema_version": cls.SCHEMA_VERSION,
+            "schema_version": SCHEMA_VERSION,
             "chunk_id": chunk_id,
             "document_id": document_id,
             "source_system": source_system,

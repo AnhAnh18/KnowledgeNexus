@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from knowledgenexus.foundation.domain.records import ChunkRecordBuilder
+from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
 from knowledgenexus.foundation.domain.rules import ContentHasher
 from knowledgenexus.shared.contracts.foundation.schema_validator import (
     FoundationSchemaValidator,
@@ -64,9 +65,7 @@ def test_builder_returns_dict() -> None:
 
 
 def test_record_has_schema_version_1_0() -> None:
-    assert build_valid_confluence_record()["schema_version"] == (
-        ChunkRecordBuilder.SCHEMA_VERSION
-    )
+    assert build_valid_confluence_record()["schema_version"] == SCHEMA_VERSION
 
 
 def test_content_hash_matches_text_hash() -> None:

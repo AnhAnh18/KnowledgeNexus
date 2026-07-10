@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
 from knowledgenexus.foundation.domain.rules import ContentHasher
 
 
 class CanonicalDocumentRecordBuilder:
     """Build plain CanonicalDocument record dicts shaped by the Foundation schema."""
-
-    SCHEMA_VERSION = "1.0"
 
     @classmethod
     def build(
@@ -65,7 +64,7 @@ class CanonicalDocumentRecordBuilder:
             raise TypeError("CanonicalDocumentRecordBuilder.metadata expects dict")
 
         return {
-            "schema_version": cls.SCHEMA_VERSION,
+            "schema_version": SCHEMA_VERSION,
             "document_id": document_id,
             "source_system": source_system,
             "source_type": source_type,
