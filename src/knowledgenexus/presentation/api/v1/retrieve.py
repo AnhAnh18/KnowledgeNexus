@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/v1", tags=["retrieve"])
 
 
 def get_retrieve_use_case() -> RetrieveChunksUseCase:
-    from knowledgenexus.main import get_retrieve_chunks_use_case
+    from knowledgenexus.presentation.dependencies import get_retrieve_chunks_use_case
     return get_retrieve_chunks_use_case()
 
 
