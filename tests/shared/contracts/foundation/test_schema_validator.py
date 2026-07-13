@@ -48,6 +48,40 @@ def valid_chunk_record() -> dict[str, object]:
     }
 
 
+def valid_manifest_record(
+    *,
+    generated_at: str = "2026-07-13T09:30:15Z",
+) -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "dataset_version": "v20260713-023015-000000Z",
+        "export_mode": "full_snapshot",
+        "generated_at": generated_at,
+        "config_hash": "0" * 64,
+        "chunker_version": "1.2.0",
+        "schemas_version": "foundation-schemas-1",
+        "counts": {
+            "documents": 1,
+            "chunks": 1,
+        },
+    }
+
+
+def valid_relation_record(
+    *,
+    created_at: str = "2026-07-13T09:30:15Z",
+) -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "relation_id": "rel:0123456789abcdef",
+        "source_id": "doc:confluence:938880621",
+        "target_id": "jira:issue:SPEN-1234",
+        "relation_type": "mentions_jira_key",
+        "resolution_status": "unresolved_without_jira_api",
+        "created_at": created_at,
+    }
+
+
 def test_loader_can_load_all_contract_schemas() -> None:
     contract = load_foundation_contract_schemas()
     schema_files = sorted(contract.schema_dir.glob("*.json"))
@@ -62,7 +96,10 @@ def test_loader_can_load_all_contract_schemas() -> None:
     ).resolve()
     assert set(contract.schemas_by_id) == schema_ids
     assert "ChunkRecord" in contract.schemas_by_name
-    assert "https://svmc.samsung/knowledge/schemas/defs.schema.json" in contract.schemas_by_id
+    assert (
+        "https://svmc.samsung/knowledge/schemas/defs.schema.json"
+        in contract.schemas_by_id
+    )
 
 
 def test_valid_chunk_record_passes() -> None:
@@ -130,3 +167,59 @@ def test_valid_jsonl_file_returns_record_count(tmp_path: Path) -> None:
     count = FoundationSchemaValidator().validate_jsonl_file("ChunkRecord", jsonl_path)
 
     assert count == 2
+
+
+def test_valid_manifest_date_time_passes() -> None:
+    FoundationSchemaValidator().validate_record(
+        "Manifest",
+        valid_manifest_record(generated_at="2026-07-13T09:30:15Z"),
+    )
+
+
+def test_valid_manifest_fractional_seconds_date_time_passes() -> None:
+    FoundationSchemaValidator().validate_record(
+        "Manifest",
+        valid_manifest_record(generated_at="2026-07-13T09:30:15.123456Z"),
+    )
+
+
+@pytest.mark.parametrize(
+    "generated_at",
+    [
+        "not-a-date",
+        "2026-07-13",
+        "2026-13-40T25:61:61Z",
+    ],
+)
+def test_manifest_invalid_date_time_format_fails(generated_at: str) -> None:
+    with pytest.raises(FoundationValidationError) as raised:
+        FoundationSchemaValidator().validate_record(
+            "Manifest",
+            valid_manifest_record(generated_at=generated_at),
+        )
+
+    assert raised.value.error_path == "generated_at"
+
+
+def test_jsonl_file_rejects_invalid_manifest_date_time(tmp_path: Path) -> None:
+    jsonl_path = tmp_path / "manifest.jsonl"
+    jsonl_path.write_text(
+        json.dumps(valid_manifest_record(generated_at="not-a-date")) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FoundationValidationError) as raised:
+        FoundationSchemaValidator().validate_jsonl_file("Manifest", jsonl_path)
+
+    assert raised.value.error_path == "generated_at"
+    assert raised.value.line_number == 1
+
+
+def test_relation_date_time_format_is_enforced() -> None:
+    with pytest.raises(FoundationValidationError) as raised:
+        FoundationSchemaValidator().validate_record(
+            "RelationRecord",
+            valid_relation_record(created_at="2026-07-13"),
+        )
+
+    assert raised.value.error_path == "created_at"
