@@ -1,3 +1,3 @@
-from .api import app, router
+from .api import app, health_router, retrieve_router
 
-__all__ = ["app", "router"]
+__all__ = ["app", "health_router", "retrieve_router"]

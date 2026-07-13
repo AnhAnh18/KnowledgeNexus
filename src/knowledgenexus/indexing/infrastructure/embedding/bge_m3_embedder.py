@@ -52,6 +52,19 @@ class BgeM3Embedder(EmbedderPort):
             self._dimension,
         )
 
+    @classmethod
+    def from_settings(cls, settings) -> BgeM3Embedder:
+        return cls(
+            model_name=settings.embedding_model,
+            device=settings.embedding_device,
+            batch_size=settings.embedding_batch_size,
+        )
+
+    def close(self) -> None:
+        self._model = None
+        logger.info("BgeM3Embedder closed")
+
+
     @property
     def model_name(self) -> str:
         return self._model_name

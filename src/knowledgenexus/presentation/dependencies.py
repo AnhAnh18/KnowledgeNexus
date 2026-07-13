@@ -13,7 +13,7 @@ def get_retrieve_chunks_use_case() -> RetrieveChunksUseCase:
 
     container = get_container()
 
-    embedder_adapter = IndexingEmbedderAdapter(container.embedder)
+    embedder_adapter = IndexingEmbedderAdapter(container.get_embedder())
     search_adapter = IndexingSearchAdapter(container.vector_store)
     chunk_adapter = IndexingChunkAdapter(container.chunk_repo)
 
