@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from knowledgenexus.indexing.application.use_cases.chunk_storage_service import ChunkStorageService
+from knowledgenexus.indexing.domain.ports.embedder_port import EmbedderPort
 from knowledgenexus.shared.config.settings import Settings
 from knowledgenexus.indexing.infrastructure.database.engine import create_engine, create_session_factory, init_database
 from knowledgenexus.indexing.infrastructure.repositories.sqlite_chunk_repo import SqliteChunkRepository
@@ -20,6 +21,7 @@ class AppContainer:
     document_repo: SqliteDocumentRepository
     vector_store: QdrantVectorStore
     chunk_storage: ChunkStorageService
+    embedder: EmbedderPort | None = None
 
     async def shutdown(self) -> None:
         await self.vector_store.close()
