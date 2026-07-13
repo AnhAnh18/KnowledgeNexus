@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -24,24 +23,8 @@ except ImportError:  # pragma: no cover - compatibility path for older jsonschem
     Resource = None  # type: ignore[assignment]
     DRAFT202012 = None  # type: ignore[assignment]
 
-try:
-    from rfc3339_validator import validate_rfc3339
-except ImportError:  # pragma: no cover - optional jsonschema format dependency
-    validate_rfc3339 = None
-
 
 _FORMAT_CHECKER = FormatChecker()
-
-
-@_FORMAT_CHECKER.checks("date-time", raises=ValueError)
-def _is_date_time(value: object) -> bool:
-    if not isinstance(value, str):
-        return True
-
-    if validate_rfc3339 is not None:
-        return bool(validate_rfc3339(value.upper()))
-
-    return _is_rfc3339_date_time(value)
 
 
 @dataclass(frozen=True)
@@ -218,78 +201,3 @@ def _format_error_path(error: ValidationError) -> str:
             parts.append(f"{separator}{item}")
 
     return "".join(parts)
-
-
-def _is_rfc3339_date_time(value: str) -> bool:
-    if value.count("T") != 1:
-        return False
-
-    date_part, time_part = value.split("T", maxsplit=1)
-    if not _has_rfc3339_date_shape(date_part):
-        return False
-    if not _has_rfc3339_time_shape(time_part):
-        return False
-
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return False
-
-    return parsed.tzinfo is not None and parsed.utcoffset() is not None
-
-
-def _has_rfc3339_date_shape(value: str) -> bool:
-    return (
-        len(value) == 10
-        and value[4] == "-"
-        and value[7] == "-"
-        and _all_digits(value[:4], value[5:7], value[8:10])
-    )
-
-
-def _has_rfc3339_time_shape(value: str) -> bool:
-    time_value, offset_value = _split_rfc3339_offset(value)
-    if offset_value is None:
-        return False
-
-    second_part, dot, fraction_part = time_value.partition(".")
-    if dot and not fraction_part.isdigit():
-        return False
-
-    return (
-        len(second_part) == 8
-        and second_part[2] == ":"
-        and second_part[5] == ":"
-        and _all_digits(second_part[:2], second_part[3:5], second_part[6:8])
-    )
-
-
-def _split_rfc3339_offset(value: str) -> tuple[str, str | None]:
-    if value.endswith("Z"):
-        return value[:-1], "Z"
-
-    for marker in ("+", "-"):
-        marker_index = value.rfind(marker)
-        if marker_index == -1:
-            continue
-
-        time_value = value[:marker_index]
-        offset_value = value[marker_index:]
-        if _has_rfc3339_offset_shape(offset_value):
-            return time_value, offset_value
-
-    return value, None
-
-
-def _has_rfc3339_offset_shape(value: str) -> bool:
-    return (
-        len(value) == 6
-        and value[0] in {"+", "-"}
-        and value[3] == ":"
-        and _all_digits(value[1:3], value[4:6])
-    )
-
-
-def _all_digits(*parts: str) -> bool:
-    return all(part.isdigit() for part in parts)

@@ -169,10 +169,18 @@ def test_valid_jsonl_file_returns_record_count(tmp_path: Path) -> None:
     assert count == 2
 
 
-def test_valid_manifest_date_time_passes() -> None:
+@pytest.mark.parametrize(
+    "generated_at",
+    [
+        "2026-07-13T09:30:15Z",
+        "2026-07-13T09:30:15+05:30",
+        "2026-07-13t09:30:15z",
+    ],
+)
+def test_valid_manifest_date_time_passes(generated_at: str) -> None:
     FoundationSchemaValidator().validate_record(
         "Manifest",
-        valid_manifest_record(generated_at="2026-07-13T09:30:15Z"),
+        valid_manifest_record(generated_at=generated_at),
     )
 
 
@@ -189,6 +197,8 @@ def test_valid_manifest_fractional_seconds_date_time_passes() -> None:
         "not-a-date",
         "2026-07-13",
         "2026-13-40T25:61:61Z",
+        "2026-07-13T09:30:15+00:60",
+        "2026-07-13T09:30:15+05:99",
     ],
 )
 def test_manifest_invalid_date_time_format_fails(generated_at: str) -> None:
