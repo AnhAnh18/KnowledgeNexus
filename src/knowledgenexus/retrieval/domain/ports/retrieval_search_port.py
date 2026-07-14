@@ -16,3 +16,7 @@ class RetrievalSearchPort(ABC):
         filters: dict[str, Any] | None = None,
     ) -> list[ScoredChunk]:
         ...
+
+    @abstractmethod
+    async def delete_by_document_id(self, document_id: str) -> int:
+        ...

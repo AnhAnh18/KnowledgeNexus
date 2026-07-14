@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from knowledgenexus.presentation.api.v1.schemas.document_schema import (
     DocumentSchema,
     ListDocumentsResponseSchema,
 )
+from knowledgenexus.retrieval.application.use_cases.delete_document import DeleteDocumentUseCase
 from knowledgenexus.retrieval.application.use_cases.list_documents import (
     ListDocumentsRequest,
     ListDocumentsUseCase,
@@ -46,3 +47,21 @@ async def list_documents(
         limit=result.limit,
         offset=result.offset,
     )
+
+
+def get_delete_document_use_case() -> DeleteDocumentUseCase:
+    from knowledgenexus.presentation.dependencies import build_delete_document_use_case
+    return build_delete_document_use_case()
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: str,
+    use_case: DeleteDocumentUseCase = Depends(get_delete_document_use_case),
+) -> None:
+    deleted = await use_case.execute(document_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{document_id}' not found",
+        )

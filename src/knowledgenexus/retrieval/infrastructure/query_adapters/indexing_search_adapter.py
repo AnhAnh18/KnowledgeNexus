@@ -20,3 +20,6 @@ class IndexingSearchAdapter(RetrievalSearchPort):
         filters: dict[str, Any] | None = None,
     ) -> list[ScoredChunk]:
         return await self._vector_store.search(query_vector, top_k, filters)
+
+    async def delete_by_document_id(self, document_id: str) -> int:
+        return await self._vector_store.delete_by_document_id(document_id)
