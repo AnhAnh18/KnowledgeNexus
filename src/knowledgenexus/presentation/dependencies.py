@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from knowledgenexus.retrieval.application.use_cases.list_documents import ListDocumentsUseCase
 from knowledgenexus.retrieval.application.use_cases.retrieve_chunks import RetrieveChunksUseCase
 
 
@@ -22,3 +23,15 @@ def get_retrieve_chunks_use_case() -> RetrieveChunksUseCase:
         search_port=search_adapter,
         chunk_port=chunk_adapter,
     )
+
+
+def build_list_documents_use_case() -> ListDocumentsUseCase:
+    from knowledgenexus.retrieval.infrastructure.query_adapters import IndexingDocumentAdapter
+    from knowledgenexus.shared.di import get_container
+
+    container = get_container()
+    document_adapter = IndexingDocumentAdapter(container.document_repo)
+
+    return ListDocumentsUseCase(document_port=document_adapter)
+
+
