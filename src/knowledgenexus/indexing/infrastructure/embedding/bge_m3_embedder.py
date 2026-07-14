@@ -54,8 +54,11 @@ class BgeM3Embedder(EmbedderPort):
 
     @classmethod
     def from_settings(cls, settings) -> BgeM3Embedder:
+        from knowledgenexus.indexing.infrastructure.embedding.model_path import resolve_embedding_model_path
+
+        model_name = resolve_embedding_model_path(settings)
         return cls(
-            model_name=settings.embedding_model,
+            model_name=model_name,
             device=settings.embedding_device,
             batch_size=settings.embedding_batch_size,
         )

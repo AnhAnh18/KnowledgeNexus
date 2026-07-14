@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     # Embedding
     embedding_model: str = "BAAI/bge-m3"
+    embedding_model_path: str | None = None
+    embedding_dimension: int = 1024
     embedding_device: str = "cpu"
     embedding_cache_dir: str = "./data/index/models"
     embedding_batch_size: int = 32
