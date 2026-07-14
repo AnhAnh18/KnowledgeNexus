@@ -5,6 +5,13 @@ from .retrieve_schema import (
     RetrieveResponseSchema,
     RetrievedChunkSchema,
 )
+from .store_schema import (
+    CoreChunkMetadataSchema,
+    ChunkStoreItem,
+    StoreChunksRequest,
+    StoreChunksResponse,
+    StoreStatsResponse,
+)
 
 __all__ = [
     "DocumentSchema",
@@ -13,4 +20,9 @@ __all__ = [
     "RetrieveResponseSchema",
     "RetrievedChunkSchema",
     "CitationSchema",
+    "CoreChunkMetadataSchema",
+    "ChunkStoreItem",
+    "StoreChunksRequest",
+    "StoreChunksResponse",
+    "StoreStatsResponse",
 ]
