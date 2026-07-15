@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from knowledgenexus.presentation.api.v1 import documents_router, health_router, retrieve_router, store_router
+from knowledgenexus.presentation.api.v1 import documents_router, health_router, ingest_job_router, retrieve_router, store_router
 
 
 @asynccontextmanager
@@ -29,3 +29,4 @@ app.include_router(health_router)
 app.include_router(retrieve_router)
 app.include_router(documents_router)
 app.include_router(store_router)
+app.include_router(ingest_job_router)

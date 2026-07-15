@@ -37,3 +37,16 @@ class ChunkModel(Base):
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_id: Mapped[str] = mapped_column(String(256), nullable=False)
 
+
+class IngestJobModel(Base):
+    __tablename__ = "ingest_jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stats: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+

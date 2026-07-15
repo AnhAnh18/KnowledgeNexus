@@ -53,9 +53,11 @@ async def api_client(monkeypatch):
         session_factory=MagicMock(),
         chunk_repo=MagicMock(),
         document_repo=document_repo,
+        ingest_job_repo=MagicMock(),
         vector_store=MagicMock(),
         chunk_storage=chunk_storage,
     )
+
 
     async def fake_init_container(settings):
         return container

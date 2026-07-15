@@ -4,8 +4,9 @@ from uuid import UUID
 from knowledgenexus.indexing.domain.enums.source_type import SourceType
 from knowledgenexus.indexing.domain.models.chunk import Chunk, ChunkPayload, CoreChunkMetadata
 from knowledgenexus.indexing.domain.models.document import Document
+from knowledgenexus.indexing.domain.models.ingest_job import IngestJob, IngestJobStatus
 
-from knowledgenexus.indexing.infrastructure.database.models import ChunkModel, DocumentModel
+from knowledgenexus.indexing.infrastructure.database.models import ChunkModel, DocumentModel, IngestJobModel
 
 
 def document_to_model(document: Document) -> DocumentModel:
@@ -85,3 +86,26 @@ def chunk_from_model(model: ChunkModel) -> Chunk:
         payload=payload,
     )
 
+
+def ingest_job_to_model(job: IngestJob) -> IngestJobModel:
+    return IngestJobModel(
+        id=job.id,
+        source_type=str(job.source_type),
+        status=job.status.value,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+        stats=job.stats,
+    )
+
+
+def ingest_job_from_model(model: IngestJobModel) -> IngestJob:
+    return IngestJob(
+        id=model.id,
+        source_type=SourceType(model.source_type),
+        status=IngestJobStatus(model.status),
+        started_at=model.started_at,
+        completed_at=model.completed_at,
+        error=model.error,
+        stats=model.stats or {},
+    )

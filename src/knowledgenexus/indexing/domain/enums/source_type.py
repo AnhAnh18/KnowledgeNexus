@@ -9,4 +9,6 @@ class SourceType(StrEnum):
     
     @classmethod
     def is_valid(cls, value: str) -> bool:
-        return value.upper() in cls.values()
+        return value.upper() in [member.value for member in cls]
+
+

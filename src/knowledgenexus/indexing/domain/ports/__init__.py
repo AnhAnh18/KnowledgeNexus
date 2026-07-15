@@ -1,6 +1,7 @@
 from .chunk_repository_port import ChunkRepositoryPort
 from .document_repository_port import DocumentRepositoryPort
 from .embedder_port import EmbedderPort
+from .ingest_job_repository_port import IngestJobRepositoryPort
 from .vector_store_port import ScoredChunk, VectorStorePort
 
 __all__ = [
@@ -8,5 +9,6 @@ __all__ = [
     "VectorStorePort",
     "ChunkRepositoryPort",
     "DocumentRepositoryPort",
+    "IngestJobRepositoryPort",
     "ScoredChunk",
 ]

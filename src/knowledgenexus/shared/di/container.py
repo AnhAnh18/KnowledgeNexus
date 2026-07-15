@@ -8,6 +8,7 @@ from knowledgenexus.shared.config.settings import Settings
 from knowledgenexus.indexing.infrastructure.database.engine import create_engine, create_session_factory, init_database
 from knowledgenexus.indexing.infrastructure.repositories.sqlite_chunk_repo import SqliteChunkRepository
 from knowledgenexus.indexing.infrastructure.repositories.sqlite_document_repo import SqliteDocumentRepository
+from knowledgenexus.indexing.infrastructure.repositories.sqlite_ingest_job_repo import SqliteIngestJobRepository
 from knowledgenexus.indexing.infrastructure.vector_store.qdrant_store import QdrantVectorStore
 
 
@@ -18,6 +19,7 @@ class AppContainer:
     session_factory: async_sessionmaker[AsyncSession]
     chunk_repo: SqliteChunkRepository
     document_repo: SqliteDocumentRepository
+    ingest_job_repo: SqliteIngestJobRepository
     vector_store: QdrantVectorStore
     chunk_storage: ChunkStorageService
     embedder: BgeM3Embedder | None = field(default=None, repr=False, compare=False)
@@ -44,6 +46,7 @@ async def build_container(settings: Settings) -> AppContainer:
 
     chunk_repo = SqliteChunkRepository(session_factory)
     document_repo = SqliteDocumentRepository(session_factory)
+    ingest_job_repo = SqliteIngestJobRepository(session_factory)
 
     vector_store = await QdrantVectorStore.create(
         url=settings.qdrant_url,
@@ -64,6 +67,7 @@ async def build_container(settings: Settings) -> AppContainer:
         session_factory=session_factory,
         chunk_repo=chunk_repo,
         document_repo=document_repo,
+        ingest_job_repo=ingest_job_repo,
         vector_store=vector_store,
         chunk_storage=chunk_storage,
     )
