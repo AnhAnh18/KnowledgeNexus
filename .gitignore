@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local/context bundles
+*.zip
+akp_context_bundle_*.zip
+
+# Local AI/Codex working notes
+.local_ai/
+
+# Environment
+.env
+.env.local
+
+# Runtime data
+data/raw/
+data/work/
+data/index/
+data/exports/
+*.db
+
+# IDE
+.settings/
+.idea/
+.vscode/
+*.swp
+
+# Models cache
+*.bin
+*.safetensors
+
+# Borrowed external tool copied into this workspace — contains live credentials; never publish
+Tool_TRreport/
+Tool_TRreport.7z
+*.7z
+
+# Local agent worktrees / machine-local Claude Code state
+.claude/

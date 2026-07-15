@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/sync_state_record.schema.json",
+  "title": "SyncStateRecord",
+  "description": "Snapshot row of per-entity sync progress. NOTE: the authoritative, mutable sync state lives in the SQLite metadata store; sync_state.jsonl is an exported snapshot for inspection (master spec Appendix A).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "source_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/nonEmptyString"
+    },
+    "entity_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "entity_type": {
+      "enum": [
+        "page",
+        "attachment",
+        "file",
+        "repo"
+      ]
+    },
+    "last_seen_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_content_hash": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sha256OrNull"
+    },
+    "last_synced_at": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "tombstoned",
+        "error"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "source_id",
+    "entity_id",
+    "entity_type",
+    "last_synced_at",
+    "status"
+  ]
+}

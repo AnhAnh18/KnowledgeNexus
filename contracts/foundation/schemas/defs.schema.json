@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/defs.schema.json",
+  "title": "Shared definitions",
+  "description": "Shared ID grammars, enums, and the timestamp format for the AI Knowledge Platform Part 1 output contract (v7.1). Record schemas $ref these definitions; this file is the single source of truth for the shared vocabulary.",
+  "$defs": {
+    "schemaVersion": {
+      "const": "1.0",
+      "description": "Contract version carried by every record."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 / ISO 8601 UTC timestamp, e.g. 2026-07-02T00:00:00Z."
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S+$",
+      "description": "Non-empty identifier with no whitespace."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sha256OrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commitHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Full Git commit hash (sha1) of the scanned tree."
+    },
+    "chunkId": {
+      "type": "string",
+      "pattern": "^chunk:(confluence|git):[0-9a-f]{16}(-[0-9]+)?$"
+    },
+    "relationId": {
+      "type": "string",
+      "pattern": "^rel:[0-9a-f]{16}$"
+    },
+    "tombstoneId": {
+      "type": "string",
+      "pattern": "^tomb:[0-9a-f]{16}$"
+    },
+    "aclId": {
+      "type": "string",
+      "pattern": "^acl:\\S+$"
+    },
+    "jiraKey": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]+-[0-9]+$"
+    },
+    "chunkerVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "aclTag": {
+      "type": "string",
+      "pattern": "^(user:\\S+|group:\\S+|space:[A-Z0-9]+|repo:\\S+|restricted:unresolved)$",
+      "description": "OR-semantics permission tag. Grammar in master spec \u00a714.1; repo:{name} added for git-source chunks (v7.2 D4)."
+    },
+    "aclTags": {
+      "type": "array",
+      "items": {
+        "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/aclTag"
+      },
+      "minItems": 1,
+      "description": "Never empty; default-deny materializes as ['restricted:unresolved'] (master spec \u00a714.3)."
+    },
+    "sourceSystem": {
+      "enum": [
+        "confluence",
+        "git"
+      ]
+    },
+    "contentKind": {
+      "enum": [
+        "prose",
+        "table",
+        "code_block",
+        "code_symbol",
+        "code_window"
+      ]
+    },
+    "chunkSourceType": {
+      "enum": [
+        "wiki_page",
+        "code_file",
+        "attachment_text"
+      ]
+    },
+    "relationType": {
+      "enum": [
+        "mentions_jira_key",
+        "embeds_media",
+        "includes_page",
+        "links_to_page"
+      ]
+    },
+    "resolutionStatus": {
+      "enum": [
+        "resolved",
+        "unresolved_without_jira_api",
+        "deferred_mvp",
+        "unresolved_target"
+      ]
+    },
+    "symbolType": {
+      "enum": [
+        "class",
+        "struct",
+        "interface",
+        "enum",
+        "function",
+        "method",
+        "namespace",
+        "package"
+      ]
+    },
+    "symbolLanguage": {
+      "enum": [
+        "cpp",
+        "java",
+        "kotlin"
+      ]
+    },
+    "parseStatus": {
+      "enum": [
+        "ok",
+        "partial",
+        "failed"
+      ]
+    },
+    "downloadStatus": {
+      "enum": [
+        "downloaded",
+        "skipped",
+        "failed",
+        "not_attempted"
+      ]
+    },
+    "processingStatus": {
+      "enum": [
+        "parsed",
+        "ocr",
+        "summarized",
+        "not_processed",
+        "failed"
+      ]
+    },
+    "relevance": {
+      "enum": [
+        "high",
+        "medium",
+        "low",
+        "unknown"
+      ]
+    },
+    "aclExtractionStatus": {
+      "enum": [
+        "ok",
+        "partial",
+        "unavailable"
+      ]
+    },
+    "aclConfidence": {
+      "enum": [
+        "exact",
+        "approximate"
+      ]
+    },
+    "tombstoneEntityType": {
+      "enum": [
+        "document",
+        "chunk",
+        "relation",
+        "acl",
+        "media",
+        "symbol"
+      ]
+    },
+    "tombstoneReason": {
+      "enum": [
+        "source_deleted",
+        "access_revoked",
+        "moved_out_of_scope",
+        "content_updated",
+        "config_invalidated"
+      ]
+    },
+    "exportMode": {
+      "enum": [
+        "full_snapshot",
+        "delta"
+      ]
+    }
+  }
+}

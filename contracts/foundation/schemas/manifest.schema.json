@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/manifest.schema.json",
+  "title": "Manifest",
+  "description": "Top-level descriptor of one export. Declares export_mode and the versions needed to apply it (master spec \u00a716.2, Appendix A).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "dataset_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "export_mode": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/exportMode"
+    },
+    "base_dataset_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Required (non-null) when export_mode is 'delta'."
+    },
+    "generated_at": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+    },
+    "config_hash": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sha256"
+    },
+    "chunker_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/chunkerVersion"
+    },
+    "schemas_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "source_scopes": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_version",
+    "export_mode",
+    "generated_at",
+    "config_hash",
+    "chunker_version",
+    "schemas_version",
+    "counts"
+  ]
+}

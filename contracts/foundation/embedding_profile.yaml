@@ -1,0 +1,49 @@
+# Provisional — for POC retrieval benchmarking.
+# NOT normative until one profile is locked into CHUNKING_SPEC.md
+# as chunker_version 1.2.0. See AI_Knowledge_Platform_v7_3_Update.md (D8–D10).
+
+embedding_model:
+  name: BAAI/bge-m3
+  provider: local                 # open-weight, self-host, free
+  tokenizer: BAAI/bge-m3
+  tokenizer_note: SentencePiece, XLM-RoBERTa-based
+  vector_dim: 1024
+  max_model_tokens: 8192
+  retrieval_modes:                # capability of the model; implementation = Task 2/Task 3
+    - dense
+    - sparse
+    - colbert
+
+benchmark_method:
+  round_1: dense_only_chunk_budget_sweep
+  round_2: fixed_budget_hybrid_retrieval_test
+  principle: change_one_variable_at_a_time
+
+chunking_profiles:
+  control:                        # ~MiniLM-era sizing; sanity baseline to test whether bigger chunks actually help
+    target_tokens: 200
+    hard_max_tokens: 240
+    overlap_tokens: 40
+    min_tokens: 64
+  small:
+    target_tokens: 300
+    hard_max_tokens: 600
+    overlap_tokens: 64
+    min_tokens: 96
+  medium:
+    target_tokens: 450
+    hard_max_tokens: 1000
+    overlap_tokens: 64
+    min_tokens: 96
+  large:
+    target_tokens: 700
+    hard_max_tokens: 1500
+    overlap_tokens: 96
+    min_tokens: 128
+
+code_window_policy:
+  note: >
+    Scale code_window_target_tokens and overlap lines per selected profile during
+    benchmark. Keep token-packed line windows and the max-line guard from
+    CHUNKING_SPEC.md §5. hard_max_tokens must always stay <= max_model_tokens
+    minus the model's special tokens.

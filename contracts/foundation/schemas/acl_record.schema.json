@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svmc.samsung/knowledge/schemas/acl_record.schema.json",
+  "title": "ACLRecord",
+  "description": "Per-document access control. acl_tags is the enforced representation; inheritance is a deny-safe intersection (master spec \u00a714).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/schemaVersion"
+    },
+    "acl_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/aclId"
+    },
+    "document_id": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/opaqueId"
+    },
+    "source_system": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/sourceSystem"
+    },
+    "crawler_identity": {
+      "type": "string"
+    },
+    "is_restricted": {
+      "type": "boolean"
+    },
+    "restriction_inherited": {
+      "type": "boolean"
+    },
+    "restriction_source_page_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowed_users": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowed_groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acl_tags": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/aclTags"
+    },
+    "acl_extraction_status": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/aclExtractionStatus"
+    },
+    "acl_confidence": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/aclConfidence"
+    },
+    "extracted_at": {
+      "$ref": "https://svmc.samsung/knowledge/schemas/defs.schema.json#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "schema_version",
+    "acl_id",
+    "document_id",
+    "source_system",
+    "is_restricted",
+    "acl_tags",
+    "acl_extraction_status",
+    "extracted_at"
+  ]
+}
