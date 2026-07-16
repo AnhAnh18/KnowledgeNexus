@@ -1,81 +1,94 @@
 # KnowledgeNexus
 
-Clean Architecture RAG platform — hybrid **SQLite** (source of truth) + **Qdrant** (vector search).
+KnowledgeNexus is an internal engineering knowledge platform. The repository is
+currently building the Foundation data layer first: contracts, deterministic
+records and snapshots, and source inventory/ingestion boundaries.
 
-## Architecture
+Embedding, Qdrant indexing, retrieval, chat, and presentation APIs are later
+bounded contexts and are not runnable features yet.
 
-- **Domain** (`packages/domain`): entities, ports, `source_metadata/` typed schemas
-- **API** (`services/api`): FastAPI application, use cases, infrastructure adapters
-- **Payload model**: `CoreChunkMetadata` (common) + `extra` dict (source-specific)
+## Requirements
 
-## Prerequisites
+- Python 3.11 or newer
+- `pip`
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Qdrant (native binary, port 6333) — see below
-
-## Setup
+Install the declared runtime dependencies from the repository root:
 
 ```bash
-# Install dependencies
-uv sync
+python -m pip install -r requirements.txt
+```
 
-# Copy environment template
+The dependency versions are intentionally unpinned until the repository adopts
+a packaging and lock-file convention. Reproducible production environments
+should record the resolved versions externally in the meantime.
+
+### Why `rfc3339-validator` is required
+
+Foundation schemas use JSON Schema `format: date-time` fields. The
+`FoundationSchemaValidator` enables `jsonschema.FormatChecker`, and
+`rfc3339-validator` supplies the RFC 3339 implementation used to reject invalid
+date-time values. It is therefore a runtime validation dependency, not an
+optional test helper.
+
+## Local setup
+
+Copy the environment template and keep all real credentials local:
+
+```bash
 cp .env.example .env
 ```
 
-## Run Qdrant (native — no Docker until M6)
+On PowerShell:
 
-Download from [Qdrant releases](https://github.com/qdrant/qdrant/releases) or:
-
-```bash
-# Windows (scoop)
-scoop install qdrant
-
-# macOS
-brew install qdrant
-
-# Run
-qdrant --config-path ./config/qdrant  # or default on :6333
+```powershell
+Copy-Item .env.example .env
 ```
 
-## Run API
-
-```bash
-uv run knowledgenexus
-# or
-uv run uvicorn knowledgenexus.main:app --reload --port 8000
-```
-
-Health: http://localhost:8000/api/v1/health
+The current Foundation code does not automatically load `.env`. Source adapters
+must receive resolved connection and authentication configuration explicitly.
 
 ## Tests
 
+Install `pytest` in the development environment if it is not already present:
+
 ```bash
-uv run pytest
+python -m pip install pytest
+python -m pytest tests/foundation tests/shared -q
 ```
 
-## Project structure
+The Foundation tests are offline and use synthetic or sanitized fixtures. Real
+source smoke runs are separate, explicit milestone activities.
 
+## Repository structure
+
+```text
+contracts/foundation/          Foundation schemas and integration contracts
+src/knowledgenexus/foundation/ Foundation domain, application, ports, adapters
+src/knowledgenexus/shared/     Shared technical contract utilities
+tests/foundation/              Foundation unit and integration tests
+tests/shared/                  Shared contract utility tests
+data/exports/                  Published Foundation snapshots (runtime, ignored)
 ```
-contracts/openapi.yaml     # API contract (M0)
-config/                    # Qdrant collection schema, defaults
-packages/domain/           # Domain layer (no external deps)
-services/api/              # FastAPI service
-tests/                     # Unit + integration tests
+
+Foundation publishes snapshots under:
+
+```text
+data/exports/<dataset_name>/<dataset_version>/
 ```
 
-## Milestones
+Future indexing code must consume only published exports, never Foundation raw
+or working directories.
 
-| # | Deliverable |
-|---|-------------|
-| M0 | Foundation — domain, ports, OpenAPI, settings ✅ |
-| M1 | SQLite repos + Qdrant adapter + Store API |
-| M2 | Chunker, BGE-M3, Confluence parser |
-| M3 | MVP-1 — Ingest E2E |
-| M4 | MVP-2 — Retrieve + search |
-| M5 | MVP-3 — RAG chat |
-| M6 | Docker, MCP/URL/file connectors, PostgreSQL |
+## Current status
+
+- M0-M4: Foundation scaffold, contracts, deterministic record builders, and
+  full-snapshot export foundation complete.
+- M5A: deployment-independent Confluence inventory core complete.
+- M5B: deployment-specific Confluence Data Center inventory adapter is next.
+- M5C: small manually reviewed real inventory follows M5B.
+
+The current Confluence milestone is inventory metadata only. It does not fetch
+page bodies, rendered HTML, comments, attachments, or permissions.
 
 ## License
 
