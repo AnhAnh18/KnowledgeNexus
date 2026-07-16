@@ -1,0 +1,84 @@
+{
+  "limit": 2,
+  "results": [
+    {
+      "content": {
+        "ancestors": [
+          {
+            "id": "GLOBAL_PAGE",
+            "title": "Fixture Global Page"
+          },
+          {
+            "id": "SELECTED_PAGE",
+            "title": "Fixture Root Page"
+          }
+        ],
+        "id": "DIRECT_CHILD",
+        "metadata": {
+          "labels": {
+            "_links": {
+              "self": "/fixture-labels"
+            },
+            "limit": 200,
+            "results": [],
+            "size": 0,
+            "start": 0
+          }
+        },
+        "space": {
+          "key": "SPACE"
+        },
+        "status": "current",
+        "title": "Fixture Direct Child",
+        "type": "page",
+        "version": {
+          "number": 3,
+          "when": "2000-01-02T00:00:00.000+00:00"
+        }
+      }
+    },
+    {
+      "content": {
+        "ancestors": [
+          {
+            "id": "GLOBAL_PAGE",
+            "title": "Fixture Global Page"
+          },
+          {
+            "id": "SELECTED_PAGE",
+            "title": "Fixture Root Page"
+          },
+          {
+            "id": "DIRECT_CHILD",
+            "title": "Fixture Direct Child"
+          }
+        ],
+        "id": "NESTED_CHILD",
+        "metadata": {
+          "labels": {
+            "_links": {
+              "self": "/fixture-labels"
+            },
+            "limit": 200,
+            "results": [],
+            "size": 0,
+            "start": 0
+          }
+        },
+        "space": {
+          "key": "SPACE"
+        },
+        "status": "current",
+        "title": "Fixture Nested Child",
+        "type": "page",
+        "version": {
+          "number": 8,
+          "when": "2000-01-03T00:00:00.000+00:00"
+        }
+      }
+    }
+  ],
+  "size": 2,
+  "start": 0,
+  "totalSize": 3
+}
