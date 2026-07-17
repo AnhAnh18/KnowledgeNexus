@@ -1,0 +1,60 @@
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+diff --git a/README.md b/README.md
+index dc51de9..4a80efb 100644
+--- a/README.md
++++ b/README.md
+@@ -77,6 +77,54 @@ tests/                     # Unit + integration tests
+ | M5 | MVP-3 — RAG chat |
+ | M6 | Docker, MCP/URL/file connectors, PostgreSQL |
+ 
++## Foundation workstream
++
++The Foundation workstream in this repository builds the data-contract,
++deterministic export, and source-ingestion boundary used by later indexing and
++retrieval work. Its internal milestone labels, such as Foundation M5A or M5B,
++are workstream-local and do not replace the product milestones above.
++
++Current Foundation status:
++
++- Foundation M0-M4: contracts, deterministic record construction, and
++  full-snapshot export foundation complete.
++- Foundation M5A: deployment-independent Confluence inventory core complete.
++- Foundation M5B-0: Confluence Data Center response shape confirmed through a
++  sanitized offline evidence packet.
++- Foundation M5B-1: pure response parsing and metadata normalization complete.
++- Foundation M5B-2: Data Center HTTP adapter and pagination is the next step.
++
++Install the dependencies used by the current Foundation implementation from the
++repository root:
++
++```bash
++python -m pip install -r requirements.txt
++python -m pip install pytest
++python -m pytest tests/foundation tests/shared -q
++```
++
++`rfc3339-validator` is a declared runtime dependency because the Foundation
++schema validator enables JSON Schema `format: date-time` checking through
++`jsonschema.FormatChecker`. It is not only a test dependency.
++
++Foundation-specific repository areas are:
++
++```text
++contracts/foundation/          Foundation schemas and integration contracts
++src/knowledgenexus/foundation/ Foundation domain, application, ports, adapters
++src/knowledgenexus/shared/     Shared technical contract utilities
++tests/foundation/              Foundation unit and integration tests
++tests/shared/                  Shared contract utility tests
++data/exports/                  Published Foundation snapshots (runtime, ignored)
++```
++
++Foundation publishes snapshots under
++`data/exports/<dataset_name>/<dataset_version>/`. Later indexing code must
++consume only these published exports, never Foundation raw or working
++directories. The current Confluence work covers inventory metadata only; page
++bodies, rendered HTML, comments, attachments, and permissions remain outside
++the current milestone.
++
+ ## License
+ 
+ Internal use.

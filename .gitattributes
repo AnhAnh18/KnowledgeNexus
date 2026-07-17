@@ -1,1 +1,5 @@
 tests/fixtures/foundation/golden_full_snapshot/** text eol=lf
+
+# Review patches must keep their bytes exactly: in a unified diff a blank context
+# line is a single space, so whitespace-fixing them would corrupt every patch.
+.local_ai/review/*.patch -whitespace text eol=lf

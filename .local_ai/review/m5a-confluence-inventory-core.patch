@@ -1,0 +1,1736 @@
+diff --git a/src/knowledgenexus/foundation/application/__init__.py b/src/knowledgenexus/foundation/application/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+new file mode 100644
+index 0000000..a58596e
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -0,0 +1,5 @@
++from knowledgenexus.foundation.application.use_cases.build_confluence_inventory import (
++    BuildConfluenceInventory,
++)
++
++__all__ = ["BuildConfluenceInventory"]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/build_confluence_inventory.py b/src/knowledgenexus/foundation/application/use_cases/build_confluence_inventory.py
+new file mode 100644
+index 0000000..943ff6b
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/build_confluence_inventory.py
+@@ -0,0 +1,108 @@
++from __future__ import annotations
++
++from knowledgenexus.foundation.domain.models.confluence_inventory_item import (
++    ConfluenceInventoryItem,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++from knowledgenexus.foundation.domain.models.confluence_source_config import (
++    ConfluenceSourceConfig,
++)
++from knowledgenexus.foundation.domain.rules.confluence_scope_policy import (
++    ConfluenceScopePolicy,
++)
++from knowledgenexus.foundation.ports.confluence_inventory_port import (
++    ConfluenceInventoryPort,
++)
++
++
++class BuildConfluenceInventory:
++    def __init__(self, *, inventory_port: ConfluenceInventoryPort) -> None:
++        self._inventory_port = inventory_port
++
++    def execute(
++        self,
++        *,
++        config: ConfluenceSourceConfig,
++    ) -> tuple[ConfluenceInventoryItem, ...]:
++        metadata_by_page_id: dict[str, ConfluencePageMetadata] = {}
++
++        for root in sorted(config.include_roots, key=lambda item: item.page_id):
++            root_found = False
++            pages = self._inventory_port.iter_page_metadata(
++                space_key=config.space_key,
++                root_page_id=root.page_id,
++                page_size=config.page_size,
++            )
++            for page in pages:
++                self._validate_page(
++                    page=page,
++                    space_key=config.space_key,
++                    root_page_id=root.page_id,
++                )
++                if page.page_id == root.page_id:
++                    root_found = True
++                existing = metadata_by_page_id.get(page.page_id)
++                if existing is not None and existing != page:
++                    raise ValueError(
++                        "Confluence inventory returned conflicting metadata for "
++                        f"page_id {page.page_id!r}"
++                    )
++                metadata_by_page_id[page.page_id] = page
++
++            if not root_found:
++                raise ValueError(
++                    "Confluence inventory result is missing requested root page "
++                    f"{root.page_id!r}"
++                )
++
++        include_root_ids = tuple(root.page_id for root in config.include_roots)
++        items = []
++        for page in metadata_by_page_id.values():
++            scope_status, scope_reason = ConfluenceScopePolicy.decide(
++                page=page,
++                include_root_ids=include_root_ids,
++                exclude_subtrees=config.exclude_subtrees,
++            )
++            items.append(
++                ConfluenceInventoryItem.from_metadata(
++                    source_id=config.source_id,
++                    metadata=page,
++                    scope_status=scope_status,
++                    scope_reason=scope_reason,
++                )
++            )
++
++        return tuple(
++            sorted(
++                items,
++                key=lambda item: (
++                    item.space_key,
++                    item.ancestor_page_ids,
++                    item.page_id,
++                ),
++            )
++        )
++
++    @staticmethod
++    def _validate_page(
++        *,
++        page: ConfluencePageMetadata,
++        space_key: str,
++        root_page_id: str,
++    ) -> None:
++        if not isinstance(page, ConfluencePageMetadata):
++            raise TypeError(
++                "ConfluenceInventoryPort must return ConfluencePageMetadata"
++            )
++        if page.space_key != space_key:
++            raise ValueError(
++                "Confluence inventory returned page from wrong space: "
++                f"{page.page_id!r}"
++            )
++        if page.page_id != root_page_id and root_page_id not in page.ancestor_page_ids:
++            raise ValueError(
++                "Confluence inventory returned page outside requested root: "
++                f"{page.page_id!r}"
++            )
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+new file mode 100644
+index 0000000..68d6033
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -0,0 +1,19 @@
++from knowledgenexus.foundation.domain.models.confluence_inventory_item import (
++    ConfluenceInventoryItem,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++from knowledgenexus.foundation.domain.models.confluence_source_config import (
++    ConfluenceExcludeSubtree,
++    ConfluenceIncludeRoot,
++    ConfluenceSourceConfig,
++)
++
++__all__ = [
++    "ConfluenceExcludeSubtree",
++    "ConfluenceIncludeRoot",
++    "ConfluenceInventoryItem",
++    "ConfluencePageMetadata",
++    "ConfluenceSourceConfig",
++]
+diff --git a/src/knowledgenexus/foundation/domain/models/confluence_inventory_item.py b/src/knowledgenexus/foundation/domain/models/confluence_inventory_item.py
+new file mode 100644
+index 0000000..7e62d3d
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/confluence_inventory_item.py
+@@ -0,0 +1,85 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Literal
++
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++
++
++ConfluenceScopeStatus = Literal["included", "excluded_subtree"]
++VALID_SCOPE_STATUSES = frozenset({"included", "excluded_subtree"})
++
++
++@dataclass(frozen=True)
++class ConfluenceInventoryItem:
++    source_id: str
++    page_id: str
++    title: str
++    space_key: str
++    parent_page_id: str | None
++    ancestor_page_ids: tuple[str, ...]
++    ancestor_titles: tuple[str, ...]
++    updated_at: str | None
++    source_version: str | None
++    labels: tuple[str, ...]
++    attachment_count: int | None
++    scope_status: ConfluenceScopeStatus
++    scope_reason: str
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.source_id, str):
++            raise TypeError("ConfluenceInventoryItem.source_id expects str")
++        if self.source_id == "":
++            raise ValueError("ConfluenceInventoryItem.source_id must not be empty")
++        if self.scope_status not in VALID_SCOPE_STATUSES:
++            raise ValueError(
++                "ConfluenceInventoryItem.scope_status must be included or "
++                "excluded_subtree"
++            )
++        if not isinstance(self.scope_reason, str):
++            raise TypeError("ConfluenceInventoryItem.scope_reason expects str")
++        if self.scope_reason == "":
++            raise ValueError("ConfluenceInventoryItem.scope_reason must not be empty")
++
++        metadata = ConfluencePageMetadata(
++            page_id=self.page_id,
++            title=self.title,
++            space_key=self.space_key,
++            parent_page_id=self.parent_page_id,
++            ancestor_page_ids=self.ancestor_page_ids,
++            ancestor_titles=self.ancestor_titles,
++            updated_at=self.updated_at,
++            source_version=self.source_version,
++            labels=self.labels,
++            attachment_count=self.attachment_count,
++        )
++        object.__setattr__(self, "ancestor_page_ids", metadata.ancestor_page_ids)
++        object.__setattr__(self, "ancestor_titles", metadata.ancestor_titles)
++        object.__setattr__(self, "labels", metadata.labels)
++
++    @classmethod
++    def from_metadata(
++        cls,
++        *,
++        source_id: str,
++        metadata: ConfluencePageMetadata,
++        scope_status: ConfluenceScopeStatus,
++        scope_reason: str,
++    ) -> ConfluenceInventoryItem:
++        return cls(
++            source_id=source_id,
++            page_id=metadata.page_id,
++            title=metadata.title,
++            space_key=metadata.space_key,
++            parent_page_id=metadata.parent_page_id,
++            ancestor_page_ids=metadata.ancestor_page_ids,
++            ancestor_titles=metadata.ancestor_titles,
++            updated_at=metadata.updated_at,
++            source_version=metadata.source_version,
++            labels=metadata.labels,
++            attachment_count=metadata.attachment_count,
++            scope_status=scope_status,
++            scope_reason=scope_reason,
++        )
+diff --git a/src/knowledgenexus/foundation/domain/models/confluence_page_metadata.py b/src/knowledgenexus/foundation/domain/models/confluence_page_metadata.py
+new file mode 100644
+index 0000000..4a99ec4
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/confluence_page_metadata.py
+@@ -0,0 +1,90 @@
++from __future__ import annotations
++
++from collections.abc import Sequence
++from dataclasses import dataclass
++from typing import Any
++
++
++def _require_non_empty_string(field_name: str, value: Any) -> None:
++    if not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str")
++    if value == "":
++        raise ValueError(f"{field_name} must not be empty")
++
++
++def _require_optional_string(field_name: str, value: Any) -> None:
++    if value is not None and not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str or None")
++
++
++def _copy_ordered_string_tuple(field_name: str, values: Any) -> tuple[str, ...]:
++    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
++        raise TypeError(f"{field_name} expects an ordered collection of strings")
++    copied_values = tuple(values)
++    if not all(isinstance(value, str) for value in copied_values):
++        raise TypeError(f"{field_name} expects strings")
++    return copied_values
++
++
++def _copy_sorted_unique_string_tuple(
++    field_name: str,
++    values: Any,
++) -> tuple[str, ...]:
++    if isinstance(values, (str, bytes)):
++        raise TypeError(f"{field_name} expects a collection of strings")
++    copied_values = tuple(values)
++    if not all(isinstance(value, str) for value in copied_values):
++        raise TypeError(f"{field_name} expects strings")
++    return tuple(sorted(set(copied_values)))
++
++
++@dataclass(frozen=True)
++class ConfluencePageMetadata:
++    page_id: str
++    title: str
++    space_key: str
++    parent_page_id: str | None = None
++    ancestor_page_ids: tuple[str, ...] = ()
++    ancestor_titles: tuple[str, ...] = ()
++    updated_at: str | None = None
++    source_version: str | None = None
++    labels: tuple[str, ...] = ()
++    attachment_count: int | None = None
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluencePageMetadata.page_id", self.page_id)
++        _require_non_empty_string("ConfluencePageMetadata.title", self.title)
++        _require_non_empty_string("ConfluencePageMetadata.space_key", self.space_key)
++        _require_optional_string(
++            "ConfluencePageMetadata.parent_page_id", self.parent_page_id
++        )
++        _require_optional_string("ConfluencePageMetadata.updated_at", self.updated_at)
++        _require_optional_string(
++            "ConfluencePageMetadata.source_version", self.source_version
++        )
++
++        ancestor_page_ids = _copy_ordered_string_tuple(
++            "ConfluencePageMetadata.ancestor_page_ids", self.ancestor_page_ids
++        )
++        ancestor_titles = _copy_ordered_string_tuple(
++            "ConfluencePageMetadata.ancestor_titles", self.ancestor_titles
++        )
++        labels = _copy_sorted_unique_string_tuple(
++            "ConfluencePageMetadata.labels", self.labels
++        )
++
++        if self.attachment_count is not None:
++            if isinstance(self.attachment_count, bool) or not isinstance(
++                self.attachment_count, int
++            ):
++                raise TypeError(
++                    "ConfluencePageMetadata.attachment_count expects an integer or None"
++                )
++            if self.attachment_count < 0:
++                raise ValueError(
++                    "ConfluencePageMetadata.attachment_count must be non-negative"
++                )
++
++        object.__setattr__(self, "ancestor_page_ids", ancestor_page_ids)
++        object.__setattr__(self, "ancestor_titles", ancestor_titles)
++        object.__setattr__(self, "labels", labels)
+diff --git a/src/knowledgenexus/foundation/domain/models/confluence_source_config.py b/src/knowledgenexus/foundation/domain/models/confluence_source_config.py
+new file mode 100644
+index 0000000..8cb871e
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/confluence_source_config.py
+@@ -0,0 +1,118 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any
++
++
++DEFAULT_INVENTORY_PAGE_SIZE = 50
++
++
++def _require_non_empty_string(field_name: str, value: Any) -> None:
++    if not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str")
++    if value == "":
++        raise ValueError(f"{field_name} must not be empty")
++
++
++def _require_optional_string(field_name: str, value: Any) -> None:
++    if value is not None and not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str or None")
++
++
++def _copy_collection(field_name: str, values: Any) -> tuple[Any, ...]:
++    if isinstance(values, (str, bytes)):
++        raise TypeError(f"{field_name} expects a collection")
++    return tuple(values)
++
++
++@dataclass(frozen=True)
++class ConfluenceIncludeRoot:
++    page_id: str
++    name: str | None = None
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluenceIncludeRoot.page_id", self.page_id)
++        _require_optional_string("ConfluenceIncludeRoot.name", self.name)
++
++
++@dataclass(frozen=True)
++class ConfluenceExcludeSubtree:
++    page_id: str
++    reason: str | None = None
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluenceExcludeSubtree.page_id", self.page_id)
++        _require_optional_string("ConfluenceExcludeSubtree.reason", self.reason)
++
++
++@dataclass(frozen=True)
++class ConfluenceSourceConfig:
++    source_id: str
++    space_key: str
++    include_roots: tuple[ConfluenceIncludeRoot, ...]
++    exclude_subtrees: tuple[ConfluenceExcludeSubtree, ...] = ()
++    include_keywords: tuple[str, ...] = ()
++    exclude_keywords: tuple[str, ...] = ()
++    page_size: int = DEFAULT_INVENTORY_PAGE_SIZE
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluenceSourceConfig.source_id", self.source_id)
++        _require_non_empty_string("ConfluenceSourceConfig.space_key", self.space_key)
++
++        include_roots = _copy_collection(
++            "ConfluenceSourceConfig.include_roots", self.include_roots
++        )
++        exclude_subtrees = _copy_collection(
++            "ConfluenceSourceConfig.exclude_subtrees", self.exclude_subtrees
++        )
++        include_keywords = _copy_collection(
++            "ConfluenceSourceConfig.include_keywords", self.include_keywords
++        )
++        exclude_keywords = _copy_collection(
++            "ConfluenceSourceConfig.exclude_keywords", self.exclude_keywords
++        )
++
++        if not include_roots:
++            raise ValueError("ConfluenceSourceConfig.include_roots must not be empty")
++        if not all(isinstance(root, ConfluenceIncludeRoot) for root in include_roots):
++            raise TypeError(
++                "ConfluenceSourceConfig.include_roots expects ConfluenceIncludeRoot entries"
++            )
++        if not all(
++            isinstance(subtree, ConfluenceExcludeSubtree)
++            for subtree in exclude_subtrees
++        ):
++            raise TypeError(
++                "ConfluenceSourceConfig.exclude_subtrees expects "
++                "ConfluenceExcludeSubtree entries"
++            )
++        if not all(isinstance(keyword, str) for keyword in include_keywords):
++            raise TypeError("ConfluenceSourceConfig.include_keywords expects strings")
++        if not all(isinstance(keyword, str) for keyword in exclude_keywords):
++            raise TypeError("ConfluenceSourceConfig.exclude_keywords expects strings")
++
++        include_ids = [root.page_id for root in include_roots]
++        exclude_ids = [subtree.page_id for subtree in exclude_subtrees]
++        if len(include_ids) != len(set(include_ids)):
++            raise ValueError("ConfluenceSourceConfig include-root page IDs must be unique")
++        if len(exclude_ids) != len(set(exclude_ids)):
++            raise ValueError(
++                "ConfluenceSourceConfig excluded-subtree page IDs must be unique"
++            )
++
++        overlap = set(include_ids).intersection(exclude_ids)
++        if overlap:
++            raise ValueError(
++                "ConfluenceSourceConfig include/exclude page IDs must not overlap: "
++                f"{sorted(overlap)}"
++            )
++
++        if isinstance(self.page_size, bool) or not isinstance(self.page_size, int):
++            raise TypeError("ConfluenceSourceConfig.page_size expects an integer")
++        if self.page_size <= 0:
++            raise ValueError("ConfluenceSourceConfig.page_size must be positive")
++
++        object.__setattr__(self, "include_roots", include_roots)
++        object.__setattr__(self, "exclude_subtrees", exclude_subtrees)
++        object.__setattr__(self, "include_keywords", include_keywords)
++        object.__setattr__(self, "exclude_keywords", exclude_keywords)
+diff --git a/src/knowledgenexus/foundation/domain/rules/confluence_scope_policy.py b/src/knowledgenexus/foundation/domain/rules/confluence_scope_policy.py
+new file mode 100644
+index 0000000..8cd23f4
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/rules/confluence_scope_policy.py
+@@ -0,0 +1,41 @@
++from __future__ import annotations
++
++from collections.abc import Iterable
++
++from knowledgenexus.foundation.domain.models.confluence_inventory_item import (
++    ConfluenceScopeStatus,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++from knowledgenexus.foundation.domain.models.confluence_source_config import (
++    ConfluenceExcludeSubtree,
++)
++
++
++class ConfluenceScopePolicy:
++    """Pure deterministic include/exclude classification for inventory pages."""
++
++    @staticmethod
++    def decide(
++        *,
++        page: ConfluencePageMetadata,
++        include_root_ids: Iterable[str],
++        exclude_subtrees: Iterable[ConfluenceExcludeSubtree],
++    ) -> tuple[ConfluenceScopeStatus, str]:
++        include_ids = frozenset(include_root_ids)
++        excluded_ids = frozenset(subtree.page_id for subtree in exclude_subtrees)
++
++        if page.page_id in excluded_ids:
++            return "excluded_subtree", f"excluded_page:{page.page_id}"
++
++        for ancestor_page_id in reversed(page.ancestor_page_ids):
++            if ancestor_page_id in excluded_ids:
++                return (
++                    "excluded_subtree",
++                    f"excluded_ancestor:{ancestor_page_id}",
++                )
++
++        if page.page_id in include_ids:
++            return "included", "included_root"
++        return "included", "included_descendant"
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/confluence_inventory_report_writer.py b/src/knowledgenexus/foundation/infrastructure/exporters/confluence_inventory_report_writer.py
+new file mode 100644
+index 0000000..8597981
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/confluence_inventory_report_writer.py
+@@ -0,0 +1,189 @@
++from __future__ import annotations
++
++import csv
++import io
++import json
++import os
++import tempfile
++from dataclasses import asdict
++from pathlib import Path
++from typing import Final, Sequence
++
++from knowledgenexus.foundation.domain.models.confluence_inventory_item import (
++    ConfluenceInventoryItem,
++)
++
++
++PAGES_INVENTORY_FILE_NAME: Final = "pages_inventory.jsonl"
++INVENTORY_REPORT_FILE_NAME: Final = "inventory_report.csv"
++CSV_COLUMNS: Final = (
++    "source_id",
++    "page_id",
++    "title",
++    "space_key",
++    "parent_page_id",
++    "page_path",
++    "ancestor_page_ids",
++    "ancestor_titles",
++    "updated_at",
++    "source_version",
++    "labels",
++    "attachment_count",
++    "scope_status",
++    "scope_reason",
++)
++CSV_FORMULA_PREFIXES: Final = ("=", "+", "-", "@")
++
++
++class ConfluenceInventoryReportWriter:
++    @staticmethod
++    def write(
++        *,
++        output_dir: Path,
++        items: Sequence[ConfluenceInventoryItem],
++    ) -> int:
++        if not output_dir.exists():
++            raise FileNotFoundError(f"Output directory does not exist: {output_dir}")
++        if not output_dir.is_dir():
++            raise NotADirectoryError(f"Output path is not a directory: {output_dir}")
++
++        jsonl_path = output_dir / PAGES_INVENTORY_FILE_NAME
++        csv_path = output_dir / INVENTORY_REPORT_FILE_NAME
++        for target in (jsonl_path, csv_path):
++            if target.exists() or target.is_symlink():
++                raise FileExistsError(f"Inventory report target already exists: {target}")
++
++        materialized_items = tuple(items)
++        jsonl_bytes = _render_jsonl(materialized_items)
++        csv_bytes = _render_csv(materialized_items)
++
++        temp_paths: list[Path] = []
++        published_links: list[tuple[Path, Path]] = []
++        try:
++            jsonl_temp = _write_temp_file(jsonl_path, jsonl_bytes)
++            temp_paths.append(jsonl_temp)
++            csv_temp = _write_temp_file(csv_path, csv_bytes)
++            temp_paths.append(csv_temp)
++
++            _publish_no_clobber(temp_path=jsonl_temp, target_path=jsonl_path)
++            published_links.append((jsonl_path, jsonl_temp))
++            _publish_no_clobber(temp_path=csv_temp, target_path=csv_path)
++            published_links.append((csv_path, csv_temp))
++
++            for temp_path in temp_paths:
++                _remove_owned_file(temp_path)
++            temp_paths.clear()
++        except Exception:
++            for target_path, temp_path in reversed(published_links):
++                _remove_owned_link(target_path=target_path, temp_path=temp_path)
++            for temp_path in temp_paths:
++                _remove_owned_file(temp_path)
++            raise
++
++        return len(materialized_items)
++
++
++def _render_jsonl(items: Sequence[ConfluenceInventoryItem]) -> bytes:
++    lines = []
++    for item in items:
++        record = asdict(item)
++        record["page_path"] = _page_path(item)
++        lines.append(
++            json.dumps(
++                record,
++                ensure_ascii=False,
++                sort_keys=True,
++                separators=(",", ":"),
++                allow_nan=False,
++            )
++        )
++    output = "" if not lines else "\n".join(lines) + "\n"
++    return output.encode("utf-8")
++
++
++def _render_csv(items: Sequence[ConfluenceInventoryItem]) -> bytes:
++    output = io.StringIO(newline="")
++    writer = csv.DictWriter(
++        output,
++        fieldnames=CSV_COLUMNS,
++        lineterminator="\n",
++    )
++    writer.writeheader()
++    for item in items:
++        writer.writerow(
++            {
++                "source_id": _csv_scalar(item.source_id),
++                "page_id": _csv_scalar(item.page_id),
++                "title": _csv_scalar(item.title),
++                "space_key": _csv_scalar(item.space_key),
++                "parent_page_id": _csv_scalar(item.parent_page_id),
++                "page_path": _csv_scalar(_page_path(item)),
++                "ancestor_page_ids": _compact_json_array(item.ancestor_page_ids),
++                "ancestor_titles": _compact_json_array(item.ancestor_titles),
++                "updated_at": _csv_scalar(item.updated_at),
++                "source_version": _csv_scalar(item.source_version),
++                "labels": _compact_json_array(item.labels),
++                "attachment_count": _csv_scalar(item.attachment_count),
++                "scope_status": _csv_scalar(item.scope_status),
++                "scope_reason": _csv_scalar(item.scope_reason),
++            }
++        )
++    return output.getvalue().encode("utf-8")
++
++
++def _write_temp_file(target: Path, content: bytes) -> Path:
++    temp_path: Path | None = None
++    try:
++        with tempfile.NamedTemporaryFile(
++            "wb",
++            dir=target.parent,
++            prefix=f".{target.name}.",
++            suffix=".tmp",
++            delete=False,
++        ) as temp_file:
++            temp_path = Path(temp_file.name)
++            temp_file.write(content)
++        return temp_path
++    except Exception:
++        if temp_path is not None:
++            _remove_owned_file(temp_path)
++        raise
++
++
++def _publish_no_clobber(*, temp_path: Path, target_path: Path) -> None:
++    os.link(temp_path, target_path)
++
++
++def _page_path(item: ConfluenceInventoryItem) -> str:
++    return " / ".join((*item.ancestor_titles, item.title))
++
++
++def _compact_json_array(values: tuple[str, ...]) -> str:
++    return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
++
++
++def _csv_scalar(value: object | None) -> object:
++    if value is None:
++        return ""
++    if isinstance(value, str) and value.startswith(CSV_FORMULA_PREFIXES):
++        return f"'{value}"
++    return value
++
++
++def _remove_owned_file(path: Path) -> None:
++    try:
++        path.unlink(missing_ok=True)
++    except OSError:
++        pass
++
++
++def _remove_owned_link(*, target_path: Path, temp_path: Path) -> None:
++    try:
++        if (
++            target_path.exists()
++            and temp_path.exists()
++            and target_path.samefile(temp_path)
++        ):
++            target_path.unlink()
++    except OSError:
++        pass
+diff --git a/src/knowledgenexus/foundation/ports/__init__.py b/src/knowledgenexus/foundation/ports/__init__.py
+new file mode 100644
+index 0000000..c6dacdf
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/__init__.py
+@@ -0,0 +1,5 @@
++from knowledgenexus.foundation.ports.confluence_inventory_port import (
++    ConfluenceInventoryPort,
++)
++
++__all__ = ["ConfluenceInventoryPort"]
+diff --git a/src/knowledgenexus/foundation/ports/confluence_inventory_port.py b/src/knowledgenexus/foundation/ports/confluence_inventory_port.py
+new file mode 100644
+index 0000000..8b07f81
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/confluence_inventory_port.py
+@@ -0,0 +1,20 @@
++from __future__ import annotations
++
++from collections.abc import Iterable
++from typing import Protocol
++
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++
++
++class ConfluenceInventoryPort(Protocol):
++    """Normalized inventory metadata required by the M5 application boundary."""
++
++    def iter_page_metadata(
++        self,
++        *,
++        space_key: str,
++        root_page_id: str,
++        page_size: int,
++    ) -> Iterable[ConfluencePageMetadata]: ...
+diff --git a/tests/foundation/application/use_cases/test_build_confluence_inventory.py b/tests/foundation/application/use_cases/test_build_confluence_inventory.py
+new file mode 100644
+index 0000000..5516f58
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_build_confluence_inventory.py
+@@ -0,0 +1,224 @@
++from __future__ import annotations
++
++from collections.abc import Iterable, Iterator
++
++import pytest
++
++from knowledgenexus.foundation.application.use_cases import BuildConfluenceInventory
++from knowledgenexus.foundation.domain.models import (
++    ConfluenceExcludeSubtree,
++    ConfluenceIncludeRoot,
++    ConfluencePageMetadata,
++    ConfluenceSourceConfig,
++)
++
++
++class FakeInventoryPort:
++    def __init__(self, pages_by_root: dict[str, list[ConfluencePageMetadata]]) -> None:
++        self.pages_by_root = pages_by_root
++        self.calls: list[tuple[str, str, int]] = []
++        self.iterations = 0
++
++    def iter_page_metadata(
++        self,
++        *,
++        space_key: str,
++        root_page_id: str,
++        page_size: int,
++    ) -> Iterable[ConfluencePageMetadata]:
++        self.calls.append((space_key, root_page_id, page_size))
++
++        def one_pass() -> Iterator[ConfluencePageMetadata]:
++            self.iterations += 1
++            yield from self.pages_by_root[root_page_id]
++
++        return one_pass()
++
++
++def test_builds_root_and_descendants_and_passes_exact_port_arguments() -> None:
++    root = _page("root", attachment_count=None, labels=("z", "a", "z"))
++    child = _page(
++        "child",
++        ancestors=("root",),
++        parent="root",
++        attachment_count=0,
++    )
++    port = FakeInventoryPort({"root": [child, root]})
++
++    items = BuildConfluenceInventory(inventory_port=port).execute(
++        config=_config(page_size=17)
++    )
++
++    assert port.calls == [("SPACE", "root", 17)]
++    assert port.iterations == 1
++    assert {item.page_id for item in items} == {"root", "child"}
++    root_item = next(item for item in items if item.page_id == "root")
++    child_item = next(item for item in items if item.page_id == "child")
++    assert root_item.scope_reason == "included_root"
++    assert root_item.labels == ("a", "z")
++    assert root_item.attachment_count is None
++    assert child_item.attachment_count == 0
++
++
++def test_missing_requested_root_fails() -> None:
++    port = FakeInventoryPort({"root": [_page("child", ancestors=("root",))]})
++
++    with pytest.raises(ValueError, match="missing requested root"):
++        BuildConfluenceInventory(inventory_port=port).execute(config=_config())
++
++
++def test_wrong_space_page_fails() -> None:
++    port = FakeInventoryPort(
++        {"root": [_page("root"), _page("child", ancestors=("root",), space="OTHER")]}
++    )
++
++    with pytest.raises(ValueError, match="wrong space"):
++        BuildConfluenceInventory(inventory_port=port).execute(config=_config())
++
++
++def test_unrelated_page_fails() -> None:
++    port = FakeInventoryPort({"root": [_page("root"), _page("unrelated")]})
++
++    with pytest.raises(ValueError, match="outside requested root"):
++        BuildConfluenceInventory(inventory_port=port).execute(config=_config())
++
++
++def test_overlapping_roots_deduplicate_identical_metadata() -> None:
++    root = _page("root")
++    nested = _page("nested", ancestors=("root",), parent="root")
++    leaf = _page("leaf", ancestors=("root", "nested"), parent="nested")
++    port = FakeInventoryPort(
++        {
++            "root": [leaf, nested, root],
++            "nested": [nested, leaf],
++        }
++    )
++
++    items = BuildConfluenceInventory(inventory_port=port).execute(
++        config=_config(root_ids=("nested", "root"))
++    )
++
++    assert [item.page_id for item in items] == ["root", "nested", "leaf"]
++    assert port.calls == [("SPACE", "nested", 25), ("SPACE", "root", 25)]
++
++
++def test_conflicting_duplicate_metadata_fails() -> None:
++    root = _page("root")
++    nested = _page("nested", ancestors=("root",))
++    conflicting_nested = ConfluencePageMetadata(
++        page_id="nested",
++        title="Different title",
++        space_key="SPACE",
++        ancestor_page_ids=("root",),
++    )
++    port = FakeInventoryPort(
++        {
++            "root": [root, nested],
++            "nested": [conflicting_nested],
++        }
++    )
++
++    with pytest.raises(ValueError, match="conflicting metadata"):
++        BuildConfluenceInventory(inventory_port=port).execute(
++            config=_config(root_ids=("root", "nested"))
++        )
++
++
++def test_excluded_subtree_items_remain_in_output() -> None:
++    pages = [
++        _page("root"),
++        _page("skip", ancestors=("root",)),
++        _page("under-skip", ancestors=("root", "skip")),
++    ]
++    port = FakeInventoryPort({"root": pages})
++
++    items = BuildConfluenceInventory(inventory_port=port).execute(
++        config=_config(excluded_ids=("skip",))
++    )
++
++    assert [item.scope_status for item in items] == [
++        "included",
++        "excluded_subtree",
++        "excluded_subtree",
++    ]
++    assert items[1].scope_reason == "excluded_page:skip"
++    assert items[2].scope_reason == "excluded_ancestor:skip"
++
++
++def test_api_and_include_root_order_do_not_change_output() -> None:
++    root = _page("root")
++    nested = _page("nested", ancestors=("root",))
++    leaf = _page("leaf", ancestors=("root", "nested"))
++    first = FakeInventoryPort(
++        {"root": [leaf, root, nested], "nested": [leaf, nested]}
++    )
++    second = FakeInventoryPort(
++        {"root": [nested, leaf, root], "nested": [nested, leaf]}
++    )
++
++    first_items = BuildConfluenceInventory(inventory_port=first).execute(
++        config=_config(root_ids=("root", "nested"), include_keywords=("travel",))
++    )
++    second_items = BuildConfluenceInventory(inventory_port=second).execute(
++        config=_config(root_ids=("nested", "root"), exclude_keywords=("root",))
++    )
++
++    assert first_items == second_items
++
++
++def test_output_sort_uses_structural_ids_not_titles() -> None:
++    pages = [
++        _page("root", title="Zulu"),
++        _page("b", title="Alpha", ancestors=("root", "z-branch")),
++        _page("a", title="Zulu", ancestors=("root", "a-branch")),
++    ]
++    port = FakeInventoryPort({"root": pages})
++
++    items = BuildConfluenceInventory(inventory_port=port).execute(config=_config())
++
++    assert [item.page_id for item in items] == ["root", "a", "b"]
++
++
++def _config(
++    *,
++    root_ids: tuple[str, ...] = ("root",),
++    excluded_ids: tuple[str, ...] = (),
++    include_keywords: tuple[str, ...] = (),
++    exclude_keywords: tuple[str, ...] = (),
++    page_size: int = 25,
++) -> ConfluenceSourceConfig:
++    return ConfluenceSourceConfig(
++        source_id="wiki-poc",
++        space_key="SPACE",
++        include_roots=tuple(
++            ConfluenceIncludeRoot(page_id=page_id) for page_id in root_ids
++        ),
++        exclude_subtrees=tuple(
++            ConfluenceExcludeSubtree(page_id=page_id) for page_id in excluded_ids
++        ),
++        include_keywords=include_keywords,
++        exclude_keywords=exclude_keywords,
++        page_size=page_size,
++    )
++
++
++def _page(
++    page_id: str,
++    *,
++    title: str | None = None,
++    ancestors: tuple[str, ...] = (),
++    parent: str | None = None,
++    space: str = "SPACE",
++    labels: tuple[str, ...] = (),
++    attachment_count: int | None = None,
++) -> ConfluencePageMetadata:
++    return ConfluencePageMetadata(
++        page_id=page_id,
++        title=title or page_id,
++        space_key=space,
++        parent_page_id=parent,
++        ancestor_page_ids=ancestors,
++        ancestor_titles=tuple(f"Title {ancestor}" for ancestor in ancestors),
++        labels=labels,
++        attachment_count=attachment_count,
++    )
+diff --git a/tests/foundation/domain/models/test_confluence_source_config.py b/tests/foundation/domain/models/test_confluence_source_config.py
+new file mode 100644
+index 0000000..e20cc1d
+--- /dev/null
++++ b/tests/foundation/domain/models/test_confluence_source_config.py
+@@ -0,0 +1,252 @@
++from __future__ import annotations
++
++import pytest
++
++from knowledgenexus.foundation.domain.models import (
++    ConfluenceExcludeSubtree,
++    ConfluenceIncludeRoot,
++    ConfluencePageMetadata,
++    ConfluenceSourceConfig,
++)
++
++
++def test_valid_minimal_source_config_copies_collections_to_tuples() -> None:
++    roots = [ConfluenceIncludeRoot(page_id="root-1")]
++    include_keywords = ["architecture"]
++
++    config = ConfluenceSourceConfig(
++        source_id="wiki-poc",
++        space_key="SPACE",
++        include_roots=roots,  # type: ignore[arg-type]
++        include_keywords=include_keywords,  # type: ignore[arg-type]
++    )
++
++    roots.append(ConfluenceIncludeRoot(page_id="root-2"))
++    include_keywords.append("later")
++    assert config.include_roots == (ConfluenceIncludeRoot(page_id="root-1"),)
++    assert config.include_keywords == ("architecture",)
++    assert config.page_size == 50
++
++
++def test_multiple_roots_exclusions_and_keywords_are_preserved() -> None:
++    config = ConfluenceSourceConfig(
++        source_id="wiki-poc",
++        space_key="SPACE",
++        include_roots=(
++            ConfluenceIncludeRoot(page_id="root-2", name="Second"),
++            ConfluenceIncludeRoot(page_id="root-1", name="First"),
++        ),
++        exclude_subtrees=(
++            ConfluenceExcludeSubtree(page_id="skip", reason="manual review"),
++        ),
++        include_keywords=("design",),
++        exclude_keywords=("travel",),
++        page_size=25,
++    )
++
++    assert config.include_roots[0].page_id == "root-2"
++    assert config.exclude_subtrees[0].reason == "manual review"
++    assert config.page_size == 25
++
++
++@pytest.mark.parametrize(
++    "field_name",
++    [
++        "include_roots",
++        "exclude_subtrees",
++        "include_keywords",
++        "exclude_keywords",
++    ],
++)
++@pytest.mark.parametrize("scalar", ["root", b"root"])
++def test_config_collection_fields_reject_string_and_bytes_scalars(
++    field_name: str,
++    scalar: object,
++) -> None:
++    values = {
++        "source_id": "wiki-poc",
++        "space_key": "SPACE",
++        "include_roots": (ConfluenceIncludeRoot(page_id="root"),),
++        field_name: scalar,
++    }
++
++    with pytest.raises(TypeError, match="expects a collection"):
++        ConfluenceSourceConfig(**values)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize("field", ["source_id", "space_key"])
++def test_required_config_strings_must_not_be_empty(field: str) -> None:
++    values = {
++        "source_id": "wiki-poc",
++        "space_key": "SPACE",
++        "include_roots": (ConfluenceIncludeRoot(page_id="root"),),
++    }
++    values[field] = ""
++
++    with pytest.raises(ValueError, match=field):
++        ConfluenceSourceConfig(**values)  # type: ignore[arg-type]
++
++
++def test_at_least_one_include_root_is_required() -> None:
++    with pytest.raises(ValueError, match="include_roots"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(),
++        )
++
++
++def test_duplicate_include_root_ids_are_rejected() -> None:
++    with pytest.raises(ValueError, match="include-root"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(
++                ConfluenceIncludeRoot(page_id="root"),
++                ConfluenceIncludeRoot(page_id="root"),
++            ),
++        )
++
++
++def test_duplicate_exclusion_ids_are_rejected() -> None:
++    with pytest.raises(ValueError, match="excluded-subtree"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(ConfluenceIncludeRoot(page_id="root"),),
++            exclude_subtrees=(
++                ConfluenceExcludeSubtree(page_id="skip"),
++                ConfluenceExcludeSubtree(page_id="skip"),
++            ),
++        )
++
++
++def test_include_exclude_overlap_is_rejected() -> None:
++    with pytest.raises(ValueError, match="must not overlap"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(ConfluenceIncludeRoot(page_id="same"),),
++            exclude_subtrees=(ConfluenceExcludeSubtree(page_id="same"),),
++        )
++
++
++@pytest.mark.parametrize("page_size", [0, -1])
++def test_page_size_must_be_positive(page_size: int) -> None:
++    with pytest.raises(ValueError, match="positive"):
++        _config(page_size=page_size)
++
++
++@pytest.mark.parametrize("page_size", [True, 1.5, "10"])
++def test_page_size_must_be_an_actual_integer(page_size: object) -> None:
++    with pytest.raises(TypeError, match="integer"):
++        _config(page_size=page_size)  # type: ignore[arg-type]
++
++
++def test_metadata_preserves_ancestor_order_and_normalizes_labels() -> None:
++    ancestor_ids = ["grandparent", "parent"]
++    labels = ["zeta", "alpha", "zeta"]
++
++    metadata = ConfluencePageMetadata(
++        page_id="page",
++        title="Title",
++        space_key="SPACE",
++        ancestor_page_ids=ancestor_ids,  # type: ignore[arg-type]
++        ancestor_titles=("Grandparent", "Parent"),
++        labels=labels,  # type: ignore[arg-type]
++    )
++
++    ancestor_ids.reverse()
++    labels.append("later")
++    assert metadata.ancestor_page_ids == ("grandparent", "parent")
++    assert metadata.labels == ("alpha", "zeta")
++
++
++@pytest.mark.parametrize(
++    "field_name",
++    ["ancestor_page_ids", "ancestor_titles", "labels"],
++)
++@pytest.mark.parametrize("scalar", ["root", b"root"])
++def test_metadata_collection_fields_reject_string_and_bytes_scalars(
++    field_name: str,
++    scalar: object,
++) -> None:
++    values = {
++        "page_id": "page",
++        "title": "Title",
++        "space_key": "SPACE",
++        field_name: scalar,
++    }
++
++    with pytest.raises(TypeError, match="collection of strings"):
++        ConfluencePageMetadata(**values)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize("field_name", ["ancestor_page_ids", "ancestor_titles"])
++@pytest.mark.parametrize(
++    "unordered_values",
++    [{"root", "parent"}, {"root": 1, "parent": 2}],
++)
++def test_ordered_ancestor_fields_reject_sets_and_dicts(
++    field_name: str,
++    unordered_values: object,
++) -> None:
++    values = {
++        "page_id": "page",
++        "title": "Title",
++        "space_key": "SPACE",
++        field_name: unordered_values,
++    }
++
++    with pytest.raises(TypeError, match="ordered collection of strings"):
++        ConfluencePageMetadata(**values)  # type: ignore[arg-type]
++
++
++def test_labels_accept_unordered_collection_and_remain_deterministic() -> None:
++    metadata = ConfluencePageMetadata(
++        page_id="page",
++        title="Title",
++        space_key="SPACE",
++        labels={"zeta", "alpha", "zeta"},  # type: ignore[arg-type]
++    )
++
++    assert metadata.labels == ("alpha", "zeta")
++
++
++@pytest.mark.parametrize("attachment_count", [None, 0, 7])
++def test_metadata_accepts_unknown_zero_and_positive_attachment_counts(
++    attachment_count: int | None,
++) -> None:
++    assert _metadata(attachment_count=attachment_count).attachment_count == attachment_count
++
++
++@pytest.mark.parametrize("attachment_count", [-1])
++def test_metadata_rejects_negative_attachment_count(attachment_count: int) -> None:
++    with pytest.raises(ValueError, match="non-negative"):
++        _metadata(attachment_count=attachment_count)
++
++
++@pytest.mark.parametrize("attachment_count", [True, 1.5, "1"])
++def test_metadata_rejects_non_integer_attachment_count(
++    attachment_count: object,
++) -> None:
++    with pytest.raises(TypeError, match="integer or None"):
++        _metadata(attachment_count=attachment_count)  # type: ignore[arg-type]
++
++
++def _config(*, page_size: int) -> ConfluenceSourceConfig:
++    return ConfluenceSourceConfig(
++        source_id="wiki-poc",
++        space_key="SPACE",
++        include_roots=(ConfluenceIncludeRoot(page_id="root"),),
++        page_size=page_size,
++    )
++
++
++def _metadata(*, attachment_count: int | None) -> ConfluencePageMetadata:
++    return ConfluencePageMetadata(
++        page_id="page",
++        title="Title",
++        space_key="SPACE",
++        attachment_count=attachment_count,
++    )
+diff --git a/tests/foundation/domain/rules/test_confluence_scope_policy.py b/tests/foundation/domain/rules/test_confluence_scope_policy.py
+new file mode 100644
+index 0000000..547cdb6
+--- /dev/null
++++ b/tests/foundation/domain/rules/test_confluence_scope_policy.py
+@@ -0,0 +1,77 @@
++from __future__ import annotations
++
++from knowledgenexus.foundation.domain.models import (
++    ConfluenceExcludeSubtree,
++    ConfluencePageMetadata,
++)
++from knowledgenexus.foundation.domain.rules.confluence_scope_policy import (
++    ConfluenceScopePolicy,
++)
++
++
++def test_include_root_itself() -> None:
++    assert _decide(_page(page_id="root")) == ("included", "included_root")
++
++
++def test_include_normal_descendant() -> None:
++    assert _decide(_page(page_id="child", ancestors=("root",))) == (
++        "included",
++        "included_descendant",
++    )
++
++
++def test_exact_page_exclusion_wins_over_ancestor_exclusion() -> None:
++    decision = _decide(
++        _page(page_id="skip-page", ancestors=("root", "skip-ancestor")),
++        exclusions=("skip-ancestor", "skip-page"),
++    )
++
++    assert decision == ("excluded_subtree", "excluded_page:skip-page")
++
++
++def test_nearest_matching_excluded_ancestor_is_selected() -> None:
++    decision = _decide(
++        _page(
++            page_id="child",
++            ancestors=("root", "excluded-far", "middle", "excluded-near"),
++        ),
++        exclusions=("excluded-near", "excluded-far"),
++    )
++
++    assert decision == (
++        "excluded_subtree",
++        "excluded_ancestor:excluded-near",
++    )
++
++
++def test_keywords_are_not_inputs_to_scope_policy() -> None:
++    page = _page(page_id="travel-photos", ancestors=("root",))
++
++    assert _decide(page) == ("included", "included_descendant")
++
++
++def _decide(
++    page: ConfluencePageMetadata,
++    *,
++    exclusions: tuple[str, ...] = (),
++) -> tuple[str, str]:
++    return ConfluenceScopePolicy.decide(
++        page=page,
++        include_root_ids=("root",),
++        exclude_subtrees=tuple(
++            ConfluenceExcludeSubtree(page_id=page_id) for page_id in exclusions
++        ),
++    )
++
++
++def _page(
++    *,
++    page_id: str,
++    ancestors: tuple[str, ...] = (),
++) -> ConfluencePageMetadata:
++    return ConfluencePageMetadata(
++        page_id=page_id,
++        title=page_id,
++        space_key="SPACE",
++        ancestor_page_ids=ancestors,
++    )
+diff --git a/tests/foundation/infrastructure/exporters/test_confluence_inventory_report_writer.py b/tests/foundation/infrastructure/exporters/test_confluence_inventory_report_writer.py
+new file mode 100644
+index 0000000..1c26c13
+--- /dev/null
++++ b/tests/foundation/infrastructure/exporters/test_confluence_inventory_report_writer.py
+@@ -0,0 +1,303 @@
++from __future__ import annotations
++
++import csv
++import json
++from pathlib import Path
++from typing import BinaryIO
++
++import pytest
++
++from knowledgenexus.foundation.domain.models import ConfluenceInventoryItem
++from knowledgenexus.foundation.infrastructure.exporters.confluence_inventory_report_writer import (
++    ConfluenceInventoryReportWriter,
++)
++
++
++def test_writes_exact_deterministic_jsonl_and_csv_bytes(tmp_path: Path) -> None:
++    items = (
++        _item(
++            page_id="page-1",
++            title='Thiết kế, "API"',
++            ancestors=("root", "parent"),
++            ancestor_titles=("Gốc", "Nhánh"),
++            labels=("api", "design"),
++            attachment_count=None,
++        ),
++        _item(
++            page_id="page-2",
++            title="Empty attachments",
++            attachment_count=0,
++            scope_status="excluded_subtree",
++            scope_reason="excluded_page:page-2",
++        ),
++    )
++
++    count = ConfluenceInventoryReportWriter.write(output_dir=tmp_path, items=items)
++
++    assert count == 2
++    jsonl_bytes = (tmp_path / "pages_inventory.jsonl").read_bytes()
++    assert jsonl_bytes == (
++        '{"ancestor_page_ids":["root","parent"],"ancestor_titles":["Gốc","Nhánh"],'
++        '"attachment_count":null,"labels":["api","design"],"page_id":"page-1",'
++        '"page_path":"Gốc / Nhánh / Thiết kế, \\"API\\"","parent_page_id":null,'
++        '"scope_reason":"included_descendant","scope_status":"included",'
++        '"source_id":"wiki-poc","source_version":null,"space_key":"SPACE",'
++        '"title":"Thiết kế, \\"API\\"","updated_at":null}\n'
++        '{"ancestor_page_ids":[],"ancestor_titles":[],"attachment_count":0,'
++        '"labels":[],"page_id":"page-2","page_path":"Empty attachments",'
++        '"parent_page_id":null,"scope_reason":"excluded_page:page-2",'
++        '"scope_status":"excluded_subtree","source_id":"wiki-poc",'
++        '"source_version":null,"space_key":"SPACE","title":"Empty attachments",'
++        '"updated_at":null}\n'
++    ).encode("utf-8")
++
++    csv_bytes = (tmp_path / "inventory_report.csv").read_bytes()
++    assert csv_bytes == (
++        "source_id,page_id,title,space_key,parent_page_id,page_path,"
++        "ancestor_page_ids,ancestor_titles,updated_at,source_version,labels,"
++        "attachment_count,scope_status,scope_reason\n"
++        'wiki-poc,page-1,"Thiết kế, ""API""",SPACE,,"Gốc / Nhánh / Thiết kế, '
++        '""API""","[""root"",""parent""]","[""Gốc"",""Nhánh""]",'
++        ',,"[""api"",""design""]",,included,included_descendant\n'
++        "wiki-poc,page-2,Empty attachments,SPACE,,Empty attachments,[],[],"
++        ",,[],0,excluded_subtree,excluded_page:page-2\n"
++    ).encode("utf-8")
++    assert b"\r\n" not in csv_bytes
++    assert not jsonl_bytes.startswith(b"\xef\xbb\xbf")
++    assert not csv_bytes.startswith(b"\xef\xbb\xbf")
++
++
++def test_empty_items_write_zero_byte_jsonl_and_header_only_csv(
++    tmp_path: Path,
++) -> None:
++    count = ConfluenceInventoryReportWriter.write(output_dir=tmp_path, items=())
++
++    assert count == 0
++    assert (tmp_path / "pages_inventory.jsonl").read_bytes() == b""
++    assert (tmp_path / "inventory_report.csv").read_text(encoding="utf-8") == (
++        "source_id,page_id,title,space_key,parent_page_id,page_path,"
++        "ancestor_page_ids,ancestor_titles,updated_at,source_version,labels,"
++        "attachment_count,scope_status,scope_reason\n"
++    )
++
++
++def test_independent_output_directories_have_identical_bytes(tmp_path: Path) -> None:
++    first = tmp_path / "first"
++    second = tmp_path / "second"
++    first.mkdir()
++    second.mkdir()
++    items = (_item(page_id="unicode", title="Tiếng Việt"),)
++
++    ConfluenceInventoryReportWriter.write(output_dir=first, items=items)
++    ConfluenceInventoryReportWriter.write(output_dir=second, items=items)
++
++    for name in ("pages_inventory.jsonl", "inventory_report.csv"):
++        assert (first / name).read_bytes() == (second / name).read_bytes()
++    assert "Tiếng Việt" in (first / "pages_inventory.jsonl").read_text(
++        encoding="utf-8"
++    )
++
++
++@pytest.mark.parametrize("target_name", ["pages_inventory.jsonl", "inventory_report.csv"])
++def test_pre_existing_target_is_not_overwritten(
++    tmp_path: Path,
++    target_name: str,
++) -> None:
++    target = tmp_path / target_name
++    target.write_bytes(b"owned by caller")
++
++    with pytest.raises(FileExistsError):
++        ConfluenceInventoryReportWriter.write(
++            output_dir=tmp_path,
++            items=(_item(page_id="page"),),
++        )
++
++    assert target.read_bytes() == b"owned by caller"
++    assert sorted(path.name for path in tmp_path.iterdir()) == [target_name]
++
++
++def test_missing_output_directory_is_not_created(tmp_path: Path) -> None:
++    output_dir = tmp_path / "missing"
++
++    with pytest.raises(FileNotFoundError):
++        ConfluenceInventoryReportWriter.write(output_dir=output_dir, items=())
++
++    assert not output_dir.exists()
++
++
++def test_publish_failure_propagates_and_removes_owned_outputs_and_temps(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    from knowledgenexus.foundation.infrastructure.exporters import (
++        confluence_inventory_report_writer as writer_module,
++    )
++
++    unrelated = tmp_path / "unrelated.txt"
++    unrelated.write_bytes(b"preserve")
++    original_link = writer_module.os.link
++
++    def fail_csv_link(source: Path, target: Path) -> None:
++        if Path(target).name == "inventory_report.csv":
++            raise OSError("simulated publish failure")
++        original_link(source, target)
++
++    monkeypatch.setattr(writer_module.os, "link", fail_csv_link)
++
++    with pytest.raises(OSError, match="simulated publish failure"):
++        ConfluenceInventoryReportWriter.write(
++            output_dir=tmp_path,
++            items=(_item(page_id="page"),),
++        )
++
++    assert unrelated.read_bytes() == b"preserve"
++    assert not (tmp_path / "pages_inventory.jsonl").exists()
++    assert not (tmp_path / "inventory_report.csv").exists()
++    assert list(tmp_path.glob(".*.tmp")) == []
++
++
++def test_concurrent_creator_cannot_be_overwritten(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    from knowledgenexus.foundation.infrastructure.exporters import (
++        confluence_inventory_report_writer as writer_module,
++    )
++
++    concurrent_bytes = b"created by concurrent writer"
++    original_link = writer_module.os.link
++
++    def create_target_then_link(source: Path, target: Path) -> None:
++        target_path = Path(target)
++        if target_path.name == "pages_inventory.jsonl":
++            target_path.write_bytes(concurrent_bytes)
++        original_link(source, target)
++
++    monkeypatch.setattr(writer_module.os, "link", create_target_then_link)
++
++    with pytest.raises(FileExistsError):
++        ConfluenceInventoryReportWriter.write(
++            output_dir=tmp_path,
++            items=(_item(page_id="page"),),
++        )
++
++    assert (tmp_path / "pages_inventory.jsonl").read_bytes() == concurrent_bytes
++    assert not (tmp_path / "inventory_report.csv").exists()
++    assert list(tmp_path.glob(".*.tmp")) == []
++
++
++def test_temp_write_failure_propagates_and_removes_temp_file(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    from knowledgenexus.foundation.infrastructure.exporters import (
++        confluence_inventory_report_writer as writer_module,
++    )
++
++    real_named_temporary_file = writer_module.tempfile.NamedTemporaryFile
++
++    class FailingTemporaryFile:
++        def __init__(self, wrapped: BinaryIO) -> None:
++            self._wrapped = wrapped
++            self.name = wrapped.name
++
++        def __enter__(self) -> FailingTemporaryFile:
++            self._wrapped.__enter__()
++            return self
++
++        def __exit__(self, *args: object) -> object:
++            return self._wrapped.__exit__(*args)
++
++        def write(self, content: bytes) -> int:
++            self._wrapped.write(content[:1])
++            raise OSError("simulated temp write failure")
++
++    def failing_named_temporary_file(*args: object, **kwargs: object) -> object:
++        return FailingTemporaryFile(real_named_temporary_file(*args, **kwargs))
++
++    monkeypatch.setattr(
++        writer_module.tempfile,
++        "NamedTemporaryFile",
++        failing_named_temporary_file,
++    )
++
++    with pytest.raises(OSError, match="simulated temp write failure"):
++        ConfluenceInventoryReportWriter.write(
++            output_dir=tmp_path,
++            items=(_item(page_id="page"),),
++        )
++
++    assert list(tmp_path.iterdir()) == []
++
++
++def test_csv_formula_prefixes_are_neutralized_but_jsonl_values_are_unchanged(
++    tmp_path: Path,
++) -> None:
++    dangerous_titles = ("=1+1", "+SUM(A1:A2)", "-2+3", "@command")
++    items = tuple(
++        _item(page_id=f"page-{index}", title=title)
++        for index, title in enumerate(dangerous_titles)
++    )
++
++    ConfluenceInventoryReportWriter.write(output_dir=tmp_path, items=items)
++
++    with (tmp_path / "inventory_report.csv").open(
++        "r", encoding="utf-8", newline=""
++    ) as csv_file:
++        csv_rows = list(csv.DictReader(csv_file))
++    json_rows = [
++        json.loads(line)
++        for line in (tmp_path / "pages_inventory.jsonl").read_text("utf-8").splitlines()
++    ]
++
++    assert [row["title"] for row in csv_rows] == [
++        f"'{title}" for title in dangerous_titles
++    ]
++    assert [row["page_path"] for row in csv_rows] == [
++        f"'{title}" for title in dangerous_titles
++    ]
++    assert [row["title"] for row in json_rows] == list(dangerous_titles)
++    assert [row["page_path"] for row in json_rows] == list(dangerous_titles)
++
++
++def test_output_contains_no_connection_or_environment_values(tmp_path: Path) -> None:
++    ConfluenceInventoryReportWriter.write(
++        output_dir=tmp_path,
++        items=(_item(page_id="page"),),
++    )
++
++    output = b"".join(path.read_bytes() for path in tmp_path.iterdir())
++    assert b"PAT" not in output
++    assert b"base_url" not in output
++    assert str(tmp_path).encode("utf-8") not in output
++    assert json.loads((tmp_path / "pages_inventory.jsonl").read_text("utf-8"))[
++        "attachment_count"
++    ] is None
++
++
++def _item(
++    *,
++    page_id: str,
++    title: str | None = None,
++    ancestors: tuple[str, ...] = (),
++    ancestor_titles: tuple[str, ...] = (),
++    labels: tuple[str, ...] = (),
++    attachment_count: int | None = None,
++    scope_status: str = "included",
++    scope_reason: str = "included_descendant",
++) -> ConfluenceInventoryItem:
++    return ConfluenceInventoryItem(
++        source_id="wiki-poc",
++        page_id=page_id,
++        title=title or page_id,
++        space_key="SPACE",
++        parent_page_id=None,
++        ancestor_page_ids=ancestors,
++        ancestor_titles=ancestor_titles,
++        updated_at=None,
++        source_version=None,
++        labels=labels,
++        attachment_count=attachment_count,
++        scope_status=scope_status,  # type: ignore[arg-type]
++        scope_reason=scope_reason,
++    )
+diff --git a/tests/foundation/integration/test_confluence_inventory_core.py b/tests/foundation/integration/test_confluence_inventory_core.py
+new file mode 100644
+index 0000000..a673922
+--- /dev/null
++++ b/tests/foundation/integration/test_confluence_inventory_core.py
+@@ -0,0 +1,107 @@
++from __future__ import annotations
++
++import csv
++import json
++from collections.abc import Iterable
++from pathlib import Path
++
++from knowledgenexus.foundation.application.use_cases import BuildConfluenceInventory
++from knowledgenexus.foundation.domain.models import (
++    ConfluenceExcludeSubtree,
++    ConfluenceIncludeRoot,
++    ConfluencePageMetadata,
++    ConfluenceSourceConfig,
++)
++from knowledgenexus.foundation.infrastructure.exporters.confluence_inventory_report_writer import (
++    ConfluenceInventoryReportWriter,
++)
++
++
++class SyntheticInventoryPort:
++    def __init__(self, *, reverse_order: bool) -> None:
++        root = _page("root")
++        nested = _page("nested", ancestors=("root",), attachment_count=None)
++        excluded = _page("excluded", ancestors=("root", "nested"))
++        leaf = _page("leaf", ancestors=("root", "nested", "excluded"))
++        pages = {
++            "root": [root, nested, excluded, leaf],
++            "nested": [nested, excluded, leaf],
++        }
++        self._pages = {
++            key: tuple(reversed(value)) if reverse_order else tuple(value)
++            for key, value in pages.items()
++        }
++
++    def iter_page_metadata(
++        self,
++        *,
++        space_key: str,
++        root_page_id: str,
++        page_size: int,
++    ) -> Iterable[ConfluencePageMetadata]:
++        return iter(self._pages[root_page_id])
++
++
++def test_fake_port_to_reports_preserves_included_and_excluded_audit_rows(
++    tmp_path: Path,
++) -> None:
++    config = ConfluenceSourceConfig(
++        source_id="synthetic-wiki",
++        space_key="SPACE",
++        include_roots=(
++            ConfluenceIncludeRoot(page_id="nested"),
++            ConfluenceIncludeRoot(page_id="root"),
++        ),
++        exclude_subtrees=(ConfluenceExcludeSubtree(page_id="excluded"),),
++        page_size=5,
++    )
++    use_case = BuildConfluenceInventory(
++        inventory_port=SyntheticInventoryPort(reverse_order=True)
++    )
++
++    items = use_case.execute(config=config)
++    count = ConfluenceInventoryReportWriter.write(output_dir=tmp_path, items=items)
++
++    json_rows = [
++        json.loads(line)
++        for line in (tmp_path / "pages_inventory.jsonl").read_text("utf-8").splitlines()
++    ]
++    with (tmp_path / "inventory_report.csv").open(
++        "r", encoding="utf-8", newline=""
++    ) as csv_file:
++        csv_rows = list(csv.DictReader(csv_file))
++
++    assert count == 4
++    assert [row["page_id"] for row in json_rows] == [
++        "root",
++        "nested",
++        "excluded",
++        "leaf",
++    ]
++    assert [row["scope_status"] for row in json_rows] == [
++        "included",
++        "included",
++        "excluded_subtree",
++        "excluded_subtree",
++    ]
++    assert json_rows[1]["attachment_count"] is None
++    assert [row["scope_reason"] for row in csv_rows[-2:]] == [
++        "excluded_page:excluded",
++        "excluded_ancestor:excluded",
++    ]
++
++
++def _page(
++    page_id: str,
++    *,
++    ancestors: tuple[str, ...] = (),
++    attachment_count: int | None = 0,
++) -> ConfluencePageMetadata:
++    return ConfluencePageMetadata(
++        page_id=page_id,
++        title=f"Title {page_id}",
++        space_key="SPACE",
++        ancestor_page_ids=ancestors,
++        ancestor_titles=tuple(f"Title {ancestor}" for ancestor in ancestors),
++        attachment_count=attachment_count,
++    )

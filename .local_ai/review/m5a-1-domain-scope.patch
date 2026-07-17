@@ -1,0 +1,724 @@
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+new file mode 100644
+index 0000000..68d6033
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -0,0 +1,19 @@
++from knowledgenexus.foundation.domain.models.confluence_inventory_item import (
++    ConfluenceInventoryItem,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++from knowledgenexus.foundation.domain.models.confluence_source_config import (
++    ConfluenceExcludeSubtree,
++    ConfluenceIncludeRoot,
++    ConfluenceSourceConfig,
++)
++
++__all__ = [
++    "ConfluenceExcludeSubtree",
++    "ConfluenceIncludeRoot",
++    "ConfluenceInventoryItem",
++    "ConfluencePageMetadata",
++    "ConfluenceSourceConfig",
++]
+diff --git a/src/knowledgenexus/foundation/domain/models/confluence_inventory_item.py b/src/knowledgenexus/foundation/domain/models/confluence_inventory_item.py
+new file mode 100644
+index 0000000..7e62d3d
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/confluence_inventory_item.py
+@@ -0,0 +1,85 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Literal
++
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++
++
++ConfluenceScopeStatus = Literal["included", "excluded_subtree"]
++VALID_SCOPE_STATUSES = frozenset({"included", "excluded_subtree"})
++
++
++@dataclass(frozen=True)
++class ConfluenceInventoryItem:
++    source_id: str
++    page_id: str
++    title: str
++    space_key: str
++    parent_page_id: str | None
++    ancestor_page_ids: tuple[str, ...]
++    ancestor_titles: tuple[str, ...]
++    updated_at: str | None
++    source_version: str | None
++    labels: tuple[str, ...]
++    attachment_count: int | None
++    scope_status: ConfluenceScopeStatus
++    scope_reason: str
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.source_id, str):
++            raise TypeError("ConfluenceInventoryItem.source_id expects str")
++        if self.source_id == "":
++            raise ValueError("ConfluenceInventoryItem.source_id must not be empty")
++        if self.scope_status not in VALID_SCOPE_STATUSES:
++            raise ValueError(
++                "ConfluenceInventoryItem.scope_status must be included or "
++                "excluded_subtree"
++            )
++        if not isinstance(self.scope_reason, str):
++            raise TypeError("ConfluenceInventoryItem.scope_reason expects str")
++        if self.scope_reason == "":
++            raise ValueError("ConfluenceInventoryItem.scope_reason must not be empty")
++
++        metadata = ConfluencePageMetadata(
++            page_id=self.page_id,
++            title=self.title,
++            space_key=self.space_key,
++            parent_page_id=self.parent_page_id,
++            ancestor_page_ids=self.ancestor_page_ids,
++            ancestor_titles=self.ancestor_titles,
++            updated_at=self.updated_at,
++            source_version=self.source_version,
++            labels=self.labels,
++            attachment_count=self.attachment_count,
++        )
++        object.__setattr__(self, "ancestor_page_ids", metadata.ancestor_page_ids)
++        object.__setattr__(self, "ancestor_titles", metadata.ancestor_titles)
++        object.__setattr__(self, "labels", metadata.labels)
++
++    @classmethod
++    def from_metadata(
++        cls,
++        *,
++        source_id: str,
++        metadata: ConfluencePageMetadata,
++        scope_status: ConfluenceScopeStatus,
++        scope_reason: str,
++    ) -> ConfluenceInventoryItem:
++        return cls(
++            source_id=source_id,
++            page_id=metadata.page_id,
++            title=metadata.title,
++            space_key=metadata.space_key,
++            parent_page_id=metadata.parent_page_id,
++            ancestor_page_ids=metadata.ancestor_page_ids,
++            ancestor_titles=metadata.ancestor_titles,
++            updated_at=metadata.updated_at,
++            source_version=metadata.source_version,
++            labels=metadata.labels,
++            attachment_count=metadata.attachment_count,
++            scope_status=scope_status,
++            scope_reason=scope_reason,
++        )
+diff --git a/src/knowledgenexus/foundation/domain/models/confluence_page_metadata.py b/src/knowledgenexus/foundation/domain/models/confluence_page_metadata.py
+new file mode 100644
+index 0000000..4a99ec4
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/confluence_page_metadata.py
+@@ -0,0 +1,90 @@
++from __future__ import annotations
++
++from collections.abc import Sequence
++from dataclasses import dataclass
++from typing import Any
++
++
++def _require_non_empty_string(field_name: str, value: Any) -> None:
++    if not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str")
++    if value == "":
++        raise ValueError(f"{field_name} must not be empty")
++
++
++def _require_optional_string(field_name: str, value: Any) -> None:
++    if value is not None and not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str or None")
++
++
++def _copy_ordered_string_tuple(field_name: str, values: Any) -> tuple[str, ...]:
++    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
++        raise TypeError(f"{field_name} expects an ordered collection of strings")
++    copied_values = tuple(values)
++    if not all(isinstance(value, str) for value in copied_values):
++        raise TypeError(f"{field_name} expects strings")
++    return copied_values
++
++
++def _copy_sorted_unique_string_tuple(
++    field_name: str,
++    values: Any,
++) -> tuple[str, ...]:
++    if isinstance(values, (str, bytes)):
++        raise TypeError(f"{field_name} expects a collection of strings")
++    copied_values = tuple(values)
++    if not all(isinstance(value, str) for value in copied_values):
++        raise TypeError(f"{field_name} expects strings")
++    return tuple(sorted(set(copied_values)))
++
++
++@dataclass(frozen=True)
++class ConfluencePageMetadata:
++    page_id: str
++    title: str
++    space_key: str
++    parent_page_id: str | None = None
++    ancestor_page_ids: tuple[str, ...] = ()
++    ancestor_titles: tuple[str, ...] = ()
++    updated_at: str | None = None
++    source_version: str | None = None
++    labels: tuple[str, ...] = ()
++    attachment_count: int | None = None
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluencePageMetadata.page_id", self.page_id)
++        _require_non_empty_string("ConfluencePageMetadata.title", self.title)
++        _require_non_empty_string("ConfluencePageMetadata.space_key", self.space_key)
++        _require_optional_string(
++            "ConfluencePageMetadata.parent_page_id", self.parent_page_id
++        )
++        _require_optional_string("ConfluencePageMetadata.updated_at", self.updated_at)
++        _require_optional_string(
++            "ConfluencePageMetadata.source_version", self.source_version
++        )
++
++        ancestor_page_ids = _copy_ordered_string_tuple(
++            "ConfluencePageMetadata.ancestor_page_ids", self.ancestor_page_ids
++        )
++        ancestor_titles = _copy_ordered_string_tuple(
++            "ConfluencePageMetadata.ancestor_titles", self.ancestor_titles
++        )
++        labels = _copy_sorted_unique_string_tuple(
++            "ConfluencePageMetadata.labels", self.labels
++        )
++
++        if self.attachment_count is not None:
++            if isinstance(self.attachment_count, bool) or not isinstance(
++                self.attachment_count, int
++            ):
++                raise TypeError(
++                    "ConfluencePageMetadata.attachment_count expects an integer or None"
++                )
++            if self.attachment_count < 0:
++                raise ValueError(
++                    "ConfluencePageMetadata.attachment_count must be non-negative"
++                )
++
++        object.__setattr__(self, "ancestor_page_ids", ancestor_page_ids)
++        object.__setattr__(self, "ancestor_titles", ancestor_titles)
++        object.__setattr__(self, "labels", labels)
+diff --git a/src/knowledgenexus/foundation/domain/models/confluence_source_config.py b/src/knowledgenexus/foundation/domain/models/confluence_source_config.py
+new file mode 100644
+index 0000000..8cb871e
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/confluence_source_config.py
+@@ -0,0 +1,118 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any
++
++
++DEFAULT_INVENTORY_PAGE_SIZE = 50
++
++
++def _require_non_empty_string(field_name: str, value: Any) -> None:
++    if not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str")
++    if value == "":
++        raise ValueError(f"{field_name} must not be empty")
++
++
++def _require_optional_string(field_name: str, value: Any) -> None:
++    if value is not None and not isinstance(value, str):
++        raise TypeError(f"{field_name} expects str or None")
++
++
++def _copy_collection(field_name: str, values: Any) -> tuple[Any, ...]:
++    if isinstance(values, (str, bytes)):
++        raise TypeError(f"{field_name} expects a collection")
++    return tuple(values)
++
++
++@dataclass(frozen=True)
++class ConfluenceIncludeRoot:
++    page_id: str
++    name: str | None = None
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluenceIncludeRoot.page_id", self.page_id)
++        _require_optional_string("ConfluenceIncludeRoot.name", self.name)
++
++
++@dataclass(frozen=True)
++class ConfluenceExcludeSubtree:
++    page_id: str
++    reason: str | None = None
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluenceExcludeSubtree.page_id", self.page_id)
++        _require_optional_string("ConfluenceExcludeSubtree.reason", self.reason)
++
++
++@dataclass(frozen=True)
++class ConfluenceSourceConfig:
++    source_id: str
++    space_key: str
++    include_roots: tuple[ConfluenceIncludeRoot, ...]
++    exclude_subtrees: tuple[ConfluenceExcludeSubtree, ...] = ()
++    include_keywords: tuple[str, ...] = ()
++    exclude_keywords: tuple[str, ...] = ()
++    page_size: int = DEFAULT_INVENTORY_PAGE_SIZE
++
++    def __post_init__(self) -> None:
++        _require_non_empty_string("ConfluenceSourceConfig.source_id", self.source_id)
++        _require_non_empty_string("ConfluenceSourceConfig.space_key", self.space_key)
++
++        include_roots = _copy_collection(
++            "ConfluenceSourceConfig.include_roots", self.include_roots
++        )
++        exclude_subtrees = _copy_collection(
++            "ConfluenceSourceConfig.exclude_subtrees", self.exclude_subtrees
++        )
++        include_keywords = _copy_collection(
++            "ConfluenceSourceConfig.include_keywords", self.include_keywords
++        )
++        exclude_keywords = _copy_collection(
++            "ConfluenceSourceConfig.exclude_keywords", self.exclude_keywords
++        )
++
++        if not include_roots:
++            raise ValueError("ConfluenceSourceConfig.include_roots must not be empty")
++        if not all(isinstance(root, ConfluenceIncludeRoot) for root in include_roots):
++            raise TypeError(
++                "ConfluenceSourceConfig.include_roots expects ConfluenceIncludeRoot entries"
++            )
++        if not all(
++            isinstance(subtree, ConfluenceExcludeSubtree)
++            for subtree in exclude_subtrees
++        ):
++            raise TypeError(
++                "ConfluenceSourceConfig.exclude_subtrees expects "
++                "ConfluenceExcludeSubtree entries"
++            )
++        if not all(isinstance(keyword, str) for keyword in include_keywords):
++            raise TypeError("ConfluenceSourceConfig.include_keywords expects strings")
++        if not all(isinstance(keyword, str) for keyword in exclude_keywords):
++            raise TypeError("ConfluenceSourceConfig.exclude_keywords expects strings")
++
++        include_ids = [root.page_id for root in include_roots]
++        exclude_ids = [subtree.page_id for subtree in exclude_subtrees]
++        if len(include_ids) != len(set(include_ids)):
++            raise ValueError("ConfluenceSourceConfig include-root page IDs must be unique")
++        if len(exclude_ids) != len(set(exclude_ids)):
++            raise ValueError(
++                "ConfluenceSourceConfig excluded-subtree page IDs must be unique"
++            )
++
++        overlap = set(include_ids).intersection(exclude_ids)
++        if overlap:
++            raise ValueError(
++                "ConfluenceSourceConfig include/exclude page IDs must not overlap: "
++                f"{sorted(overlap)}"
++            )
++
++        if isinstance(self.page_size, bool) or not isinstance(self.page_size, int):
++            raise TypeError("ConfluenceSourceConfig.page_size expects an integer")
++        if self.page_size <= 0:
++            raise ValueError("ConfluenceSourceConfig.page_size must be positive")
++
++        object.__setattr__(self, "include_roots", include_roots)
++        object.__setattr__(self, "exclude_subtrees", exclude_subtrees)
++        object.__setattr__(self, "include_keywords", include_keywords)
++        object.__setattr__(self, "exclude_keywords", exclude_keywords)
+diff --git a/src/knowledgenexus/foundation/domain/rules/confluence_scope_policy.py b/src/knowledgenexus/foundation/domain/rules/confluence_scope_policy.py
+new file mode 100644
+index 0000000..8cd23f4
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/rules/confluence_scope_policy.py
+@@ -0,0 +1,41 @@
++from __future__ import annotations
++
++from collections.abc import Iterable
++
++from knowledgenexus.foundation.domain.models.confluence_inventory_item import (
++    ConfluenceScopeStatus,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++from knowledgenexus.foundation.domain.models.confluence_source_config import (
++    ConfluenceExcludeSubtree,
++)
++
++
++class ConfluenceScopePolicy:
++    """Pure deterministic include/exclude classification for inventory pages."""
++
++    @staticmethod
++    def decide(
++        *,
++        page: ConfluencePageMetadata,
++        include_root_ids: Iterable[str],
++        exclude_subtrees: Iterable[ConfluenceExcludeSubtree],
++    ) -> tuple[ConfluenceScopeStatus, str]:
++        include_ids = frozenset(include_root_ids)
++        excluded_ids = frozenset(subtree.page_id for subtree in exclude_subtrees)
++
++        if page.page_id in excluded_ids:
++            return "excluded_subtree", f"excluded_page:{page.page_id}"
++
++        for ancestor_page_id in reversed(page.ancestor_page_ids):
++            if ancestor_page_id in excluded_ids:
++                return (
++                    "excluded_subtree",
++                    f"excluded_ancestor:{ancestor_page_id}",
++                )
++
++        if page.page_id in include_ids:
++            return "included", "included_root"
++        return "included", "included_descendant"
+diff --git a/tests/foundation/domain/models/test_confluence_source_config.py b/tests/foundation/domain/models/test_confluence_source_config.py
+new file mode 100644
+index 0000000..e20cc1d
+--- /dev/null
++++ b/tests/foundation/domain/models/test_confluence_source_config.py
+@@ -0,0 +1,252 @@
++from __future__ import annotations
++
++import pytest
++
++from knowledgenexus.foundation.domain.models import (
++    ConfluenceExcludeSubtree,
++    ConfluenceIncludeRoot,
++    ConfluencePageMetadata,
++    ConfluenceSourceConfig,
++)
++
++
++def test_valid_minimal_source_config_copies_collections_to_tuples() -> None:
++    roots = [ConfluenceIncludeRoot(page_id="root-1")]
++    include_keywords = ["architecture"]
++
++    config = ConfluenceSourceConfig(
++        source_id="wiki-poc",
++        space_key="SPACE",
++        include_roots=roots,  # type: ignore[arg-type]
++        include_keywords=include_keywords,  # type: ignore[arg-type]
++    )
++
++    roots.append(ConfluenceIncludeRoot(page_id="root-2"))
++    include_keywords.append("later")
++    assert config.include_roots == (ConfluenceIncludeRoot(page_id="root-1"),)
++    assert config.include_keywords == ("architecture",)
++    assert config.page_size == 50
++
++
++def test_multiple_roots_exclusions_and_keywords_are_preserved() -> None:
++    config = ConfluenceSourceConfig(
++        source_id="wiki-poc",
++        space_key="SPACE",
++        include_roots=(
++            ConfluenceIncludeRoot(page_id="root-2", name="Second"),
++            ConfluenceIncludeRoot(page_id="root-1", name="First"),
++        ),
++        exclude_subtrees=(
++            ConfluenceExcludeSubtree(page_id="skip", reason="manual review"),
++        ),
++        include_keywords=("design",),
++        exclude_keywords=("travel",),
++        page_size=25,
++    )
++
++    assert config.include_roots[0].page_id == "root-2"
++    assert config.exclude_subtrees[0].reason == "manual review"
++    assert config.page_size == 25
++
++
++@pytest.mark.parametrize(
++    "field_name",
++    [
++        "include_roots",
++        "exclude_subtrees",
++        "include_keywords",
++        "exclude_keywords",
++    ],
++)
++@pytest.mark.parametrize("scalar", ["root", b"root"])
++def test_config_collection_fields_reject_string_and_bytes_scalars(
++    field_name: str,
++    scalar: object,
++) -> None:
++    values = {
++        "source_id": "wiki-poc",
++        "space_key": "SPACE",
++        "include_roots": (ConfluenceIncludeRoot(page_id="root"),),
++        field_name: scalar,
++    }
++
++    with pytest.raises(TypeError, match="expects a collection"):
++        ConfluenceSourceConfig(**values)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize("field", ["source_id", "space_key"])
++def test_required_config_strings_must_not_be_empty(field: str) -> None:
++    values = {
++        "source_id": "wiki-poc",
++        "space_key": "SPACE",
++        "include_roots": (ConfluenceIncludeRoot(page_id="root"),),
++    }
++    values[field] = ""
++
++    with pytest.raises(ValueError, match=field):
++        ConfluenceSourceConfig(**values)  # type: ignore[arg-type]
++
++
++def test_at_least_one_include_root_is_required() -> None:
++    with pytest.raises(ValueError, match="include_roots"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(),
++        )
++
++
++def test_duplicate_include_root_ids_are_rejected() -> None:
++    with pytest.raises(ValueError, match="include-root"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(
++                ConfluenceIncludeRoot(page_id="root"),
++                ConfluenceIncludeRoot(page_id="root"),
++            ),
++        )
++
++
++def test_duplicate_exclusion_ids_are_rejected() -> None:
++    with pytest.raises(ValueError, match="excluded-subtree"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(ConfluenceIncludeRoot(page_id="root"),),
++            exclude_subtrees=(
++                ConfluenceExcludeSubtree(page_id="skip"),
++                ConfluenceExcludeSubtree(page_id="skip"),
++            ),
++        )
++
++
++def test_include_exclude_overlap_is_rejected() -> None:
++    with pytest.raises(ValueError, match="must not overlap"):
++        ConfluenceSourceConfig(
++            source_id="wiki-poc",
++            space_key="SPACE",
++            include_roots=(ConfluenceIncludeRoot(page_id="same"),),
++            exclude_subtrees=(ConfluenceExcludeSubtree(page_id="same"),),
++        )
++
++
++@pytest.mark.parametrize("page_size", [0, -1])
++def test_page_size_must_be_positive(page_size: int) -> None:
++    with pytest.raises(ValueError, match="positive"):
++        _config(page_size=page_size)
++
++
++@pytest.mark.parametrize("page_size", [True, 1.5, "10"])
++def test_page_size_must_be_an_actual_integer(page_size: object) -> None:
++    with pytest.raises(TypeError, match="integer"):
++        _config(page_size=page_size)  # type: ignore[arg-type]
++
++
++def test_metadata_preserves_ancestor_order_and_normalizes_labels() -> None:
++    ancestor_ids = ["grandparent", "parent"]
++    labels = ["zeta", "alpha", "zeta"]
++
++    metadata = ConfluencePageMetadata(
++        page_id="page",
++        title="Title",
++        space_key="SPACE",
++        ancestor_page_ids=ancestor_ids,  # type: ignore[arg-type]
++        ancestor_titles=("Grandparent", "Parent"),
++        labels=labels,  # type: ignore[arg-type]
++    )
++
++    ancestor_ids.reverse()
++    labels.append("later")
++    assert metadata.ancestor_page_ids == ("grandparent", "parent")
++    assert metadata.labels == ("alpha", "zeta")
++
++
++@pytest.mark.parametrize(
++    "field_name",
++    ["ancestor_page_ids", "ancestor_titles", "labels"],
++)
++@pytest.mark.parametrize("scalar", ["root", b"root"])
++def test_metadata_collection_fields_reject_string_and_bytes_scalars(
++    field_name: str,
++    scalar: object,
++) -> None:
++    values = {
++        "page_id": "page",
++        "title": "Title",
++        "space_key": "SPACE",
++        field_name: scalar,
++    }
++
++    with pytest.raises(TypeError, match="collection of strings"):
++        ConfluencePageMetadata(**values)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize("field_name", ["ancestor_page_ids", "ancestor_titles"])
++@pytest.mark.parametrize(
++    "unordered_values",
++    [{"root", "parent"}, {"root": 1, "parent": 2}],
++)
++def test_ordered_ancestor_fields_reject_sets_and_dicts(
++    field_name: str,
++    unordered_values: object,
++) -> None:
++    values = {
++        "page_id": "page",
++        "title": "Title",
++        "space_key": "SPACE",
++        field_name: unordered_values,
++    }
++
++    with pytest.raises(TypeError, match="ordered collection of strings"):
++        ConfluencePageMetadata(**values)  # type: ignore[arg-type]
++
++
++def test_labels_accept_unordered_collection_and_remain_deterministic() -> None:
++    metadata = ConfluencePageMetadata(
++        page_id="page",
++        title="Title",
++        space_key="SPACE",
++        labels={"zeta", "alpha", "zeta"},  # type: ignore[arg-type]
++    )
++
++    assert metadata.labels == ("alpha", "zeta")
++
++
++@pytest.mark.parametrize("attachment_count", [None, 0, 7])
++def test_metadata_accepts_unknown_zero_and_positive_attachment_counts(
++    attachment_count: int | None,
++) -> None:
++    assert _metadata(attachment_count=attachment_count).attachment_count == attachment_count
++
++
++@pytest.mark.parametrize("attachment_count", [-1])
++def test_metadata_rejects_negative_attachment_count(attachment_count: int) -> None:
++    with pytest.raises(ValueError, match="non-negative"):
++        _metadata(attachment_count=attachment_count)
++
++
++@pytest.mark.parametrize("attachment_count", [True, 1.5, "1"])
++def test_metadata_rejects_non_integer_attachment_count(
++    attachment_count: object,
++) -> None:
++    with pytest.raises(TypeError, match="integer or None"):
++        _metadata(attachment_count=attachment_count)  # type: ignore[arg-type]
++
++
++def _config(*, page_size: int) -> ConfluenceSourceConfig:
++    return ConfluenceSourceConfig(
++        source_id="wiki-poc",
++        space_key="SPACE",
++        include_roots=(ConfluenceIncludeRoot(page_id="root"),),
++        page_size=page_size,
++    )
++
++
++def _metadata(*, attachment_count: int | None) -> ConfluencePageMetadata:
++    return ConfluencePageMetadata(
++        page_id="page",
++        title="Title",
++        space_key="SPACE",
++        attachment_count=attachment_count,
++    )
+diff --git a/tests/foundation/domain/rules/test_confluence_scope_policy.py b/tests/foundation/domain/rules/test_confluence_scope_policy.py
+new file mode 100644
+index 0000000..547cdb6
+--- /dev/null
++++ b/tests/foundation/domain/rules/test_confluence_scope_policy.py
+@@ -0,0 +1,77 @@
++from __future__ import annotations
++
++from knowledgenexus.foundation.domain.models import (
++    ConfluenceExcludeSubtree,
++    ConfluencePageMetadata,
++)
++from knowledgenexus.foundation.domain.rules.confluence_scope_policy import (
++    ConfluenceScopePolicy,
++)
++
++
++def test_include_root_itself() -> None:
++    assert _decide(_page(page_id="root")) == ("included", "included_root")
++
++
++def test_include_normal_descendant() -> None:
++    assert _decide(_page(page_id="child", ancestors=("root",))) == (
++        "included",
++        "included_descendant",
++    )
++
++
++def test_exact_page_exclusion_wins_over_ancestor_exclusion() -> None:
++    decision = _decide(
++        _page(page_id="skip-page", ancestors=("root", "skip-ancestor")),
++        exclusions=("skip-ancestor", "skip-page"),
++    )
++
++    assert decision == ("excluded_subtree", "excluded_page:skip-page")
++
++
++def test_nearest_matching_excluded_ancestor_is_selected() -> None:
++    decision = _decide(
++        _page(
++            page_id="child",
++            ancestors=("root", "excluded-far", "middle", "excluded-near"),
++        ),
++        exclusions=("excluded-near", "excluded-far"),
++    )
++
++    assert decision == (
++        "excluded_subtree",
++        "excluded_ancestor:excluded-near",
++    )
++
++
++def test_keywords_are_not_inputs_to_scope_policy() -> None:
++    page = _page(page_id="travel-photos", ancestors=("root",))
++
++    assert _decide(page) == ("included", "included_descendant")
++
++
++def _decide(
++    page: ConfluencePageMetadata,
++    *,
++    exclusions: tuple[str, ...] = (),
++) -> tuple[str, str]:
++    return ConfluenceScopePolicy.decide(
++        page=page,
++        include_root_ids=("root",),
++        exclude_subtrees=tuple(
++            ConfluenceExcludeSubtree(page_id=page_id) for page_id in exclusions
++        ),
++    )
++
++
++def _page(
++    *,
++    page_id: str,
++    ancestors: tuple[str, ...] = (),
++) -> ConfluencePageMetadata:
++    return ConfluencePageMetadata(
++        page_id=page_id,
++        title=page_id,
++        space_key="SPACE",
++        ancestor_page_ids=ancestors,
++    )

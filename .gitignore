@@ -13,8 +13,10 @@ build/
 *.zip
 akp_context_bundle_*.zip
 
-# Local AI/Codex working notes
-.local_ai/
+# Local AI/Codex working notes are tracked so they sync across machines.
+# Probe evidence is not: those packets are sanitized captures of a real internal
+# Confluence, they were consumed by M5B-0, and they have no cross-machine value.
+.local_ai/evidence/
 
 # Environment
 .env

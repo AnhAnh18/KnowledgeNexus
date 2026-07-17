@@ -1,0 +1,159 @@
+diff --git a/tests/fixtures/foundation/confluence_data_center/root_page_response.json b/tests/fixtures/foundation/confluence_data_center/root_page_response.json
+new file mode 100644
+index 0000000..df7081d
+--- /dev/null
++++ b/tests/fixtures/foundation/confluence_data_center/root_page_response.json
+@@ -0,0 +1,10 @@
++{
++  "id": "SELECTED_PAGE",
++  "status": "current",
++  "title": "Fixture Root Page",
++  "type": "page",
++  "version": {
++    "number": 15,
++    "when": "2000-01-01T00:00:00.000+00:00"
++  }
++}
+diff --git a/tests/fixtures/foundation/confluence_data_center/search_page_start_0.json b/tests/fixtures/foundation/confluence_data_center/search_page_start_0.json
+new file mode 100644
+index 0000000..1ec6746
+--- /dev/null
++++ b/tests/fixtures/foundation/confluence_data_center/search_page_start_0.json
+@@ -0,0 +1,84 @@
++{
++  "limit": 2,
++  "results": [
++    {
++      "content": {
++        "ancestors": [
++          {
++            "id": "GLOBAL_PAGE",
++            "title": "Fixture Global Page"
++          },
++          {
++            "id": "SELECTED_PAGE",
++            "title": "Fixture Root Page"
++          }
++        ],
++        "id": "DIRECT_CHILD",
++        "metadata": {
++          "labels": {
++            "_links": {
++              "self": "/fixture-labels"
++            },
++            "limit": 200,
++            "results": [],
++            "size": 0,
++            "start": 0
++          }
++        },
++        "space": {
++          "key": "SPACE"
++        },
++        "status": "current",
++        "title": "Fixture Direct Child",
++        "type": "page",
++        "version": {
++          "number": 3,
++          "when": "2000-01-02T00:00:00.000+00:00"
++        }
++      }
++    },
++    {
++      "content": {
++        "ancestors": [
++          {
++            "id": "GLOBAL_PAGE",
++            "title": "Fixture Global Page"
++          },
++          {
++            "id": "SELECTED_PAGE",
++            "title": "Fixture Root Page"
++          },
++          {
++            "id": "DIRECT_CHILD",
++            "title": "Fixture Direct Child"
++          }
++        ],
++        "id": "NESTED_CHILD",
++        "metadata": {
++          "labels": {
++            "_links": {
++              "self": "/fixture-labels"
++            },
++            "limit": 200,
++            "results": [],
++            "size": 0,
++            "start": 0
++          }
++        },
++        "space": {
++          "key": "SPACE"
++        },
++        "status": "current",
++        "title": "Fixture Nested Child",
++        "type": "page",
++        "version": {
++          "number": 8,
++          "when": "2000-01-03T00:00:00.000+00:00"
++        }
++      }
++    }
++  ],
++  "size": 2,
++  "start": 0,
++  "totalSize": 3
++}
+diff --git a/tests/fixtures/foundation/confluence_data_center/search_page_terminal.json b/tests/fixtures/foundation/confluence_data_center/search_page_terminal.json
+new file mode 100644
+index 0000000..f0a496d
+--- /dev/null
++++ b/tests/fixtures/foundation/confluence_data_center/search_page_terminal.json
+@@ -0,0 +1,47 @@
++{
++  "_links": {
++    "next": "/must-not-control-terminal-state"
++  },
++  "limit": 2,
++  "results": [
++    {
++      "content": {
++        "ancestors": [
++          {
++            "id": "GLOBAL_PAGE",
++            "title": "Fixture Global Page"
++          },
++          {
++            "id": "SELECTED_PAGE",
++            "title": "Fixture Root Page"
++          }
++        ],
++        "id": "TERMINAL_CHILD",
++        "metadata": {
++          "labels": {
++            "_links": {
++              "self": "/fixture-labels"
++            },
++            "limit": 200,
++            "results": [],
++            "size": 0,
++            "start": 0
++          }
++        },
++        "space": {
++          "key": "SPACE"
++        },
++        "status": "current",
++        "title": "Fixture Terminal Child",
++        "type": "page",
++        "version": {
++          "number": 1,
++          "when": "2000-01-04T00:00:00.000+00:00"
++        }
++      }
++    }
++  ],
++  "size": 1,
++  "start": 2,
++  "totalSize": 3
++}

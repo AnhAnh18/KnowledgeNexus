@@ -1,0 +1,806 @@
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_writer.py b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_writer.py
+new file mode 100644
+index 0000000..66133ff
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_writer.py
+@@ -0,0 +1,184 @@
++"""Build machine-readable Foundation full-snapshot staging directories."""
++
++from __future__ import annotations
++
++import json
++import shutil
++from collections.abc import Iterable, Iterator, Mapping
++from pathlib import Path
++from typing import Any
++
++from knowledgenexus.foundation.domain.records import ManifestRecordBuilder
++from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer import (
++    JsonlRecordWriter,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++
++
++JSONL_FILE_SCHEMA_PAIRS: tuple[tuple[str, str, str], ...] = (
++    ("documents.jsonl", "documents", "CanonicalDocument"),
++    ("chunks.jsonl", "chunks", "ChunkRecord"),
++    ("relations.jsonl", "relations", "RelationRecord"),
++    ("acl.jsonl", "acl", "ACLRecord"),
++    ("media_assets.jsonl", "media_assets", "MediaAsset"),
++    ("symbols.jsonl", "symbols", "SymbolRecord"),
++    ("sync_state.jsonl", "sync_state", "SyncStateRecord"),
++    ("tombstones.jsonl", "tombstones", "TombstoneRecord"),
++)
++
++EXPECTED_MACHINE_FILES = frozenset(
++    [file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS] + ["manifest.json"]
++)
++
++
++class FullSnapshotStagingWriter:
++    """Write a validated machine-readable full-snapshot staging directory."""
++
++    @staticmethod
++    def write(
++        *,
++        staging_path: Path,
++        validator: FoundationSchemaValidator,
++        dataset_version: str,
++        generated_at: str,
++        config_hash: str,
++        chunker_version: str,
++        schemas_version: str,
++        documents: Iterable[Mapping[str, object]],
++        chunks: Iterable[Mapping[str, object]],
++        relations: Iterable[Mapping[str, object]],
++        acl: Iterable[Mapping[str, object]],
++        media_assets: Iterable[Mapping[str, object]],
++        symbols: Iterable[Mapping[str, object]],
++        sync_state: Iterable[Mapping[str, object]],
++        tombstones: Iterable[Mapping[str, object]],
++        source_scopes: Mapping[str, object] | None = None,
++    ) -> dict[str, object]:
++        if staging_path.exists():
++            raise FileExistsError(f"Staging path already exists: {staging_path}")
++        if not staging_path.parent.is_dir():
++            raise FileNotFoundError(
++                f"Staging parent directory does not exist: {staging_path.parent}"
++            )
++
++        staging_path.mkdir()
++        try:
++            counts = _write_jsonl_files(
++                staging_path=staging_path,
++                validator=validator,
++                documents=documents,
++                chunks=chunks,
++                relations=relations,
++                acl=acl,
++                media_assets=media_assets,
++                symbols=symbols,
++                sync_state=sync_state,
++                tombstones=tombstones,
++            )
++            manifest = ManifestRecordBuilder.build(
++                dataset_version=dataset_version,
++                export_mode="full_snapshot",
++                generated_at=generated_at,
++                config_hash=config_hash,
++                chunker_version=chunker_version,
++                schemas_version=schemas_version,
++                counts=counts,
++                source_scopes=source_scopes,
++            )
++            validator.validate_record("Manifest", manifest)
++            _write_manifest(staging_path / "manifest.json", manifest)
++            _verify_machine_files(staging_path)
++            return manifest
++        except Exception:
++            _remove_owned_staging_path(staging_path)
++            raise
++
++
++def _write_jsonl_files(
++    *,
++    staging_path: Path,
++    validator: FoundationSchemaValidator,
++    documents: Iterable[Mapping[str, object]],
++    chunks: Iterable[Mapping[str, object]],
++    relations: Iterable[Mapping[str, object]],
++    acl: Iterable[Mapping[str, object]],
++    media_assets: Iterable[Mapping[str, object]],
++    symbols: Iterable[Mapping[str, object]],
++    sync_state: Iterable[Mapping[str, object]],
++    tombstones: Iterable[Mapping[str, object]],
++) -> dict[str, int]:
++    streams: dict[str, Iterable[Mapping[str, object]]] = {
++        "documents": documents,
++        "chunks": chunks,
++        "relations": relations,
++        "acl": acl,
++        "media_assets": media_assets,
++        "symbols": symbols,
++        "sync_state": sync_state,
++        "tombstones": tombstones,
++    }
++
++    counts: dict[str, int] = {}
++    for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
++        counts[count_key] = JsonlRecordWriter.write(
++            path=staging_path / file_name,
++            records=_validated_records(
++                validator=validator,
++                schema_name=schema_name,
++                records=streams[count_key],
++            ),
++        )
++
++    return counts
++
++
++def _validated_records(
++    *,
++    validator: FoundationSchemaValidator,
++    schema_name: str,
++    records: Iterable[Mapping[str, object]],
++) -> Iterator[dict[str, object]]:
++    for record in records:
++        if not isinstance(record, Mapping):
++            raise TypeError("Foundation record must be a mapping")
++
++        plain_record = dict(record)
++        validator.validate_record(schema_name, plain_record)
++        yield plain_record
++
++
++def _write_manifest(path: Path, manifest: Mapping[str, Any]) -> None:
++    with path.open("w", encoding="utf-8", newline="\n") as handle:
++        json.dump(
++            manifest,
++            handle,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        )
++        handle.write("\n")
++
++
++def _verify_machine_files(staging_path: Path) -> None:
++    entries = list(staging_path.iterdir())
++    actual_names = {entry.name for entry in entries}
++    all_regular_files = all(
++        entry.is_file() and not entry.is_symlink()
++        for entry in entries
++    )
++
++    if actual_names != EXPECTED_MACHINE_FILES or not all_regular_files:
++        raise RuntimeError(
++            "Staging directory is incomplete or contains unexpected entries: "
++            f"{sorted(actual_names)}"
++        )
++
++
++def _remove_owned_staging_path(staging_path: Path) -> None:
++    try:
++        shutil.rmtree(staging_path)
++    except OSError:
++        pass
+diff --git a/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py b/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py
+new file mode 100644
+index 0000000..41fbb66
+--- /dev/null
++++ b/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py
+@@ -0,0 +1,594 @@
++from __future__ import annotations
++
++import copy
++import json
++from collections.abc import Iterable, Iterator, Mapping
++from pathlib import Path
++from types import MappingProxyType
++
++import pytest
++
++from knowledgenexus.foundation.infrastructure.exporters import (
++    full_snapshot_staging_writer as staging_writer_module,
++)
++from knowledgenexus.foundation.infrastructure.exporters import FullSnapshotStagingWriter
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++    FoundationValidationError,
++)
++from tests.fixtures.foundation.record_factories import (
++    DOCUMENT_ID,
++    TIMESTAMP,
++    build_sample_acl_record,
++    build_sample_chunk_record,
++    build_sample_document_record,
++    build_sample_relation_record,
++    sample_chunk_id,
++    sample_relation_id,
++)
++
++
++EXPECTED_MACHINE_FILES = {
++    "documents.jsonl",
++    "chunks.jsonl",
++    "relations.jsonl",
++    "acl.jsonl",
++    "media_assets.jsonl",
++    "symbols.jsonl",
++    "sync_state.jsonl",
++    "tombstones.jsonl",
++    "manifest.json",
++}
++EXPECTED_COUNT_KEYS = {
++    "documents",
++    "chunks",
++    "relations",
++    "acl",
++    "media_assets",
++    "symbols",
++    "sync_state",
++    "tombstones",
++}
++VALID_DATASET_VERSION = "v20260713-093015-123456Z"
++VALID_GENERATED_AT = "2026-07-13T09:30:15Z"
++VALID_CONFIG_HASH = "a" * 64
++VALID_CHUNKER_VERSION = "1.2.0"
++VALID_SCHEMAS_VERSION = "1.0"
++
++
++def test_successful_full_machine_readable_staging_snapshot(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++
++    manifest = _write_staging(staging_path)
++
++    assert staging_path.is_dir()
++    assert _file_names(staging_path) == EXPECTED_MACHINE_FILES
++    assert not (staging_path / "quality_report.md").exists()
++    assert not (staging_path / "LATEST.txt").exists()
++    assert manifest == json.loads(
++        (staging_path / "manifest.json").read_text(encoding="utf-8")
++    )
++    assert (staging_path / "manifest.json").read_bytes().endswith(b"\n")
++    FoundationSchemaValidator().validate_record("Manifest", manifest)
++
++
++def test_successful_staging_contains_exact_filename_set(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++
++    _write_staging(staging_path)
++
++    assert _file_names(staging_path) == EXPECTED_MACHINE_FILES
++
++
++def test_empty_streams_create_zero_byte_jsonl_files_and_zero_counts(
++    tmp_path: Path,
++) -> None:
++    staging_path = tmp_path / "staging"
++
++    manifest = _write_staging(
++        staging_path,
++        documents=[],
++        chunks=[],
++        relations=[],
++        acl=[],
++        media_assets=[],
++        symbols=[],
++        sync_state=[],
++        tombstones=[],
++    )
++
++    for file_name in EXPECTED_MACHINE_FILES - {"manifest.json"}:
++        assert (staging_path / file_name).read_bytes() == b""
++    assert manifest["counts"] == {key: 0 for key in EXPECTED_COUNT_KEYS}
++    FoundationSchemaValidator().validate_record("Manifest", manifest)
++
++
++def test_actual_counts_come_from_jsonl_writer_results(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++
++    manifest = _write_staging(
++        staging_path,
++        documents=[
++            build_sample_document_record(),
++            _another_document_record(),
++        ],
++        chunks=[
++            build_sample_chunk_record(),
++            _another_chunk_record(),
++            _third_chunk_record(),
++        ],
++        relations=[build_sample_relation_record()],
++        acl=[build_sample_acl_record(), _another_acl_record()],
++        media_assets=[build_sample_media_asset_record()],
++        symbols=[],
++        sync_state=[build_sample_sync_state_record()],
++        tombstones=[
++            build_sample_tombstone_record(),
++            _another_tombstone_record(),
++        ],
++    )
++
++    assert manifest["counts"] == {
++        "documents": 2,
++        "chunks": 3,
++        "relations": 1,
++        "acl": 2,
++        "media_assets": 1,
++        "symbols": 0,
++        "sync_state": 1,
++        "tombstones": 2,
++    }
++
++
++def test_record_order_and_one_pass_streams_are_preserved(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++    chunks = OnePassRecords([build_sample_chunk_record(), _another_chunk_record()])
++    documents = OnePassRecords(
++        [build_sample_document_record(), _another_document_record()]
++    )
++
++    _write_staging(
++        staging_path,
++        documents=documents,
++        chunks=chunks,
++        relations=[],
++        acl=[],
++        media_assets=[],
++        symbols=[],
++        sync_state=[],
++        tombstones=[],
++    )
++
++    assert documents.iteration_count == 1
++    assert chunks.iteration_count == 1
++    assert _jsonl_records(staging_path / "chunks.jsonl") == [
++        build_sample_chunk_record(),
++        _another_chunk_record(),
++    ]
++
++
++def test_generic_mapping_records_are_supported(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++    document = build_sample_document_record()
++
++    manifest = _write_staging(
++        staging_path,
++        documents=[MappingProxyType(document)],
++    )
++
++    assert manifest["counts"]["documents"] == 1
++    assert _jsonl_records(staging_path / "documents.jsonl") == [document]
++
++
++def test_invalid_first_record_aborts_and_removes_staging(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++    invalid_document = build_sample_document_record()
++    del invalid_document["content_hash"]
++
++    with pytest.raises(FoundationValidationError):
++        _write_staging(staging_path, documents=[invalid_document])
++
++    assert not staging_path.exists()
++
++
++def test_later_stream_validation_failure_removes_owned_staging(
++    tmp_path: Path,
++) -> None:
++    staging_path = tmp_path / "staging"
++
++    with pytest.raises(FoundationValidationError):
++        _write_staging(
++            staging_path,
++            documents=[build_sample_document_record()],
++            chunks=[_invalid_chunk_record()],
++        )
++
++    assert not staging_path.exists()
++
++
++def test_later_record_validation_failure_removes_owned_staging(
++    tmp_path: Path,
++) -> None:
++    staging_path = tmp_path / "staging"
++
++    with pytest.raises(FoundationValidationError):
++        _write_staging(
++            staging_path,
++            chunks=[build_sample_chunk_record(), _invalid_chunk_record()],
++        )
++
++    assert not staging_path.exists()
++    assert not (staging_path / "manifest.json").exists()
++
++
++def test_jsonl_writer_failure_removes_owned_staging(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    staging_path = tmp_path / "staging"
++    original_write = staging_writer_module.JsonlRecordWriter.write
++
++    def fail_on_relations(
++        *,
++        path: Path,
++        records: Iterable[Mapping[str, object]],
++    ) -> int:
++        if path.name == "relations.jsonl":
++            raise RuntimeError("forced writer failure")
++        return original_write(path=path, records=records)
++
++    monkeypatch.setattr(
++        staging_writer_module.JsonlRecordWriter,
++        "write",
++        staticmethod(fail_on_relations),
++    )
++
++    with pytest.raises(RuntimeError, match="forced writer failure"):
++        _write_staging(staging_path)
++
++    assert not staging_path.exists()
++
++
++def test_manifest_validation_failure_removes_owned_staging(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++
++    with pytest.raises(FoundationValidationError):
++        _write_staging(staging_path, config_hash="not-a-sha256")
++
++    assert not staging_path.exists()
++    assert not (staging_path / "manifest.json").exists()
++
++
++def test_unexpected_directory_after_manifest_write_removes_staging(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    staging_path = tmp_path / "staging"
++    original_write_manifest = staging_writer_module._write_manifest
++
++    def write_manifest_and_add_unexpected_directory(
++        path: Path,
++        manifest: Mapping[str, object],
++    ) -> None:
++        original_write_manifest(path, manifest)
++        (path.parent / "unexpected_dir").mkdir()
++
++    monkeypatch.setattr(
++        staging_writer_module,
++        "_write_manifest",
++        write_manifest_and_add_unexpected_directory,
++    )
++
++    with pytest.raises(RuntimeError, match="unexpected entries"):
++        _write_staging(staging_path)
++
++    assert not staging_path.exists()
++
++
++def test_manifest_strict_serialization_failure_removes_staging(
++    tmp_path: Path,
++) -> None:
++    staging_path = tmp_path / "staging"
++
++    with pytest.raises(TypeError):
++        _write_staging(
++            staging_path,
++            source_scopes={
++                "confluence": {
++                    "unsupported": {1, 2},
++                }
++            },
++        )
++
++    assert not staging_path.exists()
++
++
++def test_pre_existing_staging_path_is_not_modified(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++    staging_path.mkdir()
++    sentinel = staging_path / "sentinel.txt"
++    sentinel.write_text("keep me", encoding="utf-8")
++
++    with pytest.raises(FileExistsError):
++        _write_staging(staging_path)
++
++    assert sentinel.read_text(encoding="utf-8") == "keep me"
++
++
++def test_missing_staging_parent_is_not_created(tmp_path: Path) -> None:
++    staging_path = tmp_path / "missing-parent" / "staging"
++
++    with pytest.raises(FileNotFoundError):
++        _write_staging(staging_path)
++
++    assert not staging_path.parent.exists()
++
++
++def test_caller_metadata_is_preserved_in_manifest(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++    source_scopes = {
++        "confluence": {
++            "space_keys": ["SVMC"],
++            "page_ids": ["938880621"],
++        }
++    }
++
++    manifest = _write_staging(
++        staging_path,
++        dataset_version="v20260714-010203-040506Z",
++        generated_at="2026-07-14T01:02:03Z",
++        config_hash="b" * 64,
++        chunker_version="9.8.7",
++        schemas_version="schemas-test",
++        source_scopes=source_scopes,
++    )
++
++    assert manifest["dataset_version"] == "v20260714-010203-040506Z"
++    assert manifest["generated_at"] == "2026-07-14T01:02:03Z"
++    assert manifest["config_hash"] == "b" * 64
++    assert manifest["chunker_version"] == "9.8.7"
++    assert manifest["schemas_version"] == "schemas-test"
++    assert manifest["source_scopes"] == source_scopes
++    assert manifest["export_mode"] == "full_snapshot"
++    assert "base_dataset_version" not in manifest
++
++
++def test_optional_source_scopes_policy(tmp_path: Path) -> None:
++    omitted_manifest = _write_staging(tmp_path / "omitted", source_scopes=None)
++    empty_manifest = _write_staging(tmp_path / "empty", source_scopes={})
++    populated_manifest = _write_staging(
++        tmp_path / "populated",
++        source_scopes={"git": {"repos": ["spen-sdk"]}},
++    )
++
++    assert "source_scopes" not in omitted_manifest
++    assert empty_manifest["source_scopes"] == {}
++    assert populated_manifest["source_scopes"] == {
++        "git": {"repos": ["spen-sdk"]}
++    }
++
++
++def test_schema_file_mapping_for_all_streams_is_exercised(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++
++    manifest = _write_staging(staging_path)
++
++    assert manifest["counts"] == {key: 1 for key in EXPECTED_COUNT_KEYS}
++    FoundationSchemaValidator().validate_jsonl_file(
++        "CanonicalDocument",
++        staging_path / "documents.jsonl",
++    )
++    FoundationSchemaValidator().validate_jsonl_file(
++        "ChunkRecord",
++        staging_path / "chunks.jsonl",
++    )
++    FoundationSchemaValidator().validate_jsonl_file(
++        "RelationRecord",
++        staging_path / "relations.jsonl",
++    )
++    FoundationSchemaValidator().validate_jsonl_file(
++        "ACLRecord",
++        staging_path / "acl.jsonl",
++    )
++    FoundationSchemaValidator().validate_jsonl_file(
++        "MediaAsset",
++        staging_path / "media_assets.jsonl",
++    )
++    FoundationSchemaValidator().validate_jsonl_file(
++        "SymbolRecord",
++        staging_path / "symbols.jsonl",
++    )
++    FoundationSchemaValidator().validate_jsonl_file(
++        "SyncStateRecord",
++        staging_path / "sync_state.jsonl",
++    )
++    FoundationSchemaValidator().validate_jsonl_file(
++        "TombstoneRecord",
++        staging_path / "tombstones.jsonl",
++    )
++
++
++def test_no_publish_latest_or_quality_report_behavior(tmp_path: Path) -> None:
++    staging_path = tmp_path / "staging"
++
++    _write_staging(staging_path)
++
++    assert sorted(path.name for path in tmp_path.iterdir()) == ["staging"]
++    assert not (tmp_path / VALID_DATASET_VERSION).exists()
++    assert not (tmp_path / "LATEST.txt").exists()
++    assert not (staging_path / "LATEST.txt").exists()
++    assert not (staging_path / "quality_report.md").exists()
++
++
++class OnePassRecords:
++    def __init__(self, records: list[dict[str, object]]) -> None:
++        self._records = records
++        self.iteration_count = 0
++
++    def __iter__(self) -> Iterator[dict[str, object]]:
++        self.iteration_count += 1
++        if self.iteration_count > 1:
++            raise AssertionError("stream iterated more than once")
++
++        yield from self._records
++
++
++def _write_staging(staging_path: Path, **overrides: object) -> dict[str, object]:
++    kwargs = _valid_writer_kwargs(staging_path)
++    kwargs.update(overrides)
++    return FullSnapshotStagingWriter.write(**kwargs)  # type: ignore[arg-type]
++
++
++def _valid_writer_kwargs(staging_path: Path) -> dict[str, object]:
++    kwargs: dict[str, object] = {
++        "staging_path": staging_path,
++        "validator": FoundationSchemaValidator(),
++        "dataset_version": VALID_DATASET_VERSION,
++        "generated_at": VALID_GENERATED_AT,
++        "config_hash": VALID_CONFIG_HASH,
++        "chunker_version": VALID_CHUNKER_VERSION,
++        "schemas_version": VALID_SCHEMAS_VERSION,
++    }
++    kwargs.update(_valid_streams())
++    return kwargs
++
++
++def _valid_streams() -> dict[str, list[dict[str, object]]]:
++    return {
++        "documents": [build_sample_document_record()],
++        "chunks": [build_sample_chunk_record()],
++        "relations": [build_sample_relation_record()],
++        "acl": [build_sample_acl_record()],
++        "media_assets": [build_sample_media_asset_record()],
++        "symbols": [build_sample_symbol_record()],
++        "sync_state": [build_sample_sync_state_record()],
++        "tombstones": [build_sample_tombstone_record()],
++    }
++
++
++def build_sample_media_asset_record() -> dict[str, object]:
++    return {
++        "schema_version": "1.0",
++        "media_id": "media:confluence:diagram-1",
++        "parent_document_id": DOCUMENT_ID,
++        "source_system": "confluence",
++        "filename": "architecture.drawio",
++        "mime_type": "application/xml",
++        "size_bytes": 1234,
++        "download_status": "downloaded",
++        "processing_status": "parsed",
++        "relevance": "high",
++        "extracted_text": "Component A connects to Component B.",
++        "summary": "Architecture diagram.",
++        "confidence": 1,
++        "raw_uri": "raw://confluence/attachments/diagram-1",
++        "content_hash": "b" * 64,
++        "source_version": "7",
++        "updated_at": TIMESTAMP,
++        "crawled_at": TIMESTAMP,
++    }
++
++
++def build_sample_symbol_record() -> dict[str, object]:
++    return {
++        "schema_version": "1.0",
++        "symbol_id": "symbol:spen-sdk:SampleController",
++        "repo": "spen-sdk",
++        "branch": "develop",
++        "commit_hash": "c" * 40,
++        "file_path": "src/SampleController.cpp",
++        "language": "cpp",
++        "symbol_type": "class",
++        "name": "SampleController",
++        "qualified_name": "spen::SampleController",
++        "signature": None,
++        "line_start": 10,
++        "line_end": 42,
++        "parent_symbol": None,
++        "chunk_id": sample_chunk_id(),
++        "parse_status": "ok",
++        "scanned_at": TIMESTAMP,
++    }
++
++
++def build_sample_sync_state_record() -> dict[str, object]:
++    return {
++        "schema_version": "1.0",
++        "source_id": "confluence_svmc_spensrv",
++        "entity_id": DOCUMENT_ID,
++        "entity_type": "page",
++        "last_seen_version": "1",
++        "last_content_hash": "d" * 64,
++        "last_synced_at": TIMESTAMP,
++        "status": "active",
++    }
++
++
++def build_sample_tombstone_record() -> dict[str, object]:
++    return {
++        "schema_version": "1.0",
++        "tombstone_id": "tomb:0123456789abcdef",
++        "entity_type": "relation",
++        "entity_id": sample_relation_id(),
++        "reason": "content_updated",
++        "detail": "Fixture tombstone for staging writer coverage.",
++        "detected_at": TIMESTAMP,
++        "dataset_version": VALID_DATASET_VERSION,
++        "source_version_last_seen": "1",
++    }
++
++
++def _another_document_record() -> dict[str, object]:
++    record = copy.deepcopy(build_sample_document_record())
++    record["document_id"] = "confluence:page:456"
++    record["acl_id"] = "acl:confluence:page:456"
++    return record
++
++
++def _another_chunk_record() -> dict[str, object]:
++    record = copy.deepcopy(build_sample_chunk_record())
++    record["chunk_id"] = "chunk:confluence:fedcba9876543210"
++    record["document_id"] = "confluence:page:456"
++    record["text"] = "Second chunk body."
++    record["content_hash"] = "e" * 64
++    return record
++
++
++def _third_chunk_record() -> dict[str, object]:
++    record = copy.deepcopy(build_sample_chunk_record())
++    record["chunk_id"] = "chunk:confluence:1111111111111111"
++    record["text"] = "Third chunk body."
++    record["content_hash"] = "f" * 64
++    return record
++
++
++def _another_acl_record() -> dict[str, object]:
++    record = copy.deepcopy(build_sample_acl_record())
++    record["acl_id"] = "acl:confluence:page:456"
++    record["document_id"] = "confluence:page:456"
++    return record
++
++
++def _another_tombstone_record() -> dict[str, object]:
++    record = copy.deepcopy(build_sample_tombstone_record())
++    record["tombstone_id"] = "tomb:fedcba9876543210"
++    record["entity_id"] = "chunk:confluence:fedcba9876543210"
++    record["entity_type"] = "chunk"
++    return record
++
++
++def _invalid_chunk_record() -> dict[str, object]:
++    record = copy.deepcopy(build_sample_chunk_record())
++    del record["acl_tags"]
++    return record
++
++
++def _file_names(path: Path) -> set[str]:
++    return {child.name for child in path.iterdir()}
++
++
++def _jsonl_records(path: Path) -> list[dict[str, object]]:
++    return [
++        json.loads(raw_line)
++        for raw_line in path.read_text(encoding="utf-8").splitlines()
++    ]
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+index 61e7798..e9d0a6e 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+@@ -1,7 +1,11 @@
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import (
++    FullSnapshotStagingWriter,
++)
+ from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer import (
+     JsonlRecordWriter,
+ )
+ 
+ __all__ = [
++    "FullSnapshotStagingWriter",
+     "JsonlRecordWriter",
+ ]

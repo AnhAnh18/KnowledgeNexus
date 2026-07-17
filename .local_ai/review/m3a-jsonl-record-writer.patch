@@ -1,0 +1,338 @@
+diff --git a/src/knowledgenexus/foundation/infrastructure/__init__.py b/src/knowledgenexus/foundation/infrastructure/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+new file mode 100644
+index 0000000..da40342
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+@@ -0,0 +1,7 @@
++from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer import (
++    JsonlRecordWriter,
++)
++
++__all__ = [
++    "JsonlRecordWriter",
++]
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/jsonl_record_writer.py b/src/knowledgenexus/foundation/infrastructure/exporters/jsonl_record_writer.py
+new file mode 100644
+index 0000000..db2899f
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/jsonl_record_writer.py
+@@ -0,0 +1,69 @@
++from __future__ import annotations
++
++import json
++import tempfile
++from collections.abc import Iterable, Mapping
++from pathlib import Path
++from typing import TextIO
++
++
++class JsonlRecordWriter:
++    @staticmethod
++    def write(
++        *,
++        path: Path,
++        records: Iterable[Mapping[str, object]],
++    ) -> int:
++        if not path.parent.is_dir():
++            raise FileNotFoundError(f"Parent directory does not exist: {path.parent}")
++
++        temp_path: Path | None = None
++        try:
++            with tempfile.NamedTemporaryFile(
++                "w",
++                encoding="utf-8",
++                newline="\n",
++                dir=path.parent,
++                prefix=f".{path.name}.",
++                suffix=".tmp",
++                delete=False,
++            ) as temp_file:
++                temp_path = Path(temp_file.name)
++                count = 0
++                for record in records:
++                    JsonlRecordWriter._write_record(temp_file, record)
++                    count += 1
++
++            temp_path.replace(path)
++            return count
++        except Exception:
++            if temp_path is not None:
++                try:
++                    temp_path.unlink(missing_ok=True)
++                except OSError:
++                    pass
++            raise
++
++    @staticmethod
++    def _write_record(
++        file_handle: TextIO,
++        record: Mapping[str, object],
++    ) -> None:
++        if not isinstance(record, Mapping):
++            raise TypeError("JSONL record must be a mapping")
++
++        plain_record = dict(record)
++
++        for key in plain_record:
++            if not isinstance(key, str):
++                raise TypeError("JSONL record top-level keys must be strings")
++
++        json.dump(
++            plain_record,
++            file_handle,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        )
++        file_handle.write("\n")
+diff --git a/tests/foundation/infrastructure/exporters/test_jsonl_record_writer.py b/tests/foundation/infrastructure/exporters/test_jsonl_record_writer.py
+new file mode 100644
+index 0000000..793907d
+--- /dev/null
++++ b/tests/foundation/infrastructure/exporters/test_jsonl_record_writer.py
+@@ -0,0 +1,241 @@
++from __future__ import annotations
++
++import json
++from datetime import datetime
++from pathlib import Path
++from types import MappingProxyType
++from typing import Iterator
++
++import pytest
++
++from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer import (
++    JsonlRecordWriter,
++)
++
++
++def test_empty_iterable_creates_zero_byte_file(tmp_path: Path) -> None:
++    target = tmp_path / "records.jsonl"
++
++    count = JsonlRecordWriter.write(path=target, records=[])
++
++    assert count == 0
++    assert target.read_bytes() == b""
++
++
++def test_one_record_writes_compact_json_object_with_trailing_newline(
++    tmp_path: Path,
++) -> None:
++    target = tmp_path / "records.jsonl"
++
++    count = JsonlRecordWriter.write(
++        path=target,
++        records=[{"b": 2, "a": 1}],
++    )
++
++    assert count == 1
++    assert target.read_bytes() == b'{"a":1,"b":2}\n'
++
++
++def test_generic_mapping_record_is_supported(tmp_path: Path) -> None:
++    target = tmp_path / "records.jsonl"
++
++    count = JsonlRecordWriter.write(
++        path=target,
++        records=[MappingProxyType({"b": 2, "a": 1})],
++    )
++
++    assert count == 1
++    assert target.read_bytes() == b'{"a":1,"b":2}\n'
++
++
++def test_multiple_records_preserve_order_without_blank_lines(
++    tmp_path: Path,
++) -> None:
++    target = tmp_path / "records.jsonl"
++
++    count = JsonlRecordWriter.write(
++        path=target,
++        records=[
++            {"position": 1, "value": "first"},
++            {"position": 2, "value": "second"},
++        ],
++    )
++
++    assert count == 2
++    assert target.read_text(encoding="utf-8") == (
++        '{"position":1,"value":"first"}\n'
++        '{"position":2,"value":"second"}\n'
++    )
++
++
++def test_unicode_is_written_as_readable_utf8(tmp_path: Path) -> None:
++    target = tmp_path / "records.jsonl"
++
++    JsonlRecordWriter.write(
++        path=target,
++        records=[{"text": "Tiếng Việt và 한국어"}],
++    )
++
++    output = target.read_bytes()
++    assert output == '{"text":"Tiếng Việt và 한국어"}\n'.encode("utf-8")
++    assert b"\\u" not in output
++
++
++def test_semantically_equal_mappings_have_deterministic_bytes(
++    tmp_path: Path,
++) -> None:
++    first_target = tmp_path / "first.jsonl"
++    second_target = tmp_path / "second.jsonl"
++
++    JsonlRecordWriter.write(path=first_target, records=[{"b": 2, "a": 1}])
++    JsonlRecordWriter.write(path=second_target, records=[{"a": 1, "b": 2}])
++
++    assert first_target.read_bytes() == second_target.read_bytes()
++
++
++def test_repeated_ordered_inputs_have_deterministic_bytes(tmp_path: Path) -> None:
++    first_target = tmp_path / "first.jsonl"
++    second_target = tmp_path / "second.jsonl"
++    records = [{"id": "a"}, {"id": "b"}]
++
++    JsonlRecordWriter.write(path=first_target, records=records)
++    JsonlRecordWriter.write(path=second_target, records=records)
++
++    assert first_target.read_bytes() == second_target.read_bytes()
++
++
++@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
++def test_non_finite_numbers_are_rejected(tmp_path: Path, value: float) -> None:
++    target = tmp_path / "records.jsonl"
++
++    with pytest.raises(ValueError):
++        JsonlRecordWriter.write(path=target, records=[{"value": value}])
++
++
++@pytest.mark.parametrize("value", [{1, 2}, datetime(2026, 7, 13), Path("x")])
++def test_unsupported_values_are_not_string_coerced(
++    tmp_path: Path,
++    value: object,
++) -> None:
++    target = tmp_path / "records.jsonl"
++
++    with pytest.raises(TypeError):
++        JsonlRecordWriter.write(path=target, records=[{"value": value}])
++
++
++@pytest.mark.parametrize("record", ["text", ["not", "mapping"], 123])
++def test_non_mapping_records_are_rejected(
++    tmp_path: Path,
++    record: object,
++) -> None:
++    target = tmp_path / "records.jsonl"
++
++    with pytest.raises(TypeError):
++        JsonlRecordWriter.write(  # type: ignore[list-item]
++            path=target,
++            records=[record],
++        )
++
++
++def test_non_string_top_level_keys_are_rejected(tmp_path: Path) -> None:
++    target = tmp_path / "records.jsonl"
++
++    with pytest.raises(TypeError):
++        JsonlRecordWriter.write(
++            path=target,
++            records=[{1: "numeric key"}],  # type: ignore[dict-item]
++        )
++
++
++def test_existing_target_is_preserved_on_serialization_failure(
++    tmp_path: Path,
++) -> None:
++    target = tmp_path / "records.jsonl"
++    previous_bytes = b"previous\n"
++    target.write_bytes(previous_bytes)
++
++    with pytest.raises(TypeError):
++        JsonlRecordWriter.write(
++            path=target,
++            records=[
++                {"id": "valid"},
++                {"id": "invalid", "value": {1, 2}},
++            ],
++        )
++
++    assert target.read_bytes() == previous_bytes
++    assert _temp_paths(tmp_path) == []
++
++
++def test_no_partial_target_is_published_on_failure(tmp_path: Path) -> None:
++    target = tmp_path / "records.jsonl"
++
++    with pytest.raises(TypeError):
++        JsonlRecordWriter.write(
++            path=target,
++            records=[
++                {"id": "valid"},
++                {"id": "invalid", "value": {1, 2}},
++            ],
++        )
++
++    assert not target.exists()
++    assert _temp_paths(tmp_path) == []
++
++
++def test_successful_write_replaces_existing_target(tmp_path: Path) -> None:
++    target = tmp_path / "records.jsonl"
++    target.write_text("old\n", encoding="utf-8")
++
++    count = JsonlRecordWriter.write(
++        path=target,
++        records=[{"id": "new"}],
++    )
++
++    assert count == 1
++    assert target.read_bytes() == b'{"id":"new"}\n'
++
++
++def test_one_pass_iterable_is_consumed_once(tmp_path: Path) -> None:
++    target = tmp_path / "records.jsonl"
++    yielded: list[int] = []
++
++    def records() -> Iterator[dict[str, object]]:
++        for index in range(2):
++            yielded.append(index)
++            yield {"index": index}
++
++    count = JsonlRecordWriter.write(path=target, records=records())
++
++    assert count == 2
++    assert yielded == [0, 1]
++    assert target.read_text(encoding="utf-8") == '{"index":0}\n{"index":1}\n'
++
++
++def test_parent_directory_must_already_exist(tmp_path: Path) -> None:
++    target = tmp_path / "missing" / "records.jsonl"
++
++    with pytest.raises(FileNotFoundError):
++        JsonlRecordWriter.write(path=target, records=[])
++
++    assert not target.parent.exists()
++
++
++def test_writer_does_not_require_foundation_schema_valid_record(
++    tmp_path: Path,
++) -> None:
++    target = tmp_path / "records.jsonl"
++
++    count = JsonlRecordWriter.write(
++        path=target,
++        records=[{"not_a_foundation_record": True}],
++    )
++
++    assert count == 1
++    assert json.loads(target.read_text(encoding="utf-8")) == {
++        "not_a_foundation_record": True
++    }
++
++
++def _temp_paths(directory: Path) -> list[Path]:
++    return sorted(directory.glob(".*.tmp"))

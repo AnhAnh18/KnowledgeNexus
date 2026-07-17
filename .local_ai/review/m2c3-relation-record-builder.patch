@@ -1,0 +1,401 @@
+diff --git a/src/knowledgenexus/foundation/domain/records/__init__.py b/src/knowledgenexus/foundation/domain/records/__init__.py
+index f1fb8b1..96a4ea8 100644
+--- a/src/knowledgenexus/foundation/domain/records/__init__.py
++++ b/src/knowledgenexus/foundation/domain/records/__init__.py
+@@ -4,5 +4,12 @@ from knowledgenexus.foundation.domain.records.canonical_document_record_builder
+ from knowledgenexus.foundation.domain.records.chunk_record_builder import (
+     ChunkRecordBuilder,
+ )
++from knowledgenexus.foundation.domain.records.relation_record_builder import (
++    RelationRecordBuilder,
++)
+ 
+-__all__ = ["CanonicalDocumentRecordBuilder", "ChunkRecordBuilder"]
++__all__ = [
++    "CanonicalDocumentRecordBuilder",
++    "ChunkRecordBuilder",
++    "RelationRecordBuilder",
++]
+diff --git a/src/knowledgenexus/foundation/domain/records/canonical_document_record_builder.py b/src/knowledgenexus/foundation/domain/records/canonical_document_record_builder.py
+index 6d7fe83..5138c2a 100644
+--- a/src/knowledgenexus/foundation/domain/records/canonical_document_record_builder.py
++++ b/src/knowledgenexus/foundation/domain/records/canonical_document_record_builder.py
+@@ -2,14 +2,13 @@ from __future__ import annotations
+ 
+ from typing import Any
+ 
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
+ from knowledgenexus.foundation.domain.rules import ContentHasher
+ 
+ 
+ class CanonicalDocumentRecordBuilder:
+     """Build plain CanonicalDocument record dicts shaped by the Foundation schema."""
+ 
+-    SCHEMA_VERSION = "1.0"
+-
+     @classmethod
+     def build(
+         cls,
+@@ -65,7 +64,7 @@ class CanonicalDocumentRecordBuilder:
+             raise TypeError("CanonicalDocumentRecordBuilder.metadata expects dict")
+ 
+         return {
+-            "schema_version": cls.SCHEMA_VERSION,
++            "schema_version": SCHEMA_VERSION,
+             "document_id": document_id,
+             "source_system": source_system,
+             "source_type": source_type,
+diff --git a/src/knowledgenexus/foundation/domain/records/chunk_record_builder.py b/src/knowledgenexus/foundation/domain/records/chunk_record_builder.py
+index 05dcab5..90e0dc8 100644
+--- a/src/knowledgenexus/foundation/domain/records/chunk_record_builder.py
++++ b/src/knowledgenexus/foundation/domain/records/chunk_record_builder.py
+@@ -2,14 +2,13 @@ from __future__ import annotations
+ 
+ from typing import Any
+ 
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
+ from knowledgenexus.foundation.domain.rules import ContentHasher
+ 
+ 
+ class ChunkRecordBuilder:
+     """Build plain ChunkRecord dicts shaped by the Foundation schema."""
+ 
+-    SCHEMA_VERSION = "1.0"
+-
+     @classmethod
+     def build(
+         cls,
+@@ -78,7 +77,7 @@ class ChunkRecordBuilder:
+         cls._require_optional_list("relation_ids", relation_ids)
+ 
+         record: dict[str, object] = {
+-            "schema_version": cls.SCHEMA_VERSION,
++            "schema_version": SCHEMA_VERSION,
+             "chunk_id": chunk_id,
+             "document_id": document_id,
+             "source_system": source_system,
+diff --git a/src/knowledgenexus/foundation/domain/records/common_constants.py b/src/knowledgenexus/foundation/domain/records/common_constants.py
+new file mode 100644
+index 0000000..8d87cb4
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/records/common_constants.py
+@@ -0,0 +1 @@
++SCHEMA_VERSION = "1.0"
+diff --git a/src/knowledgenexus/foundation/domain/records/relation_record_builder.py b/src/knowledgenexus/foundation/domain/records/relation_record_builder.py
+new file mode 100644
+index 0000000..b4b3c61
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/records/relation_record_builder.py
+@@ -0,0 +1,75 @@
++from __future__ import annotations
++
++from typing import Any
++
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
++
++
++class RelationRecordBuilder:
++    """Build plain RelationRecord dicts shaped by the Foundation schema."""
++
++    @classmethod
++    def build(
++        cls,
++        *,
++        relation_id: str,
++        source_id: str,
++        target_id: str,
++        relation_type: str,
++        resolution_status: str,
++        created_at: str,
++        evidence: str | None = None,
++        confidence: int | float | None = None,
++    ) -> dict[str, object]:
++        cls._require_non_empty_string("relation_id", relation_id)
++        cls._require_non_empty_string("source_id", source_id)
++        cls._require_non_empty_string("target_id", target_id)
++        cls._require_non_empty_string("relation_type", relation_type)
++        cls._require_non_empty_string("resolution_status", resolution_status)
++        cls._require_non_empty_string("created_at", created_at)
++        cls._require_optional_string("evidence", evidence)
++        cls._require_optional_confidence("confidence", confidence)
++
++        record: dict[str, object] = {
++            "schema_version": SCHEMA_VERSION,
++            "relation_id": relation_id,
++            "source_id": source_id,
++            "target_id": target_id,
++            "relation_type": relation_type,
++            "resolution_status": resolution_status,
++            "created_at": created_at,
++        }
++
++        if evidence is not None:
++            record["evidence"] = evidence
++        if confidence is not None:
++            record["confidence"] = confidence
++
++        return record
++
++    @staticmethod
++    def _require_string(field_name: str, value: Any) -> None:
++        if not isinstance(value, str):
++            raise TypeError(f"RelationRecordBuilder.{field_name} expects str")
++
++    @staticmethod
++    def _require_non_empty_string(field_name: str, value: Any) -> None:
++        RelationRecordBuilder._require_string(field_name, value)
++        if value == "":
++            raise ValueError(f"RelationRecordBuilder.{field_name} must not be empty")
++
++    @staticmethod
++    def _require_optional_string(field_name: str, value: Any) -> None:
++        if value is not None and not isinstance(value, str):
++            raise TypeError(f"RelationRecordBuilder.{field_name} expects str")
++
++    @staticmethod
++    def _require_optional_confidence(field_name: str, value: Any) -> None:
++        if value is None:
++            return
++        if not isinstance(value, (int, float)) or isinstance(value, bool):
++            raise TypeError(f"RelationRecordBuilder.{field_name} expects number")
++        if not 0 <= value <= 1:
++            raise ValueError(
++                f"RelationRecordBuilder.{field_name} must be between 0 and 1"
++            )
+diff --git a/tests/foundation/domain/records/test_canonical_document_record_builder.py b/tests/foundation/domain/records/test_canonical_document_record_builder.py
+index 67747eb..8ee7d7b 100644
+--- a/tests/foundation/domain/records/test_canonical_document_record_builder.py
++++ b/tests/foundation/domain/records/test_canonical_document_record_builder.py
+@@ -5,6 +5,7 @@ import copy
+ import pytest
+ 
+ from knowledgenexus.foundation.domain.records import CanonicalDocumentRecordBuilder
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
+ from knowledgenexus.foundation.domain.rules import ContentHasher
+ from knowledgenexus.shared.contracts.foundation.schema_validator import (
+     FoundationSchemaValidator,
+@@ -64,10 +65,7 @@ def test_builder_returns_dict() -> None:
+ 
+ 
+ def test_record_has_schema_version_1_0() -> None:
+-    assert (
+-        build_valid_record()["schema_version"]
+-        == CanonicalDocumentRecordBuilder.SCHEMA_VERSION
+-    )
++    assert build_valid_record()["schema_version"] == SCHEMA_VERSION
+ 
+ 
+ def test_content_hash_matches_normalized_body_text_hash() -> None:
+diff --git a/tests/foundation/domain/records/test_chunk_record_builder.py b/tests/foundation/domain/records/test_chunk_record_builder.py
+index 37c3fcf..4d1e326 100644
+--- a/tests/foundation/domain/records/test_chunk_record_builder.py
++++ b/tests/foundation/domain/records/test_chunk_record_builder.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ import pytest
+ 
+ from knowledgenexus.foundation.domain.records import ChunkRecordBuilder
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
+ from knowledgenexus.foundation.domain.rules import ContentHasher
+ from knowledgenexus.shared.contracts.foundation.schema_validator import (
+     FoundationSchemaValidator,
+@@ -64,9 +65,7 @@ def test_builder_returns_dict() -> None:
+ 
+ 
+ def test_record_has_schema_version_1_0() -> None:
+-    assert build_valid_confluence_record()["schema_version"] == (
+-        ChunkRecordBuilder.SCHEMA_VERSION
+-    )
++    assert build_valid_confluence_record()["schema_version"] == SCHEMA_VERSION
+ 
+ 
+ def test_content_hash_matches_text_hash() -> None:
+diff --git a/tests/foundation/domain/records/test_common_constants.py b/tests/foundation/domain/records/test_common_constants.py
+new file mode 100644
+index 0000000..33b9184
+--- /dev/null
++++ b/tests/foundation/domain/records/test_common_constants.py
+@@ -0,0 +1,7 @@
++from __future__ import annotations
++
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
++
++
++def test_common_record_schema_version_is_contract_version() -> None:
++    assert SCHEMA_VERSION == "1.0"
+diff --git a/tests/foundation/domain/records/test_relation_record_builder.py b/tests/foundation/domain/records/test_relation_record_builder.py
+new file mode 100644
+index 0000000..1f40a1a
+--- /dev/null
++++ b/tests/foundation/domain/records/test_relation_record_builder.py
+@@ -0,0 +1,171 @@
++from __future__ import annotations
++
++import pytest
++
++from knowledgenexus.foundation.domain.records import RelationRecordBuilder
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++
++
++def build_valid_jira_record(
++    *,
++    evidence: str | None = "Mentioned as SVMCSPEN-1234 in the page body.",
++    confidence: int | float | None = 1.0,
++) -> dict[str, object]:
++    return RelationRecordBuilder.build(
++        relation_id="rel:0123456789abcdef",
++        source_id="confluence:page:938880621",
++        target_id="jira:issue:SVMCSPEN-1234",
++        relation_type="mentions_jira_key",
++        resolution_status="unresolved_without_jira_api",
++        created_at="2026-07-10T00:00:00Z",
++        evidence=evidence,
++        confidence=confidence,
++    )
++
++
++def build_valid_non_jira_record() -> dict[str, object]:
++    return RelationRecordBuilder.build(
++        relation_id="rel:fedcba9876543210",
++        source_id="confluence:page:938880621",
++        target_id="confluence:page:938880622",
++        relation_type="links_to_page",
++        resolution_status="resolved",
++        created_at="2026-07-10T00:00:00Z",
++    )
++
++
++def test_builder_returns_dict() -> None:
++    assert isinstance(build_valid_jira_record(), dict)
++
++
++def test_record_has_schema_version_1_0() -> None:
++    assert build_valid_jira_record()["schema_version"] == SCHEMA_VERSION
++
++
++def test_valid_jira_record_passes_foundation_schema_validation() -> None:
++    FoundationSchemaValidator().validate_record(
++        "RelationRecord",
++        build_valid_jira_record(),
++    )
++
++
++def test_valid_non_jira_record_passes_foundation_schema_validation() -> None:
++    FoundationSchemaValidator().validate_record(
++        "RelationRecord",
++        build_valid_non_jira_record(),
++    )
++
++
++def test_full_record_with_evidence_and_confidence_passes_schema_validation() -> None:
++    record = build_valid_jira_record(
++        evidence="Inline Jira mention in Confluence body.",
++        confidence=0.75,
++    )
++
++    assert record["evidence"] == "Inline Jira mention in Confluence body."
++    assert record["confidence"] == 0.75
++    FoundationSchemaValidator().validate_record("RelationRecord", record)
++
++
++def test_evidence_and_confidence_are_omitted_when_none() -> None:
++    record = build_valid_jira_record(evidence=None, confidence=None)
++
++    assert "evidence" not in record
++    assert "confidence" not in record
++    FoundationSchemaValidator().validate_record("RelationRecord", record)
++
++
++def test_empty_evidence_string_is_allowed() -> None:
++    record = build_valid_jira_record(evidence="", confidence=None)
++
++    assert record["evidence"] == ""
++    FoundationSchemaValidator().validate_record("RelationRecord", record)
++
++
++@pytest.mark.parametrize(
++    ("field_name", "value", "error_type"),
++    [
++        ("relation_id", 123, TypeError),
++        ("relation_id", "", ValueError),
++        ("source_id", 123, TypeError),
++        ("source_id", "", ValueError),
++        ("target_id", 123, TypeError),
++        ("target_id", "", ValueError),
++        ("relation_type", 123, TypeError),
++        ("relation_type", "", ValueError),
++        ("resolution_status", 123, TypeError),
++        ("resolution_status", "", ValueError),
++        ("created_at", 123, TypeError),
++        ("created_at", "", ValueError),
++    ],
++)
++def test_invalid_required_string_input_fails(
++    field_name: str,
++    value: object,
++    error_type: type[Exception],
++) -> None:
++    kwargs = {
++        "relation_id": "rel:0123456789abcdef",
++        "source_id": "confluence:page:938880621",
++        "target_id": "jira:issue:SVMCSPEN-1234",
++        "relation_type": "mentions_jira_key",
++        "resolution_status": "unresolved_without_jira_api",
++        "created_at": "2026-07-10T00:00:00Z",
++    }
++    kwargs[field_name] = value
++
++    with pytest.raises(error_type, match=field_name):
++        RelationRecordBuilder.build(**kwargs)  # type: ignore[arg-type]
++
++
++def test_invalid_evidence_type_fails() -> None:
++    with pytest.raises(TypeError, match="evidence expects str"):
++        build_valid_jira_record(evidence=123)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize("confidence", ["0.5", True, object()])
++def test_invalid_confidence_type_fails(confidence: object) -> None:
++    with pytest.raises(TypeError, match="confidence expects number"):
++        build_valid_jira_record(confidence=confidence)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize("confidence", [0, 1, 0.5])
++def test_integer_and_floating_point_confidence_values_are_accepted(
++    confidence: int | float,
++) -> None:
++    record = build_valid_jira_record(confidence=confidence)
++
++    assert record["confidence"] == confidence
++    FoundationSchemaValidator().validate_record("RelationRecord", record)
++
++
++@pytest.mark.parametrize(
++    "confidence",
++    [float("nan"), float("inf"), float("-inf"), -0.1, 1.1],
++)
++def test_invalid_confidence_value_fails(confidence: float) -> None:
++    with pytest.raises(ValueError, match="confidence"):
++        build_valid_jira_record(confidence=confidence)
++
++
++def test_relation_id_matches_caller_provided_value() -> None:
++    record = RelationRecordBuilder.build(
++        relation_id="rel:1111111111111111",
++        source_id="confluence:page:938880621",
++        target_id="confluence:page:938880622",
++        relation_type="links_to_page",
++        resolution_status="resolved",
++        created_at="2026-07-10T00:00:00Z",
++    )
++
++    assert record["relation_id"] == "rel:1111111111111111"
++
++
++def test_schema_validation_proves_no_unknown_top_level_fields_are_added() -> None:
++    FoundationSchemaValidator().validate_record(
++        "RelationRecord",
++        build_valid_jira_record(),
++    )

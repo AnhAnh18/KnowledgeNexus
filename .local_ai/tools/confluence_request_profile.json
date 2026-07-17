@@ -1,0 +1,46 @@
+{
+  "_note": [
+    "Non-secret request shape derived from Tool_TRreport and the first two sanitized M5B-0 packets.",
+    "The first packet proved that parent on /rest/api/content was ignored; the second confirmed the /rest/api/search CQL result envelope and numeric start/limit/size/totalSize pagination fields.",
+    "Deployment = Confluence Server / Data Center; authentication = Bearer PAT; REST base = /rest/api.",
+    "Never put a hostname, PAT, page ID, space key, identity, cookie, or Authorization value in this file.",
+    "The search expansion requests inventory metadata only: ancestors, space, version, and labels; it never requests page body or attachments.",
+    "If a live run exits 13, stop and review the sanitized failure; never alter selectors or page size during pagination."
+  ],
+  "schema_version": 1,
+  "deployment": "data-center",
+  "confluence_version": null,
+  "api_family": "rest-api (Confluence Server/Data Center)",
+  "auth_scheme": "bearer_pat",
+  "root_request": {
+    "path_template": "/rest/api/content/{root_page_id}",
+    "query": [
+      ["expand", "version"]
+    ]
+  },
+  "inventory_request": {
+    "path_template": "/rest/api/search",
+    "query": [
+      [
+        "cql",
+        "space=\"{space_key}\" and ancestor={root_page_id} and type=page"
+      ],
+      [
+        "expand",
+        "content.ancestors,content.space,content.version,content.metadata.labels"
+      ],
+      ["limit", "{page_size}"],
+      ["start", "0"]
+    ]
+  },
+  "pagination": {
+    "kind": "start_limit",
+    "start_query_parameter": "start",
+    "limit_query_parameter": "limit",
+    "response_start_pointer": "/start",
+    "response_limit_pointer": "/limit",
+    "response_size_pointer": "/size",
+    "response_total_pointer": "/totalSize",
+    "terminal_rule": "start_plus_size_gte_total"
+  }
+}

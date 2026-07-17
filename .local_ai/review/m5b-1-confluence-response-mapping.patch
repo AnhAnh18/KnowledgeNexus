@@ -1,0 +1,1243 @@
+diff --git a/src/knowledgenexus/foundation/infrastructure/confluence/__init__.py b/src/knowledgenexus/foundation/infrastructure/confluence/__init__.py
+new file mode 100644
+index 0000000..6988e50
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/confluence/__init__.py
+@@ -0,0 +1,11 @@
++from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_metadata_mapper import (
++    ConfluenceDataCenterPageMetadataMapper,
++    ConfluenceDataCenterPayloadError,
++    ParsedConfluenceSearchPage,
++)
++
++__all__ = [
++    "ConfluenceDataCenterPageMetadataMapper",
++    "ConfluenceDataCenterPayloadError",
++    "ParsedConfluenceSearchPage",
++]
+diff --git a/src/knowledgenexus/foundation/infrastructure/confluence/confluence_data_center_page_metadata_mapper.py b/src/knowledgenexus/foundation/infrastructure/confluence/confluence_data_center_page_metadata_mapper.py
+new file mode 100644
+index 0000000..9fe5979
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/confluence/confluence_data_center_page_metadata_mapper.py
+@@ -0,0 +1,453 @@
++from __future__ import annotations
++
++from collections.abc import Mapping
++from dataclasses import dataclass
++
++from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
++    ConfluencePageMetadata,
++)
++
++
++class ConfluenceDataCenterPayloadError(ValueError):
++    """A confirmed Data Center response does not satisfy the M5B contract."""
++
++
++@dataclass(frozen=True)
++class ParsedConfluenceSearchPage:
++    items: tuple[ConfluencePageMetadata, ...]
++    start: int
++    limit: int
++    size: int
++    total_size: int
++    is_terminal: bool
++
++
++class ConfluenceDataCenterPageMetadataMapper:
++    @staticmethod
++    def map_root(
++        *,
++        payload: Mapping[str, object],
++        expected_root_page_id: str,
++        expected_space_key: str,
++    ) -> ConfluencePageMetadata:
++        context = "root response"
++        root = _require_mapping(payload, context)
++        expected_root_page_id = _require_expected_string(
++            expected_root_page_id,
++            "expected_root_page_id",
++        )
++        expected_space_key = _require_expected_string(
++            expected_space_key,
++            "expected_space_key",
++        )
++
++        page_id = _require_string_field(root, "id", context)
++        if page_id != expected_root_page_id:
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.id must match the expected root page ID"
++            )
++        title = _require_string_field(root, "title", context)
++        _require_literal_field(root, "type", "page", context)
++        _require_literal_field(root, "status", "current", context)
++        updated_at, source_version = _extract_version(root, context)
++
++        if "space" in root:
++            space = _require_mapping_field(root, "space", context)
++            observed_space_key = _require_string_field(
++                space,
++                "key",
++                f"{context}.space",
++            )
++            if observed_space_key != expected_space_key:
++                raise ConfluenceDataCenterPayloadError(
++                    f"{context}.space.key must match the expected space key"
++                )
++
++        return ConfluencePageMetadata(
++            page_id=page_id,
++            title=title,
++            space_key=expected_space_key,
++            parent_page_id=None,
++            ancestor_page_ids=(),
++            ancestor_titles=(),
++            updated_at=updated_at,
++            source_version=source_version,
++            labels=_extract_labels(root, context, required=False),
++            attachment_count=None,
++        )
++
++    @staticmethod
++    def map_search_result(
++        *,
++        result: Mapping[str, object],
++        selected_root_page_id: str,
++        expected_space_key: str,
++    ) -> ConfluencePageMetadata:
++        context = "search result"
++        result_mapping = _require_mapping(result, context)
++        selected_root_page_id = _require_expected_string(
++            selected_root_page_id,
++            "selected_root_page_id",
++        )
++        expected_space_key = _require_expected_string(
++            expected_space_key,
++            "expected_space_key",
++        )
++        content = _require_mapping_field(result_mapping, "content", context)
++        content_context = f"{context}.content"
++
++        page_id = _require_string_field(content, "id", content_context)
++        if page_id == selected_root_page_id:
++            raise ConfluenceDataCenterPayloadError(
++                f"{content_context}.id must identify a descendant, not the selected root"
++            )
++        title = _require_string_field(content, "title", content_context)
++        _require_literal_field(content, "type", "page", content_context)
++        _require_literal_field(content, "status", "current", content_context)
++
++        space = _require_mapping_field(content, "space", content_context)
++        observed_space_key = _require_string_field(
++            space,
++            "key",
++            f"{content_context}.space",
++        )
++        if observed_space_key != expected_space_key:
++            raise ConfluenceDataCenterPayloadError(
++                f"{content_context}.space.key must match the expected space key"
++            )
++
++        ancestor_ids, ancestor_titles = _extract_relative_ancestors(
++            content=content,
++            page_id=page_id,
++            selected_root_page_id=selected_root_page_id,
++            context=content_context,
++        )
++        updated_at, source_version = _extract_version(content, content_context)
++
++        return ConfluencePageMetadata(
++            page_id=page_id,
++            title=title,
++            space_key=observed_space_key,
++            parent_page_id=ancestor_ids[-1],
++            ancestor_page_ids=ancestor_ids,
++            ancestor_titles=ancestor_titles,
++            updated_at=updated_at,
++            source_version=source_version,
++            labels=_extract_labels(content, content_context, required=True),
++            attachment_count=None,
++        )
++
++    @classmethod
++    def parse_search_page(
++        cls,
++        *,
++        payload: Mapping[str, object],
++        expected_start: int,
++        expected_limit: int,
++        selected_root_page_id: str,
++        expected_space_key: str,
++    ) -> ParsedConfluenceSearchPage:
++        context = "search page response"
++        page = _require_mapping(payload, context)
++        expected_start = _require_expected_integer(
++            expected_start,
++            "expected_start",
++            positive=False,
++        )
++        expected_limit = _require_expected_integer(
++            expected_limit,
++            "expected_limit",
++            positive=False,
++        )
++
++        results = page.get("results")
++        if not isinstance(results, list):
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.results must be a list"
++            )
++        start = _require_integer_field(page, "start", context, positive=False)
++        limit = _require_integer_field(page, "limit", context, positive=False)
++        size = _require_integer_field(page, "size", context, positive=False)
++        total_size = _require_integer_field(
++            page,
++            "totalSize",
++            context,
++            positive=False,
++        )
++
++        if start != expected_start:
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.start must match the expected request start"
++            )
++        if limit != expected_limit:
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.limit must match the expected request limit"
++            )
++        if size != len(results):
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.size must equal the number of results"
++            )
++        if size > limit:
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.size must not exceed limit"
++            )
++        if total_size < start + size:
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.totalSize must cover the current result window"
++            )
++        if start < total_size and size == 0:
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.size must advance a non-terminal result window"
++            )
++
++        items = []
++        for index, result in enumerate(results):
++            try:
++                item = cls.map_search_result(
++                    result=_require_mapping(
++                        result,
++                        f"{context}.results[{index}]",
++                    ),
++                    selected_root_page_id=selected_root_page_id,
++                    expected_space_key=expected_space_key,
++                )
++            except ConfluenceDataCenterPayloadError as exc:
++                raise ConfluenceDataCenterPayloadError(
++                    f"{context}.results[{index}] failed: {exc}"
++                ) from exc
++            items.append(item)
++
++        return ParsedConfluenceSearchPage(
++            items=tuple(items),
++            start=start,
++            limit=limit,
++            size=size,
++            total_size=total_size,
++            is_terminal=start + size >= total_size,
++        )
++
++
++def _extract_relative_ancestors(
++    *,
++    content: Mapping[str, object],
++    page_id: str,
++    selected_root_page_id: str,
++    context: str,
++) -> tuple[tuple[str, ...], tuple[str, ...]]:
++    raw_ancestors = content.get("ancestors")
++    if not isinstance(raw_ancestors, list):
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.ancestors must be a list"
++        )
++
++    ancestor_pairs = []
++    for index, raw_ancestor in enumerate(raw_ancestors):
++        ancestor_context = f"{context}.ancestors[{index}]"
++        ancestor = _require_mapping(raw_ancestor, ancestor_context)
++        ancestor_pairs.append(
++            (
++                _require_string_field(ancestor, "id", ancestor_context),
++                _require_string_field(ancestor, "title", ancestor_context),
++            )
++        )
++
++    root_indexes = [
++        index
++        for index, (ancestor_id, _) in enumerate(ancestor_pairs)
++        if ancestor_id == selected_root_page_id
++    ]
++    if len(root_indexes) != 1:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.ancestors must contain the selected root exactly once"
++        )
++
++    retained_pairs = ancestor_pairs[root_indexes[0] :]
++    ancestor_ids = tuple(ancestor_id for ancestor_id, _ in retained_pairs)
++    if len(set(ancestor_ids)) != len(ancestor_ids):
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.ancestors must not contain duplicate page IDs"
++        )
++    if page_id in ancestor_ids:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.ancestors must not contain the descendant page ID"
++        )
++    return (
++        ancestor_ids,
++        tuple(ancestor_title for _, ancestor_title in retained_pairs),
++    )
++
++
++def _extract_version(
++    page: Mapping[str, object],
++    context: str,
++) -> tuple[str, str]:
++    version = _require_mapping_field(page, "version", context)
++    version_context = f"{context}.version"
++    number = _require_actual_integer_field(version, "number", version_context)
++    when = _require_string_field(version, "when", version_context)
++    return when, str(number)
++
++
++def _extract_labels(
++    page: Mapping[str, object],
++    context: str,
++    *,
++    required: bool,
++) -> tuple[str, ...]:
++    if "metadata" not in page:
++        if required:
++            raise ConfluenceDataCenterPayloadError(
++                f"{context}.metadata must be an object"
++            )
++        return ()
++    metadata = _require_mapping_field(page, "metadata", context)
++    metadata_context = f"{context}.metadata"
++    if "labels" not in metadata:
++        if required:
++            raise ConfluenceDataCenterPayloadError(
++                f"{metadata_context}.labels must be an object"
++            )
++        return ()
++    labels = _require_mapping_field(metadata, "labels", metadata_context)
++    labels_context = f"{metadata_context}.labels"
++    results = labels.get("results")
++    if not isinstance(results, list):
++        raise ConfluenceDataCenterPayloadError(
++            f"{labels_context}.results must be a list"
++        )
++    if required:
++        _validate_labels_envelope(
++            labels=labels,
++            result_count=len(results),
++            context=labels_context,
++        )
++
++    names = []
++    for index, raw_label in enumerate(results):
++        label_context = f"{labels_context}.results[{index}]"
++        label = _require_mapping(raw_label, label_context)
++        names.append(_require_string_field(label, "name", label_context))
++    return tuple(names)
++
++
++def _validate_labels_envelope(
++    *,
++    labels: Mapping[str, object],
++    result_count: int,
++    context: str,
++) -> None:
++    start = _require_integer_field(labels, "start", context, positive=False)
++    limit = _require_integer_field(labels, "limit", context, positive=False)
++    size = _require_integer_field(labels, "size", context, positive=False)
++    links = _require_mapping_field(labels, "_links", context)
++
++    if start != 0:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.start must identify the first label window"
++        )
++    if size != result_count:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.size must equal the number of label results"
++        )
++    if size > limit:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.size must not exceed limit"
++        )
++
++    next_value = links.get("next")
++    if next_value not in (None, ""):
++        raise ConfluenceDataCenterPayloadError(
++            f"{context} must not report a subsequent label window"
++        )
++
++
++def _require_mapping(value: object, context: str) -> Mapping[str, object]:
++    if not isinstance(value, Mapping):
++        raise ConfluenceDataCenterPayloadError(f"{context} must be an object")
++    return value
++
++
++def _require_mapping_field(
++    mapping: Mapping[str, object],
++    field: str,
++    context: str,
++) -> Mapping[str, object]:
++    return _require_mapping(mapping.get(field), f"{context}.{field}")
++
++
++def _require_string_field(
++    mapping: Mapping[str, object],
++    field: str,
++    context: str,
++) -> str:
++    value = mapping.get(field)
++    if not isinstance(value, str) or value == "":
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.{field} must be a non-empty string"
++        )
++    return value
++
++
++def _require_literal_field(
++    mapping: Mapping[str, object],
++    field: str,
++    expected: str,
++    context: str,
++) -> None:
++    value = mapping.get(field)
++    if value != expected:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.{field} must equal {expected!r}"
++        )
++
++
++def _require_integer_field(
++    mapping: Mapping[str, object],
++    field: str,
++    context: str,
++    *,
++    positive: bool,
++) -> int:
++    value = mapping.get(field)
++    if isinstance(value, bool) or not isinstance(value, int):
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.{field} must be an integer"
++        )
++    if positive and value <= 0:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.{field} must be positive"
++        )
++    if not positive and value < 0:
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.{field} must be non-negative"
++        )
++    return value
++
++
++def _require_actual_integer_field(
++    mapping: Mapping[str, object],
++    field: str,
++    context: str,
++) -> int:
++    value = mapping.get(field)
++    if isinstance(value, bool) or not isinstance(value, int):
++        raise ConfluenceDataCenterPayloadError(
++            f"{context}.{field} must be an integer"
++        )
++    return value
++
++
++def _require_expected_string(value: object, field: str) -> str:
++    if not isinstance(value, str) or value == "":
++        raise TypeError(f"{field} expects a non-empty string")
++    return value
++
++
++def _require_expected_integer(value: object, field: str, *, positive: bool) -> int:
++    if isinstance(value, bool) or not isinstance(value, int):
++        raise TypeError(f"{field} expects an integer")
++    if positive and value <= 0:
++        raise ValueError(f"{field} must be positive")
++    if not positive and value < 0:
++        raise ValueError(f"{field} must be non-negative")
++    return value
+diff --git a/tests/fixtures/foundation/confluence_data_center/root_page_response.json b/tests/fixtures/foundation/confluence_data_center/root_page_response.json
+new file mode 100644
+index 0000000..df7081d
+--- /dev/null
++++ b/tests/fixtures/foundation/confluence_data_center/root_page_response.json
+@@ -0,0 +1,10 @@
++{
++  "id": "SELECTED_PAGE",
++  "status": "current",
++  "title": "Fixture Root Page",
++  "type": "page",
++  "version": {
++    "number": 15,
++    "when": "2000-01-01T00:00:00.000+00:00"
++  }
++}
+diff --git a/tests/fixtures/foundation/confluence_data_center/search_page_start_0.json b/tests/fixtures/foundation/confluence_data_center/search_page_start_0.json
+new file mode 100644
+index 0000000..1ec6746
+--- /dev/null
++++ b/tests/fixtures/foundation/confluence_data_center/search_page_start_0.json
+@@ -0,0 +1,84 @@
++{
++  "limit": 2,
++  "results": [
++    {
++      "content": {
++        "ancestors": [
++          {
++            "id": "GLOBAL_PAGE",
++            "title": "Fixture Global Page"
++          },
++          {
++            "id": "SELECTED_PAGE",
++            "title": "Fixture Root Page"
++          }
++        ],
++        "id": "DIRECT_CHILD",
++        "metadata": {
++          "labels": {
++            "_links": {
++              "self": "/fixture-labels"
++            },
++            "limit": 200,
++            "results": [],
++            "size": 0,
++            "start": 0
++          }
++        },
++        "space": {
++          "key": "SPACE"
++        },
++        "status": "current",
++        "title": "Fixture Direct Child",
++        "type": "page",
++        "version": {
++          "number": 3,
++          "when": "2000-01-02T00:00:00.000+00:00"
++        }
++      }
++    },
++    {
++      "content": {
++        "ancestors": [
++          {
++            "id": "GLOBAL_PAGE",
++            "title": "Fixture Global Page"
++          },
++          {
++            "id": "SELECTED_PAGE",
++            "title": "Fixture Root Page"
++          },
++          {
++            "id": "DIRECT_CHILD",
++            "title": "Fixture Direct Child"
++          }
++        ],
++        "id": "NESTED_CHILD",
++        "metadata": {
++          "labels": {
++            "_links": {
++              "self": "/fixture-labels"
++            },
++            "limit": 200,
++            "results": [],
++            "size": 0,
++            "start": 0
++          }
++        },
++        "space": {
++          "key": "SPACE"
++        },
++        "status": "current",
++        "title": "Fixture Nested Child",
++        "type": "page",
++        "version": {
++          "number": 8,
++          "when": "2000-01-03T00:00:00.000+00:00"
++        }
++      }
++    }
++  ],
++  "size": 2,
++  "start": 0,
++  "totalSize": 3
++}
+diff --git a/tests/fixtures/foundation/confluence_data_center/search_page_terminal.json b/tests/fixtures/foundation/confluence_data_center/search_page_terminal.json
+new file mode 100644
+index 0000000..f0a496d
+--- /dev/null
++++ b/tests/fixtures/foundation/confluence_data_center/search_page_terminal.json
+@@ -0,0 +1,47 @@
++{
++  "_links": {
++    "next": "/must-not-control-terminal-state"
++  },
++  "limit": 2,
++  "results": [
++    {
++      "content": {
++        "ancestors": [
++          {
++            "id": "GLOBAL_PAGE",
++            "title": "Fixture Global Page"
++          },
++          {
++            "id": "SELECTED_PAGE",
++            "title": "Fixture Root Page"
++          }
++        ],
++        "id": "TERMINAL_CHILD",
++        "metadata": {
++          "labels": {
++            "_links": {
++              "self": "/fixture-labels"
++            },
++            "limit": 200,
++            "results": [],
++            "size": 0,
++            "start": 0
++          }
++        },
++        "space": {
++          "key": "SPACE"
++        },
++        "status": "current",
++        "title": "Fixture Terminal Child",
++        "type": "page",
++        "version": {
++          "number": 1,
++          "when": "2000-01-04T00:00:00.000+00:00"
++        }
++      }
++    }
++  ],
++  "size": 1,
++  "start": 2,
++  "totalSize": 3
++}
+diff --git a/tests/foundation/infrastructure/confluence/test_confluence_data_center_page_metadata_mapper.py b/tests/foundation/infrastructure/confluence/test_confluence_data_center_page_metadata_mapper.py
+new file mode 100644
+index 0000000..9dc0acd
+--- /dev/null
++++ b/tests/foundation/infrastructure/confluence/test_confluence_data_center_page_metadata_mapper.py
+@@ -0,0 +1,602 @@
++from __future__ import annotations
++
++import copy
++import json
++import re
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from knowledgenexus.foundation.infrastructure.confluence import (
++    ConfluenceDataCenterPageMetadataMapper,
++    ConfluenceDataCenterPayloadError,
++    ParsedConfluenceSearchPage,
++)
++
++
++FIXTURE_DIR = (
++    Path(__file__).resolve().parents[3]
++    / "fixtures"
++    / "foundation"
++    / "confluence_data_center"
++)
++ROOT_PAGE_ID = "SELECTED_PAGE"
++SPACE_KEY = "SPACE"
++_ALLOWED_FIXTURE_KEYS = frozenset(
++    {
++        "_links",
++        "ancestors",
++        "content",
++        "id",
++        "key",
++        "labels",
++        "limit",
++        "metadata",
++        "name",
++        "next",
++        "number",
++        "results",
++        "self",
++        "size",
++        "space",
++        "start",
++        "status",
++        "title",
++        "totalSize",
++        "type",
++        "version",
++        "when",
++    }
++)
++_ALLOWED_FIXTURE_STRINGS = frozenset(
++    {
++        "/fixture-labels",
++        "/must-not-control-terminal-state",
++        "2000-01-01T00:00:00.000+00:00",
++        "2000-01-02T00:00:00.000+00:00",
++        "2000-01-03T00:00:00.000+00:00",
++        "2000-01-04T00:00:00.000+00:00",
++        "DIRECT_CHILD",
++        "Fixture Direct Child",
++        "Fixture Global Page",
++        "Fixture Nested Child",
++        "Fixture Root Page",
++        "Fixture Terminal Child",
++        "GLOBAL_PAGE",
++        "NESTED_CHILD",
++        "SELECTED_PAGE",
++        "SPACE",
++        "TERMINAL_CHILD",
++        "current",
++        "page",
++    }
++)
++_ALLOWED_FIXTURE_INTEGERS = frozenset({0, 1, 2, 3, 8, 15, 200})
++
++
++def test_map_root_supports_captured_missing_space_and_labels_shape() -> None:
++    metadata = _map_root(_load_fixture("root_page_response.json"))
++
++    assert metadata.page_id == ROOT_PAGE_ID
++    assert metadata.title == "Fixture Root Page"
++    assert metadata.space_key == SPACE_KEY
++    assert metadata.parent_page_id is None
++    assert metadata.ancestor_page_ids == ()
++    assert metadata.ancestor_titles == ()
++    assert metadata.updated_at == "2000-01-01T00:00:00.000+00:00"
++    assert metadata.source_version == "15"
++    assert metadata.labels == ()
++    assert metadata.attachment_count is None
++
++
++def test_map_root_accepts_matching_observed_space() -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload["space"] = {"key": SPACE_KEY}
++
++    assert _map_root(payload).space_key == SPACE_KEY
++
++
++def test_map_root_rejects_wrong_observed_space() -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload["space"] = {"key": "OUTSIDE"}
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=r"root response\.space\.key",
++    ):
++        _map_root(payload)
++
++
++def test_map_root_missing_labels_normalizes_to_empty_tuple() -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload["metadata"] = {}
++
++    assert _map_root(payload).labels == ()
++
++
++def test_map_root_present_labels_use_domain_normalization() -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload["metadata"] = {
++        "labels": {
++            "results": [
++                {"name": "z-label"},
++                {"name": "a-label"},
++                {"name": "z-label"},
++            ]
++        }
++    }
++
++    assert _map_root(payload).labels == ("a-label", "z-label")
++
++
++def test_map_root_ignores_raw_ancestors_above_selected_root() -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload["ancestors"] = [{"id": "GLOBAL_PAGE", "title": "Outside"}]
++
++    metadata = _map_root(payload)
++
++    assert metadata.ancestor_page_ids == ()
++    assert metadata.ancestor_titles == ()
++    assert metadata.parent_page_id is None
++
++
++def test_map_root_rejects_wrong_root_id() -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload["id"] = "OTHER_ROOT"
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=r"root response\.id",
++    ):
++        _map_root(payload)
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    (("type", "blogpost"), ("status", "draft")),
++)
++def test_map_root_rejects_non_page_or_non_current(
++    field: str,
++    value: str,
++) -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload[field] = value
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=rf"root response\.{field}",
++    ):
++        _map_root(payload)
++
++
++def test_map_search_result_normalizes_direct_child_path() -> None:
++    result = _search_results()[0]
++
++    metadata = _map_search_result(result)
++
++    assert metadata.page_id == "DIRECT_CHILD"
++    assert metadata.ancestor_page_ids == (ROOT_PAGE_ID,)
++    assert metadata.ancestor_titles == ("Fixture Root Page",)
++    assert metadata.parent_page_id == ROOT_PAGE_ID
++    assert metadata.space_key == SPACE_KEY
++    assert metadata.source_version == "3"
++    assert metadata.labels == ()
++    assert metadata.attachment_count is None
++
++
++def test_map_search_result_normalizes_nested_child_path_and_alignment() -> None:
++    result = _search_results()[1]
++
++    metadata = _map_search_result(result)
++
++    assert metadata.ancestor_page_ids == (ROOT_PAGE_ID, "DIRECT_CHILD")
++    assert metadata.ancestor_titles == (
++        "Fixture Root Page",
++        "Fixture Direct Child",
++    )
++    assert metadata.parent_page_id == "DIRECT_CHILD"
++    assert "GLOBAL_PAGE" not in metadata.ancestor_page_ids
++
++
++@pytest.mark.parametrize("root_count", (0, 2))
++def test_map_search_result_requires_selected_root_exactly_once(
++    root_count: int,
++) -> None:
++    result = _search_results()[0]
++    content = _content(result)
++    ancestors = [{"id": "GLOBAL_PAGE", "title": "Fixture Global Page"}]
++    ancestors.extend(
++        {"id": ROOT_PAGE_ID, "title": "Fixture Root Page"}
++        for _ in range(root_count)
++    )
++    content["ancestors"] = ancestors
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match="selected root exactly once",
++    ):
++        _map_search_result(result)
++
++
++def test_map_search_result_rejects_page_outside_expected_space() -> None:
++    result = _search_results()[0]
++    _content(result)["space"] = {"key": "OUTSIDE"}
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=r"search result\.content\.space\.key",
++    ):
++        _map_search_result(result)
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    (("type", "blogpost"), ("status", "draft")),
++)
++def test_map_search_result_rejects_type_or_status_mismatch(
++    field: str,
++    value: str,
++) -> None:
++    result = _search_results()[0]
++    _content(result)[field] = value
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=rf"search result\.content\.{field}",
++    ):
++        _map_search_result(result)
++
++
++def test_map_search_result_rejects_root_as_descendant() -> None:
++    result = _search_results()[0]
++    _content(result)["id"] = ROOT_PAGE_ID
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match="not the selected root",
++    ):
++        _map_search_result(result)
++
++
++def test_map_search_result_rejects_self_in_retained_ancestors() -> None:
++    result = _search_results()[0]
++    content = _content(result)
++    content["ancestors"].append(
++        {"id": content["id"], "title": "Fixture Direct Child"}
++    )
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match="descendant page ID",
++    ):
++        _map_search_result(result)
++
++
++def test_map_search_result_rejects_duplicate_retained_ancestor() -> None:
++    result = _search_results()[1]
++    _content(result)["ancestors"].append(
++        {"id": "DIRECT_CHILD", "title": "Fixture Direct Child"}
++    )
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match="duplicate page IDs",
++    ):
++        _map_search_result(result)
++
++
++def test_map_search_result_maps_and_normalizes_labels() -> None:
++    result = _search_results()[0]
++    _content(result)["metadata"] = {
++        "labels": _search_labels("z-label", "a-label", "z-label")
++    }
++
++    assert _map_search_result(result).labels == ("a-label", "z-label")
++
++
++def test_map_search_result_rejects_inconsistent_label_envelope() -> None:
++    result = _search_results()[0]
++    labels = _content(result)["metadata"]["labels"]
++    labels["size"] = 1
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=r"metadata\.labels\.size",
++    ):
++        _map_search_result(result)
++
++
++def test_map_search_result_rejects_subsequent_label_window() -> None:
++    result = _search_results()[0]
++    labels = _content(result)["metadata"]["labels"]
++    labels["_links"]["next"] = "/next-label-window"
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match="subsequent label window",
++    ):
++        _map_search_result(result)
++
++
++@pytest.mark.parametrize("mapper_kind", ("root", "search"))
++def test_bool_version_is_rejected(mapper_kind: str) -> None:
++    if mapper_kind == "root":
++        payload = _load_fixture("root_page_response.json")
++        payload["version"]["number"] = True
++        call = lambda: _map_root(payload)
++    else:
++        result = _search_results()[0]
++        _content(result)["version"]["number"] = True
++        call = lambda: _map_search_result(result)
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=r"version\.number must be an integer",
++    ):
++        call()
++
++
++def test_actual_integer_version_is_converted_without_extra_value_policy() -> None:
++    payload = _load_fixture("root_page_response.json")
++    payload["version"]["number"] = 0
++
++    assert _map_root(payload).source_version == "0"
++
++
++@pytest.mark.parametrize(
++    ("mutation", "expected_path"),
++    (
++        (lambda content: content.pop("title"), r"content\.title"),
++        (lambda content: content.__setitem__("ancestors", {}), r"content\.ancestors"),
++        (lambda content: content.__setitem__("version", []), r"content\.version"),
++        (
++            lambda content: content.__setitem__("metadata", {}),
++            r"content\.metadata\.labels",
++        ),
++    ),
++)
++def test_map_search_result_rejects_missing_or_malformed_nested_fields(
++    mutation: Any,
++    expected_path: str,
++) -> None:
++    result = _search_results()[0]
++    mutation(_content(result))
++
++    with pytest.raises(ConfluenceDataCenterPayloadError, match=expected_path):
++        _map_search_result(result)
++
++
++def test_mapper_exceptions_do_not_disclose_raw_or_sensitive_values() -> None:
++    result = _search_results()[0]
++    content = _content(result)
++    sensitive_values = (
++        "Sensitive page title",
++        "https://private.example.invalid",
++        "Bearer private-token",
++    )
++    content["title"] = sensitive_values[0]
++    content["space"] = {"key": sensitive_values[1]}
++    content["body"] = sensitive_values[2]
++
++    with pytest.raises(ConfluenceDataCenterPayloadError) as exc_info:
++        _map_search_result(result)
++
++    message = str(exc_info.value)
++    assert "search result.content.space.key" in message
++    assert all(value not in message for value in sensitive_values)
++
++
++def test_parse_search_page_maps_valid_non_terminal_page() -> None:
++    parsed = _parse_search_page(_load_fixture("search_page_start_0.json"))
++
++    assert isinstance(parsed, ParsedConfluenceSearchPage)
++    assert parsed.start == 0
++    assert parsed.limit == 2
++    assert parsed.size == 2
++    assert parsed.total_size == 3
++    assert parsed.is_terminal is False
++    assert tuple(item.page_id for item in parsed.items) == (
++        "DIRECT_CHILD",
++        "NESTED_CHILD",
++    )
++    with pytest.raises(AttributeError):
++        parsed.start = 1  # type: ignore[misc]
++
++
++def test_parse_search_page_uses_numbers_not_next_link_for_terminal_state() -> None:
++    payload = _load_fixture("search_page_terminal.json")
++
++    parsed = _parse_search_page(payload, expected_start=2)
++
++    assert payload["_links"]["next"]
++    assert parsed.is_terminal is True
++    assert tuple(item.page_id for item in parsed.items) == ("TERMINAL_CHILD",)
++
++
++def test_parse_search_page_accepts_confirmed_non_negative_zero_envelope() -> None:
++    payload = {
++        "results": [],
++        "start": 0,
++        "limit": 0,
++        "size": 0,
++        "totalSize": 0,
++    }
++
++    parsed = ConfluenceDataCenterPageMetadataMapper.parse_search_page(
++        payload=payload,
++        expected_start=0,
++        expected_limit=0,
++        selected_root_page_id=ROOT_PAGE_ID,
++        expected_space_key=SPACE_KEY,
++    )
++
++    assert parsed.is_terminal is True
++    assert parsed.items == ()
++
++
++def test_parse_search_page_rejects_size_different_from_results_length() -> None:
++    payload = _load_fixture("search_page_start_0.json")
++    payload["size"] = 1
++
++    with pytest.raises(ConfluenceDataCenterPayloadError, match=r"\.size"):
++        _parse_search_page(payload)
++
++
++def test_parse_search_page_rejects_unexpected_start() -> None:
++    payload = _load_fixture("search_page_start_0.json")
++
++    with pytest.raises(ConfluenceDataCenterPayloadError, match=r"\.start"):
++        _parse_search_page(payload, expected_start=2)
++
++
++def test_parse_search_page_rejects_zero_size_non_terminal_window() -> None:
++    payload = _load_fixture("search_page_start_0.json")
++    payload["results"] = []
++    payload["size"] = 0
++
++    with pytest.raises(ConfluenceDataCenterPayloadError, match="must advance"):
++        _parse_search_page(payload)
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    (
++        ("start", True),
++        ("limit", False),
++        ("size", "2"),
++        ("totalSize", 3.0),
++    ),
++)
++def test_parse_search_page_rejects_bool_or_non_integer_pagination_values(
++    field: str,
++    value: object,
++) -> None:
++    payload = _load_fixture("search_page_start_0.json")
++    payload[field] = value
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=rf"\.{field} must be an integer",
++    ):
++        _parse_search_page(payload)
++
++
++def test_parse_search_page_rejects_window_past_total_size() -> None:
++    payload = _load_fixture("search_page_start_0.json")
++    payload["totalSize"] = 1
++
++    with pytest.raises(ConfluenceDataCenterPayloadError, match=r"\.totalSize"):
++        _parse_search_page(payload)
++
++
++def test_parse_search_page_rejects_result_mapping_failure_with_index() -> None:
++    payload = _load_fixture("search_page_start_0.json")
++    payload["results"][1] = []
++
++    with pytest.raises(
++        ConfluenceDataCenterPayloadError,
++        match=r"results\[1\]",
++    ):
++        _parse_search_page(payload)
++
++
++def test_committed_fixtures_are_sanitized_and_minimal() -> None:
++    fixture_paths = sorted(FIXTURE_DIR.glob("*.json"))
++    assert [path.name for path in fixture_paths] == [
++        "root_page_response.json",
++        "search_page_start_0.json",
++        "search_page_terminal.json",
++    ]
++
++    generic_forbidden_markers = (
++        "Bearer ",
++        "Authorization",
++        "Cookie",
++        '"body"',
++        "<SANITIZED_BODY>",
++    )
++    for fixture_path in fixture_paths:
++        text = fixture_path.read_text(encoding="utf-8")
++        fixture = json.loads(text)
++        _assert_fixture_tree_is_synthetic(fixture)
++        assert not any(marker in text for marker in generic_forbidden_markers)
++        assert "http://" not in text
++        assert "https://" not in text
++        assert re.search(r"[\w.+-]+@[\w.-]+", text) is None
++
++
++def test_fixture_safety_allowlist_rejects_unknown_sanitized_scalar() -> None:
++    with pytest.raises(AssertionError):
++        _assert_fixture_tree_is_synthetic({"id": "SANITIZED_PAGE_001"})
++
++
++def _load_fixture(name: str) -> dict[str, Any]:
++    return json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
++
++
++def _search_results() -> list[dict[str, Any]]:
++    return copy.deepcopy(_load_fixture("search_page_start_0.json")["results"])
++
++
++def _content(result: dict[str, Any]) -> dict[str, Any]:
++    return result["content"]
++
++
++def _search_labels(*names: str) -> dict[str, Any]:
++    return {
++        "_links": {"self": "/fixture-labels"},
++        "limit": 200,
++        "results": [{"name": name} for name in names],
++        "size": len(names),
++        "start": 0,
++    }
++
++
++def _assert_fixture_tree_is_synthetic(value: Any) -> None:
++    if isinstance(value, dict):
++        assert set(value).issubset(_ALLOWED_FIXTURE_KEYS)
++        for nested_value in value.values():
++            _assert_fixture_tree_is_synthetic(nested_value)
++        return
++    if isinstance(value, list):
++        for nested_value in value:
++            _assert_fixture_tree_is_synthetic(nested_value)
++        return
++    if isinstance(value, str):
++        assert value in _ALLOWED_FIXTURE_STRINGS
++        return
++    if type(value) is int:
++        assert value in _ALLOWED_FIXTURE_INTEGERS
++        return
++    raise AssertionError(f"fixture contains unsupported scalar type: {type(value)}")
++
++
++def _map_root(payload: dict[str, Any]):
++    return ConfluenceDataCenterPageMetadataMapper.map_root(
++        payload=payload,
++        expected_root_page_id=ROOT_PAGE_ID,
++        expected_space_key=SPACE_KEY,
++    )
++
++
++def _map_search_result(result: dict[str, Any]):
++    return ConfluenceDataCenterPageMetadataMapper.map_search_result(
++        result=result,
++        selected_root_page_id=ROOT_PAGE_ID,
++        expected_space_key=SPACE_KEY,
++    )
++
++
++def _parse_search_page(
++    payload: dict[str, Any],
++    *,
++    expected_start: int = 0,
++):
++    return ConfluenceDataCenterPageMetadataMapper.parse_search_page(
++        payload=payload,
++        expected_start=expected_start,
++        expected_limit=2,
++        selected_root_page_id=ROOT_PAGE_ID,
++        expected_space_key=SPACE_KEY,
++    )

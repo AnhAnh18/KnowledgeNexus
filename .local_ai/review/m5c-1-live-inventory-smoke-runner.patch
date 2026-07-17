@@ -1,0 +1,1652 @@
+diff --git a/docs/runbooks/M5C_CONFLUENCE_INVENTORY_SMOKE.md b/docs/runbooks/M5C_CONFLUENCE_INVENTORY_SMOKE.md
+new file mode 100644
+index 0000000..2992ec0
+--- /dev/null
++++ b/docs/runbooks/M5C_CONFLUENCE_INVENTORY_SMOKE.md
+@@ -0,0 +1,202 @@
++# M5C — Confluence inventory smoke run
++
++Operator runbook for the first live execution of the approved Confluence Data
++Center inventory path. Run this on the Confluence-connected machine only.
++
++## 1. What this does
++
++It performs a **read-only page-metadata inventory** of one selected root, using
++the approved production components exactly as reviewed:
++
++```
++UrllibConfluenceHttpTransport
++  -> ConfluenceDataCenterInventoryAdapter
++  -> BuildConfluenceInventory
++  -> ConfluenceInventoryReportWriter
++```
++
++The runner adds no HTTP, CQL, pagination, parsing, normalization, scope, or
++report-serialization logic of its own.
++
++## 2. What it does not do
++
++- Issues **`GET` only**, through the M5B-2 adapter. No other endpoint is called.
++- Does **not** fetch page bodies, attachments, permissions, restrictions, or
++  ACL. Attachment counts are therefore always unknown, never zero.
++- Does **not** retry, sleep, rate-limit, checkpoint, or resume. Any failure
++  stops the run.
++- Does **not** export a snapshot, create records, index, or embed.
++
++## 3. Scope for the first run
++
++Use the **same small test root** exercised during M5B-0 (8 descendants,
++including one nested descendant). Do **not** point the first run at the large
++production space root.
++
++If that root is unavailable, pick another known non-sensitive root with **at
++most 20 descendants**.
++
++The first-run configuration is:
++
++```
++page_size        = 2
++max_search_pages = 10
++```
++
++This deliberately exercises roughly four pagination windows while staying under
++the adapter's safety budget. `2 x 10` allows at most 20 descendants: if the run
++exits with category `pagination_limit`, the chosen root is **too large for a
++smoke run**. Select a smaller root. Do **not** silently raise
++`--max-search-pages` and do not probe the large production root.
++
++## 4. Required environment
++
++Two variables, set in the shell only. The token is **never** accepted on the
++command line and is never printed, logged, or written to any output file.
++
++| Variable | Meaning |
++|---|---|
++| `CONFLUENCE_BASE_URL` | HTTPS base URL, including any context path. No user-info, query, or fragment. |
++| `CONFLUENCE_PAT` | Personal access token with read access to the selected space. |
++
++The runner never loads `.env` automatically and never persists these values.
++
++## 5. Output directory
++
++`--output-dir` must:
++
++- be **outside the repository working tree**;
++- already exist;
++- be a directory;
++- be **empty** before the run.
++
++The runner refuses anything else. It never writes reports inside the repository
++and never modifies `.gitignore`.
++
++## 6. Run it
++
++Replace every placeholder. Do not paste real values into any committed file.
++
++```powershell
++$env:CONFLUENCE_BASE_URL = "<https-base-url>"
++$env:CONFLUENCE_PAT      = "<personal-access-token>"
++
++New-Item -ItemType Directory -Force "<output-dir-outside-repo>"
++
++cd "<repository-root>"
++$env:PYTHONPATH = "src"
++
++python -m knowledgenexus.foundation.cli.confluence_inventory_smoke `
++  --source-id "<source-id>" `
++  --space-key "<space-key>" `
++  --root-page-id "<numeric-root-page-id>" `
++  --page-size 2 `
++  --max-search-pages 10 `
++  --output-dir "<output-dir-outside-repo>"
++```
++
++Add one flag per excluded subtree, if any:
++
++```powershell
++  --exclude-subtree-page-id "<numeric-page-id>"
++```
++
++## 7. Success
++
++Exit code `0`, and the output directory contains **exactly three** files:
++
++| File | Contents |
++|---|---|
++| `pages_inventory.jsonl` | Real inventory metadata. **Stays on this machine.** |
++| `inventory_report.csv` | Real inventory metadata. **Stays on this machine.** |
++| `m5c_smoke_summary.json` | Counts, booleans, limits, and report hashes only. |
++
++The summary is also printed to stdout. It contains no source ID, space key,
++page ID, title, path, host, URL, CQL, header, or token.
++
++## 8. Failure
++
++Exit code is non-zero and one sanitized JSON object is written to stderr:
++
++```json
++{ "status": "failed", "category": "<category>", "cleanup_incomplete": false }
++```
++
++No summary file is written. `m5c_smoke_summary.json` is **success-only** — its
++presence is itself the evidence that the run passed.
++
++| Exit | Category | Usual meaning |
++|---|---|---|
++| 2 | `configuration` | Missing/invalid env or arguments. |
++| 3 | `output_directory` | Output dir missing, not a directory, non-empty, or inside the repo. |
++| 4 | `connection` | The host could not be reached. |
++| 5 | `authentication_or_http` | Non-2xx status, or an HTML login/SSO page instead of JSON. |
++| 6 | `response_contract` | The response did not satisfy the approved contract. |
++| 7 | `pagination_limit` | Budget exhausted — the root is too large for a smoke run. |
++| 8 | `report_write` | Reports could not be written. |
++| 9 | `report_verification` | Written reports failed verification. |
++| 1 | `unexpected` | Anything else. |
++
++Failure output never contains the host, URL, space key, page IDs, titles,
++paths, CQL, credentials, headers, payloads, or raw exception text. A mistyped
++flag — including `--pat <token>` — is rejected without echoing the arguments.
++
++**Inspect the output directory after any failure before reusing it.** Files this
++run created are removed, but a `report_verification` failure can mean the report
++writer left its own `.<name>.tmp` files behind; those hold a second copy of real
++inventory metadata and are not deleted here, because this runner never removes
++entries it did not create. If `cleanup_incomplete` is `true`, even files this run
++created could not be removed.
++
++## 9. Root labels are not authoritative
++
++M5C requests `expand=space,version` for the selected root. It does **not**
++request root labels.
++
++- The root row's **empty labels cell is not authoritative**. It means
++  *unknown / not observed*, not *confirmed no labels*.
++- Do **not** use root labels to choose exclude-subtree configuration.
++- Exclusions are **explicit page IDs** chosen from the known tree.
++- **Descendant** labels are different: they come from the confirmed
++  search-response metadata and are trustworthy.
++
++The summary states this explicitly via `root_labels_requested: false` and
++`root_labels_interpretation: "unknown_not_requested"`.
++
++## 10. What may leave this machine
++
++Only:
++
++1. `m5c_smoke_summary.json`;
++2. a **manually sanitized** completion notice you have read in full.
++
++`pages_inventory.jsonl` and `inventory_report.csv` contain real page titles,
++paths, and identifiers. They **must remain on this machine**. Do not paste them
++into a chat, ticket, commit, or any other tool.
++
++## 11. Clear the environment afterwards
++
++```powershell
++Remove-Item Env:\CONFLUENCE_PAT
++Remove-Item Env:\CONFLUENCE_BASE_URL
++Remove-Item Env:\PYTHONPATH
++```
++
++Close the shell. The token lives only in that process; nothing on disk holds it.
++
++## 12. Verify no live data entered the repository
++
++From the repository root:
++
++```powershell
++git status --porcelain
++```
++
++Expect **no** entry for `pages_inventory.jsonl`, `inventory_report.csv`,
++`m5c_smoke_summary.json`, or any path under your output directory. If any
++appears, the output directory was inside the repository — move it out and do
++not commit. Confirm with:
++
++```powershell
++git diff --cached --name-only
++```
+diff --git a/src/knowledgenexus/foundation/cli/__init__.py b/src/knowledgenexus/foundation/cli/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/knowledgenexus/foundation/cli/confluence_inventory_smoke.py b/src/knowledgenexus/foundation/cli/confluence_inventory_smoke.py
+new file mode 100644
+index 0000000..00da22b
+--- /dev/null
++++ b/src/knowledgenexus/foundation/cli/confluence_inventory_smoke.py
+@@ -0,0 +1,600 @@
++"""Operator smoke runner for the approved Confluence Data Center inventory path.
++
++Composes the approved production components and adds no HTTP, CQL, pagination,
++parsing, normalization, scope, or report-serialization behaviour of its own:
++
++    environment credentials
++        -> UrllibConfluenceHttpTransport
++        -> ConfluenceDataCenterInventoryAdapter
++        -> BuildConfluenceInventory
++        -> ConfluenceInventoryReportWriter
++        -> local reports + non-sensitive smoke summary
++
++Run with:
++
++    python -m knowledgenexus.foundation.cli.confluence_inventory_smoke ...
++"""
++
++from __future__ import annotations
++
++import argparse
++import csv
++import hashlib
++import json
++import os
++import sys
++import tempfile
++from collections.abc import Sequence
++from pathlib import Path
++from typing import NoReturn
++
++from knowledgenexus.foundation.application.use_cases.build_confluence_inventory import (  # noqa: E501
++    BuildConfluenceInventory,
++)
++from knowledgenexus.foundation.domain.models.confluence_inventory_item import (
++    ConfluenceInventoryItem,
++)
++from knowledgenexus.foundation.domain.models.confluence_source_config import (
++    ConfluenceExcludeSubtree,
++    ConfluenceIncludeRoot,
++    ConfluenceSourceConfig,
++)
++from knowledgenexus.foundation.infrastructure.confluence import (
++    ConfluenceDataCenterInventoryAdapter,
++    ConfluenceDataCenterPaginationError,
++    ConfluenceDataCenterPayloadError,
++    ConfluenceDataCenterRequestError,
++    ConfluenceHttpError,
++    UrllibConfluenceHttpTransport,
++)
++from knowledgenexus.foundation.infrastructure.exporters.confluence_inventory_report_writer import (  # noqa: E501
++    CSV_COLUMNS,
++    INVENTORY_REPORT_FILE_NAME,
++    PAGES_INVENTORY_FILE_NAME,
++    ConfluenceInventoryReportWriter,
++)
++
++SUMMARY_FILE_NAME = "m5c_smoke_summary.json"
++BASE_URL_ENV = "CONFLUENCE_BASE_URL"
++PAT_ENV = "CONFLUENCE_PAT"
++
++CATEGORY_CONFIGURATION = "configuration"
++CATEGORY_OUTPUT_DIRECTORY = "output_directory"
++CATEGORY_CONNECTION = "connection"
++CATEGORY_AUTHENTICATION_OR_HTTP = "authentication_or_http"
++CATEGORY_RESPONSE_CONTRACT = "response_contract"
++CATEGORY_PAGINATION_LIMIT = "pagination_limit"
++CATEGORY_REPORT_WRITE = "report_write"
++CATEGORY_REPORT_VERIFICATION = "report_verification"
++CATEGORY_UNEXPECTED = "unexpected"
++
++EXIT_CODES = {
++    CATEGORY_UNEXPECTED: 1,
++    CATEGORY_CONFIGURATION: 2,
++    CATEGORY_OUTPUT_DIRECTORY: 3,
++    CATEGORY_CONNECTION: 4,
++    CATEGORY_AUTHENTICATION_OR_HTTP: 5,
++    CATEGORY_RESPONSE_CONTRACT: 6,
++    CATEGORY_PAGINATION_LIMIT: 7,
++    CATEGORY_REPORT_WRITE: 8,
++    CATEGORY_REPORT_VERIFICATION: 9,
++}
++
++# The transport deliberately raises one sanitized error type without a status
++# code or typed cause, so these literals mirror its messages. If a later
++# reliability task introduces typed transport failures, replace this mapping.
++_TRANSPORT_MESSAGE_CATEGORIES = (
++    ("HTTP status", CATEGORY_AUTHENTICATION_OR_HTTP),
++    ("non-JSON content type", CATEGORY_AUTHENTICATION_OR_HTTP),
++    ("malformed JSON", CATEGORY_RESPONSE_CONTRACT),
++    ("non-object JSON payload", CATEGORY_RESPONSE_CONTRACT),
++    ("response size limit", CATEGORY_RESPONSE_CONTRACT),
++)
++
++# Header-shaped patterns, not bare words: a legitimate page may be titled
++# "Authorization Guide", and the reports hold real inventory metadata.
++_FORBIDDEN_OUTPUT_PATTERNS = (
++    "Authorization: Bearer",
++    "Set-Cookie:",
++)
++
++_SUMMARY_INT_FIELDS = (
++    "total_items",
++    "included_items",
++    "excluded_subtree_items",
++    "root_items",
++    "maximum_relative_depth",
++    "pages_inventory_jsonl_records",
++    "inventory_report_csv_data_rows",
++    "page_size",
++    "max_search_pages",
++)
++_SUMMARY_HASH_FIELDS = (
++    "pages_inventory_jsonl_sha256",
++    "inventory_report_csv_sha256",
++)
++_SUMMARY_FIXED_FIELDS = {
++    "status": "passed",
++    "attachment_count_all_unknown": True,
++    "root_labels_requested": False,
++    "root_labels_interpretation": "unknown_not_requested",
++}
++
++_REPO_ROOT = Path(__file__).resolve().parents[4]
++
++
++class SmokeFailure(Exception):
++    """A sanitized, category-tagged smoke-run failure."""
++
++    def __init__(self, category: str) -> None:
++        super().__init__(category)
++        self.category = category
++
++
++def main(argv: Sequence[str] | None = None) -> int:
++    created_paths: list[Path] = []
++    try:
++        return _run(args=_parse_args(argv), created_paths=created_paths)
++    except SystemExit as exc:
++        # `--help` only: argparse prints its own text, which holds no argv value.
++        return int(exc.code or 0)
++    except SmokeFailure as failure:
++        cleanup_incomplete = not _cleanup(created_paths)
++        _emit_failure(category=failure.category, cleanup_incomplete=cleanup_incomplete)
++        return EXIT_CODES[failure.category]
++    except BaseException:
++        # Never let an original exception reach stderr: it may carry the URL,
++        # host, CQL, identifiers, titles, payload, or credential.
++        cleanup_incomplete = not _cleanup(created_paths)
++        _emit_failure(
++            category=CATEGORY_UNEXPECTED,
++            cleanup_incomplete=cleanup_incomplete,
++        )
++        return EXIT_CODES[CATEGORY_UNEXPECTED]
++
++
++def _run(*, args: argparse.Namespace, created_paths: list[Path]) -> int:
++    base_url, personal_access_token = _require_credentials()
++    output_dir = _require_empty_output_dir(args.output_dir)
++    config = _build_config(args)
++
++    items = _collect_inventory(
++        config=config,
++        base_url=base_url,
++        personal_access_token=personal_access_token,
++        max_search_pages=args.max_search_pages,
++    )
++
++    jsonl_path = output_dir / PAGES_INVENTORY_FILE_NAME
++    csv_path = output_dir / INVENTORY_REPORT_FILE_NAME
++    summary_path = output_dir / SUMMARY_FILE_NAME
++    try:
++        ConfluenceInventoryReportWriter.write(output_dir=output_dir, items=items)
++    except Exception as exc:
++        raise SmokeFailure(CATEGORY_REPORT_WRITE) from exc
++    # Only now are these reports demonstrably ours. The writer publishes with an
++    # atomic no-clobber link and rolls its own links back on failure, so a target
++    # that exists before it returns may belong to another process; registering a
++    # pathname earlier would let cleanup delete that process's file.
++    created_paths.extend((jsonl_path, csv_path))
++    _require_exact_output_tree(
++        output_dir,
++        {PAGES_INVENTORY_FILE_NAME, INVENTORY_REPORT_FILE_NAME},
++    )
++
++    summary = _verify_and_build_summary(
++        items=items,
++        jsonl_path=jsonl_path,
++        csv_path=csv_path,
++        personal_access_token=personal_access_token,
++        page_size=args.page_size,
++        max_search_pages=args.max_search_pages,
++    )
++    summary_bytes = _render_summary(summary)
++    _require_summary_is_safe(
++        summary_bytes=summary_bytes,
++        base_url=base_url,
++        personal_access_token=personal_access_token,
++    )
++
++    _publish_summary(
++        summary_path=summary_path,
++        summary_bytes=summary_bytes,
++        created_paths=created_paths,
++    )
++    _require_exact_output_tree(
++        output_dir,
++        {PAGES_INVENTORY_FILE_NAME, INVENTORY_REPORT_FILE_NAME, SUMMARY_FILE_NAME},
++    )
++
++    sys.stdout.write(summary_bytes.decode("utf-8"))
++    return 0
++
++
++def _publish_summary(
++    *,
++    summary_path: Path,
++    summary_bytes: bytes,
++    created_paths: list[Path],
++) -> None:
++    """Publish the success-only summary without clobbering another writer.
++
++    Mirrors the M5A report writer: an exclusively created same-directory
++    temporary, then an atomic no-clobber hard link. Registering a pathname is not
++    ownership, so a path joins `created_paths` only once this runner has actually
++    created it — before that, cleanup could delete a concurrent creator's file.
++
++    The temporary is registered the moment it exists, so a failing write, flush,
++    or close still leaves nothing behind: the runbook makes the summary's
++    presence the proof that the run passed.
++    """
++    temp_path: Path | None = None
++    try:
++        with tempfile.NamedTemporaryFile(
++            "wb",
++            dir=summary_path.parent,
++            prefix=f".{summary_path.name}.",
++            suffix=".tmp",
++            delete=False,
++        ) as temp_file:
++            temp_path = Path(temp_file.name)
++            created_paths.append(temp_path)
++            temp_file.write(summary_bytes)
++    except OSError as exc:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++
++    try:
++        os.link(temp_path, summary_path)
++    except OSError as exc:
++        # Includes FileExistsError: another process owns that name, so it must
++        # not be replaced and must not be registered for cleanup.
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++    created_paths.append(summary_path)
++
++    try:
++        temp_path.unlink()
++    except OSError as exc:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++
++
++def _require_exact_output_tree(output_dir: Path, expected: set[str]) -> None:
++    """Require the output directory to hold exactly `expected` as regular files.
++
++    The M5A writer swallows failures when removing its own same-directory
++    temporaries, so a leftover `.pages_inventory.jsonl.<random>.tmp` would hold a
++    second copy of real inventory metadata while the run still reported success.
++    Those temporaries are writer-owned, so fail closed and let the operator
++    inspect rather than deleting entries this runner did not create.
++    """
++    try:
++        entries = list(output_dir.iterdir())
++    except OSError as exc:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++    if {entry.name for entry in entries} != expected:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    if any(entry.is_symlink() or not entry.is_file() for entry in entries):
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++
++
++def _collect_inventory(
++    *,
++    config: ConfluenceSourceConfig,
++    base_url: str,
++    personal_access_token: str,
++    max_search_pages: int,
++) -> tuple[ConfluenceInventoryItem, ...]:
++    try:
++        transport = UrllibConfluenceHttpTransport(
++            base_url=base_url,
++            personal_access_token=personal_access_token,
++        )
++    except (TypeError, ValueError) as exc:
++        raise SmokeFailure(CATEGORY_CONFIGURATION) from exc
++
++    adapter = ConfluenceDataCenterInventoryAdapter(
++        transport=transport,
++        max_search_pages=max_search_pages,
++    )
++    try:
++        return BuildConfluenceInventory(inventory_port=adapter).execute(config=config)
++    except ConfluenceDataCenterPaginationError as exc:
++        raise SmokeFailure(CATEGORY_PAGINATION_LIMIT) from exc
++    except ConfluenceDataCenterRequestError as exc:
++        raise SmokeFailure(_categorize_request_error(exc)) from exc
++    except ConfluenceHttpError as exc:
++        raise SmokeFailure(CATEGORY_CONNECTION) from exc
++    except ConfluenceDataCenterPayloadError as exc:
++        raise SmokeFailure(CATEGORY_RESPONSE_CONTRACT) from exc
++    except (TypeError, ValueError) as exc:
++        raise SmokeFailure(CATEGORY_CONFIGURATION) from exc
++
++
++def _categorize_request_error(error: ConfluenceDataCenterRequestError) -> str:
++    message = str(error)
++    for marker, category in _TRANSPORT_MESSAGE_CATEGORIES:
++        if marker in message:
++            return category
++    return CATEGORY_CONNECTION
++
++
++def _verify_and_build_summary(
++    *,
++    items: tuple[ConfluenceInventoryItem, ...],
++    jsonl_path: Path,
++    csv_path: Path,
++    personal_access_token: str,
++    page_size: int,
++    max_search_pages: int,
++) -> dict[str, object]:
++    total_items = len(items)
++    included_items = sum(1 for item in items if item.scope_status == "included")
++    excluded_subtree_items = sum(
++        1 for item in items if item.scope_status == "excluded_subtree"
++    )
++    root_items = sum(1 for item in items if not item.ancestor_page_ids)
++
++    if total_items <= 0:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    if root_items != 1:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    if total_items != included_items + excluded_subtree_items:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    if any(item.attachment_count is not None for item in items):
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++
++    # Reopen both published reports: the writer's return value is its own input
++    # count, not evidence about the bytes on disk.
++    jsonl_records = _count_jsonl_records(jsonl_path)
++    csv_data_rows = _count_csv_data_rows(csv_path)
++    if jsonl_records != total_items or csv_data_rows != total_items:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++
++    for path in (jsonl_path, csv_path):
++        _require_report_has_no_credential_material(
++            path=path,
++            personal_access_token=personal_access_token,
++        )
++
++    return {
++        **_SUMMARY_FIXED_FIELDS,
++        "total_items": total_items,
++        "included_items": included_items,
++        "excluded_subtree_items": excluded_subtree_items,
++        "root_items": root_items,
++        "maximum_relative_depth": max(
++            len(item.ancestor_page_ids) for item in items
++        ),
++        "pages_inventory_jsonl_records": jsonl_records,
++        "inventory_report_csv_data_rows": csv_data_rows,
++        "pages_inventory_jsonl_sha256": _sha256(jsonl_path),
++        "inventory_report_csv_sha256": _sha256(csv_path),
++        "page_size": page_size,
++        "max_search_pages": max_search_pages,
++    }
++
++
++def _count_jsonl_records(path: Path) -> int:
++    records = 0
++    try:
++        with path.open(encoding="utf-8") as handle:
++            for line in handle:
++                if line.strip() == "":
++                    continue
++                json.loads(line)
++                records += 1
++    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++    return records
++
++
++def _count_csv_data_rows(path: Path) -> int:
++    # Titles and page paths may legally contain commas, quotes, or newlines, so
++    # only the csv module can count logical records.
++    try:
++        with path.open(encoding="utf-8", newline="") as handle:
++            reader = csv.reader(handle)
++            try:
++                header = next(reader)
++            except StopIteration as exc:
++                raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++            if tuple(header) != CSV_COLUMNS:
++                raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++            return sum(1 for row in reader if row)
++    except (OSError, UnicodeDecodeError, csv.Error) as exc:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++
++
++def _require_report_has_no_credential_material(
++    *,
++    path: Path,
++    personal_access_token: str,
++) -> None:
++    try:
++        text = path.read_text(encoding="utf-8")
++    except (OSError, UnicodeDecodeError) as exc:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++    if personal_access_token in text:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    if any(pattern in text for pattern in _FORBIDDEN_OUTPUT_PATTERNS):
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++
++
++def _render_summary(summary: dict[str, object]) -> bytes:
++    return (
++        json.dumps(
++            summary,
++            ensure_ascii=False,
++            sort_keys=True,
++            indent=2,
++            allow_nan=False,
++        )
++        + "\n"
++    ).encode("utf-8")
++
++
++def _require_summary_is_safe(
++    *,
++    summary_bytes: bytes,
++    base_url: str,
++    personal_access_token: str,
++) -> None:
++    """Prove the summary carries no source, scope, connection, or secret value.
++
++    The source ID, space key, root page ID, and excluded page IDs are excluded
++    structurally: every key is allowlisted and every value is an integer, a
++    boolean, or a fixed literal. They are not also matched as text because a
++    numeric page ID collides with a count or a hash substring, which would fail
++    a legitimate run.
++    """
++    text = summary_bytes.decode("utf-8")
++    if personal_access_token in text or base_url in text:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++
++    summary = json.loads(text)
++    expected_keys = {
++        *_SUMMARY_FIXED_FIELDS,
++        *_SUMMARY_INT_FIELDS,
++        *_SUMMARY_HASH_FIELDS,
++    }
++    if set(summary) != expected_keys:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    for field, expected_value in _SUMMARY_FIXED_FIELDS.items():
++        if summary[field] != expected_value:
++            raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    for field in _SUMMARY_INT_FIELDS:
++        value = summary[field]
++        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
++            raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++    for field in _SUMMARY_HASH_FIELDS:
++        value = summary[field]
++        if not isinstance(value, str) or len(value) != 64:
++            raise SmokeFailure(CATEGORY_REPORT_VERIFICATION)
++
++
++def _sha256(path: Path) -> str:
++    try:
++        return hashlib.sha256(path.read_bytes()).hexdigest()
++    except OSError as exc:
++        raise SmokeFailure(CATEGORY_REPORT_VERIFICATION) from exc
++
++
++def _require_credentials() -> tuple[str, str]:
++    base_url = os.environ.get(BASE_URL_ENV)
++    personal_access_token = os.environ.get(PAT_ENV)
++    if not base_url or not personal_access_token:
++        raise SmokeFailure(CATEGORY_CONFIGURATION)
++    return base_url, personal_access_token
++
++
++def _require_empty_output_dir(output_dir: Path) -> Path:
++    resolved = output_dir.resolve()
++    if _is_inside(resolved, _REPO_ROOT):
++        raise SmokeFailure(CATEGORY_OUTPUT_DIRECTORY)
++    if not resolved.exists() or not resolved.is_dir():
++        raise SmokeFailure(CATEGORY_OUTPUT_DIRECTORY)
++    try:
++        if any(resolved.iterdir()):
++            raise SmokeFailure(CATEGORY_OUTPUT_DIRECTORY)
++    except OSError as exc:
++        raise SmokeFailure(CATEGORY_OUTPUT_DIRECTORY) from exc
++    return resolved
++
++
++def _is_inside(path: Path, parent: Path) -> bool:
++    normalized_path = os.path.normcase(str(path))
++    normalized_parent = os.path.normcase(str(parent))
++    return normalized_path == normalized_parent or normalized_path.startswith(
++        normalized_parent + os.sep
++    )
++
++
++def _build_config(args: argparse.Namespace) -> ConfluenceSourceConfig:
++    try:
++        return ConfluenceSourceConfig(
++            source_id=args.source_id,
++            space_key=args.space_key,
++            include_roots=(ConfluenceIncludeRoot(page_id=args.root_page_id),),
++            exclude_subtrees=tuple(
++                ConfluenceExcludeSubtree(page_id=page_id)
++                for page_id in args.exclude_subtree_page_id
++            ),
++            page_size=args.page_size,
++        )
++    except (TypeError, ValueError) as exc:
++        raise SmokeFailure(CATEGORY_CONFIGURATION) from exc
++
++
++def _cleanup(created_paths: list[Path]) -> bool:
++    """Remove only files this run created. Never touch the output directory."""
++    complete = True
++    for path in reversed(created_paths):
++        try:
++            path.unlink(missing_ok=True)
++        except OSError:
++            complete = False
++    return complete
++
++
++def _emit_failure(*, category: str, cleanup_incomplete: bool) -> None:
++    sys.stderr.write(
++        json.dumps(
++            {
++                "status": "failed",
++                "category": category,
++                "cleanup_incomplete": cleanup_incomplete,
++            },
++            ensure_ascii=False,
++            sort_keys=True,
++            indent=2,
++            allow_nan=False,
++        )
++        + "\n"
++    )
++
++
++def _positive_int(value: str) -> int:
++    parsed = int(value)
++    if parsed <= 0:
++        raise argparse.ArgumentTypeError("must be a positive integer")
++    return parsed
++
++
++class _SanitizedArgumentParser(argparse.ArgumentParser):
++    """An argument parser that never echoes argv.
++
++    `argparse.ArgumentParser.error()` writes the offending arguments to stderr
++    before raising, which would print a mistyped `--pat <token>`, base URL, space
++    key, or page ID verbatim. Every parse failure funnels through `error()`, so
++    overriding it keeps argv out of the output entirely.
++    """
++
++    def error(self, message: str) -> NoReturn:
++        raise SmokeFailure(CATEGORY_CONFIGURATION)
++
++
++def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
++    parser = _SanitizedArgumentParser(
++        prog="confluence-inventory-smoke",
++        description=(
++            "Read-only Confluence Data Center metadata inventory smoke run. "
++            f"Requires {BASE_URL_ENV} and {PAT_ENV} in the environment; the "
++            "personal access token is never accepted on the command line."
++        ),
++    )
++    parser.add_argument("--source-id", required=True)
++    parser.add_argument("--space-key", required=True)
++    parser.add_argument("--root-page-id", required=True)
++    parser.add_argument("--page-size", required=True, type=_positive_int)
++    parser.add_argument("--max-search-pages", required=True, type=_positive_int)
++    parser.add_argument("--output-dir", required=True, type=Path)
++    parser.add_argument(
++        "--exclude-subtree-page-id",
++        action="append",
++        default=[],
++        metavar="PAGE_ID",
++    )
++    return parser.parse_args(argv)
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/foundation/cli/test_confluence_inventory_smoke.py b/tests/foundation/cli/test_confluence_inventory_smoke.py
+new file mode 100644
+index 0000000..d142d06
+--- /dev/null
++++ b/tests/foundation/cli/test_confluence_inventory_smoke.py
+@@ -0,0 +1,829 @@
++from __future__ import annotations
++
++import copy
++import csv
++import hashlib
++import json
++from collections.abc import Callable, Mapping
++from dataclasses import replace
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from knowledgenexus.foundation.infrastructure.confluence import (
++    ConfluenceDataCenterPayloadError,
++    ConfluenceHttpError,
++)
++from knowledgenexus.foundation.infrastructure.confluence import (
++    confluence_http_transport as transport_module,
++)
++from knowledgenexus.foundation.infrastructure.exporters import (
++    confluence_inventory_report_writer as writer_module,
++)
++from knowledgenexus.foundation.cli import confluence_inventory_smoke as smoke
++
++
++FIXTURE_DIR = (
++    Path(__file__).resolve().parents[2]
++    / "fixtures"
++    / "foundation"
++    / "confluence_data_center"
++)
++ROOT_PAGE_ID = "1000"
++DIRECT_CHILD_ID = "1001"
++NESTED_CHILD_ID = "1002"
++TERMINAL_CHILD_ID = "1003"
++SPACE_KEY = "SPACE"
++SOURCE_ID = "smoke-fixture-source"
++BASE_URL = "https://fixture.invalid/confluence"
++PAT = "fixture-secret-token"
++ROOT_PATH = f"/rest/api/content/{ROOT_PAGE_ID}"
++SEARCH_PATH = "/rest/api/search"
++_SYNTHETIC_ID_MAP = {
++    "GLOBAL_PAGE": "900",
++    "SELECTED_PAGE": ROOT_PAGE_ID,
++    "DIRECT_CHILD": DIRECT_CHILD_ID,
++    "NESTED_CHILD": NESTED_CHILD_ID,
++    "TERMINAL_CHILD": TERMINAL_CHILD_ID,
++}
++
++
++@pytest.fixture(autouse=True)
++def _forbid_network(monkeypatch: pytest.MonkeyPatch) -> None:
++    """Prove no test can reach the network through the real transport."""
++
++    def explode(*args: object, **kwargs: object) -> object:
++        raise AssertionError("smoke tests must not open a network connection")
++
++    monkeypatch.setattr(transport_module.urllib.request, "build_opener", explode)
++    monkeypatch.setattr(transport_module.urllib.request, "urlopen", explode)
++
++
++@pytest.fixture(autouse=True)
++def _credentials(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv(smoke.BASE_URL_ENV, BASE_URL)
++    monkeypatch.setenv(smoke.PAT_ENV, PAT)
++
++
++class FakeTransport:
++    instances: list[FakeTransport] = []
++
++    def __init__(self, *, base_url: str, personal_access_token: str) -> None:
++        self.base_url = base_url
++        self.personal_access_token = personal_access_token
++        self.requests: list[dict[str, Any]] = []
++        FakeTransport.instances.append(self)
++
++    def get_json(
++        self,
++        *,
++        path: str,
++        query: Mapping[str, str],
++    ) -> Mapping[str, object]:
++        self.requests.append({"path": path, "query": dict(query)})
++        return _serve_fixtures(path, dict(query))
++
++
++def _install_transport(
++    monkeypatch: pytest.MonkeyPatch,
++    handler: Callable[[str, dict[str, str]], Mapping[str, object]] | None = None,
++) -> None:
++    FakeTransport.instances = []
++
++    class _Transport(FakeTransport):
++        def get_json(
++            self,
++            *,
++            path: str,
++            query: Mapping[str, str],
++        ) -> Mapping[str, object]:
++            self.requests.append({"path": path, "query": dict(query)})
++            served = handler or _serve_fixtures
++            return served(path, dict(query))
++
++    monkeypatch.setattr(smoke, "UrllibConfluenceHttpTransport", _Transport)
++
++
++def _argv(output_dir: Path, **overrides: Any) -> list[str]:
++    argv = [
++        "--source-id",
++        overrides.get("source_id", SOURCE_ID),
++        "--space-key",
++        overrides.get("space_key", SPACE_KEY),
++        "--root-page-id",
++        overrides.get("root_page_id", ROOT_PAGE_ID),
++        "--page-size",
++        str(overrides.get("page_size", 2)),
++        "--max-search-pages",
++        str(overrides.get("max_search_pages", 10)),
++        "--output-dir",
++        str(output_dir),
++    ]
++    for page_id in overrides.get("exclude", ()):
++        argv.extend(["--exclude-subtree-page-id", page_id])
++    return argv
++
++
++def test_successful_run_writes_exactly_three_files(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    assert sorted(path.name for path in tmp_path.iterdir()) == [
++        "inventory_report.csv",
++        "m5c_smoke_summary.json",
++        "pages_inventory.jsonl",
++    ]
++
++
++def test_run_composes_production_transport_adapter_and_use_case(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    transport = FakeTransport.instances[0]
++    assert transport.base_url == BASE_URL
++    assert transport.personal_access_token == PAT
++    # Exact approved M5B-2 request shape, produced by the production adapter.
++    assert transport.requests[0] == {
++        "path": ROOT_PATH,
++        "query": {"expand": "space,version"},
++    }
++    assert transport.requests[1]["path"] == SEARCH_PATH
++    assert transport.requests[1]["query"]["cql"] == (
++        f'space="{SPACE_KEY}" and ancestor={ROOT_PAGE_ID} and type=page'
++    )
++    assert transport.requests[1]["query"]["limit"] == "2"
++
++
++def test_reports_are_written_by_the_m5a_writer_not_hand_serialized(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    with (tmp_path / "inventory_report.csv").open(encoding="utf-8", newline="") as fh:
++        header = next(csv.reader(fh))
++    assert tuple(header) == smoke.CSV_COLUMNS
++
++    records = [
++        json.loads(line)
++        for line in (tmp_path / "pages_inventory.jsonl").read_text(
++            encoding="utf-8"
++        ).splitlines()
++    ]
++    assert [record["page_id"] for record in records] == [
++        ROOT_PAGE_ID,
++        DIRECT_CHILD_ID,
++        TERMINAL_CHILD_ID,
++        NESTED_CHILD_ID,
++    ]
++
++
++def test_summary_counts_depth_and_flags_are_correct(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path, exclude=(DIRECT_CHILD_ID,))) == 0
++
++    summary = _summary(tmp_path)
++    assert summary["status"] == "passed"
++    assert summary["total_items"] == 4
++    assert summary["root_items"] == 1
++    assert summary["included_items"] == 2
++    assert summary["excluded_subtree_items"] == 2
++    assert summary["maximum_relative_depth"] == 2
++    assert summary["attachment_count_all_unknown"] is True
++    assert summary["root_labels_requested"] is False
++    assert summary["root_labels_interpretation"] == "unknown_not_requested"
++    assert summary["page_size"] == 2
++    assert summary["max_search_pages"] == 10
++
++
++def test_summary_row_counts_match_the_reopened_reports(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    summary = _summary(tmp_path)
++    jsonl_lines = [
++        line
++        for line in (tmp_path / "pages_inventory.jsonl")
++        .read_text(encoding="utf-8")
++        .splitlines()
++        if line.strip()
++    ]
++    with (tmp_path / "inventory_report.csv").open(encoding="utf-8", newline="") as fh:
++        csv_rows = list(csv.reader(fh))[1:]
++    assert summary["pages_inventory_jsonl_records"] == len(jsonl_lines) == 4
++    assert summary["inventory_report_csv_data_rows"] == len(csv_rows) == 4
++
++
++def test_csv_row_count_is_logical_not_physical_lines(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    # A real title may contain a newline; the CSV then has more physical lines
++    # than logical records.
++    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
++        payload = _serve_fixtures(path, query)
++        if path == SEARCH_PATH and query["start"] == "0":
++            payload["results"][0]["content"]["title"] = (
++                'Multi\nline, "quoted" title'
++            )
++        return payload
++
++    _install_transport(monkeypatch, handler)
++
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    csv_text = (tmp_path / "inventory_report.csv").read_text(encoding="utf-8")
++    summary = _summary(tmp_path)
++    assert len(csv_text.splitlines()) > summary["inventory_report_csv_data_rows"] + 1
++    assert summary["inventory_report_csv_data_rows"] == summary["total_items"] == 4
++
++
++def test_summary_hashes_match_the_published_report_bytes(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    summary = _summary(tmp_path)
++    assert summary["pages_inventory_jsonl_sha256"] == _sha256(
++        tmp_path / "pages_inventory.jsonl"
++    )
++    assert summary["inventory_report_csv_sha256"] == _sha256(
++        tmp_path / "inventory_report.csv"
++    )
++
++
++def test_summary_carries_no_source_scope_connection_or_secret_value(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path, exclude=(DIRECT_CHILD_ID,))) == 0
++
++    summary_text = (tmp_path / "m5c_smoke_summary.json").read_text(encoding="utf-8")
++    stdout = capsys.readouterr().out
++    for haystack in (summary_text, stdout):
++        for forbidden in (
++            SOURCE_ID,
++            SPACE_KEY,
++            BASE_URL,
++            "fixture.invalid",
++            PAT,
++            "Fixture Root Page",
++            "Fixture Nested Child",
++        ):
++            assert forbidden not in haystack
++    # Structural proof: only allowlisted keys, no free-text identifier field.
++    assert set(json.loads(summary_text)) == {
++        *smoke._SUMMARY_FIXED_FIELDS,
++        *smoke._SUMMARY_INT_FIELDS,
++        *smoke._SUMMARY_HASH_FIELDS,
++    }
++
++
++def test_summary_is_deterministic_strict_json(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    raw = (tmp_path / "m5c_smoke_summary.json").read_bytes()
++    assert raw.endswith(b"\n")
++    text = raw.decode("utf-8")
++    assert json.dumps(
++        json.loads(text),
++        ensure_ascii=False,
++        sort_keys=True,
++        indent=2,
++        allow_nan=False,
++    ) + "\n" == text
++
++
++@pytest.mark.parametrize("missing", (smoke.BASE_URL_ENV, smoke.PAT_ENV))
++def test_missing_credential_env_fails_as_configuration(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++    missing: str,
++) -> None:
++    _install_transport(monkeypatch)
++    monkeypatch.delenv(missing)
++
++    assert smoke.main(_argv(tmp_path)) == 2
++
++    assert json.loads(capsys.readouterr().err) == {
++        "status": "failed",
++        "category": "configuration",
++        "cleanup_incomplete": False,
++    }
++    assert list(tmp_path.iterdir()) == []
++
++
++@pytest.mark.parametrize("flag", ("--pat", "--personal-access-token", "--token"))
++def test_pat_cannot_be_supplied_through_the_cli(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    flag: str,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main([*_argv(tmp_path), flag, "REVIEW_SENTINEL_SECRET"]) == 2
++
++    # argparse echoes the offending arguments before raising; a mistyped
++    # `--pat <token>` must never reach the terminal or a shell log.
++    captured = capsys.readouterr()
++    for stream in (captured.out, captured.err):
++        assert "REVIEW_SENTINEL_SECRET" not in stream
++    assert json.loads(captured.err)["category"] == "configuration"
++    assert list(tmp_path.iterdir()) == []
++
++
++def test_invalid_cli_error_never_echoes_argv(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    _install_transport(monkeypatch)
++
++    sentinel_root_id = "7777777777"
++
++    assert (
++        smoke.main(
++            [
++                *_argv(tmp_path, root_page_id=sentinel_root_id),
++                "--not-a-real-flag",
++                BASE_URL,
++            ]
++        )
++        == 2
++    )
++
++    captured = capsys.readouterr()
++    for stream in (captured.out, captured.err):
++        for forbidden in (
++            BASE_URL,
++            "fixture.invalid",
++            sentinel_root_id,
++            "--not-a-real-flag",
++        ):
++            assert forbidden not in stream
++
++
++def test_help_still_works_and_returns_zero(
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    assert smoke.main(["--help"]) == 0
++
++    assert "confluence-inventory-smoke" in capsys.readouterr().out
++
++
++def test_output_dir_inside_the_repository_is_rejected(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(smoke._REPO_ROOT / "tests")) == 3
++
++    assert json.loads(capsys.readouterr().err)["category"] == "output_directory"
++
++
++def test_repository_root_itself_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(smoke._REPO_ROOT)) == 3
++
++
++def test_missing_output_dir_is_rejected(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path / "absent")) == 3
++
++
++def test_non_directory_output_path_is_rejected(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++    target = tmp_path / "a-file"
++    target.write_text("", encoding="utf-8")
++
++    assert smoke.main(_argv(target)) == 3
++
++
++def test_non_empty_output_dir_is_rejected(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++    (tmp_path / "pre-existing.txt").write_text("", encoding="utf-8")
++
++    assert smoke.main(_argv(tmp_path)) == 3
++    assert sorted(path.name for path in tmp_path.iterdir()) == ["pre-existing.txt"]
++
++
++def test_failed_inventory_writes_no_summary_and_leaves_no_reports(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
++        if path == ROOT_PATH:
++            return _root_payload()
++        raise ConfluenceHttpError("Confluence GET returned HTTP status 503")
++
++    _install_transport(monkeypatch, handler)
++
++    assert smoke.main(_argv(tmp_path)) == 5
++
++    assert list(tmp_path.iterdir()) == []
++    assert json.loads(capsys.readouterr().err)["status"] == "failed"
++
++
++@pytest.mark.parametrize(
++    ("message", "expected_code"),
++    (
++        ("Confluence GET returned HTTP status 401", 5),
++        ("Confluence GET failed", 4),
++        ("Confluence GET returned a non-JSON content type", 5),
++        ("Confluence GET returned malformed JSON", 6),
++    ),
++)
++def test_transport_failures_map_to_stable_categories(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    message: str,
++    expected_code: int,
++) -> None:
++    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
++        raise ConfluenceHttpError(message)
++
++    _install_transport(monkeypatch, handler)
++
++    assert smoke.main(_argv(tmp_path)) == expected_code
++
++
++def test_response_contract_failure_maps_to_its_category(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
++        return _root_payload(space_key="OUTSIDE")
++
++    _install_transport(monkeypatch, handler)
++
++    assert smoke.main(_argv(tmp_path)) == 6
++
++
++def test_pagination_budget_exhaustion_maps_to_its_category(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
++        if path == ROOT_PATH:
++            return _root_payload()
++        payload = _search_payload("search_page_start_0.json")
++        payload["start"] = int(query["start"])
++        payload["totalSize"] = payload["start"] + payload["size"] + 1
++        return payload
++
++    _install_transport(monkeypatch, handler)
++
++    assert smoke.main(_argv(tmp_path, max_search_pages=2)) == 7
++
++
++def test_failure_output_discloses_no_connection_or_secret_detail(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
++        raise ConfluenceHttpError(
++            f"Confluence GET to {BASE_URL} with {PAT} returned HTTP status 401"
++        )
++
++    _install_transport(monkeypatch, handler)
++
++    assert smoke.main(_argv(tmp_path)) == 5
++
++    captured = capsys.readouterr()
++    for stream in (captured.out, captured.err):
++        for forbidden in (PAT, BASE_URL, "fixture.invalid", SPACE_KEY, ROOT_PAGE_ID):
++            assert forbidden not in stream
++
++
++def test_unexpected_error_is_sanitized_and_categorized(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
++        raise RuntimeError(f"leaky failure carrying {PAT}")
++
++    _install_transport(monkeypatch, handler)
++
++    assert smoke.main(_argv(tmp_path)) == 1
++
++    captured = capsys.readouterr()
++    assert json.loads(captured.err)["category"] == "unexpected"
++    assert PAT not in captured.err
++
++
++def test_attachment_count_invariant_is_enforced(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    real_execute = smoke.BuildConfluenceInventory.execute
++
++    def enriched(self: Any, *, config: Any) -> Any:
++        # Simulate a future attachment enrichment reaching the M5C boundary,
++        # which M5B must never perform.
++        return tuple(
++            replace(item, attachment_count=3)
++            for item in real_execute(self, config=config)
++        )
++
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(smoke.BuildConfluenceInventory, "execute", enriched)
++
++    assert smoke.main(_argv(tmp_path)) == 9
++    assert list(tmp_path.iterdir()) == []
++
++
++def test_report_verification_failure_removes_only_runner_owned_files(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(smoke, "_count_jsonl_records", lambda path: 999)
++
++    assert smoke.main(_argv(tmp_path)) == 9
++    assert list(tmp_path.iterdir()) == []
++
++
++def test_failure_after_summary_publication_removes_the_passed_summary(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    # The summary is fully published, then a later step fails. A complete
++    # `status: passed` summary must not survive, because the runbook makes its
++    # presence the proof that the run passed.
++    real_check = smoke._require_exact_output_tree
++    calls: list[set[str]] = []
++
++    def fail_after_publish(output_dir: Path, expected: set[str]) -> None:
++        calls.append(expected)
++        if len(calls) == 2:
++            assert (output_dir / "m5c_smoke_summary.json").is_file()
++            raise smoke.SmokeFailure(smoke.CATEGORY_REPORT_VERIFICATION)
++        real_check(output_dir, expected)
++
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(smoke, "_require_exact_output_tree", fail_after_publish)
++
++    assert smoke.main(_argv(tmp_path)) == 9
++
++    assert list(tmp_path.iterdir()) == []
++    assert json.loads(capsys.readouterr().err) == {
++        "status": "failed",
++        "category": "report_verification",
++        "cleanup_incomplete": False,
++    }
++
++
++def test_summary_publish_failure_leaves_no_temp_behind(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    # The temp exists before the link is attempted; a failing link must still
++    # leave nothing, and must not register a target this runner never created.
++    #
++    # `os` is a shared module object, so refuse only the summary's own link and
++    # delegate the writer's report links: otherwise the run fails at the writer
++    # and never reaches the publisher this test is about.
++    real_link = smoke.os.link
++    published: list[int] = []
++    real_publish = smoke._publish_summary
++
++    def refuse_summary_link(src: Any, dst: Any) -> None:
++        if Path(dst).name == "m5c_smoke_summary.json":
++            raise OSError("link refused")
++        real_link(src, dst)
++
++    def counting_publish(**kwargs: Any) -> None:
++        published.append(1)
++        return real_publish(**kwargs)
++
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(smoke, "_publish_summary", counting_publish)
++    monkeypatch.setattr(smoke.os, "link", refuse_summary_link)
++
++    assert smoke.main(_argv(tmp_path)) == 9
++
++    assert published == [1], "the publisher under test must actually run"
++    assert list(tmp_path.iterdir()) == []
++
++
++def test_cleanup_never_removes_a_concurrent_creators_report(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    # Another process wins the race between the empty check and the write. The
++    # writer refuses to clobber it; this runner must not delete it either.
++    real_write = smoke.ConfluenceInventoryReportWriter.write
++    foreign = "owned by another process"
++
++    def racing_write(*, output_dir: Path, items: Any) -> int:
++        (output_dir / "pages_inventory.jsonl").write_text(foreign, encoding="utf-8")
++        return real_write(output_dir=output_dir, items=items)
++
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(
++        smoke.ConfluenceInventoryReportWriter, "write", staticmethod(racing_write)
++    )
++
++    assert smoke.main(_argv(tmp_path)) == 8
++
++    survivor = tmp_path / "pages_inventory.jsonl"
++    assert survivor.is_file()
++    assert survivor.read_text(encoding="utf-8") == foreign
++
++
++def test_summary_publish_never_clobbers_a_concurrent_creators_file(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    # Another process creates the summary name after verification but before
++    # publication. It must survive untouched and the run must fail closed.
++    real_render = smoke._render_summary
++    foreign = "owned by another process"
++
++    def render_then_race(summary: Any) -> bytes:
++        (tmp_path / "m5c_smoke_summary.json").write_text(foreign, encoding="utf-8")
++        return real_render(summary)
++
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(smoke, "_render_summary", render_then_race)
++
++    assert smoke.main(_argv(tmp_path)) == 9
++
++    survivor = tmp_path / "m5c_smoke_summary.json"
++    assert survivor.read_text(encoding="utf-8") == foreign
++    assert not any(path.name.endswith(".tmp") for path in tmp_path.iterdir())
++
++
++def test_summary_temp_name_is_unique_per_run(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    # A fixed temp name would let two concurrent runners clobber each other.
++    observed: list[str] = []
++    real_link = smoke.os.link
++
++    def record_then_link(src: Any, dst: Any) -> None:
++        observed.append(Path(src).name)
++        real_link(src, dst)
++
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(smoke.os, "link", record_then_link)
++    assert smoke.main(_argv(tmp_path)) == 0
++
++    second = tmp_path.parent / "second"
++    second.mkdir()
++    _install_transport(monkeypatch)
++    assert smoke.main(_argv(second)) == 0
++
++    # `os` is a shared module object, so this also records the writer's links.
++    summary_temps = [
++        name for name in observed if name.startswith(".m5c_smoke_summary.json.")
++    ]
++    assert len(summary_temps) == 2
++    assert summary_temps[0] != summary_temps[1]
++    assert all(name.endswith(".tmp") for name in summary_temps)
++
++
++def test_leftover_writer_temp_files_fail_closed_without_passed_summary(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    # The M5A writer swallows failures when removing its own temp files; those
++    # temps hold a second copy of real inventory metadata.
++    monkeypatch.setattr(writer_module, "_remove_owned_file", lambda path: None)
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path)) == 9
++
++    names = sorted(path.name for path in tmp_path.iterdir())
++    assert "m5c_smoke_summary.json" not in names
++    # Writer-owned temporaries are left for the operator, never deleted here.
++    assert any(name.endswith(".tmp") for name in names)
++
++
++def test_unexpected_output_entry_fails_closed(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    real_write = smoke.ConfluenceInventoryReportWriter.write
++
++    def write_then_litter(*, output_dir: Path, items: Any) -> int:
++        written = real_write(output_dir=output_dir, items=items)
++        (output_dir / "unexpected.txt").write_text("", encoding="utf-8")
++        return written
++
++    _install_transport(monkeypatch)
++    monkeypatch.setattr(
++        smoke.ConfluenceInventoryReportWriter, "write", staticmethod(write_then_litter)
++    )
++
++    assert smoke.main(_argv(tmp_path)) == 9
++    assert "m5c_smoke_summary.json" not in [p.name for p in tmp_path.iterdir()]
++
++
++def test_page_size_and_budget_must_be_positive_integers(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    _install_transport(monkeypatch)
++
++    assert smoke.main(_argv(tmp_path, page_size=0)) == 2
++    assert smoke.main(_argv(tmp_path, max_search_pages=0)) == 2
++    assert smoke.main(_argv(tmp_path, page_size="two")) == 2
++    assert list(tmp_path.iterdir()) == []
++
++
++def _summary(output_dir: Path) -> dict[str, Any]:
++    return json.loads((output_dir / "m5c_smoke_summary.json").read_text("utf-8"))
++
++
++def _sha256(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def _serve_fixtures(path: str, query: dict[str, str]) -> Mapping[str, object]:
++    if path == ROOT_PATH:
++        return _root_payload()
++    if path == SEARCH_PATH and query["start"] == "0":
++        return _search_payload("search_page_start_0.json")
++    if path == SEARCH_PATH and query["start"] == "2":
++        return _search_payload("search_page_terminal.json")
++    raise AssertionError("unexpected fixture request")
++
++
++def _root_payload(
++    *,
++    page_id: str = ROOT_PAGE_ID,
++    space_key: str = SPACE_KEY,
++) -> dict[str, Any]:
++    payload = _load_fixture("root_page_response.json")
++    payload["id"] = page_id
++    payload["space"] = {"key": space_key}
++    return payload
++
++
++def _search_payload(name: str) -> dict[str, Any]:
++    return _replace_fixture_ids(_load_fixture(name))
++
++
++def _replace_fixture_ids(value: Any) -> Any:
++    if isinstance(value, dict):
++        return {key: _replace_fixture_ids(item) for key, item in value.items()}
++    if isinstance(value, list):
++        return [_replace_fixture_ids(item) for item in value]
++    if isinstance(value, str):
++        return _SYNTHETIC_ID_MAP.get(value, value)
++    return value
++
++
++def _load_fixture(name: str) -> dict[str, Any]:
++    return copy.deepcopy(json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8")))

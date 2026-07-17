@@ -1,0 +1,694 @@
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..0ddb89c
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1 @@
++tests/fixtures/foundation/golden_full_snapshot/** text eol=lf
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/LATEST.txt b/tests/fixtures/foundation/golden_full_snapshot/LATEST.txt
+new file mode 100644
+index 0000000..2ac5e11
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/LATEST.txt
+@@ -0,0 +1 @@
++v20260714-000000-000000Z
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/acl.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/acl.jsonl
+new file mode 100644
+index 0000000..870d094
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/acl.jsonl
+@@ -0,0 +1 @@
++{"acl_confidence":"exact","acl_extraction_status":"ok","acl_id":"acl:confluence:page:golden-page-001","acl_tags":["space:GOLDEN"],"crawler_identity":"golden-fixture-crawler","document_id":"confluence:page:golden-page-001","extracted_at":"2026-07-14T00:00:00.000000Z","is_restricted":false,"schema_version":"1.0","source_system":"confluence"}
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/chunks.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/chunks.jsonl
+new file mode 100644
+index 0000000..526b989
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/chunks.jsonl
+@@ -0,0 +1,2 @@
++{"acl_tags":["space:GOLDEN"],"chunk_id":"chunk:confluence:378e383e047ac979","chunker_version":"1.2.0","content_hash":"65a7d633f6fd2d27ff791e22477bdf699283e601f9d353f142bb1066443a83bb","content_kind":"prose","document_id":"confluence:page:golden-page-001","heading_path":["Golden Foundation Sample","Overview"],"jira_keys":["GOLDEN-1"],"language":"en","page_id":"golden-page-001","relation_ids":["rel:0f6ffd736d29b7e4"],"schema_version":"1.0","source_system":"confluence","source_type":"wiki_page","source_version":"1","space_key":"GOLDEN","text":"Golden Foundation Sample › Overview\n\nGolden sample document for Foundation contract verification.","title":"Golden Foundation Sample","token_count":13,"updated_at":"2026-07-14T00:00:00.000000Z"}
++{"acl_tags":["space:GOLDEN"],"chunk_id":"chunk:confluence:adcffb96cb3d6303","chunker_version":"1.2.0","content_hash":"1ccb0170c1694130ed8934d91cf3bcf4f2b3b7b52545a3f9831b338b43158119","content_kind":"code_block","document_id":"confluence:page:golden-page-001","heading_path":["Golden Foundation Sample","Example Code"],"jira_keys":[],"language":"cpp","page_id":"golden-page-001","relation_ids":[],"schema_version":"1.0","source_system":"confluence","source_type":"wiki_page","source_version":"1","space_key":"GOLDEN","text":"Golden Foundation Sample › Example Code\n\n```cpp\nint golden_value() { return 42; }\n```","title":"Golden Foundation Sample","token_count":18,"updated_at":"2026-07-14T00:00:00.000000Z"}
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/documents.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/documents.jsonl
+new file mode 100644
+index 0000000..d939de1
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/documents.jsonl
+@@ -0,0 +1 @@
++{"acl_id":"acl:confluence:page:golden-page-001","author":null,"branch":null,"content_hash":"dcb4273b4c81c5e31c6a0238f490f2f44de3a2060032794a32c7ffa9da72a7d5","crawled_at":"2026-07-14T00:00:00.000000Z","created_at":null,"document_id":"confluence:page:golden-page-001","file_path":null,"jira_keys":["GOLDEN-1"],"metadata":{"fixture":"golden-full-snapshot"},"page_id":"golden-page-001","relation_ids":["rel:0f6ffd736d29b7e4"],"repo":null,"schema_version":"1.0","source_system":"confluence","source_type":"wiki_page","source_version":"1","space_key":"GOLDEN","title":"Golden Foundation Sample","updated_at":"2026-07-14T00:00:00.000000Z","url":"https://example.invalid/golden/page-001"}
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/manifest.json b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/manifest.json
+new file mode 100644
+index 0000000..5b00e62
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/manifest.json
+@@ -0,0 +1 @@
++{"chunker_version":"1.2.0","config_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","counts":{"acl":1,"chunks":2,"documents":1,"media_assets":1,"relations":1,"symbols":0,"sync_state":1,"tombstones":0},"dataset_version":"v20260714-000000-000000Z","export_mode":"full_snapshot","generated_at":"2026-07-14T00:00:00.000000Z","schema_version":"1.0","schemas_version":"1.0","source_scopes":{"confluence":{"page_ids":["golden-page-001"],"space_keys":["GOLDEN"]}}}
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/media_assets.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/media_assets.jsonl
+new file mode 100644
+index 0000000..95d222e
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/media_assets.jsonl
+@@ -0,0 +1 @@
++{"confidence":1,"content_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","crawled_at":"2026-07-14T00:00:00.000000Z","download_status":"downloaded","extracted_text":"Synthetic diagram text for contract verification.","filename":"golden-diagram.txt","media_id":"confluence:attachment:golden-media-001","mime_type":"text/plain","parent_document_id":"confluence:page:golden-page-001","processing_status":"parsed","raw_uri":"raw://golden/media-001","relevance":"high","schema_version":"1.0","size_bytes":42,"source_system":"confluence","source_version":"1","summary":"Synthetic golden media fixture.","updated_at":"2026-07-14T00:00:00.000000Z"}
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/quality_report.md b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/quality_report.md
+new file mode 100644
+index 0000000..4613ff1
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/quality_report.md
+@@ -0,0 +1,38 @@
++# Foundation Export Quality Report
++
++## Snapshot
++
++- Dataset version: `v20260714-000000-000000Z`
++- Export mode: `full_snapshot`
++- Generated at: `2026-07-14T00:00:00.000000Z`
++- Manifest schema version: `1.0`
++- Schemas version: `1.0`
++- Chunker version: `1.2.0`
++- Config hash: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
++
++## Record Counts
++
++| Record type | Count |
++|---|---:|
++| documents | 1 |
++| chunks | 2 |
++| relations | 1 |
++| acl | 1 |
++| media_assets | 1 |
++| symbols | 0 |
++| sync_state | 1 |
++| tombstones | 0 |
++
++## Completion Checks
++
++- Machine-readable staging file set: PASS
++- Manifest JSON parsing: PASS
++- Manifest schema validation: PASS
++- Full-snapshot producer invariants: PASS
++
++## Scope
++
++This report summarizes Foundation export construction metadata only.
++
++It does not evaluate retrieval, embedding, indexing, semantic quality,
++hallucination, or answer quality.
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/relations.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/relations.jsonl
+new file mode 100644
+index 0000000..1f35003
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/relations.jsonl
+@@ -0,0 +1 @@
++{"confidence":1,"created_at":"2026-07-14T00:00:00.000000Z","evidence":"Synthetic reference to GOLDEN-1.","relation_id":"rel:0f6ffd736d29b7e4","relation_type":"mentions_jira_key","resolution_status":"unresolved_without_jira_api","schema_version":"1.0","source_id":"confluence:page:golden-page-001","target_id":"jira:issue:GOLDEN-1"}
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/symbols.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/symbols.jsonl
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/sync_state.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/sync_state.jsonl
+new file mode 100644
+index 0000000..ec9df5b
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/sync_state.jsonl
+@@ -0,0 +1 @@
++{"entity_id":"confluence:page:golden-page-001","entity_type":"page","last_content_hash":"dcb4273b4c81c5e31c6a0238f490f2f44de3a2060032794a32c7ffa9da72a7d5","last_seen_version":"1","last_synced_at":"2026-07-14T00:00:00.000000Z","schema_version":"1.0","source_id":"confluence_golden_fixture","status":"active"}
+diff --git a/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/tombstones.jsonl b/tests/fixtures/foundation/golden_full_snapshot/v20260714-000000-000000Z/tombstones.jsonl
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/fixtures/foundation/golden_record_set.py b/tests/fixtures/foundation/golden_record_set.py
+new file mode 100644
+index 0000000..d00e4a3
+--- /dev/null
++++ b/tests/fixtures/foundation/golden_record_set.py
+@@ -0,0 +1,265 @@
++from __future__ import annotations
++
++from collections.abc import Iterator
++from pathlib import Path
++
++from knowledgenexus.foundation.domain.records import (
++    ACLRecordBuilder,
++    CanonicalDocumentRecordBuilder,
++    ChunkRecordBuilder,
++    RelationRecordBuilder,
++)
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
++from knowledgenexus.foundation.domain.rules import (
++    AclIdGenerator,
++    ChunkIdGenerator,
++    DocumentIdGenerator,
++    RelationIdGenerator,
++)
++from knowledgenexus.foundation.infrastructure.exporters import (
++    FullSnapshotPublisher,
++    FullSnapshotStagingCompleter,
++    FullSnapshotStagingWriter,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++
++
++GOLDEN_DATASET_VERSION = "v20260714-000000-000000Z"
++GOLDEN_GENERATED_AT = "2026-07-14T00:00:00.000000Z"
++GOLDEN_CONFIG_HASH = "a" * 64
++GOLDEN_CHUNKER_VERSION = "1.2.0"
++GOLDEN_SCHEMAS_VERSION = "1.0"
++
++GOLDEN_PAGE_ID = "golden-page-001"
++GOLDEN_DOCUMENT_ID = DocumentIdGenerator.confluence_page_id(GOLDEN_PAGE_ID)
++GOLDEN_JIRA_KEY = "GOLDEN-1"
++GOLDEN_JIRA_ID = f"jira:issue:{GOLDEN_JIRA_KEY}"
++GOLDEN_RELATION_TYPE = "mentions_jira_key"
++GOLDEN_RELATION_ID = RelationIdGenerator.generate_relation_id(
++    GOLDEN_DOCUMENT_ID,
++    GOLDEN_RELATION_TYPE,
++    GOLDEN_JIRA_ID,
++)
++GOLDEN_ACL_ID = AclIdGenerator.generate_acl_id(GOLDEN_DOCUMENT_ID)
++GOLDEN_ACL_TAGS = ["space:GOLDEN"]
++GOLDEN_TITLE = "Golden Foundation Sample"
++GOLDEN_PROSE_HEADING_PATH = [GOLDEN_TITLE, "Overview"]
++GOLDEN_CODE_HEADING_PATH = [GOLDEN_TITLE, "Example Code"]
++GOLDEN_PROSE_BREADCRUMB = " › ".join(GOLDEN_PROSE_HEADING_PATH)
++GOLDEN_CODE_BREADCRUMB = " › ".join(GOLDEN_CODE_HEADING_PATH)
++GOLDEN_PROSE_BODY = "Golden sample document for Foundation contract verification."
++GOLDEN_CODE_BODY = "int golden_value() { return 42; }"
++GOLDEN_FENCED_CODE_BODY = f"```cpp\n{GOLDEN_CODE_BODY}\n```"
++GOLDEN_PROSE_TEXT = f"{GOLDEN_PROSE_BREADCRUMB}\n\n{GOLDEN_PROSE_BODY}"
++GOLDEN_CODE_TEXT = f"{GOLDEN_CODE_BREADCRUMB}\n\n{GOLDEN_FENCED_CODE_BODY}"
++GOLDEN_PROSE_TOKEN_COUNT = 13
++GOLDEN_CODE_TOKEN_COUNT = 18
++GOLDEN_PROSE_CHUNK_ID = ChunkIdGenerator.generate_chunk_id(
++    "confluence",
++    GOLDEN_DOCUMENT_ID,
++    GOLDEN_PROSE_BREADCRUMB,
++    GOLDEN_PROSE_TEXT,
++)
++GOLDEN_CODE_CHUNK_ID = ChunkIdGenerator.generate_chunk_id(
++    "confluence",
++    GOLDEN_DOCUMENT_ID,
++    f"{GOLDEN_CODE_BREADCRUMB}#code0",
++    GOLDEN_CODE_TEXT,
++)
++GOLDEN_MEDIA_ATTACHMENT_ID = "golden-media-001"
++GOLDEN_MEDIA_ID = DocumentIdGenerator.confluence_attachment_id(
++    GOLDEN_MEDIA_ATTACHMENT_ID
++)
++GOLDEN_SOURCE_SCOPES = {
++    "confluence": {
++        "space_keys": ["GOLDEN"],
++        "page_ids": [GOLDEN_PAGE_ID],
++    }
++}
++
++
++def build_golden_record_set() -> dict[str, list[dict[str, object]]]:
++    document = _build_document_record()
++    content_hash = document["content_hash"]
++    assert isinstance(content_hash, str)
++
++    return {
++        "documents": [document],
++        "chunks": [_build_prose_chunk_record(), _build_code_chunk_record()],
++        "relations": [_build_relation_record()],
++        "acl": [_build_acl_record()],
++        "media_assets": [_build_media_asset_record()],
++        "symbols": [],
++        "sync_state": [_build_sync_state_record(content_hash)],
++        "tombstones": [],
++    }
++
++
++def generate_golden_full_snapshot(dataset_root: Path) -> Path:
++    records = build_golden_record_set()
++    validator = FoundationSchemaValidator()
++    staging_path = dataset_root / ".staging-golden"
++
++    FullSnapshotStagingWriter.write(
++        staging_path=staging_path,
++        validator=validator,
++        dataset_version=GOLDEN_DATASET_VERSION,
++        generated_at=GOLDEN_GENERATED_AT,
++        config_hash=GOLDEN_CONFIG_HASH,
++        chunker_version=GOLDEN_CHUNKER_VERSION,
++        schemas_version=GOLDEN_SCHEMAS_VERSION,
++        documents=_one_pass(records["documents"]),
++        chunks=_one_pass(records["chunks"]),
++        relations=_one_pass(records["relations"]),
++        acl=_one_pass(records["acl"]),
++        media_assets=_one_pass(records["media_assets"]),
++        symbols=_one_pass(records["symbols"]),
++        sync_state=_one_pass(records["sync_state"]),
++        tombstones=_one_pass(records["tombstones"]),
++        source_scopes=GOLDEN_SOURCE_SCOPES,
++    )
++    FullSnapshotStagingCompleter.complete(
++        staging_path=staging_path,
++        validator=validator,
++    )
++    return FullSnapshotPublisher.publish(
++        staging_path=staging_path,
++        dataset_root=dataset_root,
++        validator=validator,
++    )
++
++
++def _build_document_record() -> dict[str, object]:
++    normalized_body_text = f"{GOLDEN_PROSE_BODY}\n\n{GOLDEN_FENCED_CODE_BODY}"
++    return CanonicalDocumentRecordBuilder.build(
++        document_id=GOLDEN_DOCUMENT_ID,
++        source_system="confluence",
++        source_type="wiki_page",
++        normalized_body_text=normalized_body_text,
++        acl_id=GOLDEN_ACL_ID,
++        crawled_at=GOLDEN_GENERATED_AT,
++        title=GOLDEN_TITLE,
++        space_key="GOLDEN",
++        page_id=GOLDEN_PAGE_ID,
++        url="https://example.invalid/golden/page-001",
++        source_version="1",
++        jira_keys=[GOLDEN_JIRA_KEY],
++        relation_ids=[GOLDEN_RELATION_ID],
++        updated_at=GOLDEN_GENERATED_AT,
++        metadata={"fixture": "golden-full-snapshot"},
++    )
++
++
++def _build_prose_chunk_record() -> dict[str, object]:
++    return ChunkRecordBuilder.build(
++        chunk_id=GOLDEN_PROSE_CHUNK_ID,
++        document_id=GOLDEN_DOCUMENT_ID,
++        source_system="confluence",
++        source_type="wiki_page",
++        text=GOLDEN_PROSE_TEXT,
++        content_kind="prose",
++        language="en",
++        token_count=GOLDEN_PROSE_TOKEN_COUNT,
++        acl_tags=GOLDEN_ACL_TAGS,
++        chunker_version=GOLDEN_CHUNKER_VERSION,
++        title=GOLDEN_TITLE,
++        heading_path=GOLDEN_PROSE_HEADING_PATH,
++        space_key="GOLDEN",
++        page_id=GOLDEN_PAGE_ID,
++        jira_keys=[GOLDEN_JIRA_KEY],
++        relation_ids=[GOLDEN_RELATION_ID],
++        source_version="1",
++        updated_at=GOLDEN_GENERATED_AT,
++    )
++
++
++def _build_code_chunk_record() -> dict[str, object]:
++    return ChunkRecordBuilder.build(
++        chunk_id=GOLDEN_CODE_CHUNK_ID,
++        document_id=GOLDEN_DOCUMENT_ID,
++        source_system="confluence",
++        source_type="wiki_page",
++        text=GOLDEN_CODE_TEXT,
++        content_kind="code_block",
++        language="cpp",
++        token_count=GOLDEN_CODE_TOKEN_COUNT,
++        acl_tags=GOLDEN_ACL_TAGS,
++        chunker_version=GOLDEN_CHUNKER_VERSION,
++        title=GOLDEN_TITLE,
++        heading_path=GOLDEN_CODE_HEADING_PATH,
++        space_key="GOLDEN",
++        page_id=GOLDEN_PAGE_ID,
++        jira_keys=[],
++        relation_ids=[],
++        source_version="1",
++        updated_at=GOLDEN_GENERATED_AT,
++    )
++
++
++def _build_relation_record() -> dict[str, object]:
++    return RelationRecordBuilder.build(
++        relation_id=GOLDEN_RELATION_ID,
++        source_id=GOLDEN_DOCUMENT_ID,
++        target_id=GOLDEN_JIRA_ID,
++        relation_type=GOLDEN_RELATION_TYPE,
++        resolution_status="unresolved_without_jira_api",
++        created_at=GOLDEN_GENERATED_AT,
++        evidence=f"Synthetic reference to {GOLDEN_JIRA_KEY}.",
++        confidence=1,
++    )
++
++
++def _build_acl_record() -> dict[str, object]:
++    return ACLRecordBuilder.build(
++        acl_id=GOLDEN_ACL_ID,
++        document_id=GOLDEN_DOCUMENT_ID,
++        source_system="confluence",
++        is_restricted=False,
++        acl_tags=GOLDEN_ACL_TAGS,
++        acl_extraction_status="ok",
++        extracted_at=GOLDEN_GENERATED_AT,
++        crawler_identity="golden-fixture-crawler",
++        acl_confidence="exact",
++    )
++
++
++def _build_media_asset_record() -> dict[str, object]:
++    return {
++        "schema_version": SCHEMA_VERSION,
++        "media_id": GOLDEN_MEDIA_ID,
++        "parent_document_id": GOLDEN_DOCUMENT_ID,
++        "source_system": "confluence",
++        "filename": "golden-diagram.txt",
++        "mime_type": "text/plain",
++        "size_bytes": 42,
++        "download_status": "downloaded",
++        "processing_status": "parsed",
++        "relevance": "high",
++        "extracted_text": "Synthetic diagram text for contract verification.",
++        "summary": "Synthetic golden media fixture.",
++        "confidence": 1,
++        "raw_uri": "raw://golden/media-001",
++        "content_hash": "b" * 64,
++        "source_version": "1",
++        "updated_at": GOLDEN_GENERATED_AT,
++        "crawled_at": GOLDEN_GENERATED_AT,
++    }
++
++
++def _build_sync_state_record(content_hash: str) -> dict[str, object]:
++    return {
++        "schema_version": SCHEMA_VERSION,
++        "source_id": "confluence_golden_fixture",
++        "entity_id": GOLDEN_DOCUMENT_ID,
++        "entity_type": "page",
++        "last_seen_version": "1",
++        "last_content_hash": content_hash,
++        "last_synced_at": GOLDEN_GENERATED_AT,
++        "status": "active",
++    }
++
++
++def _one_pass(records: list[dict[str, object]]) -> Iterator[dict[str, object]]:
++    yield from records
+diff --git a/tests/foundation/integration/test_golden_full_snapshot_export.py b/tests/foundation/integration/test_golden_full_snapshot_export.py
+new file mode 100644
+index 0000000..fa4492e
+--- /dev/null
++++ b/tests/foundation/integration/test_golden_full_snapshot_export.py
+@@ -0,0 +1,303 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++from knowledgenexus.foundation.domain.rules import ContentHasher, ChunkIdGenerator
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import (
++    COUNT_KEYS,
++    EXPECTED_COMPLETE_FILES,
++)
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import (
++    JSONL_FILE_SCHEMA_PAIRS,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++from tests.fixtures.foundation.golden_record_set import (
++    GOLDEN_ACL_ID,
++    GOLDEN_CODE_CHUNK_ID,
++    GOLDEN_CODE_TEXT,
++    GOLDEN_CODE_TOKEN_COUNT,
++    GOLDEN_DATASET_VERSION,
++    GOLDEN_DOCUMENT_ID,
++    GOLDEN_GENERATED_AT,
++    GOLDEN_MEDIA_ID,
++    GOLDEN_PROSE_CHUNK_ID,
++    GOLDEN_PROSE_TEXT,
++    GOLDEN_PROSE_TOKEN_COUNT,
++    GOLDEN_RELATION_ID,
++    GOLDEN_SOURCE_SCOPES,
++    generate_golden_full_snapshot,
++)
++
++
++GOLDEN_FIXTURE_ROOT = (
++    Path(__file__).resolve().parents[2]
++    / "fixtures"
++    / "foundation"
++    / "golden_full_snapshot"
++)
++EXPECTED_COUNTS = {
++    "documents": 1,
++    "chunks": 2,
++    "relations": 1,
++    "acl": 1,
++    "media_assets": 1,
++    "symbols": 0,
++    "sync_state": 1,
++    "tombstones": 0,
++}
++
++
++def test_generated_golden_snapshot_matches_committed_fixture(
++    tmp_path: Path,
++) -> None:
++    generated_root = tmp_path / "golden-dataset"
++    generated_root.mkdir()
++
++    generate_golden_full_snapshot(generated_root)
++
++    _assert_trees_match(GOLDEN_FIXTURE_ROOT, generated_root)
++
++
++def test_committed_golden_snapshot_is_contract_valid() -> None:
++    latest_path = GOLDEN_FIXTURE_ROOT / "LATEST.txt"
++    assert latest_path.read_bytes() == (GOLDEN_DATASET_VERSION + "\n").encode()
++
++    snapshot_path = GOLDEN_FIXTURE_ROOT / GOLDEN_DATASET_VERSION
++    assert snapshot_path.is_dir()
++    entries = list(snapshot_path.iterdir())
++    assert {entry.name for entry in entries} == EXPECTED_COMPLETE_FILES
++    assert all(entry.is_file() and not entry.is_symlink() for entry in entries)
++
++    manifest = _read_object(snapshot_path / "manifest.json")
++    FoundationSchemaValidator().validate_record("Manifest", manifest)
++    assert snapshot_path.name == manifest["dataset_version"]
++    assert manifest["dataset_version"] == GOLDEN_DATASET_VERSION
++    assert manifest["export_mode"] == "full_snapshot"
++    assert "base_dataset_version" not in manifest
++    assert set(manifest["counts"]) == set(COUNT_KEYS)  # type: ignore[arg-type]
++    assert manifest["counts"] == EXPECTED_COUNTS
++    assert manifest["source_scopes"] == GOLDEN_SOURCE_SCOPES
++
++    actual_counts: dict[str, int] = {}
++    validator = FoundationSchemaValidator()
++    for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
++        actual_counts[count_key] = _validate_jsonl_file(
++            snapshot_path / file_name,
++            schema_name=schema_name,
++            validator=validator,
++        )
++
++    assert actual_counts == manifest["counts"]
++    assert (snapshot_path / "symbols.jsonl").read_bytes() == b""
++    assert (snapshot_path / "tombstones.jsonl").read_bytes() == b""
++
++    report = (snapshot_path / "quality_report.md").read_text(encoding="utf-8")
++    assert report.endswith("\n")
++    assert not report.endswith("\n\n")
++    assert f"- Dataset version: `{GOLDEN_DATASET_VERSION}`" in report
++    assert f"- Generated at: `{GOLDEN_GENERATED_AT}`" in report
++    for count_key, count in EXPECTED_COUNTS.items():
++        assert f"| {count_key} | {count} |" in report
++    assert "space_keys" not in report
++    assert "page_ids" not in report
++    assert "GOLDEN" not in report
++    assert "Semantic quality: PASS" not in report
++    assert "It does not evaluate retrieval" in report
++
++
++def test_golden_snapshot_generation_is_deterministic(tmp_path: Path) -> None:
++    first_root = tmp_path / "first"
++    second_root = tmp_path / "second"
++    first_root.mkdir()
++    second_root.mkdir()
++
++    generate_golden_full_snapshot(first_root)
++    generate_golden_full_snapshot(second_root)
++
++    _assert_trees_match(first_root, second_root)
++
++
++def test_golden_graph_preserves_m2d_invariants() -> None:
++    records = _read_committed_record_set()
++    document_ids = _ids(records["documents"], "document_id")
++    relation_ids = _ids(records["relations"], "relation_id")
++    chunk_ids = _ids(records["chunks"], "chunk_id")
++    acl_tags_by_document = {
++        record["document_id"]: set(record["acl_tags"])  # type: ignore[arg-type]
++        for record in records["acl"]
++    }
++
++    assert _ids(records["chunks"], "document_id") <= document_ids
++    assert _ids(records["acl"], "document_id") <= document_ids
++    assert _ids(records["media_assets"], "parent_document_id") <= document_ids
++    assert _ids(records["sync_state"], "entity_id") <= document_ids
++    assert _ids(records["relations"], "source_id") <= document_ids
++    assert _ids(records["relations"], "target_id") == {"jira:issue:GOLDEN-1"}
++
++    for chunk in records["chunks"]:
++        assert set(chunk["relation_ids"]) <= relation_ids  # type: ignore[arg-type]
++        assert set(chunk["acl_tags"]) <= acl_tags_by_document[  # type: ignore[arg-type]
++            chunk["document_id"]
++        ]
++
++    assert document_ids == {GOLDEN_DOCUMENT_ID}
++    assert chunk_ids == {GOLDEN_PROSE_CHUNK_ID, GOLDEN_CODE_CHUNK_ID}
++    assert relation_ids == {GOLDEN_RELATION_ID}
++    assert _ids(records["acl"], "acl_id") == {GOLDEN_ACL_ID}
++
++    id_fields = {
++        "documents": "document_id",
++        "chunks": "chunk_id",
++        "relations": "relation_id",
++        "acl": "acl_id",
++        "media_assets": "media_id",
++        "sync_state": "entity_id",
++    }
++    for collection_name, id_field in id_fields.items():
++        values = [record[id_field] for record in records[collection_name]]
++        assert len(values) == len(set(values))
++
++
++def test_exported_wiki_chunk_text_is_exact() -> None:
++    records = _read_committed_record_set()
++    chunks_by_id = {record["chunk_id"]: record for record in records["chunks"]}
++
++    assert chunks_by_id[GOLDEN_PROSE_CHUNK_ID]["text"] == GOLDEN_PROSE_TEXT
++    assert chunks_by_id[GOLDEN_CODE_CHUNK_ID]["text"] == GOLDEN_CODE_TEXT
++    assert chunks_by_id[GOLDEN_PROSE_CHUNK_ID]["token_count"] == (
++        GOLDEN_PROSE_TOKEN_COUNT
++    )
++    assert chunks_by_id[GOLDEN_CODE_CHUNK_ID]["token_count"] == (
++        GOLDEN_CODE_TOKEN_COUNT
++    )
++    assert chunks_by_id[GOLDEN_PROSE_CHUNK_ID]["content_hash"] == (
++        ContentHasher.hash_text(GOLDEN_PROSE_TEXT)
++    )
++    assert chunks_by_id[GOLDEN_CODE_CHUNK_ID]["content_hash"] == (
++        ContentHasher.hash_text(GOLDEN_CODE_TEXT)
++    )
++    assert GOLDEN_PROSE_CHUNK_ID == ChunkIdGenerator.generate_chunk_id(
++        "confluence",
++        GOLDEN_DOCUMENT_ID,
++        "Golden Foundation Sample › Overview",
++        GOLDEN_PROSE_TEXT,
++    )
++    assert GOLDEN_CODE_CHUNK_ID == ChunkIdGenerator.generate_chunk_id(
++        "confluence",
++        GOLDEN_DOCUMENT_ID,
++        "Golden Foundation Sample › Example Code#code0",
++        GOLDEN_CODE_TEXT,
++    )
++    assert GOLDEN_CODE_TEXT.endswith(
++        "```cpp\nint golden_value() { return 42; }\n```"
++    )
++
++
++def test_exported_symbols_stream_is_empty() -> None:
++    snapshot_path = GOLDEN_FIXTURE_ROOT / GOLDEN_DATASET_VERSION
++    manifest = _read_object(snapshot_path / "manifest.json")
++
++    assert (snapshot_path / "symbols.jsonl").read_bytes() == b""
++    assert manifest["counts"]["symbols"] == 0  # type: ignore[index]
++
++
++def test_exported_media_id_uses_attachment_identity_convention() -> None:
++    records = _read_committed_record_set()
++
++    assert _ids(records["media_assets"], "media_id") == {GOLDEN_MEDIA_ID}
++    assert GOLDEN_MEDIA_ID == "confluence:attachment:golden-media-001"
++
++
++def _assert_trees_match(expected_root: Path, actual_root: Path) -> None:
++    expected_entries = _relative_entries(expected_root)
++    actual_entries = _relative_entries(actual_root)
++    missing = sorted(expected_entries.keys() - actual_entries.keys())
++    unexpected = sorted(actual_entries.keys() - expected_entries.keys())
++    wrong_kinds = sorted(
++        path
++        for path in expected_entries.keys() & actual_entries.keys()
++        if expected_entries[path] != actual_entries[path]
++    )
++
++    expected_files = _relative_file_bytes(expected_root)
++    actual_files = _relative_file_bytes(actual_root)
++    byte_different = sorted(
++        path
++        for path in expected_files.keys() & actual_files.keys()
++        if expected_files[path] != actual_files[path]
++    )
++
++    assert not (missing or unexpected or wrong_kinds or byte_different), (
++        f"missing={missing}, unexpected={unexpected}, "
++        f"wrong_kinds={wrong_kinds}, byte_different={byte_different}"
++    )
++
++
++def _relative_entries(root: Path) -> dict[str, str]:
++    return {
++        path.relative_to(root).as_posix(): "directory" if path.is_dir() else "file"
++        for path in root.rglob("*")
++    }
++
++
++def _relative_file_bytes(root: Path) -> dict[str, bytes]:
++    return {
++        path.relative_to(root).as_posix(): path.read_bytes()
++        for path in root.rglob("*")
++        if path.is_file()
++    }
++
++
++def _read_object(path: Path) -> dict[str, object]:
++    value = json.loads(path.read_text(encoding="utf-8"))
++    assert isinstance(value, dict)
++    return value
++
++
++def _read_committed_record_set() -> dict[str, list[dict[str, object]]]:
++    snapshot_path = GOLDEN_FIXTURE_ROOT / GOLDEN_DATASET_VERSION
++    records: dict[str, list[dict[str, object]]] = {}
++
++    for file_name, count_key, _ in JSONL_FILE_SCHEMA_PAIRS:
++        records[count_key] = _read_jsonl_records(snapshot_path / file_name)
++
++    return records
++
++
++def _read_jsonl_records(path: Path) -> list[dict[str, object]]:
++    records: list[dict[str, object]] = []
++    for raw_line in path.read_text(encoding="utf-8").splitlines():
++        record = json.loads(raw_line)
++        assert isinstance(record, dict)
++        records.append(record)
++    return records
++
++
++def _validate_jsonl_file(
++    path: Path,
++    *,
++    schema_name: str,
++    validator: FoundationSchemaValidator,
++) -> int:
++    raw_bytes = path.read_bytes()
++    if not raw_bytes:
++        return 0
++
++    assert raw_bytes.endswith(b"\n")
++    assert not raw_bytes.endswith(b"\n\n")
++    raw_lines = raw_bytes.splitlines()
++    assert all(raw_line for raw_line in raw_lines)
++
++    for raw_line in raw_lines:
++        record = json.loads(raw_line)
++        assert isinstance(record, dict)
++        validator.validate_record(schema_name, record)
++
++    return len(raw_lines)
++
++
++def _ids(records: list[dict[str, object]], field_name: str) -> set[object]:
++    return {record[field_name] for record in records}

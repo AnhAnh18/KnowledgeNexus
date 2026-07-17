@@ -1,0 +1,37 @@
+diff --git a/tests/foundation/domain/records/test_acl_record_builder.py b/tests/foundation/domain/records/test_acl_record_builder.py
+--- a/tests/foundation/domain/records/test_acl_record_builder.py
++++ b/tests/foundation/domain/records/test_acl_record_builder.py
+@@ -125,6 +125,32 @@ def test_empty_optional_lists_and_optional_strings_are_preserved() -> None:
+     assert record["allowed_groups"] == []
+     FoundationSchemaValidator().validate_record("ACLRecord", record)
+ 
+ 
++def test_partial_optional_fields_are_preserved_and_none_fields_are_omitted() -> None:
++    record = ACLRecordBuilder.build(
++        acl_id="acl:confluence:page:938880626",
++        document_id="confluence:page:938880626",
++        source_system="confluence",
++        is_restricted=True,
++        acl_tags=["group:foundation-team"],
++        acl_extraction_status="partial",
++        extracted_at="2026-07-10T00:00:00Z",
++        crawler_identity="svc-foundation-crawler",
++        restriction_inherited=None,
++        restriction_source_page_ids=["938880600"],
++        allowed_users=None,
++        allowed_groups=["foundation-team"],
++        acl_confidence=None,
++    )
++
++    assert record["crawler_identity"] == "svc-foundation-crawler"
++    assert record["restriction_source_page_ids"] == ["938880600"]
++    assert record["allowed_groups"] == ["foundation-team"]
++    assert "restriction_inherited" not in record
++    assert "allowed_users" not in record
++    assert "acl_confidence" not in record
++    FoundationSchemaValidator().validate_record("ACLRecord", record)
++
++
+ def test_list_inputs_are_copied_not_mutated_or_shared() -> None:
+     acl_tags = ["user:spen"]
+     restriction_source_page_ids = ["938880600"]

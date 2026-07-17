@@ -1,0 +1,469 @@
+diff --git a/src/knowledgenexus/foundation/domain/records/__init__.py b/src/knowledgenexus/foundation/domain/records/__init__.py
+--- a/src/knowledgenexus/foundation/domain/records/__init__.py
++++ b/src/knowledgenexus/foundation/domain/records/__init__.py
+@@ -1,5 +1,8 @@
+ from knowledgenexus.foundation.domain.records.canonical_document_record_builder import (
+     CanonicalDocumentRecordBuilder,
+ )
++from knowledgenexus.foundation.domain.records.chunk_record_builder import (
++    ChunkRecordBuilder,
++)
+ 
+-__all__ = ["CanonicalDocumentRecordBuilder"]
++__all__ = ["CanonicalDocumentRecordBuilder", "ChunkRecordBuilder"]
+diff --git a/src/knowledgenexus/foundation/domain/records/chunk_record_builder.py b/src/knowledgenexus/foundation/domain/records/chunk_record_builder.py
+new file mode 100644
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/records/chunk_record_builder.py
+@@ -0,0 +1,163 @@
++from __future__ import annotations
++
++from typing import Any
++
++from knowledgenexus.foundation.domain.rules import ContentHasher
++
++
++class ChunkRecordBuilder:
++    """Build plain ChunkRecord dicts shaped by the Foundation schema."""
++
++    SCHEMA_VERSION = "1.0"
++
++    @classmethod
++    def build(
++        cls,
++        *,
++        chunk_id: str,
++        document_id: str,
++        source_system: str,
++        source_type: str,
++        text: str,
++        content_kind: str,
++        language: str,
++        token_count: int,
++        acl_tags: list[str],
++        chunker_version: str,
++        title: str | None = None,
++        heading_path: list[str] | None = None,
++        space_key: str | None = None,
++        page_id: str | None = None,
++        repo: str | None = None,
++        branch: str | None = None,
++        file_path: str | None = None,
++        symbol: str | None = None,
++        line_start: int | None = None,
++        line_end: int | None = None,
++        part_index: int | None = None,
++        part_total: int | None = None,
++        jira_keys: list[str] | None = None,
++        relation_ids: list[str] | None = None,
++        source_version: str | None = None,
++        updated_at: str | None = None,
++    ) -> dict[str, object]:
++        cls._require_non_empty_string("chunk_id", chunk_id)
++        cls._require_non_empty_string("document_id", document_id)
++        cls._require_non_empty_string("source_system", source_system)
++        cls._require_non_empty_string("source_type", source_type)
++        cls._require_non_empty_string("text", text)
++        cls._require_non_empty_string("content_kind", content_kind)
++        cls._require_non_empty_string("language", language)
++        cls._require_non_empty_string("chunker_version", chunker_version)
++        cls._require_non_negative_int("token_count", token_count)
++        cls._require_non_empty_list("acl_tags", acl_tags)
++
++        for field_name, value in {
++            "title": title,
++            "space_key": space_key,
++            "page_id": page_id,
++            "repo": repo,
++            "branch": branch,
++            "file_path": file_path,
++            "symbol": symbol,
++            "source_version": source_version,
++            "updated_at": updated_at,
++        }.items():
++            cls._require_optional_string(field_name, value)
++
++        for field_name, value in {
++            "line_start": line_start,
++            "line_end": line_end,
++            "part_index": part_index,
++            "part_total": part_total,
++        }.items():
++            cls._require_optional_int(field_name, value)
++
++        cls._require_optional_list("heading_path", heading_path)
++        cls._require_optional_list("jira_keys", jira_keys)
++        cls._require_optional_list("relation_ids", relation_ids)
++
++        record: dict[str, object] = {
++            "schema_version": cls.SCHEMA_VERSION,
++            "chunk_id": chunk_id,
++            "document_id": document_id,
++            "source_system": source_system,
++            "source_type": source_type,
++            "text": text,
++            "content_kind": content_kind,
++            "language": language,
++            "token_count": token_count,
++            "acl_tags": list(acl_tags),
++            "content_hash": ContentHasher.hash_text(text),
++            "chunker_version": chunker_version,
++            "jira_keys": list(jira_keys or []),
++            "relation_ids": list(relation_ids or []),
++        }
++
++        optional_fields: dict[str, object] = {
++            "title": title,
++            "heading_path": list(heading_path) if heading_path is not None else None,
++            "space_key": space_key,
++            "page_id": page_id,
++            "repo": repo,
++            "branch": branch,
++            "file_path": file_path,
++            "symbol": symbol,
++            "line_start": line_start,
++            "line_end": line_end,
++            "part_index": part_index,
++            "part_total": part_total,
++            "source_version": source_version,
++            "updated_at": updated_at,
++        }
++        record.update(
++            {
++                field_name: value
++                for field_name, value in optional_fields.items()
++                if value is not None
++            }
++        )
++
++        return record
++
++    @staticmethod
++    def _require_string(field_name: str, value: Any) -> None:
++        if not isinstance(value, str):
++            raise TypeError(f"ChunkRecordBuilder.{field_name} expects str")
++
++    @staticmethod
++    def _require_non_empty_string(field_name: str, value: Any) -> None:
++        ChunkRecordBuilder._require_string(field_name, value)
++        if value == "":
++            raise ValueError(f"ChunkRecordBuilder.{field_name} must not be empty")
++
++    @staticmethod
++    def _require_optional_string(field_name: str, value: Any) -> None:
++        if value is not None and not isinstance(value, str):
++            raise TypeError(f"ChunkRecordBuilder.{field_name} expects str")
++
++    @staticmethod
++    def _require_non_negative_int(field_name: str, value: Any) -> None:
++        if not isinstance(value, int) or isinstance(value, bool):
++            raise TypeError(f"ChunkRecordBuilder.{field_name} expects int")
++        if value < 0:
++            raise ValueError(f"ChunkRecordBuilder.{field_name} must not be negative")
++
++    @staticmethod
++    def _require_optional_int(field_name: str, value: Any) -> None:
++        if value is not None and (
++            not isinstance(value, int) or isinstance(value, bool)
++        ):
++            raise TypeError(f"ChunkRecordBuilder.{field_name} expects int")
++
++    @staticmethod
++    def _require_optional_list(field_name: str, value: Any) -> None:
++        if value is not None and not isinstance(value, list):
++            raise TypeError(f"ChunkRecordBuilder.{field_name} expects list")
++
++    @staticmethod
++    def _require_non_empty_list(field_name: str, value: Any) -> None:
++        if not isinstance(value, list):
++            raise TypeError(f"ChunkRecordBuilder.{field_name} expects list")
++        if not value:
++            raise ValueError(f"ChunkRecordBuilder.{field_name} must not be empty")
+diff --git a/tests/foundation/domain/records/test_chunk_record_builder.py b/tests/foundation/domain/records/test_chunk_record_builder.py
+new file mode 100644
+--- /dev/null
++++ b/tests/foundation/domain/records/test_chunk_record_builder.py
+@@ -0,0 +1,283 @@
++from __future__ import annotations
++
++import pytest
++
++from knowledgenexus.foundation.domain.records import ChunkRecordBuilder
++from knowledgenexus.foundation.domain.rules import ContentHasher
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++
++
++def build_valid_confluence_record(
++    *,
++    text: str = "SVMC Root\n\nAlready normalized chunk text.",
++) -> dict[str, object]:
++    return ChunkRecordBuilder.build(
++        chunk_id="chunk:confluence:0123456789abcdef",
++        document_id="confluence:page:938880621",
++        source_system="confluence",
++        source_type="wiki_page",
++        text=text,
++        content_kind="prose",
++        language="en",
++        token_count=7,
++        acl_tags=["space:SVMC"],
++        chunker_version="1.0.0",
++        title="SVMC Root",
++        heading_path=["SVMC Root", "Overview"],
++        space_key="SVMC",
++        page_id="938880621",
++        jira_keys=["SVMCSPEN-1234"],
++        relation_ids=["rel:0123456789abcdef"],
++        source_version="42",
++        updated_at="2026-07-10T00:00:00Z",
++    )
++
++
++def build_valid_git_record() -> dict[str, object]:
++    return ChunkRecordBuilder.build(
++        chunk_id="chunk:git:fedcba9876543210",
++        document_id="git:file:spen-sdk:src/main.py",
++        source_system="git",
++        source_type="code_file",
++        text="def build() -> None:\n    pass\n",
++        content_kind="code_symbol",
++        language="python",
++        token_count=8,
++        acl_tags=["repo:spen-sdk"],
++        chunker_version="1.0.0",
++        repo="spen-sdk",
++        branch="main",
++        file_path="src/main.py",
++        symbol="build",
++        line_start=10,
++        line_end=11,
++        part_index=0,
++        part_total=1,
++        source_version="0123456789abcdef0123456789abcdef01234567",
++    )
++
++
++def test_builder_returns_dict() -> None:
++    assert isinstance(build_valid_confluence_record(), dict)
++
++
++def test_record_has_schema_version_1_0() -> None:
++    assert build_valid_confluence_record()["schema_version"] == (
++        ChunkRecordBuilder.SCHEMA_VERSION
++    )
++
++
++def test_content_hash_matches_text_hash() -> None:
++    text = "Already normalized\n\nChunk text"
++
++    assert build_valid_confluence_record(text=text)[
++        "content_hash"
++    ] == ContentHasher.hash_text(text)
++
++
++def test_valid_confluence_prose_record_passes_foundation_schema_validation() -> None:
++    FoundationSchemaValidator().validate_record(
++        "ChunkRecord",
++        build_valid_confluence_record(),
++    )
++
++
++def test_valid_git_code_record_passes_foundation_schema_validation() -> None:
++    FoundationSchemaValidator().validate_record("ChunkRecord", build_valid_git_record())
++
++
++def test_jira_keys_and_relation_ids_default_to_empty_lists() -> None:
++    record = ChunkRecordBuilder.build(
++        chunk_id="chunk:confluence:0123456789abcdef",
++        document_id="confluence:page:938880621",
++        source_system="confluence",
++        source_type="wiki_page",
++        text="Chunk text",
++        content_kind="prose",
++        language="en",
++        token_count=2,
++        acl_tags=["space:SVMC"],
++        chunker_version="1.0.0",
++    )
++
++    assert record["jira_keys"] == []
++    assert record["relation_ids"] == []
++    FoundationSchemaValidator().validate_record("ChunkRecord", record)
++
++
++def test_optional_fields_are_omitted_when_absent_except_default_lists() -> None:
++    record = ChunkRecordBuilder.build(
++        chunk_id="chunk:confluence:0123456789abcdef",
++        document_id="confluence:page:938880621",
++        source_system="confluence",
++        source_type="wiki_page",
++        text="Chunk text",
++        content_kind="prose",
++        language="en",
++        token_count=2,
++        acl_tags=["space:SVMC"],
++        chunker_version="1.0.0",
++    )
++
++    assert "title" not in record
++    assert "heading_path" not in record
++    assert "updated_at" not in record
++    assert record["jira_keys"] == []
++    assert record["relation_ids"] == []
++
++
++def test_input_lists_are_copied_not_mutated_or_shared() -> None:
++    heading_path = ["Root", "Leaf"]
++    acl_tags = ["space:SVMC"]
++    jira_keys = ["SVMCSPEN-1234"]
++    relation_ids = ["rel:0123456789abcdef"]
++
++    record = ChunkRecordBuilder.build(
++        chunk_id="chunk:confluence:0123456789abcdef",
++        document_id="confluence:page:938880621",
++        source_system="confluence",
++        source_type="wiki_page",
++        text="Chunk text",
++        content_kind="prose",
++        language="en",
++        token_count=2,
++        heading_path=heading_path,
++        acl_tags=acl_tags,
++        chunker_version="1.0.0",
++        jira_keys=jira_keys,
++        relation_ids=relation_ids,
++    )
++
++    heading_path.append("Mutated")
++    acl_tags.append("space:OTHER")
++    jira_keys.append("SVMCSPEN-9999")
++    relation_ids.append("rel:fedcba9876543210")
++
++    assert record["heading_path"] == ["Root", "Leaf"]
++    assert record["heading_path"] is not heading_path
++    assert record["acl_tags"] == ["space:SVMC"]
++    assert record["acl_tags"] is not acl_tags
++    assert record["jira_keys"] == ["SVMCSPEN-1234"]
++    assert record["jira_keys"] is not jira_keys
++    assert record["relation_ids"] == ["rel:0123456789abcdef"]
++    assert record["relation_ids"] is not relation_ids
++
++
++def test_acl_tags_empty_fails() -> None:
++    with pytest.raises(ValueError, match="acl_tags"):
++        ChunkRecordBuilder.build(
++            chunk_id="chunk:confluence:0123456789abcdef",
++            document_id="confluence:page:938880621",
++            source_system="confluence",
++            source_type="wiki_page",
++            text="Chunk text",
++            content_kind="prose",
++            language="en",
++            token_count=2,
++            acl_tags=[],
++            chunker_version="1.0.0",
++        )
++
++
++@pytest.mark.parametrize(
++    ("field_name", "value", "error_type"),
++    [
++        ("chunk_id", 123, TypeError),
++        ("chunk_id", "", ValueError),
++        ("document_id", 123, TypeError),
++        ("document_id", "", ValueError),
++        ("source_system", 123, TypeError),
++        ("source_system", "", ValueError),
++        ("source_type", 123, TypeError),
++        ("source_type", "", ValueError),
++        ("text", 123, TypeError),
++        ("text", "", ValueError),
++        ("content_kind", 123, TypeError),
++        ("content_kind", "", ValueError),
++        ("language", 123, TypeError),
++        ("language", "", ValueError),
++        ("chunker_version", 123, TypeError),
++        ("chunker_version", "", ValueError),
++    ],
++)
++def test_invalid_required_string_input_fails(
++    field_name: str,
++    value: object,
++    error_type: type[Exception],
++) -> None:
++    kwargs = {
++        "chunk_id": "chunk:confluence:0123456789abcdef",
++        "document_id": "confluence:page:938880621",
++        "source_system": "confluence",
++        "source_type": "wiki_page",
++        "text": "Chunk text",
++        "content_kind": "prose",
++        "language": "en",
++        "token_count": 2,
++        "acl_tags": ["space:SVMC"],
++        "chunker_version": "1.0.0",
++    }
++    kwargs[field_name] = value
++
++    with pytest.raises(error_type, match=field_name):
++        ChunkRecordBuilder.build(**kwargs)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize(
++    ("token_count", "error_type"),
++    [
++        ("2", TypeError),
++        (True, TypeError),
++        (-1, ValueError),
++    ],
++)
++def test_invalid_token_count_fails(
++    token_count: object,
++    error_type: type[Exception],
++) -> None:
++    with pytest.raises(error_type, match="token_count"):
++        ChunkRecordBuilder.build(
++            chunk_id="chunk:confluence:0123456789abcdef",
++            document_id="confluence:page:938880621",
++            source_system="confluence",
++            source_type="wiki_page",
++            text="Chunk text",
++            content_kind="prose",
++            language="en",
++            token_count=token_count,  # type: ignore[arg-type]
++            acl_tags=["space:SVMC"],
++            chunker_version="1.0.0",
++        )
++
++
++@pytest.mark.parametrize(
++    "field_name",
++    ["heading_path", "acl_tags", "jira_keys", "relation_ids"],
++)
++def test_invalid_list_input_fails(field_name: str) -> None:
++    kwargs = {
++        "chunk_id": "chunk:confluence:0123456789abcdef",
++        "document_id": "confluence:page:938880621",
++        "source_system": "confluence",
++        "source_type": "wiki_page",
++        "text": "Chunk text",
++        "content_kind": "prose",
++        "language": "en",
++        "token_count": 2,
++        "acl_tags": ["space:SVMC"],
++        "chunker_version": "1.0.0",
++        field_name: "not-a-list",
++    }
++
++    with pytest.raises(TypeError, match=f"{field_name} expects list"):
++        ChunkRecordBuilder.build(**kwargs)  # type: ignore[arg-type]
++
++
++def test_builder_does_not_normalize_or_alter_text() -> None:
++    text = "Line with trailing spaces   \r\n\r\n\nNext line"
++    record = build_valid_confluence_record(text=text)
++
++    assert record["text"] == text
++    assert record["content_hash"] == ContentHasher.hash_text(text)

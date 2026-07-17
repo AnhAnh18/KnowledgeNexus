@@ -1,0 +1,58 @@
+{
+  "_instructions": [
+    "Copy this file to confluence_request_profile.json on the Confluence-connected machine.",
+    "Replace only fields required by the confirmed working read-only requests; this is configuration, not Python code.",
+    "Do not put a hostname, page ID, space key, username, PAT, cookie, or Authorization value in this file.",
+    "Paths are exact origin-absolute HTTP request paths and must include any Confluence context path.",
+    "Keep {root_page_id}, {space_key}, and {page_size} as literal runtime placeholders where needed.",
+    "Never configure body, attachment, comment, restriction, ACL/permission, rendered HTML, download, or export resources.",
+    "For pagination.kind use exactly json_next, link_header, cursor_value, or start_limit. Unused pagination fields may remain unchanged.",
+    "For json_next/link_header, mutable_query_parameters lists only pagination-position keys that the confirmed next URL may add/change; selector, type/status, parent/ancestor, and page-size keys are never mutable.",
+    "The probe accepts reordered immutable query pairs but rejects any immutable name/value/count change.",
+    "For cursor_value, next_pointer locates the opaque response cursor and cursor_query_parameter is the confirmed request query name.",
+    "For start_limit, replace inventory_request.query with the two-pair _start_limit_inventory_query_example and make its names exactly match the pagination parameter names."
+  ],
+  "schema_version": 1,
+  "deployment": "REPLACE_WITH_cloud_OR_data-center",
+  "confluence_version": null,
+  "api_family": "REPLACE_WITH_CONFIRMED_API_FAMILY_OR_BASE_PATH_SHAPE",
+  "auth_scheme": "REPLACE_WITH_bearer_pat_OR_basic_username_pat",
+  "root_request": {
+    "path_template": "/REPLACE_WITH_EXACT_ROOT_PATH/{root_page_id}",
+    "query": []
+  },
+  "inventory_request": {
+    "path_template": "/REPLACE_WITH_EXACT_INVENTORY_PATH_SCOPED_TO/{root_page_id}",
+    "query": [
+      [
+        "REPLACE_WITH_CONFIRMED_PAGE_SIZE_PARAMETER",
+        "{page_size}"
+      ]
+    ]
+  },
+  "_start_limit_inventory_query_example": [
+    [
+      "REPLACE_WITH_CONFIRMED_START_PARAMETER",
+      "0"
+    ],
+    [
+      "REPLACE_WITH_CONFIRMED_LIMIT_PARAMETER",
+      "{page_size}"
+    ]
+  ],
+  "pagination": {
+    "kind": "REPLACE_WITH_json_next_OR_link_header_OR_cursor_value_OR_start_limit",
+    "next_pointer": "REPLACE_WITH_JSON_POINTER_SUCH_AS_CONFIRMED_NEXT_FIELD",
+    "cursor_query_parameter": "REPLACE_WITH_CONFIRMED_CURSOR_QUERY_PARAMETER",
+    "mutable_query_parameters": [
+      "REPLACE_WITH_CONFIRMED_CURSOR_OR_PAGE_PARAMETER"
+    ],
+    "start_query_parameter": "REPLACE_WITH_CONFIRMED_START_PARAMETER",
+    "limit_query_parameter": "REPLACE_WITH_CONFIRMED_LIMIT_PARAMETER",
+    "response_start_pointer": "REPLACE_WITH_CONFIRMED_JSON_POINTER",
+    "response_limit_pointer": "REPLACE_WITH_CONFIRMED_JSON_POINTER",
+    "response_size_pointer": "REPLACE_WITH_CONFIRMED_JSON_POINTER",
+    "response_total_pointer": "REPLACE_WITH_CONFIRMED_JSON_POINTER",
+    "terminal_rule": "start_plus_size_gte_total"
+  }
+}
