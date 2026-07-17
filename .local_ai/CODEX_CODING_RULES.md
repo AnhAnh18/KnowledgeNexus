@@ -53,6 +53,25 @@
 - When two or more files share a stable schema-facing literal, move it to a common local constant instead of duplicating it.
 - When builders copy mutable inputs such as lists or dicts into output records, add tests proving the output does not alias caller-owned objects.
 
+## Plan Review
+
+When given a task plan, review the whole plan and read the code it touches
+*before* asking anything, then raise **every** question in one batch so the
+author can answer once.
+
+- Do not drip-feed questions across turns. Finish the analysis first: blocking
+  issues, decisions the author must own, contradictions inside the plan,
+  conflicts with a normative contract, and evidence gaps all go in the same
+  message.
+- Include what a decision costs, and give a recommendation. The author is
+  choosing, not being surveyed.
+- Batch the answers back the same way: state which decision governs each part
+  before implementing.
+- Only re-ask when the answers themselves conflict or an implementation fact
+  emerges that no one could have known at plan time. Say plainly which it is.
+- Prefer verifying against the repository over asking. Only ask what the code,
+  contracts, and evidence cannot answer.
+
 ## Model Rotation Policy
 
 - Implementation and review roles are model-agnostic.
@@ -80,25 +99,31 @@
 
 ## Commit Size and Splitting
 
-The commit is the review unit, so its size decides whether a reviewer can
-actually check it. M5C-1 landed as one commit of 1631 lines, which was too large
-to review well.
+The commit is the review unit, so it must be something a reviewer can hold in
+their head at once. M5C-1 landed as one commit of 1631 lines: one undifferentiated
+block, which is what to avoid.
 
-- Split a task into lettered commits when it exceeds roughly 400 changed lines
-  including tests, or when it delivers more than one independently reviewable
-  concept: `[M5C1-A]`, `[M5C1-B]`, `[M5C1-C]`.
+- The unit is **one cohesive piece of behaviour together with everything that
+  proves it**: the transport and its tests, the adapter and its tests, the
+  argument/validation layer and its tests. Related things stay together; a
+  reviewer should be able to check one commit without holding the others open.
+- Split a task into lettered commits when it delivers more than one such piece:
+  `[M5C1-A]`, `[M5C1-B]`, `[M5C1-C]`.
+- **Line count is a symptom, not the rule.** A large commit usually means several
+  pieces got merged, so look for the seam — but do not split a genuinely single
+  piece just to hit a number, and do not merge two pieces just because both are
+  small.
+- Split by layer or component, never by file type. Do not separate production
+  code from the tests that prove it: a commit adding untested production code
+  cannot be reviewed, and a commit adding tests for code that does not exist yet
+  cannot pass. Each lettered commit carries its own tests.
 - Every split commit must stand on its own: it builds, the full suite passes, and
   it is reviewable without reading the next one. A red or half-finished
   intermediate commit is worse than one large commit.
-- Split by concept, not by file type. Do not separate production code from the
-  tests that prove it: a commit adding untested production code cannot be
-  reviewed, and a commit adding tests for code that does not exist yet cannot
-  pass. Each lettered commit carries its own tests.
-- Order the letters so each one is a working increment. Prefer the boundary the
-  task already has — for M5C-1 that was argument/output-directory validation,
-  then inventory execution and report writing, then verification and summary
-  publication, then the runbook.
-- If a task genuinely is one indivisible concept, keep it whole and say so in the
+- Prefer the seam the task already has. M5C-1's seams were the CLI
+  argument/output-directory layer, the inventory execution and report writing,
+  the verification and summary publication, and the runbook.
+- If a task genuinely is one cohesive piece, keep it whole and say so in the
   review summary rather than splitting it artificially.
 - Never split a security-relevant change so that an intermediate commit is
   exploitable.
