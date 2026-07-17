@@ -117,9 +117,10 @@ block, which is what to avoid.
   code from the tests that prove it: a commit adding untested production code
   cannot be reviewed, and a commit adding tests for code that does not exist yet
   cannot pass. Each lettered commit carries its own tests.
-- Every split commit must stand on its own: it builds, the full suite passes, and
-  it is reviewable without reading the next one. A red or half-finished
-  intermediate commit is worse than one large commit.
+- Every split commit must be green where it sits: it builds and the full suite
+  passes at that commit, and it is reviewable without reading the *next* one. It
+  may depend on the commits *before* it — that is the stack, not a defect. A red
+  or half-finished intermediate commit is worse than one large commit.
 - Prefer the seam the task already has. M5C-1's seams were the CLI
   argument/output-directory layer, the inventory execution and report writing,
   the verification and summary publication, and the runbook.
@@ -127,6 +128,55 @@ block, which is what to avoid.
   review summary rather than splitting it artificially.
 - Never split a security-relevant change so that an intermediate commit is
   exploitable.
+
+### Review stack
+
+Deliver a split task as an ordered review stack:
+
+```text
+BASE -> [TASK-A] -> [TASK-B] -> [TASK-C]
+```
+
+- Each lettered commit is a cohesive behaviour plus its own tests and must pass
+  the full suite at that point. Later commits may depend on earlier commits;
+  they are reviewed in order and are not required to be independently
+  cherry-pickable onto `BASE`.
+- Record `BASE`, every lettered commit SHA, and `REVIEW_HEAD` in the review
+  summary. Review each commit/range directly from git; do not create patches by
+  default.
+
+### Squashing is opt-in
+
+- **Default: keep accepted lettered commits in final history.** The layer/test
+  boundaries stay visible to whoever reads the history later, which is most of
+  the value of splitting in the first place.
+- Squash them into one task commit only when explicitly requested by the
+  repository owner or required by the target repository's merge policy.
+- The implementer and reviewer must not assume squash by default.
+- When a squash *is* requested, it must not change content. Verify the final
+  squashed commit and the approved `REVIEW_HEAD` have identical trees with
+  `git diff --exit-code <REVIEW_HEAD> <SQUASHED_HEAD>` (or equal tree IDs), and
+  record `TREE_EQUIVALENCE=PASS` plus the final SHA in the review summary.
+- Any content change made during or after the squash invalidates tree
+  equivalence and requires focused re-review before the final commit is used.
+
+### Behaviour and test pairing
+
+Keep these changes with the tests that prove them in the same review commit:
+
+| Behaviour/component | Tests that travel with it |
+| --- | --- |
+| Public API or domain model | contract, validation, invariants, and immutability tests |
+| Port/interface | consumer-contract test or a minimal fake implementation used by its consumer |
+| Infrastructure adapter/transport | request/response shape, error mapping, and offline boundary tests |
+| CLI/API entrypoint | input validation, output/exit shape, sanitization, and credential-leak tests |
+| Filesystem publisher | atomic publication, no-clobber, cleanup, and injected-failure tests |
+| Serializer/exporter | schema validation, exact bytes/rows/counts/hashes, and malformed-output tests |
+| Security boundary | negative regression tests proving the protected value or unsafe state cannot escape |
+
+Do not create an API-only commit merely to reduce line count when the API has no
+reviewable behaviour without its implementation. Keep the smallest meaningful
+implementation and its proof together.
 
 ## Review Artifacts
 
