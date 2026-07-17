@@ -78,8 +78,48 @@
 - Keep the existing scope convention after the tag: `foundation:`, `docs:`,
   `chore:`.
 
+## Commit Size and Splitting
+
+The commit is the review unit, so its size decides whether a reviewer can
+actually check it. M5C-1 landed as one commit of 1631 lines, which was too large
+to review well.
+
+- Split a task into lettered commits when it exceeds roughly 400 changed lines
+  including tests, or when it delivers more than one independently reviewable
+  concept: `[M5C1-A]`, `[M5C1-B]`, `[M5C1-C]`.
+- Every split commit must stand on its own: it builds, the full suite passes, and
+  it is reviewable without reading the next one. A red or half-finished
+  intermediate commit is worse than one large commit.
+- Split by concept, not by file type. Do not separate production code from the
+  tests that prove it: a commit adding untested production code cannot be
+  reviewed, and a commit adding tests for code that does not exist yet cannot
+  pass. Each lettered commit carries its own tests.
+- Order the letters so each one is a working increment. Prefer the boundary the
+  task already has — for M5C-1 that was argument/output-directory validation,
+  then inventory execution and report writing, then verification and summary
+  publication, then the runbook.
+- If a task genuinely is one indivisible concept, keep it whole and say so in the
+  review summary rather than splitting it artificially.
+- Never split a security-relevant change so that an intermediate commit is
+  exploitable.
+
+## Review Artifacts
+
+- Do not create `.local_ai/review/*.patch` files by default. They cost tokens to
+  produce and duplicate what git already stores; the commit itself is the review
+  artifact. A reviewer reads `git show <sha>` or `git diff <base>..<head>`.
+- Still write `.local_ai/review/<task>-review-summary.md`: it records decisions,
+  probes, accepted findings, and verification, none of which git holds.
+- Record the exact `BASE` and `TASK` commit range the review covers, so the
+  reviewer does not have to guess.
+- Create a patch only when explicitly asked, for example to move work to a
+  machine without this git history.
+
 ## Patch Discipline
+
+Applies only when a patch was explicitly requested.
 
 - When creating patches, clearly say whether the patch is full/squashed or incremental.
 - If a patch is incremental, state which previous patch it must be applied after.
 - When a patch represents already-applied workspace changes, validate it with `git apply --reverse --check <patch>`.
+- A patch file must exclude `.local_ai` and unrelated working-tree changes.

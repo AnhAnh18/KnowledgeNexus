@@ -50,10 +50,22 @@ Before committing, check the following.
 
 ## Git
 
-- Is the commit small and reviewable?
-- Is the commit message specific?
+- Is the commit message specific and tagged (`[<TASK>]`, `[SETUP]`, `[DOCS]`)?
+- Is a setup or policy change tagged `[SETUP]` rather than with a task ID?
+- Is the commit small enough to review? Beyond roughly 400 changed lines, or more
+  than one independently reviewable concept, it should have been split into
+  `[TASK-A]`, `[TASK-B]`, ...
+- Does each split commit stand alone: builds, full suite passes, reviewable
+  without the next one?
+- Does each split commit carry its own tests, rather than separating production
+  code from the tests that prove it?
 - Are local-only files such as bundles, raw/work/export data, and personal references excluded?
-- If a patch file was created, does it clearly say whether it is full/squashed or incremental?
-- If a patch file was created, was the matching review summary created or updated under `.local_ai/review/`?
-- If the patch is incremental, does it state which previous patch it must be applied after?
-- If the patch represents already-applied workspace changes, did `git apply --reverse --check <patch>` pass?
+- Was the review summary created or updated under `.local_ai/review/`?
+- Does the review summary state the exact `BASE`..`TASK` range it covers?
+
+## Patches (only when explicitly requested)
+
+- Does the patch clearly say whether it is full/squashed or incremental?
+- If incremental, does it state which previous patch it must be applied after?
+- If it represents already-applied workspace changes, did `git apply --reverse --check <patch>` pass?
+- Does it exclude `.local_ai` and unrelated working-tree changes?
