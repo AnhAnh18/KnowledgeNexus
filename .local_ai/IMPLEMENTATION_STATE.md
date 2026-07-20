@@ -2,19 +2,12 @@
 
 ## Current Milestone
 
-M6 - M6A (fetch and preserve one raw page) is implemented as a review stack and
-offline-reviewed by Codex through source `REVIEW_HEAD` `5542311`. Its controlled
-live run passed on the connected primary machine at target production head
-`e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; sanitized evidence is registered
-here and the repository owner accepted the documentation/state closeout.
-`M6A_FINAL_HEAD` is the M6A controlled-live closeout commit containing this
-state. M6-0 page-fetch live evidence was
-collected and approved by the operator on the connected primary machine and its
-sanitized conclusion is registered here. M5 is complete: M5C-1 was independently
-approved, and the operator completed the M5C-2 live inventory smoke on the
-connected primary machine. Only its sanitized conclusion is registered here.
-No live run was performed from the Codex machine and no raw production artifact
-exists in the repository. M6A is complete and M6B is the active next task.
+M6 - M6B (collect and preserve one page's restriction observations and
+attachment metadata) is implemented as a local review stack, pending detached
+review and pending a controlled live run. M6A is complete: its controlled live
+run passed on the connected primary machine and the repository owner accepted
+the sanitized closeout. No live request was performed from the Codex machine,
+no raw production artifact exists in this repository, and M6C has not started.
 
 ## Done
 
@@ -904,9 +897,36 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
   --page-id "<numeric-page-id>" --raw-root data/raw
 ```
 
+## M6B - Page-Adjacent Confluence Observations
+
+- Status: implemented as a local review stack; pending detached review; pending
+  controlled live run. Base commit: `6b23ed3`; production `REVIEW_HEAD`:
+  `56e1e71`.
+- Reads the deterministic M6A artifact through `RawPageReadPort`, validates its
+  identity and ordered ancestor IDs before any network call, and never refetches
+  the page body.
+- Fetches `view` restrictions for ancestors in source order followed by the
+  selected page. Exact bodies for 200/401/403/404 are atomically preserved;
+  401/403/404 and malformed/unrecognized 200 shapes normalize to `unavailable`,
+  never `unrestricted`.
+- Fetches attachment metadata from `start=0` and follows only validated,
+  root-relative `_links.next` windows for the same page and endpoint. Missing
+  `next` alone terminates. Cycles, repeated windows, unsafe links, page-budget
+  exhaustion, malformed windows, and duplicate attachment IDs fail closed.
+- Raw path rules:
+  - restrictions: `<raw_root>/confluence/restrictions/view/<selected_page_id>/<target_page_id>.body`
+  - attachment metadata: `<raw_root>/confluence/attachments/metadata/<selected_page_id>/start-<start>_limit-<limit>.json`
+- Added one additive status-aware transport method. Existing `get_json` and
+  M6A `get_bytes` behavior remain regression-tested.
+- Internal normalized observations are plain JSON-compatible dictionaries.
+  M6B does not build ACLRecord/MediaAsset, compute effective ACL, parse XHTML,
+  download attachment bodies, chunk content, or start M6C.
+- No live request was made during implementation.
+
+Review artifact:
+- `.local_ai/review/m6b-page-observations-implementation-summary.md`
+
 ## Next Planned Task
 
-M6B - for exactly one selected page, read the preserved M6A raw artifact, collect
-and preserve ordered page/ancestor restriction observations, and collect and
-preserve paginated attachment metadata. M6B must not create ACL records, download
-attachment bodies, normalize XHTML, or start M6C.
+Complete M6B detached offline review and controlled live verification. M6C may
+start only after those gates pass.

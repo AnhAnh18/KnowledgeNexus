@@ -70,7 +70,8 @@ Sync-state clarification:
 | M5C-2 - Live inventory run on main machine | done; live PASS | Sanitized operator evidence in `.local_ai/review/m5c-2-live-inventory-summary.md`; 9 items and two verified report hashes | Read-only Data Center run; real reports stayed outside Git; root labels remain unknown. |
 | M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
 | M6A - Fetch and preserve one raw page | done; controlled live PASS | Source review head `5542311`; target production head `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; owner-accepted sanitized live evidence | `M6A_FINAL_HEAD` is the controlled-live documentation/state closeout commit; no raw artifact is tracked. |
-| M6 (B-G) - Rest of one-page vertical slice | M6B next | M6A raw provenance gate passed | Restrictions/ACL, normalization, chunking, relation, export end to end. |
+| M6B - Page-adjacent observations | implemented; review/live pending | Local review stack over base `6b23ed3`; production `REVIEW_HEAD` `56e1e71`; focused and Foundation regression tests | Reads M6A raw input, preserves restriction responses and paginated attachment metadata; no ACLRecord or attachment download. |
+| M6 (C-G) - Rest of one-page vertical slice | planned after M6B gates | M6A raw provenance gate passed | Normalization, chunking, ACL, relation, and export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -755,7 +756,8 @@ Status:
   PASS at independent target production head
   `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; the repository owner accepted the
   sanitized documentation/state closeout. M6A is complete.
-- M6B-M6G: planned.
+- M6B: implemented; detached review and controlled live run pending.
+- M6C-M6G: planned.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).
