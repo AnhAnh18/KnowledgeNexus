@@ -28,6 +28,13 @@ class ConfluenceHttpTransport(Protocol):
         query: Mapping[str, str],
     ) -> Mapping[str, object]: ...
 
+    def get_bytes(
+        self,
+        *,
+        path: str,
+        query: Mapping[str, str],
+    ) -> bytes: ...
+
 
 class UrllibConfluenceHttpTransport:
     """HTTPS-only, redirect-refusing Bearer-PAT JSON transport."""
@@ -57,6 +64,39 @@ class UrllibConfluenceHttpTransport:
         path: str,
         query: Mapping[str, str],
     ) -> Mapping[str, object]:
+        body = self._read_response_bytes(path=path, query=query)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ConfluenceHttpError(
+                "Confluence GET returned malformed JSON"
+            ) from None
+        if not isinstance(payload, Mapping):
+            raise ConfluenceHttpError(
+                "Confluence GET returned a non-object JSON payload"
+            )
+        return payload
+
+    def get_bytes(
+        self,
+        *,
+        path: str,
+        query: Mapping[str, str],
+    ) -> bytes:
+        """Return the exact response-body bytes, before any JSON parsing.
+
+        Same HTTPS, redirect, status, content-type, and size guards as
+        `get_json`; only the trailing `json.loads` is omitted so a caller can
+        preserve the response verbatim.
+        """
+        return self._read_response_bytes(path=path, query=query)
+
+    def _read_response_bytes(
+        self,
+        *,
+        path: str,
+        query: Mapping[str, str],
+    ) -> bytes:
         request_path = _require_request_path(path)
         query_pairs = _copy_query_pairs(query)
         url = (
@@ -113,18 +153,7 @@ class UrllibConfluenceHttpTransport:
             raise ConfluenceHttpError(
                 "Confluence GET exceeded the response size limit"
             )
-
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ConfluenceHttpError(
-                "Confluence GET returned malformed JSON"
-            ) from None
-        if not isinstance(payload, Mapping):
-            raise ConfluenceHttpError(
-                "Confluence GET returned a non-object JSON payload"
-            )
-        return payload
+        return body
 
 
 class _RefuseRedirectHandler(urllib.request.HTTPRedirectHandler):
