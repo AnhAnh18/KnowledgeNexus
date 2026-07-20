@@ -2,8 +2,9 @@
 
 ## Current Milestone
 
-M6 - M6A (fetch and preserve one raw page) is implemented as a review stack and
-is pending detached review and live execution. M6-0 page-fetch live evidence was
+M6 - M6A (fetch and preserve one raw page) is implemented as a review stack,
+offline-reviewed by Codex through `REVIEW_HEAD` `5542311`, and pending live
+execution. M6-0 page-fetch live evidence was
 collected and approved by the operator on the connected primary machine and its
 sanitized conclusion is registered here. M5C-1 offline smoke harness is
 implemented and awaits independent review; M5C-2, the live inventory run, is
@@ -834,6 +835,10 @@ Review artifact:
   - `de389ec` `[M6A-B]` deterministic atomic raw page store + tests
   - `9ce4590` `[M6A-C]` page adapter + use case + operator entrypoint + tests
   - `a8623d4` `[M6A-D]` end-to-end offline regression test
+  - `5542311` `[M6A-E]` Codex review fix: fetch/store behind foundation ports
+    (`ConfluencePageFetchPort`, `RawPageStorePort`, `RawPageArtifact` in domain),
+    a `tests/architecture` import-boundary guard, and the `response_size_limit`
+    category (oversize now exits 9, not `http`)
 - Public behaviour: one `GET /rest/api/content/{page_id}?expand=body.storage,space,version,ancestors,metadata.labels`,
   verify (valid JSON, top-level object, `str(id) == requested id`), preserve the
   exact response bytes at `<raw_root>/confluence/pages/<page_id>.json`
@@ -849,9 +854,10 @@ Review artifact:
   ACL interpretation, XHTML/`body.storage` normalization, `CanonicalDocument`,
   chunking, relations, sync/tombstone, export, embedding/retrieval/chat. M6B was
   not started.
-- Status: implemented, pending detached review (Codex) and live execution. No
-  live run was performed from the Codex machine and no raw artifact exists in the
-  repository.
+- Status: offline implementation approved by Codex through `REVIEW_HEAD`
+  `5542311`; pending the frozen-code live run and final documentation review by
+  Claude. No live run was performed from the Codex machine and no raw artifact
+  exists in the repository.
 
 Review artifact:
 - `.local_ai/review/m6a-raw-page-fetch-summary.md`
@@ -870,11 +876,11 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
 
 ## Next Planned Task
 
-Detached review of the M6A stack (`0948252..a8623d4` plus this state commit),
-then the M6A live run on the Confluence-connected machine using the command
-above. After M6A is approved and run, M6B (capture restrictions and attachment
-metadata) follows. M5C-2 (live inventory smoke) also remains pending on the
-Confluence-accessible machine.
+Run the approved M6A code at `REVIEW_HEAD` `5542311` on the
+Confluence-connected machine using the command above. After the frozen-code live
+gate passes, M6B (capture restrictions and attachment metadata) follows. The
+completed M5C live gate is registered in its own documentation commit so M5C
+and M6A history remain separate.
 
 ### Deferred M5C-2 note
 

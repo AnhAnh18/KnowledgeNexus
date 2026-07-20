@@ -1,8 +1,20 @@
 # M6A Raw Page Fetch Implementation Summary
 
-> Implementation record for the detached reviewer (Codex). This is not the
-> independent review. No live run was performed; no raw production artifact
-> exists in the repository.
+> Implementation and review record. Codex independently reviewed the original
+> stack and the focused review fix through `REVIEW_HEAD` `5542311`.
+>
+> No production live run was performed on this checkout. No production raw
+> artifact was committed, staged, attached to this summary, or included in the
+> review range.
+
+## Status
+
+- Offline implementation verdict: **Approve**.
+- Independently reviewed production range: `0948252..5542311`.
+- Controlled production live run: **not performed**.
+- Live acceptance gate: **pending**.
+- Overall task status: **M6A is not yet fully approved or complete**.
+- M6B must not start until the controlled live run is reviewed and accepted.
 
 ## Task
 
@@ -18,9 +30,42 @@ deterministic path -> atomic replacement.
   - `de389ec` `[M6A-B]` deterministic atomic raw page store + tests
   - `9ce4590` `[M6A-C]` page adapter + use case + operator entrypoint + tests
   - `a8623d4` `[M6A-D]` end-to-end offline regression test
-  - this documentation commit updates durable state
-- Review each commit directly (`git show <sha>`); the M6A range is
-  `0948252..<TIP>`.
+  - `5542311` `[M6A-E]` review fix: move fetch/store behind foundation ports and
+    add the `response_size_limit` category
+  - `[M6A-F]` documentation closeout (this commit; no production-code changes)
+
+## Detached review record
+
+- Initial review range: `0948252..a8623d4`.
+- Initial verdict: `Changes required`.
+- Accepted findings: one P2 and three P3 findings recorded below.
+- Focused fix range: `a8623d4..5542311`.
+- Focused fix-review verdict: `Approve`.
+- Unresolved P0/P1 findings: none.
+- Unresolved accepted P2 findings: none.
+- The documentation closeout is outside the independently reviewed production
+  range and does not change production source or tests.
+
+## Round 1 review fixes (Codex)
+
+- **P2 (Clean Architecture)** — `FetchRawConfluencePage` imported concrete
+  infrastructure, the only use case doing so. Fixed in `[M6A-E]`: added
+  `foundation.ports.ConfluencePageFetchPort` and `RawPageStorePort` with
+  sanitized port-level errors, moved `RawPageArtifact` to
+  `foundation.domain.models`, and pointed the use case at ports + domain only.
+  A `tests/architecture` import-boundary test now guards every use case.
+- **P3 (size category)** — the original summary incorrectly said an oversized
+  response produced `store`, while the implementation mapped it to `http`.
+  `[M6A-E]` makes the operational result explicit: a transport
+  `ConfluenceHttpResponseTooLargeError` and a
+  `ConfluencePageTooLargeError` port error yield the distinct
+  `response_size_limit` category (CLI exit 9). This is not decision 4A;
+  decision 4A governs only the confirmed endpoint and expand shape.
+- **P3 (unicode)** — added a byte-fidelity test over real multibyte UTF-8
+  (`café`, `世界`) alongside an escaped sequence.
+- **P3 (durable docs)** — reconciled the roadmap section with its table row.
+- Review each commit directly (`git show <sha>`); the independently reviewed
+  production range is `0948252..5542311`.
 
 ## Locked decisions applied
 
@@ -31,7 +76,7 @@ deterministic path -> atomic replacement.
   limit); only the trailing `json.loads` is omitted for `get_bytes`. No separate
   transport, no raw HTTP in the page adapter. Regression tests prove `get_json`
   still parses from the same bytes `get_bytes` returns raw.
-- **2A** review stack `[M6A-A..D]`, lettered commits kept (squash not requested).
+- **2A** review stack `[M6A-A..E]`, lettered commits kept (squash not requested).
 - **3A** `--raw-root` optional, default `data/raw` (gitignored, Foundation
   internal); path `<raw_root>/confluence/pages/<page_id>.json`; no title,
   timestamp, UUID, or version in the path; resolved target confirmed under the
@@ -52,9 +97,9 @@ deterministic path -> atomic replacement.
   raises), valid JSON, top-level object, `str(response id) == requested id`. No
   `body.storage` normalization, no `CanonicalDocument` mapping.
 - Sanitized failure categories, per stage: `invalid_page_id`, `http`,
-  `malformed_json`, `non_object_json`, `identity_mismatch`, `store`, plus CLI
-  `configuration` and `unexpected`. No page id, host, title, or body appears in
-  any exception, log, or CLI output.
+  `response_size_limit`, `malformed_json`, `non_object_json`, `identity_mismatch`,
+  `store`, plus CLI `configuration` and `unexpected`. No page id, host, title,
+  or body appears in any exception message, log, or CLI output.
 
 ## Notes for the reviewer
 
@@ -73,11 +118,17 @@ deterministic path -> atomic replacement.
 ## Verification
 
 ```text
-C:\Users\SPen\AppData\Local\Programs\Python\Python312\python.exe -m pytest tests/foundation/infrastructure/confluence/test_confluence_http_transport.py tests/foundation/infrastructure/raw_store tests/foundation/infrastructure/confluence/test_confluence_data_center_page_adapter.py tests/foundation/application/use_cases/test_fetch_raw_confluence_page.py tests/foundation/cli/test_fetch_raw_confluence_page_cli.py tests/foundation/integration/test_fetch_raw_confluence_page_e2e.py -q
-(focused M6A suites pass)
+C:\Users\SPen\AppData\Local\Programs\Python\Python312\python.exe -m pytest tests/architecture tests/foundation/infrastructure/confluence/test_confluence_http_transport.py tests/foundation/infrastructure/raw_store tests/foundation/infrastructure/confluence/test_confluence_data_center_page_adapter.py tests/foundation/application/use_cases/test_fetch_raw_confluence_page.py tests/foundation/cli/test_fetch_raw_confluence_page_cli.py tests/foundation/integration/test_fetch_raw_confluence_page_e2e.py -q
+110 passed
 
-C:\Users\SPen\AppData\Local\Programs\Python\Python312\python.exe -m pytest tests/foundation tests/shared -q
-700 passed
+C:\Users\SPen\AppData\Local\Programs\Python\Python312\python.exe -m pytest tests/foundation -q
+689 passed
+
+C:\Users\SPen\AppData\Local\Programs\Python\Python312\python.exe -m pytest tests/shared -q
+17 passed
+
+C:\Users\SPen\AppData\Local\Programs\Python\Python312\python.exe -m pytest tests/architecture -q
+3 passed
 
 git diff --check   -> exit 0 (clean)
 
@@ -88,7 +139,7 @@ python -m ...fetch_raw_confluence_page --page-id 1000 --raw-root <tmp> (no env) 
 No `data/raw` directory was created in the repository; tests write only under
 `tmp_path`.
 
-## Approved later operator command (live run, not performed here)
+## Pending operator command (live run, not performed here)
 
 On the Confluence-connected machine, with credentials in the environment only:
 
@@ -103,15 +154,26 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
   --raw-root data/raw
 ```
 
-Success prints only `method_get=true ... temporary_cleanup=true`. The raw
-artifact lands at `data/raw/confluence/pages/<page_id>.json` (gitignored) and
-must not be committed. A page over the size limit fails closed with category
-`store` (the transport size guard); raising the limit is an explicit
-`--max-response-bytes` operator choice, not an automatic retry.
+Success output is limited to these boolean lines:
+
+- `method_get=true`
+- `status_success=true`
+- `json_valid=true`
+- `identity_match=true`
+- `artifact_written=true`
+- `hash_verified=true`
+- `temporary_cleanup=true`
+
+It contains no page ID, title, hostname, raw path, full hash, or raw body. The
+raw artifact lands at `data/raw/confluence/pages/<page_id>.json` (gitignored)
+and must not be committed. A page over the size limit fails closed with category
+`response_size_limit` (CLI exit 9, from the transport size guard); raising the
+limit is an explicit `--max-response-bytes` operator choice, not an automatic
+retry.
 
 ## Boundary
 
 No restriction/attachment/inventory/descendant call; no ACL interpretation, no
 XHTML parsing, no normalization, no chunking, no relation/Jira, no sync/tombstone,
-no export, no embedding/retrieval/chat; no dependency added; no live run; M6B not
-started.
+no export, no embedding/retrieval/chat; no live run; M6B not started. No
+third-party package or external runtime dependency was added.
