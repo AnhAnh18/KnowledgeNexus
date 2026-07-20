@@ -6,6 +6,9 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_
 from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_adapter import (  # noqa: E501
     ConfluenceDataCenterPageAdapter,
 )
+from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_observation_adapter import (  # noqa: E501
+    ConfluenceDataCenterPageObservationAdapter,
+)
 from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_metadata_mapper import (
     ConfluenceDataCenterPageMetadataMapper,
     ConfluenceDataCenterPayloadError,
@@ -13,6 +16,7 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_
 )
 from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transport import (  # noqa: E501
     ConfluenceHttpError,
+    ConfluenceHttpResponse,
     ConfluenceHttpResponseTooLargeError,
     ConfluenceHttpTransport,
     UrllibConfluenceHttpTransport,
@@ -21,11 +25,13 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transpo
 __all__ = [
     "ConfluenceDataCenterInventoryAdapter",
     "ConfluenceDataCenterPageAdapter",
+    "ConfluenceDataCenterPageObservationAdapter",
     "ConfluenceDataCenterPageMetadataMapper",
     "ConfluenceDataCenterPaginationError",
     "ConfluenceDataCenterPayloadError",
     "ConfluenceDataCenterRequestError",
     "ConfluenceHttpError",
+    "ConfluenceHttpResponse",
     "ConfluenceHttpResponseTooLargeError",
     "ConfluenceHttpTransport",
     "ParsedConfluenceSearchPage",
