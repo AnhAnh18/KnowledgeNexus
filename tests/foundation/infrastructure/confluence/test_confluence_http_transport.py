@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
+from io import BytesIO
 from email.message import Message
 from typing import Any
 
@@ -9,6 +10,7 @@ import pytest
 
 from knowledgenexus.foundation.infrastructure.confluence import (
     ConfluenceHttpError,
+    ConfluenceHttpResponseTooLargeError,
     UrllibConfluenceHttpTransport,
 )
 from knowledgenexus.foundation.infrastructure.confluence import (
@@ -473,6 +475,127 @@ def test_get_json_and_get_bytes_share_the_same_guarded_primitive(
 
     transport2, _, _ = _transport(monkeypatch, response=FakeResponse(body=body))
     assert transport2.get_bytes(path="/rest/api/content/1000", query={}) == body
+
+
+def test_status_aware_get_preserves_exact_404_status_and_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"<html>synthetic unavailable</html>\n"
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted",
+        404,
+        "Not Found",
+        hdrs=None,
+        fp=BytesIO(body),
+    )
+    transport, opener, _ = _transport(monkeypatch, outcome=failure)
+
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert response.status_code == 404
+    assert response.body == body
+    request, _ = opener.calls[0]
+    assert request.get_method() == "GET"
+    assert request.get_header("Authorization") == f"Bearer {PAT}"
+
+
+def test_status_aware_get_preserves_empty_http_error_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted",
+        403,
+        "Forbidden",
+        hdrs=None,
+        fp=None,
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert response.status_code == 403
+    assert response.body == b""
+
+
+def test_status_aware_response_repr_does_not_disclose_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"private-synthetic-response-body"
+    transport, _, _ = _transport(
+        monkeypatch,
+        response=FakeResponse(body=body),
+    )
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+    assert "private-synthetic-response-body" not in repr(response)
+
+
+def test_status_aware_get_does_not_require_json_content_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"synthetic plain body"
+    transport, _, _ = _transport(
+        monkeypatch,
+        response=FakeResponse(body=body, status=200, content_type="text/plain"),
+    )
+
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert response.status_code == 200
+    assert response.body == body
+
+
+def test_status_aware_get_rejects_redirect_instead_of_returning_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/redirect",
+        302,
+        "Found",
+        hdrs=None,
+        fp=BytesIO(b"redirect body"),
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    with pytest.raises(ConfluenceHttpError, match="302"):
+        transport.get_response_bytes(
+            path="/rest/api/content/1000/restriction/byOperation/view",
+            query={},
+        )
+
+
+def test_status_aware_get_enforces_response_size_limit_on_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted",
+        404,
+        "Not Found",
+        hdrs=None,
+        fp=BytesIO(b"123456789"),
+    )
+    transport, _, _ = _transport(
+        monkeypatch,
+        outcome=failure,
+        max_response_bytes=8,
+    )
+
+    with pytest.raises(ConfluenceHttpResponseTooLargeError):
+        transport.get_response_bytes(
+            path="/rest/api/content/1000/restriction/byOperation/view",
+            query={},
+        )
 
 
 def _transport(

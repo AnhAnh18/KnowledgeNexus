@@ -7,6 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Protocol
 
 
@@ -26,6 +27,22 @@ class ConfluenceHttpResponseTooLargeError(ConfluenceHttpError):
     """
 
 
+@dataclass(frozen=True, repr=False)
+class ConfluenceHttpResponse:
+    """HTTP status plus exact response bytes for status-aware observations."""
+
+    status_code: int
+    body: bytes
+
+    def __post_init__(self) -> None:
+        _require_http_status(self.status_code)
+        if not isinstance(self.body, bytes):
+            raise TypeError("body expects bytes")
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
+
 class ConfluenceHttpTransport(Protocol):
     """Minimal synchronous JSON GET seam used by the Data Center adapter."""
 
@@ -42,6 +59,13 @@ class ConfluenceHttpTransport(Protocol):
         path: str,
         query: Mapping[str, str],
     ) -> bytes: ...
+
+    def get_response_bytes(
+        self,
+        *,
+        path: str,
+        query: Mapping[str, str],
+    ) -> ConfluenceHttpResponse: ...
 
 
 class UrllibConfluenceHttpTransport:
@@ -99,48 +123,75 @@ class UrllibConfluenceHttpTransport:
         """
         return self._read_response_bytes(path=path, query=query)
 
+    def get_response_bytes(
+        self,
+        *,
+        path: str,
+        query: Mapping[str, str],
+    ) -> ConfluenceHttpResponse:
+        """Return exact bytes for both success and expected non-2xx responses.
+
+        This additive seam exists for endpoints where 401/403/404 are
+        observations. Redirects, network failures, and size-limit failures stay
+        transport errors and therefore can never masquerade as unavailable data.
+        Content type is intentionally not constrained because an expected 404
+        body may be empty, JSON, or HTML and must be preserved exactly.
+        """
+        request = self._build_request(path=path, query=query)
+        try:
+            with self._opener.open(
+                request,
+                timeout=self._timeout_seconds,
+            ) as response:
+                status = _require_http_status(getattr(response, "status", None))
+                if 300 <= status < 400:
+                    raise ConfluenceHttpError(
+                        f"Confluence GET returned HTTP status {status}"
+                    )
+                body = self._read_bounded_body(response)
+        except urllib.error.HTTPError as exc:
+            try:
+                status = _require_http_status(exc.code)
+                if 300 <= status < 400:
+                    raise ConfluenceHttpError(
+                        f"Confluence GET returned HTTP status {status}"
+                    )
+                body = self._read_bounded_body(exc) if exc.fp is not None else b""
+            finally:
+                exc.close()
+        except ConfluenceHttpError:
+            raise
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            http.client.HTTPException,
+            UnicodeError,
+            ValueError,
+        ):
+            raise ConfluenceHttpError("Confluence GET failed") from None
+        return ConfluenceHttpResponse(status_code=status, body=body)
+
     def _read_response_bytes(
         self,
         *,
         path: str,
         query: Mapping[str, str],
     ) -> bytes:
-        request_path = _require_request_path(path)
-        query_pairs = _copy_query_pairs(query)
-        url = (
-            f"{self._base_url}/{request_path.lstrip('/')}"
-            f"?{urllib.parse.urlencode(query_pairs)}"
-        )
-        try:
-            request = urllib.request.Request(
-                url,
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {self._personal_access_token}",
-                },
-                method="GET",
-            )
-        except (UnicodeError, ValueError):
-            raise ConfluenceHttpError(
-                "Confluence GET request could not be constructed"
-            ) from None
+        request = self._build_request(path=path, query=query)
 
         try:
             with self._opener.open(
                 request,
                 timeout=self._timeout_seconds,
             ) as response:
-                status = getattr(response, "status", None)
-                if isinstance(status, bool) or not isinstance(status, int):
-                    raise ConfluenceHttpError(
-                        "Confluence GET returned an invalid HTTP status"
-                    )
+                status = _require_http_status(getattr(response, "status", None))
                 if status < 200 or status >= 300:
                     raise ConfluenceHttpError(
                         f"Confluence GET returned HTTP status {status}"
                     )
                 _require_json_content_type(response.headers)
-                body = response.read(self._max_response_bytes + 1)
+                body = self._read_bounded_body(response)
         except urllib.error.HTTPError as exc:
             raise ConfluenceHttpError(
                 f"Confluence GET returned HTTP status {exc.code}"
@@ -155,6 +206,37 @@ class UrllibConfluenceHttpTransport:
         ):
             raise ConfluenceHttpError("Confluence GET failed") from None
 
+        return body
+
+    def _build_request(
+        self,
+        *,
+        path: str,
+        query: Mapping[str, str],
+    ) -> urllib.request.Request:
+        request_path = _require_request_path(path)
+        query_pairs = _copy_query_pairs(query)
+        encoded_query = urllib.parse.urlencode(query_pairs)
+        url = f"{self._base_url}/{request_path.lstrip('/')}?{encoded_query}"
+        try:
+            return urllib.request.Request(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {self._personal_access_token}",
+                },
+                method="GET",
+            )
+        except (UnicodeError, ValueError):
+            raise ConfluenceHttpError(
+                "Confluence GET request could not be constructed"
+            ) from None
+
+    def _read_bounded_body(self, response: object) -> bytes:
+        read = getattr(response, "read", None)
+        if not callable(read):
+            raise ConfluenceHttpError("Confluence GET returned an invalid body type")
+        body = read(self._max_response_bytes + 1)
         if not isinstance(body, bytes):
             raise ConfluenceHttpError("Confluence GET returned an invalid body type")
         if len(body) > self._max_response_bytes:
@@ -227,6 +309,14 @@ def _require_max_response_bytes(value: object) -> int:
         raise TypeError("max_response_bytes expects an integer")
     if value <= 0:
         raise ValueError("max_response_bytes must be positive")
+    return value
+
+
+def _require_http_status(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfluenceHttpError("Confluence GET returned an invalid HTTP status")
+    if value < 100 or value > 599:
+        raise ConfluenceHttpError("Confluence GET returned an invalid HTTP status")
     return value
 
 
