@@ -3,6 +3,9 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_
     ConfluenceDataCenterPaginationError,
     ConfluenceDataCenterRequestError,
 )
+from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_adapter import (  # noqa: E501
+    ConfluenceDataCenterPageAdapter,
+)
 from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_metadata_mapper import (
     ConfluenceDataCenterPageMetadataMapper,
     ConfluenceDataCenterPayloadError,
@@ -16,6 +19,7 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transpo
 
 __all__ = [
     "ConfluenceDataCenterInventoryAdapter",
+    "ConfluenceDataCenterPageAdapter",
     "ConfluenceDataCenterPageMetadataMapper",
     "ConfluenceDataCenterPaginationError",
     "ConfluenceDataCenterPayloadError",

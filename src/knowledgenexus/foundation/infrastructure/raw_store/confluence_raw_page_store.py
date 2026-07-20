@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-# Confluence Data Center page IDs are numeric. Restricting the path segment to
-# ASCII digits is the strictest possible rule and, on its own, makes directory
-# traversal impossible; it matches the page-id shape the inventory adapter
-# already enforces. This is intentionally not a loose path sanitizer.
-_NUMERIC_PAGE_ID = re.compile(r"\A[0-9]+\Z")
+from knowledgenexus.foundation.domain.rules.confluence_page_id import (
+    require_confluence_page_id,
+)
 
+# Restricting the path segment to the numeric page-id shape is the strictest
+# possible rule and, on its own, makes directory traversal impossible. This is
+# intentionally not a loose path sanitizer.
 _PAGES_SUBDIR = ("confluence", "pages")
 
 
@@ -94,11 +94,7 @@ class ConfluenceRawPageStore:
 
 
 def _require_page_id(value: object) -> str:
-    if not isinstance(value, str):
-        raise TypeError("page_id expects a string")
-    if _NUMERIC_PAGE_ID.fullmatch(value) is None:
-        raise ValueError("page_id must contain ASCII decimal digits only")
-    return value
+    return require_confluence_page_id(value)
 
 
 def _resolve_without_requiring_existence(path: Path) -> Path:
