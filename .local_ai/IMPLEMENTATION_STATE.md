@@ -2,13 +2,13 @@
 
 ## Current Milestone
 
-M6 - M6-0 page-fetch live evidence has been collected and approved by the
-operator on the connected primary machine; this checkout has synchronized that
-approved sanitized conclusion only. M6A (fetch and preserve one raw page) is the
-next implementation task and has not started. M5C-1 offline smoke harness is
-implemented and offline-tested and awaits independent review; M5C-2, the live
-inventory run, is still pending on the Confluence-accessible machine. No live
-run was performed from the Codex machine.
+M6 - M6A (fetch and preserve one raw page) is implemented as a review stack and
+is pending detached review and live execution. M6-0 page-fetch live evidence was
+collected and approved by the operator on the connected primary machine and its
+sanitized conclusion is registered here. M5C-1 offline smoke harness is
+implemented and awaits independent review; M5C-2, the live inventory run, is
+still pending on the Confluence-accessible machine. No live run was performed
+from the Codex machine and no raw production artifact exists in the repository.
 
 ## Done
 
@@ -827,20 +827,53 @@ PASS (exit 0)
 Review artifact:
 - `.local_ai/review/m6-0-confluence-page-fetch-evidence-summary.md`
 
+## M6A - Fetch and Preserve One Raw Page
+
+- Implemented as a review stack over `BASE_COMMIT` `0948252`:
+  - `cffa3f1` `[M6A-A]` raw-byte transport capability (`get_bytes`) + tests
+  - `de389ec` `[M6A-B]` deterministic atomic raw page store + tests
+  - `9ce4590` `[M6A-C]` page adapter + use case + operator entrypoint + tests
+  - `a8623d4` `[M6A-D]` end-to-end offline regression test
+- Public behaviour: one `GET /rest/api/content/{page_id}?expand=body.storage,space,version,ancestors,metadata.labels`,
+  verify (valid JSON, top-level object, `str(id) == requested id`), preserve the
+  exact response bytes at `<raw_root>/confluence/pages/<page_id>.json`
+  (default `raw_root` = `data/raw`, gitignored), `raw_sha256 = sha256(exact_bytes)`,
+  atomic same-directory replacement.
+- `get_bytes` was added additively via a shared guarded primitive; `get_json`
+  behaviour is unchanged (regression tested). The numeric page-id rule is a new
+  shared domain rule; the approved inventory adapter is untouched.
+- The 8 MB `max_response_bytes` guard stays enforced and injectable
+  (`--max-response-bytes`); it is never auto-raised and a page over the limit
+  fails closed with no artifact.
+- Out of scope and not done: restriction/attachment/inventory/descendant calls,
+  ACL interpretation, XHTML/`body.storage` normalization, `CanonicalDocument`,
+  chunking, relations, sync/tombstone, export, embedding/retrieval/chat. M6B was
+  not started.
+- Status: implemented, pending detached review (Codex) and live execution. No
+  live run was performed from the Codex machine and no raw artifact exists in the
+  repository.
+
+Review artifact:
+- `.local_ai/review/m6a-raw-page-fetch-summary.md`
+
+Approved later operator command (live run, not performed here), on the
+Confluence-connected machine with credentials in the environment only:
+
+```powershell
+$env:CONFLUENCE_BASE_URL = "<https-base-url>"
+$env:CONFLUENCE_PAT      = "<personal-access-token>"
+cd "<repository-root>"
+$env:PYTHONPATH = "src"
+python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
+  --page-id "<numeric-page-id>" --raw-root data/raw
+```
+
 ## Next Planned Task
 
-M6A - fetch and preserve exactly one raw production Confluence page, as a review
-stack (`[M6A-A]` raw-byte transport capability, `[M6A-B]` deterministic atomic
-raw page store, `[M6A-C]` one-page use case plus adapter integration and operator
-entrypoint, `[M6A-D]` final regression tests and durable state update), keeping
-the lettered commits per repository convention. M6A adds a `get_bytes()`
-capability to the approved transport additively, stores the exact response bytes
-at `<raw_root>/confluence/pages/<page_id>.json` (default `raw_root` = `data/raw`,
-gitignored) with a raw `sha256(exact_bytes)` and atomic same-directory
-replacement, and reuses the M5C credential/entrypoint convention. It must not
-normalize, chunk, interpret ACL, fetch restrictions or attachments, or start
-M6B. The 8 MB response-size guard stays enforced and injectable; a page over the
-limit must fail closed. M5C-2 (live inventory smoke) also remains pending on the
+Detached review of the M6A stack (`0948252..a8623d4` plus this state commit),
+then the M6A live run on the Confluence-connected machine using the command
+above. After M6A is approved and run, M6B (capture restrictions and attachment
+metadata) follows. M5C-2 (live inventory smoke) also remains pending on the
 Confluence-accessible machine.
 
 ### Deferred M5C-2 note

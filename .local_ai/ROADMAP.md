@@ -69,7 +69,7 @@ Sync-state clarification:
 | M5C-1 - Reviewed safe smoke runner | implemented; review pending | `foundation/cli/` entrypoint composing approved components, runbook, and 40 offline tests | Adds no HTTP/CQL/pagination/parsing of its own; zero cross-context imports per D34; no live run on this machine. |
 | M5C-2 - Live inventory run on main machine | planned | Depends on M5C-1 review and Confluence access | One small real inventory on the M5B-0 test root; first live confirmation of `expand=space,version`. |
 | M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
-| M6A - Fetch and preserve one raw page | next | Depends on M6-0 confirmed page shape and the approved M5B-2 transport | Adds raw-byte transport capability + atomic raw page store; no normalization/ACL/attachment. |
+| M6A - Fetch and preserve one raw page | implemented; pending detached review + live run | Review stack `0948252..a8623d4`; 700 Foundation/Shared tests pass; `.local_ai/review/m6a-raw-page-fetch-summary.md` | Adds raw-byte transport capability + atomic raw page store; no normalization/ACL/attachment. |
 | M6 (B-G) - Rest of one-page vertical slice | planned | Depends on M6A raw provenance | Restrictions/ACL, normalization, chunking, relation, export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
