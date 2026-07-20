@@ -69,8 +69,8 @@ Sync-state clarification:
 | M5C-1 - Reviewed safe smoke runner | done; independently approved | `foundation/cli/` entrypoint composing approved components, runbook, and 40 offline tests | Adds no HTTP/CQL/pagination/parsing of its own; zero cross-context imports per D34; no live run on this machine. |
 | M5C-2 - Live inventory run on main machine | done; live PASS | Sanitized operator evidence in `.local_ai/review/m5c-2-live-inventory-summary.md`; 9 items and two verified report hashes | Read-only Data Center run; real reports stayed outside Git; root labels remain unknown. |
 | M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
-| M6A - Fetch and preserve one raw page | offline approved; pending live run | Review stack `0948252..5542311`; 689 Foundation, 17 Shared, and 3 architecture tests pass; `.local_ai/review/m6a-raw-page-fetch-summary.md` | Adds raw-byte transport capability + atomic raw page store; no normalization/ACL/attachment. |
-| M6 (B-G) - Rest of one-page vertical slice | planned | Depends on M6A raw provenance | Restrictions/ACL, normalization, chunking, relation, export end to end. |
+| M6A - Fetch and preserve one raw page | done; controlled live PASS | Source review head `5542311`; target production head `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; owner-accepted sanitized live evidence | `M6A_FINAL_HEAD` is the controlled-live documentation/state closeout commit; no raw artifact is tracked. |
+| M6 (B-G) - Rest of one-page vertical slice | M6B next | M6A raw provenance gate passed | Restrictions/ACL, normalization, chunking, relation, export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -751,7 +751,10 @@ Status:
   and `.local_ai/review/m6-0-confluence-page-fetch-evidence-summary.md`. It
   confirms the page, view-restriction, and attachment request shapes. No raw
   artifact is stored in the repo, by sanitization design.
-- M6A: offline approved through `REVIEW_HEAD` `5542311`; pending live run.
+- M6A: offline approved through source `REVIEW_HEAD` `5542311`; controlled live
+  PASS at independent target production head
+  `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; the repository owner accepted the
+  sanitized documentation/state closeout. M6A is complete.
 - M6B-M6G: planned.
 
 Tasks:

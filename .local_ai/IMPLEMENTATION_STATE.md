@@ -2,15 +2,19 @@
 
 ## Current Milestone
 
-M6 - M6A (fetch and preserve one raw page) is implemented as a review stack,
-offline-reviewed by Codex through `REVIEW_HEAD` `5542311`, and pending live
-execution. M6-0 page-fetch live evidence was
+M6 - M6A (fetch and preserve one raw page) is implemented as a review stack and
+offline-reviewed by Codex through source `REVIEW_HEAD` `5542311`. Its controlled
+live run passed on the connected primary machine at target production head
+`e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; sanitized evidence is registered
+here and the repository owner accepted the documentation/state closeout.
+`M6A_FINAL_HEAD` is the M6A controlled-live closeout commit containing this
+state. M6-0 page-fetch live evidence was
 collected and approved by the operator on the connected primary machine and its
 sanitized conclusion is registered here. M5 is complete: M5C-1 was independently
 approved, and the operator completed the M5C-2 live inventory smoke on the
 connected primary machine. Only its sanitized conclusion is registered here.
 No live run was performed from the Codex machine and no raw production artifact
-exists in the repository.
+exists in the repository. M6A is complete and M6B is the active next task.
 
 ## Done
 
@@ -873,16 +877,23 @@ Review artifact:
   ACL interpretation, XHTML/`body.storage` normalization, `CanonicalDocument`,
   chunking, relations, sync/tombstone, export, embedding/retrieval/chat. M6B was
   not started.
-- Status: offline implementation approved by Codex through `REVIEW_HEAD`
-  `5542311`; pending the frozen-code live run and final documentation review by
-  Claude. No live run was performed from the Codex machine and no raw artifact
-  exists in the repository.
+- Status: offline implementation approved by Codex through source `REVIEW_HEAD`
+  `5542311`; controlled live PASS on the independent target repository at
+  production head `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`. Exit code was 0;
+  all seven success checks, artifact existence, temporary cleanup, leak scan,
+  and clean-worktree checks passed. The repository owner accepted the
+  documentation/state closeout; `M6A_FINAL_HEAD` is the closeout commit containing
+  this state. No live run was performed from the Codex machine and no raw
+  artifact exists in this repository.
 
 Review artifact:
 - `.local_ai/review/m6a-raw-page-fetch-summary.md`
+- `.local_ai/review/m6a-live-evidence-summary.md`
 
-Approved later operator command (live run, not performed here), on the
-Confluence-connected machine with credentials in the environment only:
+The approved command shape was executed on the Confluence-connected primary
+machine with credentials in the environment only. The exact local raw-root
+location is intentionally not registered. The raw artifact remains outside Git
+for M6B input.
 
 ```powershell
 $env:CONFLUENCE_BASE_URL = "<https-base-url>"
@@ -895,8 +906,7 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
 
 ## Next Planned Task
 
-Run the approved M6A code at `REVIEW_HEAD` `5542311` on the
-Confluence-connected machine using the command above. After the frozen-code live
-gate passes, M6B (capture restrictions and attachment metadata) follows. The
-completed M5C live gate is registered in its own documentation commit so M5C
-and M6A history remain separate.
+M6B - for exactly one selected page, read the preserved M6A raw artifact, collect
+and preserve ordered page/ancestor restriction observations, and collect and
+preserve paginated attachment metadata. M6B must not create ACL records, download
+attachment bodies, normalize XHTML, or start M6C.

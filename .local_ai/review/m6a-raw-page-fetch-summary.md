@@ -3,18 +3,23 @@
 > Implementation and review record. Codex independently reviewed the original
 > stack and the focused review fix through `REVIEW_HEAD` `5542311`.
 >
-> No production live run was performed on this checkout. No production raw
-> artifact was committed, staged, attached to this summary, or included in the
-> review range.
+> No production live run was performed on this checkout. The operator later
+> completed the controlled live run on the independent target repository; its
+> sanitized result is registered in `m6a-live-evidence-summary.md`. No production
+> raw artifact was committed, staged, attached to this summary, or included in
+> the review range.
 
 ## Status
 
 - Offline implementation verdict: **Approve**.
 - Independently reviewed production range: `0948252..5542311`.
-- Controlled production live run: **not performed**.
-- Live acceptance gate: **pending**.
-- Overall task status: **M6A is not yet fully approved or complete**.
-- M6B must not start until the controlled live run is reviewed and accepted.
+- Controlled production live run: **PASS** at independent target production
+  head `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`.
+- Live acceptance gate: **passed; sanitized evidence registered**.
+- Overall task status: **complete**; the repository owner accepted the
+  documentation/state closeout.
+- `M6A_FINAL_HEAD` is the controlled-live closeout commit containing this state.
+- M6B may begin after this closeout commit is created.
 
 ## Task
 
@@ -139,7 +144,7 @@ python -m ...fetch_raw_confluence_page --page-id 1000 --raw-root <tmp> (no env) 
 No `data/raw` directory was created in the repository; tests write only under
 `tmp_path`.
 
-## Pending operator command (live run, not performed here)
+## Executed operator command shape (not performed from this checkout)
 
 On the Confluence-connected machine, with credentials in the environment only:
 
@@ -154,7 +159,7 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
   --raw-root data/raw
 ```
 
-Success output is limited to these boolean lines:
+The operator reported exit code 0 and exactly these success booleans:
 
 - `method_get=true`
 - `status_success=true`
@@ -164,9 +169,11 @@ Success output is limited to these boolean lines:
 - `hash_verified=true`
 - `temporary_cleanup=true`
 
-It contains no page ID, title, hostname, raw path, full hash, or raw body. The
-raw artifact lands at `data/raw/confluence/pages/<page_id>.json` (gitignored)
-and must not be committed. A page over the size limit fails closed with category
+No page ID, title, hostname, raw path, full hash, or raw body was included in the
+sanitized completion notice. The store's deterministic relative convention is
+`confluence/pages/<page_id>.json`; the operator's raw-root location is not
+registered, and the artifact must not be committed. A page over the size limit
+fails closed with category
 `response_size_limit` (CLI exit 9, from the transport size guard); raising the
 limit is an explicit `--max-response-bytes` operator choice, not an automatic
 retry.
@@ -175,5 +182,5 @@ retry.
 
 No restriction/attachment/inventory/descendant call; no ACL interpretation, no
 XHTML parsing, no normalization, no chunking, no relation/Jira, no sync/tombstone,
-no export, no embedding/retrieval/chat; no live run; M6B not started. No
-third-party package or external runtime dependency was added.
+no export, no embedding/retrieval/chat; no live run from this checkout; M6B not
+started. No third-party package or external runtime dependency was added.
