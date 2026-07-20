@@ -363,6 +363,118 @@ def test_redirect_handler_refuses_cross_origin_request() -> None:
     assert redirected is None
 
 
+_RAW_BODY = (
+    '{"id":"1000","title":"T\\u00e9st  ","body":'
+    '{"storage":{"value":"<p>a  b</p>\\n","representation":"storage"}},'
+    "\"trailing\":true}  \n"
+).encode("utf-8")
+
+
+def test_get_bytes_returns_exact_body_before_json_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(body=_RAW_BODY)
+    transport, opener, _ = _transport(
+        monkeypatch, response=response, max_response_bytes=len(_RAW_BODY)
+    )
+
+    raw = transport.get_bytes(path="/rest/api/content/1000", query={"expand": "x"})
+
+    # Byte-for-byte: unicode escapes, double spaces, newline, key order, and the
+    # trailing bytes after the closing brace are all preserved unchanged.
+    assert raw == _RAW_BODY
+    assert isinstance(raw, bytes)
+    assert len(opener.calls) == 1
+    request, _timeout = opener.calls[0]
+    assert request.get_method() == "GET"
+    assert request.get_header("Authorization") == f"Bearer {PAT}"
+    assert request.full_url == (
+        "https://fixture.invalid/confluence/rest/api/content/1000?expand=x"
+    )
+
+
+def test_get_bytes_does_not_parse_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    # get_json would reject this; get_bytes must return it verbatim.
+    body = b"not-json-at-all"
+    transport, _, _ = _transport(monkeypatch, response=FakeResponse(body=body))
+
+    assert transport.get_bytes(path="/rest/api/content/1000", query={}) == body
+
+
+def test_get_bytes_enforces_the_response_size_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(body=b"123456789")
+    transport, _, _ = _transport(
+        monkeypatch, response=response, max_response_bytes=8
+    )
+
+    with pytest.raises(ConfluenceHttpError, match="response size limit"):
+        transport.get_bytes(path="/rest/api/content/1000", query={})
+
+    assert response.read_limits == [9]
+
+
+def test_get_bytes_rejects_non_json_content_type_without_dumping_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(
+        body=b"<html>private login page</html>", content_type="text/html"
+    )
+    transport, _, _ = _transport(monkeypatch, response=response)
+
+    with pytest.raises(ConfluenceHttpError, match="non-JSON") as exc_info:
+        transport.get_bytes(path="/rest/api/content/1000", query={})
+
+    assert "private login page" not in str(exc_info.value)
+
+
+def test_get_bytes_http_error_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = urllib.error.HTTPError(
+        f"https://fixture.invalid/{PAT}", 401, "Unauthorized", hdrs=None, fp=None
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_bytes(path="/rest/api/content/1000", query={"expand": "x"})
+
+    message = str(exc_info.value)
+    assert "401" in message
+    assert PAT not in message
+    assert "fixture.invalid" not in message
+
+
+def test_get_bytes_network_error_discloses_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.URLError(f"cannot reach fixture.invalid using {PAT}")
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_bytes(path="/rest/api/content/1000", query={})
+
+    message = str(exc_info.value)
+    assert message == "Confluence GET failed"
+    assert PAT not in message
+    assert "fixture.invalid" not in message
+
+
+def test_get_json_and_get_bytes_share_the_same_guarded_primitive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: get_json still parses to a dict from the same bytes get_bytes
+    # returns raw, proving the refactor did not change get_json behavior.
+    body = b'{"id":"1000","ok":true}'
+    transport, _, _ = _transport(monkeypatch, response=FakeResponse(body=body))
+    assert transport.get_json(path="/rest/api/content/1000", query={}) == {
+        "id": "1000",
+        "ok": True,
+    }
+
+    transport2, _, _ = _transport(monkeypatch, response=FakeResponse(body=body))
+    assert transport2.get_bytes(path="/rest/api/content/1000", query={}) == body
+
+
 def _transport(
     monkeypatch: pytest.MonkeyPatch,
     *,
