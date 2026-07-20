@@ -66,8 +66,8 @@ Sync-state clarification:
 | M5A - Confluence inventory core and scope policy | done | Typed config/metadata/items, port, use case, deterministic reports, unit/integration tests | Deployment-independent; contains no HTTP. |
 | M5B-1 - Data Center response parsing and normalization | done | Pure mapper, numeric envelope parser, sanitized fixtures, and focused tests | Root remains compatible with the captured payload; no HTTP behavior. |
 | M5B-2 - Data Center HTTP adapter and pagination | done | Independent review approved; offline fake-HTTP tests and full Foundation/Shared suite pass | Owns strict root-space verification, root-scoped CQL, numeric pagination, and a bounded HTTPS JSON transport. |
-| M5C-1 - Reviewed safe smoke runner | implemented; review pending | `foundation/cli/` entrypoint composing approved components, runbook, and 40 offline tests | Adds no HTTP/CQL/pagination/parsing of its own; zero cross-context imports per D34; no live run on this machine. |
-| M5C-2 - Live inventory run on main machine | planned | Depends on M5C-1 review and Confluence access | One small real inventory on the M5B-0 test root; first live confirmation of `expand=space,version`. |
+| M5C-1 - Reviewed safe smoke runner | done; independently approved | `foundation/cli/` entrypoint composing approved components, runbook, and 40 offline tests | Adds no HTTP/CQL/pagination/parsing of its own; zero cross-context imports per D34; no live run on this machine. |
+| M5C-2 - Live inventory run on main machine | done; live PASS | Sanitized operator evidence in `.local_ai/review/m5c-2-live-inventory-summary.md`; 9 items and two verified report hashes | Read-only Data Center run; real reports stayed outside Git; root labels remain unknown. |
 | M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
 | M6A - Fetch and preserve one raw page | offline approved; pending live run | Review stack `0948252..5542311`; 689 Foundation, 17 Shared, and 3 architecture tests pass; `.local_ai/review/m6a-raw-page-fetch-summary.md` | Adds raw-byte transport capability + atomic raw page store; no normalization/ACL/attachment. |
 | M6 (B-G) - Rest of one-page vertical slice | planned | Depends on M6A raw provenance | Restrictions/ACL, normalization, chunking, relation, export end to end. |
@@ -689,7 +689,7 @@ Status: done; independently approved.
 
 ### M5C-1 - Reviewed safe smoke runner
 
-Status: implemented; independent review pending.
+Status: done; independently approved.
 
 - Committed `foundation/cli/` entrypoint at
   `src/knowledgenexus/foundation/cli/confluence_inventory_smoke.py`, run as
@@ -713,19 +713,26 @@ Status: implemented; independent review pending.
 
 ### M5C-2 - Live inventory run on main machine
 
-Status: planned after the M5C-1 review.
+Status: done; operator live smoke PASS on the connected primary machine.
 
-- Run one real space/root scope without a full page-content crawl.
-- Use the small M5B-0 test root with `page_size = 2` and
-  `max_search_pages = 10`. Do not use the large production root; a
-  `pagination_limit` exit means the chosen root is too large for a smoke run.
-- First live confirmation of the additive `expand=space,version` root request.
-- Inspect the deterministic report and choose exact excluded subtrees before
-  M6, using explicit page IDs rather than root labels.
-- Preserve secrets outside committed configuration and artifacts. Copy back only
-  the safe summary and a manually sanitized completion notice.
+- Read-only Data Center inventory completed with 9 items: 1 root and 8
+  descendants. All 9 were included; no subtree was excluded; maximum relative
+  depth was 2.
+- Pagination completed in 4 search windows with `page_size = 2` and
+  `max_search_pages = 10`.
+- Published output was independently counted as 9 JSONL records and 9 CSV data
+  rows. The sanitized evidence retains only counts, safety conclusions, and the
+  two SHA-256 fingerprints.
+- Real reports and live output stayed outside the repository. No credential
+  material was detected, and no body, attachment, or ACL data was requested.
+- Root labels were not requested and remain unknown. Explicit page IDs, not root
+  labels, remain the basis for any future excluded-subtree selection.
+- Evidence: `.local_ai/review/m5c-2-live-inventory-summary.md`.
 
 M5 completion gate:
+
+Status: passed.
+
 - M5A mocked inventory and reports remain deterministic.
 - M5B basic pagination terminates correctly against confirmed sanitized API
   fixtures.

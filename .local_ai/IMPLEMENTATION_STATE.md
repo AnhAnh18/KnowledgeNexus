@@ -6,10 +6,11 @@ M6 - M6A (fetch and preserve one raw page) is implemented as a review stack,
 offline-reviewed by Codex through `REVIEW_HEAD` `5542311`, and pending live
 execution. M6-0 page-fetch live evidence was
 collected and approved by the operator on the connected primary machine and its
-sanitized conclusion is registered here. M5C-1 offline smoke harness is
-implemented and awaits independent review; M5C-2, the live inventory run, is
-still pending on the Confluence-accessible machine. No live run was performed
-from the Codex machine and no raw production artifact exists in the repository.
+sanitized conclusion is registered here. M5 is complete: M5C-1 was independently
+approved, and the operator completed the M5C-2 live inventory smoke on the
+connected primary machine. Only its sanitized conclusion is registered here.
+No live run was performed from the Codex machine and no raw production artifact
+exists in the repository.
 
 ## Done
 
@@ -797,6 +798,24 @@ git apply --reverse --check --cached .local_ai/review/m5c-1-live-inventory-smoke
 PASS (exit 0)
 ```
 
+## M5C-2 - Live Confluence Inventory Smoke
+
+- Operator-run read-only smoke against Confluence Data Center on the connected
+  primary machine: PASS. This checkout did not perform the live request.
+- Operator-reported inventory results: 9 total items, consisting of 1 root and
+  8 descendants; all 9 were included and none were excluded by subtree policy.
+- The maximum relative depth was 2. Four search windows were consumed with
+  `page_size = 2` and `max_search_pages = 10`.
+- The published reports were reopened and verified as 9 JSONL records and 9 CSV
+  data rows. Their SHA-256 fingerprints are retained in the sanitized review
+  summary without retaining the reports themselves.
+- The real reports remained outside the repository. No credential material was
+  detected, no live output was added to Git, and the run requested no page body,
+  attachment, or ACL data.
+- Root labels were not requested and remain unknown. They must not be interpreted
+  as confirmed empty or used to select excluded subtrees.
+- Sanitized evidence: `.local_ai/review/m5c-2-live-inventory-summary.md`.
+
 ## M6-0 - Confluence Page Fetch Live Evidence
 
 - Operator-run live probe on the connected primary machine, approved. This
@@ -881,16 +900,3 @@ Confluence-connected machine using the command above. After the frozen-code live
 gate passes, M6B (capture restrictions and attachment metadata) follows. The
 completed M5C live gate is registered in its own documentation commit so M5C
 and M6A history remain separate.
-
-### Deferred M5C-2 note
-
-M5C-2: on the Confluence-accessible machine, follow
-`docs/runbooks/M5C_CONFLUENCE_INVENTORY_SMOKE.md` and run one small real
-inventory against the same small M5B-0 test root (8 descendants) with
-`page_size = 2` and `max_search_pages = 10`. That run is the first live
-confirmation of `expand=space,version`. Do not point the first run at the large
-production root and do not silently raise `max_search_pages`: a
-`pagination_limit` exit means the chosen root is too large for a smoke run.
-Copy back only `m5c_smoke_summary.json` plus a manually sanitized completion
-notice; the real reports stay on that machine. Then inspect the report locally
-to choose explicit excluded subtrees before M6.
