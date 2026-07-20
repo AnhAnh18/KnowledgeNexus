@@ -84,6 +84,35 @@ author can answer once.
 - Critical filesystem, credential, network, migration, or data-loss changes
   require an Extra High independent review regardless of which model implements.
 
+## Commit Authorization Gate
+
+- **Default: review before commit.** Implementation changes remain unstaged or
+  staged in the working tree until the independent review and focused re-review
+  are complete and the repository owner explicitly authorizes committing them.
+- Before creating the first task commit, the implementer must show the proposed
+  commit stack (scope, code/test pairing, and order) and ask the repository owner
+  for approval. A completed implementation step or green test run is not, by
+  itself, permission to commit.
+- When review can operate on the working tree, provide `git diff`,
+  `git diff --cached`, changed-file scope, and exact test results. Do not create
+  commits merely to manufacture review artifacts.
+- If a reviewer requires `BASE`/`TASK` commit SHAs, ask the repository owner
+  before creating candidate commits. Put authorized candidate commits on a
+  local review branch, not directly on `main`, and do not push them unless push
+  authorization is given separately.
+- Candidate review commits are not automatically final history. After accepted
+  findings are fixed and re-reviewed, the repository owner decides whether to
+  keep the lettered stack, rebuild it, squash it, or commit the approved working
+  tree in another form.
+- Commit authorization and push authorization are separate. Permission to
+  commit does not imply permission to push, and permission to implement does not
+  imply either one.
+- If a model commits without authorization, it must stop, report the exact
+  commit SHAs and branch, avoid pushing or rewriting history, and ask the owner
+  whether to keep, undo, or rebuild the commits.
+- An explicit user instruction to commit, push, or prepare a commit-based review
+  stack authorizes only that requested operation and scope.
+
 ## Commit Messages
 
 - Prefix every commit with the work item it belongs to, in square brackets:
@@ -99,9 +128,9 @@ author can answer once.
 
 ## Commit Size and Splitting
 
-The commit is the review unit, so it must be something a reviewer can hold in
-their head at once. M5C-1 landed as one commit of 1631 lines: one undifferentiated
-block, which is what to avoid.
+Once commit creation is authorized, the commit is the review unit, so it must be
+something a reviewer can hold in their head at once. M5C-1 landed as one commit
+of 1631 lines: one undifferentiated block, which is what to avoid.
 
 - The unit is **one cohesive piece of behaviour together with everything that
   proves it**: the transport and its tests, the adapter and its tests, the
@@ -131,7 +160,8 @@ block, which is what to avoid.
 
 ### Review stack
 
-Deliver a split task as an ordered review stack:
+When the repository owner authorizes commit-based review, deliver a split task
+as an ordered review stack:
 
 ```text
 BASE -> [TASK-A] -> [TASK-B] -> [TASK-C]
