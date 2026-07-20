@@ -5,14 +5,15 @@ from pathlib import Path
 
 import pytest
 
+from knowledgenexus.foundation.domain.models.raw_page_artifact import RawPageArtifact
 from knowledgenexus.foundation.infrastructure.raw_store import (
     ConfluenceRawPageStore,
     ConfluenceRawPageStoreError,
-    RawPageArtifact,
 )
 from knowledgenexus.foundation.infrastructure.raw_store import (
     confluence_raw_page_store as store_module,
 )
+from knowledgenexus.foundation.ports.raw_page_store_port import RawPageStoreError
 
 
 PAGE_ID = "1000"
@@ -154,3 +155,9 @@ def test_empty_body_is_persisted_and_hashed(tmp_path: Path) -> None:
 def test_non_bytes_body_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="raw_bytes expects bytes"):
         _store(tmp_path).write(page_id=PAGE_ID, raw_bytes="not bytes")  # type: ignore[arg-type]
+
+
+def test_store_error_is_a_port_error(tmp_path: Path) -> None:
+    # The use case catches the port-level RawPageStoreError, so the concrete
+    # store error must be a subclass of it.
+    assert issubclass(ConfluenceRawPageStoreError, RawPageStoreError)

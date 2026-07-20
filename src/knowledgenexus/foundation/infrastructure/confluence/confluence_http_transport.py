@@ -18,6 +18,14 @@ class ConfluenceHttpError(RuntimeError):
     """A safe, body-free failure from the focused Confluence JSON transport."""
 
 
+class ConfluenceHttpResponseTooLargeError(ConfluenceHttpError):
+    """The response body exceeded the configured size limit.
+
+    A subclass of ConfluenceHttpError so existing `except ConfluenceHttpError`
+    handlers keep catching it, while callers that care can distinguish it.
+    """
+
+
 class ConfluenceHttpTransport(Protocol):
     """Minimal synchronous JSON GET seam used by the Data Center adapter."""
 
@@ -150,7 +158,7 @@ class UrllibConfluenceHttpTransport:
         if not isinstance(body, bytes):
             raise ConfluenceHttpError("Confluence GET returned an invalid body type")
         if len(body) > self._max_response_bytes:
-            raise ConfluenceHttpError(
+            raise ConfluenceHttpResponseTooLargeError(
                 "Confluence GET exceeded the response size limit"
             )
         return body

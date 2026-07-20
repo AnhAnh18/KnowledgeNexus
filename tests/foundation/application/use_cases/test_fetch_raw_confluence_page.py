@@ -10,13 +10,20 @@ from knowledgenexus.foundation.application.use_cases.fetch_raw_confluence_page i
     RawPageFetchError,
     RawPageFetchResult,
 )
-from knowledgenexus.foundation.infrastructure.confluence import (
-    ConfluenceDataCenterRequestError,
-)
 from knowledgenexus.foundation.infrastructure.raw_store import ConfluenceRawPageStore
+from knowledgenexus.foundation.ports.confluence_page_fetch_port import (
+    ConfluencePageFetchError,
+    ConfluencePageTooLargeError,
+)
 
 PAGE_ID = "1000"
 RAW = '{"id":"1000","title":"T  ","body":{"storage":{"value":"<p>x</p>"}}}  \n'.encode()
+# Real multibyte UTF-8 bytes (café, 世界) alongside an escaped sequence, so
+# byte fidelity is exercised on actual non-ASCII bytes, not just "\u..." text.
+RAW_UNICODE = (
+    '{"id":"1000","title":"café 世界","body":'
+    '{"storage":{"value":"<p>na\\u00efve</p>"}}}'
+).encode("utf-8")
 
 
 class FakeFetcher:
@@ -58,7 +65,7 @@ def test_success_persists_exact_bytes_and_returns_minimal_metadata(
 
 def test_http_failure_maps_to_http_and_writes_no_artifact(tmp_path: Path) -> None:
     use_case = _use_case(
-        tmp_path, RaisingFetcher(ConfluenceDataCenterRequestError("page fetch failed"))
+        tmp_path, RaisingFetcher(ConfluencePageFetchError("page fetch failed"))
     )
 
     with pytest.raises(RawPageFetchError) as exc_info:
@@ -66,6 +73,31 @@ def test_http_failure_maps_to_http_and_writes_no_artifact(tmp_path: Path) -> Non
 
     assert exc_info.value.category == "http"
     assert not (tmp_path / "confluence").exists()
+
+
+def test_oversize_maps_to_response_size_limit_and_writes_no_artifact(
+    tmp_path: Path,
+) -> None:
+    use_case = _use_case(
+        tmp_path, RaisingFetcher(ConfluencePageTooLargeError("too large"))
+    )
+
+    with pytest.raises(RawPageFetchError) as exc_info:
+        use_case.execute(page_id=PAGE_ID)
+
+    assert exc_info.value.category == "response_size_limit"
+    assert not (tmp_path / "confluence").exists()
+
+
+def test_real_multibyte_unicode_bytes_are_preserved_exactly(tmp_path: Path) -> None:
+    result = _use_case(tmp_path, FakeFetcher(RAW_UNICODE)).execute(page_id=PAGE_ID)
+
+    on_disk = result.artifact.path.read_bytes()
+    assert on_disk == RAW_UNICODE
+    assert "café".encode("utf-8") in on_disk
+    assert "世界".encode("utf-8") in on_disk
+    assert b"\\u00ef" in on_disk  # the escaped sequence stays a literal escape
+    assert result.artifact.raw_sha256 == hashlib.sha256(RAW_UNICODE).hexdigest()
 
 
 def test_malformed_json_maps_and_writes_no_artifact(tmp_path: Path) -> None:

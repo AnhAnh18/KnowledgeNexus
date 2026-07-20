@@ -170,6 +170,26 @@ def test_http_failure_is_sanitized_and_writes_no_artifact(
     assert not (tmp_path / "confluence").exists()
 
 
+def test_oversize_response_fails_closed_as_response_size_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from knowledgenexus.foundation.infrastructure.confluence import (
+        ConfluenceHttpResponseTooLargeError,
+    )
+
+    class TooLarge(FakeTransport):
+        def get_bytes(self, *, path: str, query: Mapping[str, str]) -> bytes:
+            raise ConfluenceHttpResponseTooLargeError(
+                "Confluence GET exceeded the response size limit"
+            )
+
+    _install(monkeypatch, TooLarge)
+
+    assert cli.main(_argv(tmp_path)) == 9
+    assert json.loads(capsys.readouterr().err)["category"] == "response_size_limit"
+    assert not (tmp_path / "confluence").exists()
+
+
 def test_identity_mismatch_fails_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

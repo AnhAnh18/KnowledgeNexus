@@ -3,11 +3,15 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
+from knowledgenexus.foundation.domain.models.raw_page_artifact import RawPageArtifact
 from knowledgenexus.foundation.domain.rules.confluence_page_id import (
     require_confluence_page_id,
+)
+from knowledgenexus.foundation.ports.raw_page_store_port import (
+    RawPageStoreError,
+    RawPageStorePort,
 )
 
 # Restricting the path segment to the numeric page-id shape is the strictest
@@ -16,20 +20,11 @@ from knowledgenexus.foundation.domain.rules.confluence_page_id import (
 _PAGES_SUBDIR = ("confluence", "pages")
 
 
-class ConfluenceRawPageStoreError(RuntimeError):
+class ConfluenceRawPageStoreError(RawPageStoreError):
     """A raw page could not be published to its deterministic path."""
 
 
-@dataclass(frozen=True)
-class RawPageArtifact:
-    """Minimal metadata about a persisted raw page. No raw content."""
-
-    path: Path
-    raw_sha256: str
-    byte_count: int
-
-
-class ConfluenceRawPageStore:
+class ConfluenceRawPageStore(RawPageStorePort):
     """Persists one raw Confluence page response at a deterministic path.
 
     The final path represents the current raw page and may be replaced by a

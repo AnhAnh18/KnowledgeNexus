@@ -3,24 +3,26 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
 
+from knowledgenexus.foundation.domain.models.raw_page_artifact import RawPageArtifact
 from knowledgenexus.foundation.domain.rules.confluence_page_id import (
     require_confluence_page_id,
 )
-from knowledgenexus.foundation.infrastructure.confluence import (
-    ConfluenceDataCenterRequestError,
+from knowledgenexus.foundation.ports.confluence_page_fetch_port import (
+    ConfluencePageFetchError,
+    ConfluencePageFetchPort,
+    ConfluencePageTooLargeError,
 )
-from knowledgenexus.foundation.infrastructure.raw_store import (
-    ConfluenceRawPageStore,
-    ConfluenceRawPageStoreError,
-    RawPageArtifact,
+from knowledgenexus.foundation.ports.raw_page_store_port import (
+    RawPageStoreError,
+    RawPageStorePort,
 )
 
 # Stable, sanitized failure categories. No category embeds a page id, host,
 # title, or response body.
 CATEGORY_INVALID_PAGE_ID = "invalid_page_id"
 CATEGORY_HTTP = "http"
+CATEGORY_RESPONSE_SIZE_LIMIT = "response_size_limit"
 CATEGORY_MALFORMED_JSON = "malformed_json"
 CATEGORY_NON_OBJECT_JSON = "non_object_json"
 CATEGORY_IDENTITY_MISMATCH = "identity_mismatch"
@@ -35,10 +37,6 @@ class RawPageFetchError(Exception):
         self.category = category
 
 
-class ConfluencePageRawFetcher(Protocol):
-    def fetch_page_raw(self, *, page_id: str) -> bytes: ...
-
-
 @dataclass(frozen=True)
 class RawPageFetchResult:
     """Minimal artifact metadata for callers. Never carries raw content."""
@@ -49,15 +47,16 @@ class RawPageFetchResult:
 class FetchRawConfluencePage:
     """Fetch one page, verify minimally, and preserve its exact raw bytes.
 
-    JSON parsing here is only a pre-publication correctness check; the bytes
-    persisted by the store are the exact fetched bytes, never a reserialization.
+    Depends only on ports and domain rules. JSON parsing here is only a
+    pre-publication correctness check; the bytes persisted by the store are the
+    exact fetched bytes, never a reserialization.
     """
 
     def __init__(
         self,
         *,
-        page_fetcher: ConfluencePageRawFetcher,
-        raw_page_store: ConfluenceRawPageStore,
+        page_fetcher: ConfluencePageFetchPort,
+        raw_page_store: RawPageStorePort,
     ) -> None:
         self._page_fetcher = page_fetcher
         self._raw_page_store = raw_page_store
@@ -70,7 +69,9 @@ class FetchRawConfluencePage:
 
         try:
             raw_bytes = self._page_fetcher.fetch_page_raw(page_id=page_id)
-        except ConfluenceDataCenterRequestError as exc:
+        except ConfluencePageTooLargeError as exc:
+            raise RawPageFetchError(CATEGORY_RESPONSE_SIZE_LIMIT) from exc
+        except ConfluencePageFetchError as exc:
             raise RawPageFetchError(CATEGORY_HTTP) from exc
 
         _require_identity(raw_bytes=raw_bytes, page_id=page_id)
@@ -80,7 +81,7 @@ class FetchRawConfluencePage:
                 page_id=page_id,
                 raw_bytes=raw_bytes,
             )
-        except (ConfluenceRawPageStoreError, OSError, ValueError, TypeError) as exc:
+        except (RawPageStoreError, OSError, ValueError, TypeError) as exc:
             raise RawPageFetchError(CATEGORY_STORE) from exc
 
         return RawPageFetchResult(artifact=artifact)

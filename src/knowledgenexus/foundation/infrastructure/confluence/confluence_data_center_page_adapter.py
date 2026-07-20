@@ -5,12 +5,15 @@ import urllib.parse
 from knowledgenexus.foundation.domain.rules.confluence_page_id import (
     require_confluence_page_id,
 )
-from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_inventory_adapter import (  # noqa: E501
-    ConfluenceDataCenterRequestError,
-)
 from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transport import (  # noqa: E501
     ConfluenceHttpError,
+    ConfluenceHttpResponseTooLargeError,
     ConfluenceHttpTransport,
+)
+from knowledgenexus.foundation.ports.confluence_page_fetch_port import (
+    ConfluencePageFetchError,
+    ConfluencePageFetchPort,
+    ConfluencePageTooLargeError,
 )
 
 _PAGE_PATH_TEMPLATE = "/rest/api/content/{page_id}"
@@ -19,8 +22,8 @@ _PAGE_PATH_TEMPLATE = "/rest/api/content/{page_id}"
 _PAGE_EXPAND = "body.storage,space,version,ancestors,metadata.labels"
 
 
-class ConfluenceDataCenterPageAdapter:
-    """Fetches one raw Confluence Data Center page response as exact bytes."""
+class ConfluenceDataCenterPageAdapter(ConfluencePageFetchPort):
+    """Data Center implementation of the page fetch port; returns exact bytes."""
 
     def __init__(self, *, transport: ConfluenceHttpTransport) -> None:
         self._transport = transport
@@ -35,7 +38,7 @@ class ConfluenceDataCenterPageAdapter:
                 path=path,
                 query={"expand": _PAGE_EXPAND},
             )
+        except ConfluenceHttpResponseTooLargeError as exc:
+            raise ConfluencePageTooLargeError("page response too large") from exc
         except ConfluenceHttpError as exc:
-            raise ConfluenceDataCenterRequestError(
-                "page fetch failed"
-            ) from exc
+            raise ConfluencePageFetchError("page fetch failed") from exc

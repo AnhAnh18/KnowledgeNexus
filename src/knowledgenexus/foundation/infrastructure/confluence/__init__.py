@@ -13,6 +13,7 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_
 )
 from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transport import (  # noqa: E501
     ConfluenceHttpError,
+    ConfluenceHttpResponseTooLargeError,
     ConfluenceHttpTransport,
     UrllibConfluenceHttpTransport,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "ConfluenceDataCenterPayloadError",
     "ConfluenceDataCenterRequestError",
     "ConfluenceHttpError",
+    "ConfluenceHttpResponseTooLargeError",
     "ConfluenceHttpTransport",
     "ParsedConfluenceSearchPage",
     "UrllibConfluenceHttpTransport",

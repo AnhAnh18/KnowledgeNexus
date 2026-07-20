@@ -53,6 +53,7 @@ EXIT_CODES = {
     "non_object_json": 6,
     "identity_mismatch": 7,
     "store": 8,
+    "response_size_limit": 9,
 }
 
 _SUCCESS_CHECKS = (

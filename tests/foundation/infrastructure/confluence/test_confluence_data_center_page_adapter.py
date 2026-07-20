@@ -6,8 +6,13 @@ import pytest
 
 from knowledgenexus.foundation.infrastructure.confluence import (
     ConfluenceDataCenterPageAdapter,
-    ConfluenceDataCenterRequestError,
     ConfluenceHttpError,
+    ConfluenceHttpResponseTooLargeError,
+)
+from knowledgenexus.foundation.ports.confluence_page_fetch_port import (
+    ConfluencePageFetchError,
+    ConfluencePageFetchPort,
+    ConfluencePageTooLargeError,
 )
 
 PAGE_ID = "1000"
@@ -63,20 +68,40 @@ def test_no_restriction_attachment_or_inventory_path_is_called() -> None:
     assert "child" not in path
 
 
-def test_http_failure_is_wrapped_and_sanitized() -> None:
+def test_adapter_implements_the_page_fetch_port() -> None:
+    # Explicit subclassing keeps the port in the MRO without needing a
+    # runtime-checkable Protocol.
+    assert ConfluencePageFetchPort in ConfluenceDataCenterPageAdapter.__mro__
+
+
+def test_http_failure_is_wrapped_as_port_error_and_sanitized() -> None:
     class Failing:
         def get_bytes(self, *, path: str, query: Mapping[str, str]) -> bytes:
             raise ConfluenceHttpError("Confluence GET returned HTTP status 404")
 
     adapter = ConfluenceDataCenterPageAdapter(transport=Failing())
 
-    with pytest.raises(ConfluenceDataCenterRequestError) as exc_info:
+    with pytest.raises(ConfluencePageFetchError) as exc_info:
         adapter.fetch_page_raw(page_id=PAGE_ID)
 
     message = str(exc_info.value)
     assert message == "page fetch failed"
+    assert not isinstance(exc_info.value, ConfluencePageTooLargeError)
     assert PAGE_ID not in message
     assert "404" not in message
+
+
+def test_oversize_response_maps_to_a_distinct_too_large_port_error() -> None:
+    class TooLarge:
+        def get_bytes(self, *, path: str, query: Mapping[str, str]) -> bytes:
+            raise ConfluenceHttpResponseTooLargeError(
+                "Confluence GET exceeded the response size limit"
+            )
+
+    adapter = ConfluenceDataCenterPageAdapter(transport=TooLarge())
+
+    with pytest.raises(ConfluencePageTooLargeError):
+        adapter.fetch_page_raw(page_id=PAGE_ID)
 
 
 @pytest.mark.parametrize(
