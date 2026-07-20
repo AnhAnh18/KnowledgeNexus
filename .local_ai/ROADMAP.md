@@ -68,7 +68,9 @@ Sync-state clarification:
 | M5B-2 - Data Center HTTP adapter and pagination | done | Independent review approved; offline fake-HTTP tests and full Foundation/Shared suite pass | Owns strict root-space verification, root-scoped CQL, numeric pagination, and a bounded HTTPS JSON transport. |
 | M5C-1 - Reviewed safe smoke runner | implemented; review pending | `foundation/cli/` entrypoint composing approved components, runbook, and 40 offline tests | Adds no HTTP/CQL/pagination/parsing of its own; zero cross-context imports per D34; no live run on this machine. |
 | M5C-2 - Live inventory run on main machine | planned | Depends on M5C-1 review and Confluence access | One small real inventory on the M5B-0 test root; first live confirmation of `expand=space,version`. |
-| M6 - One-page real Foundation vertical slice | planned | Depends on inventory, raw fetch, normalization, chunking, ACL/relation, export | Proves one real page end to end before scale. |
+| M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
+| M6A - Fetch and preserve one raw page | next | Depends on M6-0 confirmed page shape and the approved M5B-2 transport | Adds raw-byte transport capability + atomic raw page store; no normalization/ACL/attachment. |
+| M6 (B-G) - Rest of one-page vertical slice | planned | Depends on M6A raw provenance | Restrictions/ACL, normalization, chunking, relation, export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -736,8 +738,18 @@ Purpose:
 Prove one real page can move through the entire Foundation boundary before
 scaling horizontally.
 
+Status:
+- M6-0 operator page-fetch live evidence: done and approved on the primary
+  machine; the sanitized conclusion is registered in `IMPLEMENTATION_STATE.md`
+  and `.local_ai/review/m6-0-confluence-page-fetch-evidence-summary.md`. It
+  confirms the page, view-restriction, and attachment request shapes. No raw
+  artifact is stored in the repo, by sanitization design.
+- M6A: next; implementation not started.
+- M6B-M6G: planned.
+
 Tasks:
-- M6A fetch and preserve one raw page.
+- M6-0 confirm live page/restriction/attachment request shapes (done).
+- M6A fetch and preserve one raw page (page request only).
 - M6B capture restrictions and attachment metadata.
 - M6C normalize one page and produce `CanonicalDocument`.
 - M6D chunk one normalized page and produce `ChunkRecord`s.

@@ -2,11 +2,13 @@
 
 ## Current Milestone
 
-M5C - M5C-1 offline smoke harness is implemented and offline-tested; it awaits
-independent review. M5B-2 is complete and was independently approved at commit
-`a2fe824`. M5C-2, the live inventory run, is still pending on the
-Confluence-accessible machine. No live data has been collected on the Codex
-machine.
+M6 - M6-0 page-fetch live evidence has been collected and approved by the
+operator on the connected primary machine; this checkout has synchronized that
+approved sanitized conclusion only. M6A (fetch and preserve one raw page) is the
+next implementation task and has not started. M5C-1 offline smoke harness is
+implemented and offline-tested and awaits independent review; M5C-2, the live
+inventory run, is still pending on the Confluence-accessible machine. No live
+run was performed from the Codex machine.
 
 ## Done
 
@@ -794,7 +796,54 @@ git apply --reverse --check --cached .local_ai/review/m5c-1-live-inventory-smoke
 PASS (exit 0)
 ```
 
+## M6-0 - Confluence Page Fetch Live Evidence
+
+- Operator-run live probe on the connected primary machine, approved. This
+  checkout did not perform the live run and stores no raw production artifact;
+  that exclusion is a deliberate sanitization requirement, not missing
+  validation. Registered as documentation only.
+- Confirmed request shapes (operator observation, not inferred here):
+  - page: `GET /rest/api/content/{page_id}?expand=body.storage,space,version,ancestors,metadata.labels`
+  - view restriction: `GET /rest/api/content/{page_id}/restriction/byOperation/view`
+  - attachments: `GET /rest/api/content/{page_id}/child/attachment?start={offset}&limit={page_size}`
+- Confirmed outcomes: page request returned 200; all observed methods were GET;
+  response JSON parse passed; `body.storage` contained XHTML; XHTML initial parse
+  and serialize/reparse passed; attachment pagination collected 8 windows and 8
+  attachments and terminated by the observed `_links.next`; the selected-page
+  view restriction returned 404 (classified unavailable); 11 ancestor restriction
+  observations returned 404 (classified unavailable); unavailable restriction
+  evidence was not read as unrestricted; the downstream ACL consequence stays
+  deny-safe as `restricted:unresolved`; the leak scan passed; no credentials
+  appeared in the sanitized evidence.
+- M6A scope from this evidence: M6A consumes only the page request and preserves
+  its exact raw bytes. The restriction and attachment shapes are registered for
+  later M6 stages; M6A does not call the restriction or attachment endpoints and
+  does not interpret restrictions, ACL, attachments, or XHTML.
+- M6A endpoint and `expand` shape are confirmed by approved M6-0, so M6A tests may
+  use synthetic/sanitized page-body fixtures without labeling the endpoint shape
+  itself as inferred.
+- No M6A implementation code changed in the M6-0 state-sync commit.
+
+Review artifact:
+- `.local_ai/review/m6-0-confluence-page-fetch-evidence-summary.md`
+
 ## Next Planned Task
+
+M6A - fetch and preserve exactly one raw production Confluence page, as a review
+stack (`[M6A-A]` raw-byte transport capability, `[M6A-B]` deterministic atomic
+raw page store, `[M6A-C]` one-page use case plus adapter integration and operator
+entrypoint, `[M6A-D]` final regression tests and durable state update), keeping
+the lettered commits per repository convention. M6A adds a `get_bytes()`
+capability to the approved transport additively, stores the exact response bytes
+at `<raw_root>/confluence/pages/<page_id>.json` (default `raw_root` = `data/raw`,
+gitignored) with a raw `sha256(exact_bytes)` and atomic same-directory
+replacement, and reuses the M5C credential/entrypoint convention. It must not
+normalize, chunk, interpret ACL, fetch restrictions or attachments, or start
+M6B. The 8 MB response-size guard stays enforced and injectable; a page over the
+limit must fail closed. M5C-2 (live inventory smoke) also remains pending on the
+Confluence-accessible machine.
+
+### Deferred M5C-2 note
 
 M5C-2: on the Confluence-accessible machine, follow
 `docs/runbooks/M5C_CONFLUENCE_INVENTORY_SMOKE.md` and run one small real
