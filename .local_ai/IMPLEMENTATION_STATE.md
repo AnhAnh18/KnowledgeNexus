@@ -3,8 +3,9 @@
 ## Current Milestone
 
 M6 - M6B (collect and preserve one page's restriction observations and
-attachment metadata) is implemented as a local review stack, pending detached
-review and pending a controlled live run. M6A is complete: its controlled live
+attachment metadata) passed focused detached re-review after the accepted
+P1/P2 fixes and one P3 regression test. The controlled live run remains
+pending. M6A is complete: its controlled live
 run passed on the connected primary machine and the repository owner accepted
 the sanitized closeout. No live request was performed from the Codex machine,
 no raw production artifact exists in this repository, and M6C has not started.
@@ -899,9 +900,9 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
 
 ## M6B - Page-Adjacent Confluence Observations
 
-- Status: implemented as a local review stack; pending detached review; pending
-  controlled live run. Base commit: `6b23ed3`; production `REVIEW_HEAD`:
-  `56e1e71`.
+- Status: offline implementation and focused detached re-review approved;
+  controlled live run pending. Base commit: `6b23ed3`; original round-1 head:
+  `8b4986c`.
 - Reads the deterministic M6A artifact through `RawPageReadPort`, validates its
   identity and ordered ancestor IDs before any network call, and never refetches
   the page body.
@@ -922,11 +923,24 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
   M6B does not build ACLRecord/MediaAsset, compute effective ACL, parse XHTML,
   download attachment bodies, chunk content, or start M6C.
 - No live request was made during implementation.
+- Detached review round 1 verdict: changes required. Focused detached re-review
+  round 2 approved these accepted fixes:
+  - attachment identity now uses a dedicated attachment-ID rule that preserves
+    either documented Data Center REST representation (`123` or `att123`)
+    without widening the numeric page-ID rule;
+  - an I/O failure while draining an `HTTPError` body is translated to the
+    sanitized `ConfluenceHttpError` taxonomy, while response-too-large remains
+    distinct;
+  - a production-store integration test proves the M6A raw-page write path is
+    exactly the path consumed by the M6B reader.
+- The review's remaining P3 observations are recorded without behavior changes:
+  latest-response replacement remains deliberate, CLI interruption behavior is
+  unchanged, and internal type assertions remain defensive documentation.
 
 Review artifact:
 - `.local_ai/review/m6b-page-observations-implementation-summary.md`
 
 ## Next Planned Task
 
-Complete M6B detached offline review and controlled live verification. M6C may
-start only after those gates pass.
+Complete M6B controlled live verification. M6C may start only after that gate
+passes.

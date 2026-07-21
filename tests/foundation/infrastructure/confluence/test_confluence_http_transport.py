@@ -598,6 +598,34 @@ def test_status_aware_get_enforces_response_size_limit_on_http_error(
         )
 
 
+def test_status_aware_get_wraps_failure_while_reading_http_error_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingBody(BytesIO):
+        def read(self, size: int = -1) -> bytes:
+            raise OSError("private synthetic socket failure")
+
+    body = FailingBody(b"private response body")
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted",
+        404,
+        "Not Found",
+        hdrs=None,
+        fp=body,
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_response_bytes(
+            path="/rest/api/content/1000/restriction/byOperation/view",
+            query={},
+        )
+
+    assert str(exc_info.value) == "Confluence GET failed"
+    assert "socket" not in str(exc_info.value)
+    assert body.closed
+
+
 def _transport(
     monkeypatch: pytest.MonkeyPatch,
     *,

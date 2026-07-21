@@ -156,7 +156,23 @@ class UrllibConfluenceHttpTransport:
                     raise ConfluenceHttpError(
                         f"Confluence GET returned HTTP status {status}"
                     )
-                body = self._read_bounded_body(exc) if exc.fp is not None else b""
+                try:
+                    body = (
+                        self._read_bounded_body(exc) if exc.fp is not None else b""
+                    )
+                except ConfluenceHttpResponseTooLargeError:
+                    raise
+                except ConfluenceHttpError:
+                    raise
+                except (
+                    urllib.error.URLError,
+                    TimeoutError,
+                    OSError,
+                    http.client.HTTPException,
+                    UnicodeError,
+                    ValueError,
+                ):
+                    raise ConfluenceHttpError("Confluence GET failed") from None
             finally:
                 exc.close()
         except ConfluenceHttpError:

@@ -197,6 +197,17 @@ def test_attachment_window_normalizes_metadata_and_follows_observed_next() -> No
     json.dumps(parsed.attachments, allow_nan=False)
 
 
+def test_attachment_window_preserves_att_prefixed_identity() -> None:
+    parsed = parse_attachment_metadata_window(
+        raw_bytes=_attachment_page(
+            results=[{"id": "att2000", "type": "attachment", "title": "a"}]
+        ),
+        selected_page_id=PAGE_ID,
+        request=AttachmentMetadataRequest(start=0, limit=2),
+    )
+    assert parsed.attachments[0]["attachment_id"] == "att2000"
+
+
 def test_short_window_does_not_terminate_when_observed_next_exists() -> None:
     parsed = parse_attachment_metadata_window(
         raw_bytes=_attachment_page(

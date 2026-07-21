@@ -9,6 +9,9 @@ from knowledgenexus.foundation.domain.models.confluence_page_observation import 
     ParsedAttachmentMetadataWindow,
     RawHttpObservation,
 )
+from knowledgenexus.foundation.domain.rules.confluence_attachment_id import (
+    require_confluence_attachment_id,
+)
 from knowledgenexus.foundation.domain.rules.confluence_page_id import (
     require_confluence_page_id,
 )
@@ -215,7 +218,7 @@ def _build_attachment_observation(
     if not isinstance(item, Mapping):
         raise ConfluencePageObservationPayloadError("attachment entry is invalid")
     try:
-        attachment_id = _coerce_page_id(item.get("id"))
+        attachment_id = _coerce_attachment_id(item.get("id"))
     except (TypeError, ValueError) as exc:
         raise ConfluencePageObservationPayloadError(
             "attachment identity is invalid"
@@ -267,6 +270,12 @@ def _build_attachment_observation(
                 )
             observation["version_number"] = number
     return observation
+
+
+def _coerce_attachment_id(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise TypeError("attachment id is invalid")
+    return require_confluence_attachment_id(str(value))
 
 
 def _copy_optional_string(

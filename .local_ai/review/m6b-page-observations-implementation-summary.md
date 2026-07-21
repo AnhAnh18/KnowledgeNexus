@@ -12,12 +12,72 @@
   - `[M6B-F]` this documentation/state registration.
 - Production `REVIEW_HEAD`: `56e1e71`.
 - Detached reviewer: Claude, Extra High.
-- Detached review: pending.
+- Detached review: approved after focused round 2.
 - Controlled live run: pending.
 - The repository owner explicitly authorized this local commit-based review
-  stack. It has not been pushed.
+  stack. The round-1 stack was pushed through `8b4986c` for detached review.
 - No live network request was performed on this checkout.
 - M6C was not started.
+
+## Detached review round 1
+
+Verdict: **Changes required**. No P0 finding. The original implementer accepted
+and implemented these focused changes in the working tree:
+
+- **P1 attachment identity:** attachment IDs no longer pass through the numeric
+  page-ID rule. A dedicated rule preserves both REST forms documented across
+  Confluence Server/Data Center versions: ASCII decimal (`123`) and legacy
+  `att`-prefixed decimal (`att123`). Page IDs remain strictly numeric. The rule
+  is intentionally no broader than these two documented forms.
+- **P2 HTTPError body read:** an I/O/protocol failure while reading the body of
+  an `HTTPError` is now wrapped as body-free `ConfluenceHttpError`; the explicit
+  response-size exception still passes through unchanged.
+- **P3 raw-page path handoff:** a new integration test writes with the production
+  M6A `ConfluenceRawPageStore` and reads the exact bytes with the production M6B
+  `ConfluencePageObservationStore`.
+
+Evidence basis for the compatibility rule:
+
+- legacy Server REST attachment-list examples use IDs such as `att5678`:
+  <https://docs.atlassian.com/atlassian-confluence/REST/5.7.5/>;
+- current Data Center attachment APIs define attachment IDs as strings and use
+  decimal examples in attachment operations:
+  <https://developer.atlassian.com/server/confluence/rest/v911/api-group-attachments/>.
+
+The non-blocking P3 observations remain unchanged and explicit: an unexpected
+HTTP status deliberately replaces the deterministic restriction body with the
+latest observed body before failing operationally; CLI `KeyboardInterrupt`
+continues to map through the fixed unexpected category; internal assertions are
+not security checks.
+
+Focused-fix verification:
+
+```text
+python -m pytest <eight focused M6B/fix paths> -q
+145 passed in 3.67s
+
+python -m pytest tests/foundation tests/shared tests/architecture -q
+809 passed in 21.10s
+
+git diff --check
+PASS (line-ending warnings only on this Windows checkout)
+```
+
+Focused re-review verification:
+
+```text
+python -m pytest <focused M6B/fix paths> -q
+191 passed in 4.65s
+
+python -m pytest tests/foundation tests/shared tests/architecture -q
+809 passed in 22.74s
+
+git diff --cached --check
+PASS
+```
+
+Fix status: focused detached re-review approved; `[M6B-E]` commit authorized by
+the repository owner. No controlled live request was made.
 
 ## Public behavior
 
