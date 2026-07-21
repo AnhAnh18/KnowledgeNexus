@@ -1,49 +1,71 @@
-# Provisional — for POC retrieval benchmarking.
-# NOT normative until one profile is locked into CHUNKING_SPEC.md
-# as chunker_version 1.2.0. See AI_Knowledge_Platform_v7_3_Update.md (D8–D10).
+schema_version: 1
+chunker_version: "1.2.0"
+profile_status: provisional_until_benchmark
+active_profile: medium
 
 embedding_model:
   name: BAAI/bge-m3
-  provider: local                 # open-weight, self-host, free
   tokenizer: BAAI/bge-m3
-  tokenizer_note: SentencePiece, XLM-RoBERTa-based
-  vector_dim: 1024
-  max_model_tokens: 8192
-  retrieval_modes:                # capability of the model; implementation = Task 2/Task 3
+  tokenizer_family: SentencePiece / XLM-R
+  vector_dimension: 1024
+  maximum_model_tokens: 8192
+  retrieval_modes:
     - dense
     - sparse
     - colbert
+
+active_chunking_profile:
+  target_tokens: 450
+  minimum_tokens: 96
+  hard_maximum_tokens: 1000
+  overlap_tokens: 64
+  code_window_target_tokens: 450
+  code_window_max_lines: 40
+  code_window_overlap_lines: 4
 
 benchmark_method:
   round_1: dense_only_chunk_budget_sweep
   round_2: fixed_budget_hybrid_retrieval_test
   principle: change_one_variable_at_a_time
 
-chunking_profiles:
-  control:                        # ~MiniLM-era sizing; sanity baseline to test whether bigger chunks actually help
+# Candidate prose budgets are preserved for the later benchmark. They are not
+# selectable runtime profiles in M6D; only active_chunking_profile is complete.
+benchmark_profiles:
+  control:
     target_tokens: 200
-    hard_max_tokens: 240
+    minimum_tokens: 64
+    hard_maximum_tokens: 240
     overlap_tokens: 40
-    min_tokens: 64
   small:
     target_tokens: 300
-    hard_max_tokens: 600
+    minimum_tokens: 96
+    hard_maximum_tokens: 600
     overlap_tokens: 64
-    min_tokens: 96
   medium:
     target_tokens: 450
-    hard_max_tokens: 1000
+    minimum_tokens: 96
+    hard_maximum_tokens: 1000
     overlap_tokens: 64
-    min_tokens: 96
   large:
     target_tokens: 700
-    hard_max_tokens: 1500
+    minimum_tokens: 128
+    hard_maximum_tokens: 1500
     overlap_tokens: 96
-    min_tokens: 128
 
-code_window_policy:
-  note: >
-    Scale code_window_target_tokens and overlap lines per selected profile during
-    benchmark. Keep token-packed line windows and the max-line guard from
-    CHUNKING_SPEC.md §5. hard_max_tokens must always stay <= max_model_tokens
-    minus the model's special tokens.
+tokenizer_distribution:
+  source_repository: https://huggingface.co/BAAI/bge-m3
+  upstream_commit: 5617a9f61b028005a4858fdac845db406aefb181
+  observed_license: MIT
+  provenance_url: https://huggingface.co/BAAI/bge-m3/tree/5617a9f61b028005a4858fdac845db406aefb181
+  external_bundle_required: true
+  implicit_cache_allowed: false
+  required_assets:
+    - filename: tokenizer.json
+      byte_size: 17098108
+      sha256: 21106b6d7dab2952c1d496fb21d5dc9db75c28ed361a05f5020bbba27810dd08
+  pinned_versions:
+    # M6D uses the Rust fast-tokenizer file loader directly. The other two
+    # pins preserve the compatible upstream tokenizer toolchain identity.
+    transformers: "4.57.6"
+    tokenizers: "0.22.2"
+    sentencepiece: "0.2.2"

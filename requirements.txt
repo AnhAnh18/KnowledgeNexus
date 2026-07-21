@@ -1,2 +1,4 @@
 jsonschema
 rfc3339-validator
+PyYAML==6.0.3
+tokenizers==0.22.2

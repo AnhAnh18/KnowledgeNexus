@@ -22,6 +22,10 @@ from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluencePageSource,
     ConfluenceStorageNormalization,
 )
+from knowledgenexus.foundation.domain.models.chunking_profile import (
+    ChunkingProfile,
+    TokenizerAsset,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -36,4 +40,6 @@ __all__ = [
     "ConfluencePageNormalizationResult",
     "ConfluencePageSource",
     "ConfluenceStorageNormalization",
+    "ChunkingProfile",
+    "TokenizerAsset",
 ]

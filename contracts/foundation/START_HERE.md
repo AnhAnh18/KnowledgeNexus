@@ -9,7 +9,7 @@ Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)*
 ## Read order (priority)
 
 1. `schemas/*.json` — the data contract; **wins all field-level disputes**. Start with `defs.schema.json` (ID grammars + enums, referenced by the rest), then the record schemas, then `manifest.schema.json`.
-2. `CHUNKING_SPEC.md` — chunking behavior & token budget. **Note §1 is still written for MiniLM and needs a bge-m3 rewrite (v7.4 Part B item 1); it is historical, not the active target.**
+2. `CHUNKING_SPEC.md` — chunking behavior & token budget. §1 now locks BGE-M3 and `chunker_version 1.2.0`; the active medium budget remains provisional until benchmark evidence exists.
 3. `decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` — architecture, policies, scope (the normative base).
 4. `decision_logs/AI_Knowledge_Platform_v7_2_Update.md` — export layout, storage roles, verbatim embedding, ACL repo tag (D1–D7).
 5. `decision_logs/AI_Knowledge_Platform_v7_3_Update.md` — bge-m3 direction, benchmark plan (D8–D13).
@@ -32,7 +32,7 @@ Precedence (highest wins): `schemas/` → `CHUNKING_SPEC` → v7.1 → v7.2 → 
 
 ## Open items (operational, not design)
 
-`data_root` + disk cap (before full media crawl) · real PAT values (at code time) · real `exclude_subtrees` (after inventory) · winning bge-m3 budget (after benchmark) · fill 37-item benchmark anchors from crawled corpus · enable HQ wiki (Phase 1.1) · multi-branch (post-MVP, needs identity change) · query-time ACL resolver owner · Task 3 retrieval design doc · import-linter ruleset + sample_export fixture owner (v7.5). Also **unapplied contract patches** (v7.4 Part B): rewrite CHUNKING_SPEC §1 for bge-m3, fix `spensdk`→`spen-sdk` in doc-text — deliberately not yet applied.
+`data_root` + disk cap (before full media crawl) · real PAT values (at code time) · real `exclude_subtrees` (after inventory) · winning bge-m3 budget (after benchmark) · fill 37-item benchmark anchors from crawled corpus · enable HQ wiki (Phase 1.1) · multi-branch (post-MVP, needs identity change) · query-time ACL resolver owner · Task 3 retrieval design doc · import-linter ruleset + sample_export fixture owner (v7.5). The v7.4 Part B BGE-M3 contract migration and active `spen-sdk`→`spen-sdk` spelling correction are applied; historical decision-log text remains unchanged for audit fidelity.
 
 ## Working norms (please continue these)
 
@@ -43,5 +43,5 @@ Precedence (highest wins): `schemas/` → `CHUNKING_SPEC` → v7.1 → v7.2 → 
 
 ## Suggested next steps (two clean entry points)
 
-1. **Apply v7.4 Part B patches** — rewrite CHUNKING_SPEC §1 for bge-m3 (blocking before chunk/export) and fix `spensdk`→`spen-sdk` in doc-text/schema descriptions.
-2. **Draft the Appendix-B prompt for Confluence Inventory MVP (Job 1)** — package the three invariants (ACL inheritance, locators in sidecar, no attachment_text chunk), the `tr_wiki_maker.py` reference (read-only, PAT from env, token security), tier-1 metadata-only classifier, three output files, and an explicit out-of-scope list. This is the first real code task and yields visible results (page/attachment counts → real `exclude_subtrees`).
+1. **Implement M6D against the migrated contract** — use the explicit external BGE-M3 tokenizer bundle and the injected immutable active profile; do not tune the provisional budget from a single page.
+2. **Complete the later retrieval benchmark** — compare profiles only after representative corpus anchors exist, then record any accepted configuration migration explicitly.
