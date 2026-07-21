@@ -17,6 +17,11 @@ from knowledgenexus.foundation.domain.models.confluence_page_observation import 
 from knowledgenexus.foundation.domain.models.raw_observation_artifact import (
     RawObservationArtifact,
 )
+from knowledgenexus.foundation.domain.models.confluence_page_content import (
+    ConfluencePageNormalizationResult,
+    ConfluencePageSource,
+    ConfluenceStorageNormalization,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -28,4 +33,7 @@ __all__ = [
     "ParsedAttachmentMetadataWindow",
     "RawHttpObservation",
     "RawObservationArtifact",
+    "ConfluencePageNormalizationResult",
+    "ConfluencePageSource",
+    "ConfluenceStorageNormalization",
 ]
