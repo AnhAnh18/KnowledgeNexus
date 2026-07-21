@@ -26,6 +26,10 @@ from knowledgenexus.foundation.domain.models.chunking_profile import (
     ChunkingProfile,
     TokenizerAsset,
 )
+from knowledgenexus.foundation.domain.models.tokenization import (
+    CharacterSpan,
+    TokenizationResult,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -42,4 +46,6 @@ __all__ = [
     "ConfluenceStorageNormalization",
     "ChunkingProfile",
     "TokenizerAsset",
+    "CharacterSpan",
+    "TokenizationResult",
 ]

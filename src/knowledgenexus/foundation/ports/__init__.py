@@ -28,6 +28,11 @@ from knowledgenexus.foundation.ports.confluence_page_normalization_port import (
     ConfluenceStorageNormalizationError,
     ConfluenceStorageNormalizerPort,
 )
+from knowledgenexus.foundation.ports.tokenizer_port import (
+    TokenizerError,
+    TokenizerFailureCategory,
+    TokenizerPort,
+)
 
 __all__ = [
     "ConfluenceInventoryPort",
@@ -48,4 +53,7 @@ __all__ = [
     "ConfluenceRawPageMappingError",
     "ConfluenceStorageNormalizationError",
     "ConfluenceStorageNormalizerPort",
+    "TokenizerError",
+    "TokenizerFailureCategory",
+    "TokenizerPort",
 ]
