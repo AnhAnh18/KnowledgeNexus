@@ -70,8 +70,9 @@ Sync-state clarification:
 | M5C-2 - Live inventory run on main machine | done; live PASS | Sanitized operator evidence in `.local_ai/review/m5c-2-live-inventory-summary.md`; 9 items and two verified report hashes | Read-only Data Center run; real reports stayed outside Git; root labels remain unknown. |
 | M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
 | M6A - Fetch and preserve one raw page | done; controlled live PASS | Source review head `5542311`; target production head `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; owner-accepted sanitized live evidence | `M6A_FINAL_HEAD` is the controlled-live documentation/state closeout commit; no raw artifact is tracked. |
-| M6B - Page-adjacent observations | offline review approved; controlled live pending | Original stack over base `6b23ed3`, round-1 head `8b4986c`; focused re-review approved the P1/P2 fixes and P3 store-handoff regression | Dedicated attachment-ID rule supports documented numeric and `att`-prefixed REST forms without widening page IDs; no ACLRecord or attachment download. |
-| M6 (C-G) - Rest of one-page vertical slice | planned after M6B gates | M6A raw provenance gate passed | Normalization, chunking, ACL, relation, and export end to end. |
+| M6B - Page-adjacent observations | done; controlled live PASS | Local reviewed source head `fc06d15`; independent target production head `6ac6a622ddde74bb9756daea040e82ff1df3e48a`; owner-accepted sanitized live evidence | All 12 restriction observations and 8 attachment metadata windows were preserved; no page-body refetch, ACLRecord, or attachment download. |
+| M6C - One-page deterministic normalization | next | Reads the preserved M6A raw page offline and emits one schema-valid `CanonicalDocument` | No network, chunking, ACL materialization, relation extraction, or normalized-output persistence. |
+| M6 (D-G) - Rest of one-page vertical slice | planned after M6C gates | M6A raw provenance and M6B observation gates passed | Chunking, ACL, relation, and export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -79,7 +80,7 @@ Sync-state clarification:
 
 ## 2. Current Task
 
-Current area: M5C small real inventory smoke run.
+Current area: M6C one-page deterministic Confluence XHTML normalization.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -756,9 +757,11 @@ Status:
   PASS at independent target production head
   `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; the repository owner accepted the
   sanitized documentation/state closeout. M6A is complete.
-- M6B: offline implementation and focused detached re-review approved;
-  controlled live run pending.
-- M6C-M6G: planned.
+- M6B: complete and approved. Controlled live PASS at independent target
+  production head `6ac6a622ddde74bb9756daea040e82ff1df3e48a`; sanitized evidence is registered
+  without production identities or content.
+- M6C: next.
+- M6D-M6G: planned.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).

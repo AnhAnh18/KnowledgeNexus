@@ -3,12 +3,11 @@
 ## Current Milestone
 
 M6 - M6B (collect and preserve one page's restriction observations and
-attachment metadata) passed focused detached re-review after the accepted
-P1/P2 fixes and one P3 regression test. The controlled live run remains
-pending. M6A is complete: its controlled live
-run passed on the connected primary machine and the repository owner accepted
-the sanitized closeout. No live request was performed from the Codex machine,
-no raw production artifact exists in this repository, and M6C has not started.
+attachment metadata) is complete and approved. Its focused detached re-review
+passed after the accepted P1/P2 fixes and one P3 regression test, and its
+controlled live run passed on the connected primary machine. M6A is also
+complete. No live request was performed from the Codex machine, no raw
+production artifact exists in this repository, and M6C is the next task.
 
 ## Done
 
@@ -900,9 +899,11 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
 
 ## M6B - Page-Adjacent Confluence Observations
 
-- Status: offline implementation and focused detached re-review approved;
-  controlled live run pending. Base commit: `6b23ed3`; original round-1 head:
-  `8b4986c`.
+- Status: complete and approved. Offline implementation and focused detached
+  re-review passed at local reviewed source head `fc06d15`. The controlled live
+  run passed at independent target production head
+  `6ac6a622ddde74bb9756daea040e82ff1df3e48a`. Base commit: `6b23ed3`;
+  original round-1 head: `8b4986c`.
 - Reads the deterministic M6A artifact through `RawPageReadPort`, validates its
   identity and ordered ancestor IDs before any network call, and never refetches
   the page body.
@@ -922,7 +923,18 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
 - Internal normalized observations are plain JSON-compatible dictionaries.
   M6B does not build ACLRecord/MediaAsset, compute effective ACL, parse XHTML,
   download attachment bodies, chunk content, or start M6C.
-- No live request was made during implementation.
+- No live request was made during implementation or review on the Codex
+  machine. The connected primary machine completed the controlled live run
+  with exit code 0: it loaded the preserved M6A raw page without refetching the
+  body, collected all 12 restriction targets (11 ancestors plus the selected
+  page) as unavailable without treating them as unrestricted, and followed 8
+  observed attachment windows containing 8 metadata rows without downloading
+  attachment bodies. Raw preservation, hash verification, temporary cleanup,
+  and leak-scan gates passed.
+- The operator worktree contained pre-existing changes before the live run.
+  Its before/after baseline was identical, so the run caused no working-tree
+  modification; the evidence does not falsely claim that the worktree itself
+  was clean.
 - Detached review round 1 verdict: changes required. Focused detached re-review
   round 2 approved these accepted fixes:
   - attachment identity now uses a dedicated attachment-ID rule that preserves
@@ -939,8 +951,10 @@ python -m knowledgenexus.foundation.cli.fetch_raw_confluence_page `
 
 Review artifact:
 - `.local_ai/review/m6b-page-observations-implementation-summary.md`
+- `.local_ai/review/m6b-live-evidence-summary.md`
 
 ## Next Planned Task
 
-Complete M6B controlled live verification. M6C may start only after that gate
-passes.
+Implement M6C: read the preserved M6A page offline, normalize its
+`body.storage` XHTML deterministically, and build one schema-valid
+`CanonicalDocument`. M6C must not make a live network request.

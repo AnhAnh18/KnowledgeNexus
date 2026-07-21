@@ -10,14 +10,19 @@
   - `4c9eb7d` `[M6B-C]` bounded restriction/attachment orchestration and tests;
   - `56e1e71` `[M6B-D]` sanitized operator CLI and offline tests;
   - `[M6B-F]` this documentation/state registration.
-- Production `REVIEW_HEAD`: `56e1e71`.
+- Local reviewed source head: `fc06d15`.
+- Independent target production head used by the controlled live run:
+  `6ac6a622ddde74bb9756daea040e82ff1df3e48a`.
 - Detached reviewer: Claude, Extra High.
 - Detached review: approved after focused round 2.
-- Controlled live run: pending.
+- Controlled live run: approved; sanitized evidence is registered in
+  `.local_ai/review/m6b-live-evidence-summary.md`.
 - The repository owner explicitly authorized this local commit-based review
   stack. The round-1 stack was pushed through `8b4986c` for detached review.
-- No live network request was performed on this checkout.
-- M6C was not started.
+- No live network request was performed on this checkout. The approved live
+  run occurred only on the connected primary machine.
+- M6C may start from the documentation/state closeout commit containing this
+  summary.
 
 ## Detached review round 1
 
