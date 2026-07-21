@@ -170,9 +170,10 @@
         <p class="subtitle">Website gọi API từ server KnowledgeNexus — Server phải đang chạy</p>
 
         <!-- Config -->
-        <div class="config-bar">
+        <div class="config-bar" id="configBar" style="display:none;">
             <label>📡 API Base URL:</label>
             <input type="text" id="apiBaseUrl" value="" placeholder="http://<server-ip>:8000" />
+            <button class="btn btn-primary" style="padding:8px 16px;" onclick="saveApiBase()">💾 Lưu</button>
         </div>
 
         <!-- Status -->
@@ -248,24 +249,48 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        // ============ Auto-detect API Base URL ============
-        // If this HTML is served via http(s)://, use the same host:port.
-        // If opened as a local file (file://), default to localhost:8000.
+        // ============ Auto-detect & remember API Base URL ============
+        // Priority:
+        //   1. If served via http(s):// → use same origin (server-hosted mode)
+        //   2. If localStorage has saved value → use it (file:// mode, user already set)
+        //   3. Fallback → http://localhost:8000 (file:// mode, first time)
         (function initApiBase() {
             const input = document.getElementById('apiBaseUrl');
+            const configBar = document.getElementById('configBar');
+            let url = null;
+
             if (window.location.protocol.startsWith('http')) {
-                // Served from a web server — use same origin
-                input.value = window.location.origin;
+                // Served from a web server — use same origin, hide config bar
+                url = window.location.origin;
+                configBar.style.display = 'none';
             } else {
-                // file:// — default to localhost, user can change to LAN IP
-                input.value = 'http://localhost:8000';
+                // file:// — show config bar so user can enter server IP
+                configBar.style.display = 'flex';
+                const saved = localStorage.getItem('kn_api_base');
+                if (saved) {
+                    url = saved;
+                } else {
+                    url = 'http://localhost:8000';
+                }
             }
+            input.value = url;
         })();
+
+
+        // Save API Base URL to localStorage (for file:// access mode)
+        function saveApiBase() {
+            const url = getApiBase();
+            localStorage.setItem('kn_api_base', url);
+            showToast('Đã lưu API URL: ' + url + '\nLần sau mở file sẽ tự dùng URL này.', 'success');
+            // Immediately test connection
+            checkHealth();
+        }
 
         // ============ Helper ============
         function getApiBase() {
             return document.getElementById('apiBaseUrl').value.replace(/\/+$/, '');
         }
+
 
         function showToast(msg, type = 'success') {
             const toast = document.getElementById('toast');
@@ -466,8 +491,13 @@
                 container.innerHTML = `
                     <table>
                         <tbody>
-                            ${Object.entries(data).map(([k, v]) => `
-                                <tr><td style="font-weight:700;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>
+                            <tr><td colspan="2" style="font-weight:700;background:#f0f4ff;">📦 Qdrant (Vector DB)</td></tr>
+                            ${Object.entries(data.qdrant || {}).map(([k, v]) => `
+                                <tr><td style="padding-left:20px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>
+                            `).join('')}
+                            <tr><td colspan="2" style="font-weight:700;background:#f0f4ff;">🗄️ SQLite (Metadata DB)</td></tr>
+                            ${Object.entries(data.sqlite || {}).map(([k, v]) => `
+                                <tr><td style="padding-left:20px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>
                             `).join('')}
                         </tbody>
                     </table>
