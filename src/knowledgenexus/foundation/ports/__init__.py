@@ -22,6 +22,12 @@ from knowledgenexus.foundation.ports.raw_page_observation_store_port import (
     RawPageReadError,
     RawPageReadPort,
 )
+from knowledgenexus.foundation.ports.confluence_page_normalization_port import (
+    ConfluenceRawPageMapperPort,
+    ConfluenceRawPageMappingError,
+    ConfluenceStorageNormalizationError,
+    ConfluenceStorageNormalizerPort,
+)
 
 __all__ = [
     "ConfluenceInventoryPort",
@@ -38,4 +44,8 @@ __all__ = [
     "RawObservationStorePort",
     "RawPageReadError",
     "RawPageReadPort",
+    "ConfluenceRawPageMapperPort",
+    "ConfluenceRawPageMappingError",
+    "ConfluenceStorageNormalizationError",
+    "ConfluenceStorageNormalizerPort",
 ]
