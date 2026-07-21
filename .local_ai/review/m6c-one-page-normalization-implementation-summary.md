@@ -8,12 +8,14 @@
   - `3b2c7da` `[M6C-B]` deterministic XHTML/macro processor and tests;
   - `84afd0c` `[M6C-C]` canonical-document use case, offline CLI, and tests;
   - `9b795a2` `[M6C-D]` production-store integration proof and state registration;
-  - `[M6C-E]` accepted detached-review fixes and regression tests.
-- Production review head: the `[M6C-E]` commit containing this updated summary.
+  - `2202061` `[M6C-E]` accepted detached-review fixes and regression tests;
+  - `[M6C-F]` this documentation-only re-review registration.
+- Approved production code head: `2202061`.
+- Documentation head: the `[M6C-F]` commit containing this updated summary.
 - Detached reviewer: Claude, Extra High.
-- Detached review round 1: changes required. All accepted findings are fixed;
-  focused detached re-review is pending.
-- Local real-artifact acceptance: pending until detached review passes.
+- Detached review round 1: changes required. All accepted findings were fixed.
+- Focused detached re-review: approved; no remaining P0-P2 finding.
+- Local real-artifact acceptance: pending.
 - No network request was performed. M6D was not started.
 
 ## Detached review round 1
@@ -21,8 +23,8 @@
 Verdict: **Changes required**. No P0 finding. Codex accepted and implemented:
 
 - **P1 contract placeholder identity:** media filenames, drawio diagram names,
-  and included-page titles/IDs are now retained in the exact §10.1 placeholder
-  families. These source values belong in normalized content, while warnings,
+  and included-page titles/IDs are now retained in the exact section 10.1
+  placeholder families. These source values belong in normalized content, while warnings,
   errors, and CLI output remain identity-free.
 - **P2 unknown plain body:** an unhandled macro now retains both rich and
   plain-text bodies in source order instead of treating a plain body as absent.
@@ -33,7 +35,16 @@ Verdict: **Changes required**. No P0 finding. Codex accepted and implemented:
   existing fail-closed parser behavior.
 
 Additional adversarial tests cover Markdown-safe placeholder values and all
-three observed identity shapes. Focused re-review is pending.
+three observed identity shapes.
+
+## Focused detached re-review
+
+Verdict: **Approve**. The reviewer reran the original adversarial probes on
+`2202061` and confirmed all three findings fixed, the unbound-prefix test gap
+closed, simple tables and nested lists unchanged, deterministic NFC output, and
+no boundary expansion. Independent results were 96 focused tests, 884
+Foundation tests, 17 Shared tests, and 5 architecture tests. No network request
+was made during re-review.
 
 ## Implemented boundary
 

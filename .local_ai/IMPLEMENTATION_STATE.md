@@ -3,11 +3,11 @@
 ## Current Milestone
 
 M6 - M6C (normalize one preserved Confluence page and build one
-`CanonicalDocument`) is implemented in a clean lettered review stack. Focused
-and broad offline tests pass. Detached review and local real-artifact acceptance
-remain pending, so M6C is not yet approved. M6A and M6B are complete and
-approved. No live request was performed from the Codex machine, no raw
-production artifact exists in this repository, and M6D has not started.
+`CanonicalDocument`) passed focused detached re-review at production code head
+`2202061` with no remaining P0-P2 findings. Local real-artifact acceptance is
+the only remaining M6C gate, so M6C is not yet complete. M6A and M6B are
+complete and approved. No live request was performed from the Codex machine,
+no raw production artifact exists in this repository, and M6D has not started.
 
 ## Done
 
@@ -955,10 +955,10 @@ Review artifact:
 
 ## M6C - One-Page Confluence Normalization
 
-- Status: implemented. Detached review round 1 requested changes; the accepted
-  P1/P2 fixes and P3 regression test are implemented in `[M6C-E]` and pending
-  focused detached re-review. Local real-artifact acceptance remains pending.
-  `M6C_BASE_COMMIT`: `97a6747`.
+- Status: offline implementation approved. Detached review round 1 requested
+  changes; focused re-review approved `[M6C-E]` production code head `2202061`
+  with no remaining P0-P2 finding. Local real-artifact acceptance remains
+  pending. `M6C_BASE_COMMIT`: `97a6747`.
 - Reads exactly one deterministic M6A page through `RawPageReadPort`; performs
   no network request and does not refetch the page.
 - Validates UTF-8 JSON, object shape, numeric page identity, page type, trusted
@@ -986,6 +986,9 @@ Review artifact:
   counts and fixed status fields only, and persists no normalized output.
 - Focused M6C plus architecture verification: 101 passed. Broad Foundation,
   Shared, and architecture verification: 906 passed.
+- Detached re-review independently passed 96 focused tests, 884 Foundation
+  tests, 17 Shared tests, and 5 architecture tests. It reran the original
+  adversarial probes on the reviewed head rather than relying on this summary.
 - M6C does not emit ChunkRecord, ACLRecord, MediaAsset, or RelationRecord and
   does not implement export, attachment-body processing, or M6D.
 
@@ -994,6 +997,6 @@ Review artifact:
 
 ## Next Planned Task
 
-Run the detached M6C review against the lettered stack. If it passes, run the
-sanitized offline command against the retained M6A real artifact and register
-only sanitized acceptance evidence. Do not start M6D until both gates pass.
+Run the sanitized offline command against the retained M6A real artifact and
+register only sanitized acceptance evidence. Do not start M6D until that final
+M6C gate passes.
