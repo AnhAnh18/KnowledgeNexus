@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     qdrant_collection: str = "knowledgenexus"
     qdrant_api_key: str | None = None
 
+    # CORS (comma-separated origins, or "*" for all)
+    cors_origins: str = "*"
+
     # Embedding
     embedding_model: str = "BAAI/bge-m3"
     embedding_model_path: str | None = None

@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KnowledgeNexus - Demo Client</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            color: #1a1a2e;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 8px; color: #16213e; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 14px; }
+
+        /* Config bar */
+        .config-bar {
+            background: #fff;
+            padding: 16px 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .config-bar label { font-weight: 600; font-size: 14px; white-space: nowrap; }
+        .config-bar input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        /* Status badge */
+        .status-bar { display: flex; gap: 16px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
+        .badge {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .badge.ok { background: #d4edda; color: #155724; }
+        .badge.error { background: #f8d7da; color: #721c24; }
+        .badge.pending { background: #fff3cd; color: #856404; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .dot.ok { background: #28a745; }
+        .dot.error { background: #dc3545; }
+        .dot.pending { background: #ffc107; }
+
+        /* Card */
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .card h2 { margin-bottom: 16px; font-size: 20px; color: #16213e; display: flex; align-items: center; gap: 8px; }
+
+        /* Form */
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .form-row { display: flex; gap: 16px; }
+        .form-row .form-group { flex: 1; }
+
+        /* Button */
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary { background: #4361ee; color: #fff; }
+        .btn-primary:hover { background: #3a56d4; }
+        .btn-success { background: #2ecc71; color: #fff; }
+        .btn-success:hover { background: #27ae60; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn:disabled { background: #aaa; cursor: not-allowed; }
+
+        /* Results */
+        .results-container { margin-top: 16px; }
+        .result-item {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: #fafafa;
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        .result-title { font-weight: 700; font-size: 15px; color: #16213e; }
+        .result-score {
+            background: #4361ee;
+            color: #fff;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .result-content {
+            font-size: 14px;
+            color: #444;
+            line-height: 1.6;
+            margin-bottom: 8px;
+            white-space: pre-wrap;
+        }
+        .result-meta { font-size: 12px; color: #888; display: flex; gap: 12px; flex-wrap: wrap; }
+        .result-meta span { background: #eee; padding: 2px 8px; border-radius: 4px; }
+
+        /* Documents table */
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f8f9fa; font-weight: 700; color: #16213e; }
+        tr:hover { background: #f8f9fa; }
+
+        /* Loading */
+        .loading { text-align: center; padding: 30px; color: #666; }
+        .empty { text-align: center; padding: 30px; color: #999; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 600;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 9999;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #2ecc71; }
+        .toast.error { background: #e74c3c; }
+
+        .actions { display: flex; gap: 8px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 KnowledgeNexus Demo Client</h1>
+        <p class="subtitle">Website gọi API từ server KnowledgeNexus — Server phải đang chạy</p>
+
+        <!-- Config -->
+        <div class="config-bar">
+            <label>📡 API Base URL:</label>
+            <input type="text" id="apiBaseUrl" value="" placeholder="http://<server-ip>:8000" />
+        </div>
+
+        <!-- Status -->
+        <div class="status-bar">
+            <span class="badge pending" id="badgeHealth">
+                <span class="dot pending"></span> Chưa kiểm tra
+            </span>
+            <span class="badge pending" id="badgeSqlite">
+                <span class="dot pending"></span> SQLite: --
+            </span>
+            <span class="badge pending" id="badgeQdrant">
+                <span class="dot pending"></span> Qdrant: --
+            </span>
+        </div>
+
+        <!-- Health Check -->
+        <div class="card">
+            <h2>1️⃣ Kiểm tra trạng thái Server</h2>
+            <button class="btn btn-primary" onclick="checkHealth()">Kiểm tra Health</button>
+        </div>
+
+        <!-- Retrieve -->
+        <div class="card">
+            <h2>2️⃣ Tìm kiếm (Retrieve)</h2>
+            <div class="form-group">
+                <label>Câu truy vấn (Query)</label>
+                <input type="text" id="queryInput" placeholder="Nhập câu hỏi hoặc từ khóa cần tìm..." />
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Top K (số kết quả)</label>
+                    <select id="topK">
+                        <option value="3">3</option>
+                        <option value="5" selected>5</option>
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Score Threshold (0-1)</label>
+                    <input type="number" id="scoreThreshold" value="0" min="0" max="1" step="0.1" />
+                </div>
+            </div>
+            <button class="btn btn-success" onclick="retrieve()">Tìm kiếm</button>
+            <div class="results-container" id="retrieveResults"></div>
+        </div>
+
+        <!-- Documents -->
+        <div class="card">
+            <h2>3️⃣ Danh sách Documents</h2>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Limit</label>
+                    <input type="number" id="docLimit" value="100" min="1" max="1000" />
+                </div>
+                <div class="form-group">
+                    <label>Offset</label>
+                    <input type="number" id="docOffset" value="0" min="0" />
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="listDocuments()">Tải danh sách</button>
+            <div id="documentsTable" style="margin-top:16px;"></div>
+        </div>
+
+        <!-- Store Stats -->
+        <div class="card">
+            <h2>4️⃣ Thống kê Store</h2>
+            <button class="btn btn-primary" onclick="getStoreStats()">Xem thống kê</button>
+            <div id="statsResult" style="margin-top:16px;"></div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // ============ Auto-detect API Base URL ============
+        // If this HTML is served via http(s)://, use the same host:port.
+        // If opened as a local file (file://), default to localhost:8000.
+        (function initApiBase() {
+            const input = document.getElementById('apiBaseUrl');
+            if (window.location.protocol.startsWith('http')) {
+                // Served from a web server — use same origin
+                input.value = window.location.origin;
+            } else {
+                // file:// — default to localhost, user can change to LAN IP
+                input.value = 'http://localhost:8000';
+            }
+        })();
+
+        // ============ Helper ============
+        function getApiBase() {
+            return document.getElementById('apiBaseUrl').value.replace(/\/+$/, '');
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => { toast.className = 'toast'; }, 3000);
+        }
+
+        async function apiCall(method, path, body = null, timeoutMs = 120000) {
+            const url = getApiBase() + path;
+            const options = {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+            };
+            if (body) options.body = JSON.stringify(body);
+
+            // Use AbortController for timeout support (default 2 min for retrieve)
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            options.signal = controller.signal;
+
+            try {
+                const res = await fetch(url, options);
+                clearTimeout(timer);
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ detail: res.statusText }));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
+                return res;
+            } catch (e) {
+                clearTimeout(timer);
+                if (e.name === 'AbortError') {
+                    throw new Error('Request timed out (model có thể đang load lần đầu, vui lòng thử lại sau giây lát)');
+                }
+                throw e;
+            }
+        }
+
+
+        function setBadge(id, status, text) {
+            const badge = document.getElementById(id);
+            badge.className = `badge ${status}`;
+            badge.innerHTML = `<span class="dot ${status}"></span> ${text}`;
+        }
+
+        // ============ Health Check ============
+        async function checkHealth() {
+            setBadge('badgeHealth', 'pending', 'Đang kiểm tra...');
+            setBadge('badgeSqlite', 'pending', 'SQLite: --');
+            setBadge('badgeQdrant', 'pending', 'Qdrant: --');
+            try {
+                const res = await fetch(getApiBase() + '/api/v1/health');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                const overall = data.status === 'ok' ? 'ok' : 'error';
+                setBadge('badgeHealth', overall, `Server: ${data.status.toUpperCase()}`);
+                setBadge('badgeSqlite', data.sqlite === 'ok' ? 'ok' : 'error', `SQLite: ${data.sqlite.toUpperCase()}`);
+                setBadge('badgeQdrant', data.qdrant === 'ok' ? 'ok' : 'error', `Qdrant: ${data.qdrant.toUpperCase()}`);
+                showToast('Health check thành công!', 'success');
+            } catch (e) {
+                setBadge('badgeHealth', 'error', 'Server: ERROR');
+                setBadge('badgeSqlite', 'error', 'SQLite: --');
+                setBadge('badgeQdrant', 'error', 'Qdrant: --');
+                showToast('Không kết nối được server: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Retrieve ============
+        async function retrieve() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) { showToast('Vui lòng nhập câu truy vấn', 'error'); return; }
+
+            const topK = parseInt(document.getElementById('topK').value);
+            const scoreThreshold = parseFloat(document.getElementById('scoreThreshold').value);
+            const container = document.getElementById('retrieveResults');
+            const btn = event?.target;
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang tìm...'; }
+            container.innerHTML = '<div class="loading">⏳ Đang tìm kiếm... (lần đầu có thể mất 30-60s để load BGE-M3 model)</div>';
+
+            try {
+                const res = await apiCall('POST', '/api/v1/retrieve', {
+                    query: query,
+                    top_k: topK,
+                    score_threshold: scoreThreshold,
+                    filters: {}
+                }, 180000); // 3 min timeout for first-time model load
+
+                const data = await res.json();
+
+                if (!data.results || data.results.length === 0) {
+                    container.innerHTML = '<div class="empty">Không tìm thấy kết quả nào.</div>';
+                    showToast('Không có kết quả', 'error');
+                    return;
+                }
+
+                container.innerHTML = data.results.map(r => `
+                    <div class="result-item">
+                        <div class="result-header">
+                            <div class="result-title">${escapeHtml(r.citation.title || 'Không có tiêu đề')}</div>
+                            <div class="result-score">Score: ${(r.score * 100).toFixed(1)}%</div>
+                        </div>
+                        <div class="result-content">${escapeHtml(r.content)}</div>
+                        <div class="result-meta">
+                            ${r.citation.source_type ? `<span>📎 ${escapeHtml(r.citation.source_type)}</span>` : ''}
+                            ${r.citation.source_id ? `<span>🆔 ${escapeHtml(r.citation.source_id)}</span>` : ''}
+                            ${r.citation.url ? `<span>🔗 <a href="${escapeHtml(r.citation.url)}" target="_blank">Link</a></span>` : ''}
+                            ${r.citation.file_path ? `<span>📄 ${escapeHtml(r.citation.file_path)}</span>` : ''}
+                            ${r.citation.language ? `<span>💻 ${escapeHtml(r.citation.language)}</span>` : ''}
+                            <span>📊 Chunk ${r.citation.chunk_index + 1}/${r.citation.total_chunks}</span>
+                        </div>
+                    </div>
+                `).join('');
+                showToast(`Tìm thấy ${data.total} kết quả!`, 'success');
+            } catch (e) {
+                container.innerHTML = '';
+                showToast('Lỗi: ' + e.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Tìm kiếm'; }
+            }
+        }
+
+        // ============ List Documents ============
+
+        async function listDocuments() {
+            const limit = document.getElementById('docLimit').value || 100;
+            const offset = document.getElementById('docOffset').value || 0;
+            const container = document.getElementById('documentsTable');
+            container.innerHTML = '<div class="loading">⏳ Đang tải...</div>';
+
+            try {
+                const res = await fetch(getApiBase() + `/api/v1/documents?limit=${limit}&offset=${offset}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                if (!data.documents || data.documents.length === 0) {
+                    container.innerHTML = '<div class="empty">Không có document nào.</div>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <p style="margin-bottom:10px;color:#666;">Tổng: <strong>${data.total}</strong> documents (hiển thị ${data.documents.length})</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Source Type</th>
+                                <th>URL</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.documents.map(d => `
+                                <tr>
+                                    <td title="${d.id}">${d.id.substring(0, 8)}...</td>
+                                    <td>${escapeHtml(d.title || '--')}</td>
+                                    <td>${escapeHtml(d.source_type || '--')}</td>
+                                    <td>${d.url ? `<a href="${escapeHtml(d.url)}" target="_blank">🔗</a>` : '--'}</td>
+                                    <td>${d.created_at ? new Date(d.created_at).toLocaleDateString() : '--'}</td>
+                                    <td>
+                                        <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
+                                            onclick="deleteDocument('${d.id}')">Xóa</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                showToast('Tải danh sách thành công!', 'success');
+            } catch (e) {
+                container.innerHTML = '';
+                showToast('Lỗi: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Delete Document ============
+        async function deleteDocument(docId) {
+            if (!confirm(`Xóa document ${docId}?`)) return;
+            try {
+                await apiCall('DELETE', `/api/v1/documents/${docId}`);
+                showToast('Đã xóa document!', 'success');
+                listDocuments(); // refresh
+            } catch (e) {
+                showToast('Lỗi: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Store Stats ============
+        async function getStoreStats() {
+            const container = document.getElementById('statsResult');
+            container.innerHTML = '<div class="loading">⏳ Đang tải...</div>';
+            try {
+                const res = await fetch(getApiBase() + '/api/v1/store/stats');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                container.innerHTML = `
+                    <table>
+                        <tbody>
+                            ${Object.entries(data).map(([k, v]) => `
+                                <tr><td style="font-weight:700;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                showToast('Tải thống kê thành công!', 'success');
+            } catch (e) {
+                container.innerHTML = '';
+                showToast('Lỗi: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Utils ============
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&')
+                .replace(/</g, '<')
+                .replace(/>/g, '>')
+                .replace(/"/g, '"')
+                .replace(/'/g, '&#039;');
+        }
+
+        // Auto check health on load
+        window.addEventListener('load', () => {
+            checkHealth();
+        });
+    </script>
+</body>
+</html>

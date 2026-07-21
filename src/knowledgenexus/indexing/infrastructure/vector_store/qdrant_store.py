@@ -171,15 +171,17 @@ class QdrantVectorStore(VectorStorePort):
             raise ValidationError(
                 f"Query vector size {len(query_vector)} != {self._config.vector_size}"
             )
-        results = await self._client.search(
+        response = await self._client.query_points(
             collection_name=self._config.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
             query_filter=_build_filter(filters),
         )
         return [
-            _slim_chunk_from_payload(hit.payload or {}, hit.score or 0.0) for hit in results
+            _slim_chunk_from_payload(hit.payload or {}, hit.score or 0.0)
+            for hit in response.points
         ]
+
 
     async def delete_by_source_id(self, source_type: SourceType, source_id: str) -> int:
         await self._client.delete(
