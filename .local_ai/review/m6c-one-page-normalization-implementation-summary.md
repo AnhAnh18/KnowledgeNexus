@@ -9,13 +9,14 @@
   - `84afd0c` `[M6C-C]` canonical-document use case, offline CLI, and tests;
   - `9b795a2` `[M6C-D]` production-store integration proof and state registration;
   - `2202061` `[M6C-E]` accepted detached-review fixes and regression tests;
-  - `[M6C-F]` this documentation-only re-review registration.
+  - `203cf9f` `[M6C-F]` detached re-review registration;
+  - `[M6C-G]` final local real-artifact acceptance closeout.
 - Approved production code head: `2202061`.
-- Documentation head: the `[M6C-F]` commit containing this updated summary.
+- `M6C_FINAL_HEAD`: the `[M6C-G]` documentation/state closeout commit.
 - Detached reviewer: Claude, Extra High.
 - Detached review round 1: changes required. All accepted findings were fixed.
 - Focused detached re-review: approved; no remaining P0-P2 finding.
-- Local real-artifact acceptance: pending.
+- Local real-artifact acceptance: approved.
 - No network request was performed. M6D was not started.
 
 ## Detached review round 1
@@ -89,6 +90,23 @@ Handled macro policy:
 - unknown bodyless macro: `[macro:name omitted]`.
 
 No MediaAsset or RelationRecord is created.
+
+## Local real-artifact acceptance
+
+The reviewed code-only transfer corresponding to production code head
+`2202061` was run offline against the retained M6A raw page. The command exited
+0 and produced a schema-valid canonical document. Sanitized functional counts
+were 3 handled macros, 9 media placeholders, and zero unhandled macros, dropped
+TOC, unsupported elements, or warnings.
+
+Integrity checks confirmed that the raw artifact and full raw file tree were
+unchanged, no normalized output file was created, leak scanning passed, and no
+network request was made. Page identity, raw path, raw hashes, title, body,
+filenames, and deployment values are intentionally not registered.
+
+Evidence artifact:
+
+- `.local_ai/review/m6c-local-real-artifact-summary.md`
 
 ## Result and canonical mapping
 

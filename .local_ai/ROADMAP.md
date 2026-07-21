@@ -71,8 +71,9 @@ Sync-state clarification:
 | M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
 | M6A - Fetch and preserve one raw page | done; controlled live PASS | Source review head `5542311`; target production head `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; owner-accepted sanitized live evidence | `M6A_FINAL_HEAD` is the controlled-live documentation/state closeout commit; no raw artifact is tracked. |
 | M6B - Page-adjacent observations | done; controlled live PASS | Local reviewed source head `fc06d15`; independent target production head `6ac6a622ddde74bb9756daea040e82ff1df3e48a`; owner-accepted sanitized live evidence | All 12 restriction observations and 8 attachment metadata windows were preserved; no page-body refetch, ACLRecord, or attachment download. |
-| M6C - One-page deterministic normalization | offline approved; local artifact acceptance pending | Production code head `2202061`; focused detached re-review found no remaining P0-P2; 101 implementer-focused and 906 broad offline tests pass | Retains contract-mandated placeholder identities and multiline macro/code content; final local artifact gate remains. |
-| M6 (D-G) - Rest of one-page vertical slice | planned after M6C gates | M6A raw provenance and M6B observation gates passed | Chunking, ACL, relation, and export end to end. |
+| M6C - One-page deterministic normalization | done; local real-artifact PASS | Production code head `2202061`; focused re-review approved; offline real-artifact run passed schema, immutability, no-output, leak, and no-network gates | Contract-mandated placeholder identities and multiline macro/code content are retained; no normalized artifact is persisted. |
+| M6D - One-page deterministic chunking | next | M6C provides approved normalized Markdown/text and a valid canonical document | Build stable schema-valid chunks only; do not start ACL, relation, or export work. |
+| M6 (E-G) - Rest of one-page vertical slice | planned after M6D | M6A-M6C gates passed | ACL, relation, and export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -760,9 +761,10 @@ Status:
 - M6B: complete and approved. Controlled live PASS at independent target
   production head `6ac6a622ddde74bb9756daea040e82ff1df3e48a`; sanitized evidence is registered
   without production identities or content.
-- M6C: offline implementation approved at production code head `2202061`;
-  local real-artifact acceptance pending.
-- M6D-M6G: planned.
+- M6C: complete and approved. Production code head `2202061`; offline local
+  real-artifact acceptance passed without network or output persistence.
+- M6D: next.
+- M6E-M6G: planned.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).

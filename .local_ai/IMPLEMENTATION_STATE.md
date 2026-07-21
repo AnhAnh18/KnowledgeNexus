@@ -3,11 +3,11 @@
 ## Current Milestone
 
 M6 - M6C (normalize one preserved Confluence page and build one
-`CanonicalDocument`) passed focused detached re-review at production code head
-`2202061` with no remaining P0-P2 findings. Local real-artifact acceptance is
-the only remaining M6C gate, so M6C is not yet complete. M6A and M6B are
-complete and approved. No live request was performed from the Codex machine,
-no raw production artifact exists in this repository, and M6D has not started.
+`CanonicalDocument`) is complete and approved. Focused detached re-review
+approved production code head `2202061`, and the offline local real-artifact
+run passed every sanitized integrity gate. M6A-M6C are complete. M6D is the next
+planned task and has not started. No raw production artifact exists in this
+repository.
 
 ## Done
 
@@ -955,10 +955,11 @@ Review artifact:
 
 ## M6C - One-Page Confluence Normalization
 
-- Status: offline implementation approved. Detached review round 1 requested
-  changes; focused re-review approved `[M6C-E]` production code head `2202061`
-  with no remaining P0-P2 finding. Local real-artifact acceptance remains
-  pending. `M6C_BASE_COMMIT`: `97a6747`.
+- Status: complete and approved. Detached review round 1 requested changes;
+  focused re-review approved `[M6C-E]` production code head `2202061` with no
+  remaining P0-P2 finding. The offline local real-artifact run then passed.
+  `M6C_BASE_COMMIT`: `97a6747`; `M6C_FINAL_HEAD` is the documentation/state
+  closeout commit containing this status.
 - Reads exactly one deterministic M6A page through `RawPageReadPort`; performs
   no network request and does not refetch the page.
 - Validates UTF-8 JSON, object shape, numeric page identity, page type, trusted
@@ -989,14 +990,20 @@ Review artifact:
 - Detached re-review independently passed 96 focused tests, 884 Foundation
   tests, 17 Shared tests, and 5 architecture tests. It reran the original
   adversarial probes on the reviewed head rather than relying on this summary.
+- Local real-artifact acceptance exited 0 with a schema-valid canonical
+  document. The preserved raw artifact and complete raw file tree remained
+  unchanged, no normalized output file was created, leak scanning passed, and
+  no network request was made. The sanitized functional summary reported 3
+  handled macros, 9 media placeholders, and zero unhandled macros, dropped TOC,
+  unsupported elements, or warnings.
 - M6C does not emit ChunkRecord, ACLRecord, MediaAsset, or RelationRecord and
   does not implement export, attachment-body processing, or M6D.
 
 Review artifact:
 - `.local_ai/review/m6c-one-page-normalization-implementation-summary.md`
+- `.local_ai/review/m6c-local-real-artifact-summary.md`
 
 ## Next Planned Task
 
-Run the sanitized offline command against the retained M6A real artifact and
-register only sanitized acceptance evidence. Do not start M6D until that final
-M6C gate passes.
+Plan M6D: deterministically chunk the one normalized page and build
+schema-valid `ChunkRecord`s. M6D implementation has not started.
