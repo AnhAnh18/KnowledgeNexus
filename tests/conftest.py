@@ -12,6 +12,30 @@ from knowledgenexus.indexing.domain.models.chunk import Chunk, ChunkPayload, Cor
 
 VECTOR_SIZE = 1024
 
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--tokenizer-assets-dir",
+        action="store",
+        default=None,
+        help="Explicit external BGE-M3 tokenizer asset directory",
+    )
+
+
+@pytest.fixture
+def tokenizer_assets_dir(request: pytest.FixtureRequest) -> Path:
+    raw_path = request.config.getoption("--tokenizer-assets-dir")
+    if raw_path is None:
+        pytest.fail(
+            "asset-backed tokenizer tests require --tokenizer-assets-dir; "
+            "they must not skip or use an implicit cache"
+        )
+    path = Path(raw_path)
+    if not path.is_dir():
+        pytest.fail("--tokenizer-assets-dir must identify an existing directory")
+    return path
+
+
 @pytest.fixture
 def project_root() -> Path:
     """Return the project root directory."""

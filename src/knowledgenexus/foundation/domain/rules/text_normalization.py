@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import re
+import unicodedata
+
+
+_THREE_OR_MORE_NEWLINES = re.compile(r"\n{3,}")
+
 
 class TextNormalizationRules:
     """Deterministic text normalization before hashing, counting, and IDs."""
@@ -9,24 +15,9 @@ class TextNormalizationRules:
         if not isinstance(text, str):
             raise TypeError("TextNormalizationRules.normalize_text expects text to be str")
 
-        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        normalized = unicodedata.normalize("NFC", text)
+        lines = normalized.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         lines = [line.rstrip() for line in lines]
-
-        while lines and not lines[0]:
-            lines.pop(0)
-        while lines and not lines[-1]:
-            lines.pop()
-
-        collapsed_lines: list[str] = []
-        blank_count = 0
-        for line in lines:
-            if not line:
-                blank_count += 1
-                if blank_count <= 2:
-                    collapsed_lines.append(line)
-                continue
-
-            blank_count = 0
-            collapsed_lines.append(line)
-
-        return "\n".join(collapsed_lines)
+        normalized = "\n".join(lines)
+        normalized = _THREE_OR_MORE_NEWLINES.sub("\n\n", normalized)
+        return normalized.strip("\n")

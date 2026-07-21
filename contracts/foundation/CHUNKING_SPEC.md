@@ -5,40 +5,40 @@ Chunking specification for the AI Knowledge Platform — Part 1 (Knowledge Found
 | Field | Value |
 |---|---|
 | Status | Normative |
-| chunker_version | 1.1.0 |
-| Embedding model (selected by Task 2) | `sentence-transformers/all-MiniLM-L6-v2` — 256 word-piece limit, silent truncation |
+| chunker_version | 1.2.0 |
+| Embedding model (selected by Task 2) | `BAAI/bge-m3` — multilingual SentencePiece / XLM-R tokenizer, 8192-token model context |
 | Applies to | ChunkRecord (`schemas/chunk_record.schema.json`) |
 | Parent spec | AI_Knowledge_Platform_Master_Spec_v7_1.md §16.3 |
-| Scope | Confluence wiki pages and Git source files under the POC scope (SVMC/938880621, spensdk). No embedding, no retrieval — that is Task 2/Task 3. |
+| Scope | Confluence wiki pages and Git source files under the POC scope (SVMC/938880621, spen-sdk). No embedding, no retrieval — that is Task 2/Task 3. |
 
 This document is authoritative for how `chunks.jsonl` is produced. Where this file and the master spec appear to disagree, the master spec's §16.3 invariants win and this file must be corrected.
 
 ---
 
 
-## 0.1 Migration status *(v7.3)*
+## 0.1 Migration status *(v7.4)*
 
-BGE-M3 migration is recorded in `AI_Knowledge_Platform_v7_3_Update.md`. The BGE-M3 chunk budget is under benchmark and will be promoted only when `chunker_version` 1.2.0 is locked. Until then, §1 below remains the last normative locked profile (all-MiniLM-L6-v2, chunker_version 1.1.0). Do not treat any BGE-M3 number as normative until 1.2.0 is stamped here.
+BGE-M3 is the active model/tokenizer identity and `chunker_version` 1.2.0 is locked. The medium profile in §1 is active but remains `provisional_until_benchmark`: M6D implements it exactly and does not tune it from a single page. Any later budget change requires an explicit profile migration and a new `config_hash`; a semantic chunking change also requires a `chunker_version` bump.
 
 ## 1. Tokenizer and Budget
 
-Chunk size is measured in tokens counted with the **embedding model's own tokenizer**, not `tiktoken`. Task 2 has selected **`sentence-transformers/all-MiniLM-L6-v2`**, which uses the BERT uncased **WordPiece** tokenizer (30,522-token vocab) and **truncates input to 256 word pieces, silently**. Budgeting in that exact tokenizer is what makes `token_count` map onto the model's real truncation limit; counting in a different tokenizer (e.g. `cl100k_base`) would under-count, and code especially would silently lose its tail at embed time. `chunker_version` 1.1.0 reflects this model-tuned configuration (§7).
+Chunk size is measured with the exact pinned **`BAAI/bge-m3`** tokenizer, not `tiktoken`, whitespace counting, MiniLM WordPiece, or a hand-written approximation. The tokenizer is the multilingual SentencePiece / XLM-R tokenizer serialized as the verified fast-tokenizer asset recorded in `embedding_profile.yaml`. Runtime receives an explicit external asset directory, verifies the pinned file bytes, and loads locally without using an implicit Hugging Face cache or network fallback. Counting uses no special tokens, padding, or truncation.
 
-Sizes stay safely under the 256-WP ceiling (leaving room for the `[CLS]`/`[SEP]` tokens the model adds) and small enough for good retrieval — with this model, shorter chunks that fully fit retrieve *better* than long chunks that get truncated.
+The active profile is `medium`. It is an operationally locked input to M6D, not a claim that the retrieval benchmark has selected an optimum.
 
-| Parameter | Value (WordPiece) | Meaning |
+| Parameter | Value (BGE-M3 tokens) | Meaning |
 |---|---|---|
-| `target_tokens` | 200 | Preferred chunk size. The packer aims here. |
-| `min_tokens` | 64 | Chunks smaller than this are merged forward where the algorithm allows. |
-| `hard_max_tokens` | 240 | A chunk MUST NOT exceed this. 240 + 2 special tokens = 242 ≤ the model's 256 limit, so nothing is silently truncated. Larger units are force-split. |
-| `overlap_tokens` | 40 | Applied **only** to forced splits of an oversize unit (§4.4, §5.3). Non-split adjacent chunks do not overlap. |
-| `code_window_target_tokens` | 200 | Token target for symbol-less/oversize code windows (§5). Windows are packed by tokens, not a fixed line count. |
+| `target_tokens` | 450 | Preferred chunk size. The packer aims here. |
+| `minimum_tokens` | 96 | Chunks smaller than this are merged forward where the algorithm allows. |
+| `hard_maximum_tokens` | 1000 | Absolute limit on the exact final normalized text, including breadcrumb and repeated fences/header material. Larger units are force-split or fail closed when indivisible. |
+| `overlap_tokens` | 64 | Upper bound applied **only** to forced splits of an oversize prose unit (§4.4). Non-split adjacent chunks do not overlap. |
+| `code_window_target_tokens` | 450 | Token target for symbol-less/oversize code windows (§5). Windows are packed by complete lines, not a fixed line count. |
 | `code_window_max_lines` | 40 | Secondary guard so a token-packed window never spans an unreadable number of lines. |
 | `code_window_overlap_lines` | 4 | Line overlap between consecutive code windows. |
 
-`min_tokens` is a merge *hint*, not an invariant: a standalone short section with no valid merge target (e.g. a lone heading followed immediately by a subheading) may be emitted below `min_tokens`. `hard_max_tokens` is an invariant: the quality report MUST report `chunks_over_hard_max = 0`.
+`minimum_tokens` is a merge *hint*, not an invariant: a standalone short section with no valid merge target may be emitted below it. `hard_maximum_tokens` is an invariant: the quality report MUST report `chunks_over_hard_max = 0`. A single code line that cannot fit under the hard maximum together with its breadcrumb and valid fences fails closed as `unsplittable_code_line`; it is never split or truncated.
 
-> **Model coupling and model-specific limits.** These numbers are tuned to all-MiniLM-L6-v2's 256-WP limit. Changing the embedding model to one with a different context window (e.g. a 512-WP or 8k model) is a chunker-configuration change: bump `chunker_version` and re-export as a `full_snapshot` (`config_invalidated`, master spec §16.2). Two further properties of this specific model bear on Task 2 (not on chunk sizing): it is **English-only** — Korean/Vietnamese wiki text will embed poorly, so a multilingual model should be considered if the corpus is not English; and it was **not trained on source code** — code retrieval quality will be weak regardless of how code is chunked, so a code-aware embedding model would serve the code chunks far better.
+> **Model coupling and provisional budget.** BGE-M3 supports a larger multilingual context, but the 450/96/1000/64 profile remains provisional until the two-round retrieval benchmark. The POC does not raise the budget based on a single live page. A model/tokenizer identity change is a chunker-configuration change and requires a `chunker_version` bump plus `full_snapshot` (`config_invalidated`, master spec §16.2).
 
 ---
 
@@ -49,10 +49,10 @@ All chunk text is normalized identically so that `chunk_id` is stable and `token
 1. Unicode NFC normalization.
 2. Line endings → `\n` (CRLF and CR collapsed to LF).
 3. Trailing whitespace stripped from each line.
-4. Runs of 3+ blank lines collapsed to exactly one blank line.
-5. Leading/trailing blank lines of the chunk removed.
+4. Runs of 3 or more newline characters collapsed to exactly 2 newline characters (one blank-line boundary).
+5. Leading/trailing newline characters of the chunk removed.
 
-Normalization is applied to the *assembled* chunk text (breadcrumb/comment prefix line included, see below), and that normalized string is what goes into both the token count and the `chunk_id` hash and the `text` field. There is exactly one normalized form per chunk; no un-normalized text is ever emitted.
+Normalization is applied to the *assembled* chunk text (breadcrumb/comment prefix line included, see below), and that normalized string is what goes into both the token count and the `chunk_id` hash and the `text` field. No semantic content may be dropped; only the canonical representation changes listed above are permitted.
 
 ---
 
@@ -115,28 +115,28 @@ The breadcrumb is part of the normalized text: it is counted in `token_count` an
 
 ### 4.3 Packing and Merging
 
-- If a section body is `≤ hard_max_tokens`, it is emitted as a single `prose` chunk (breadcrumb + body).
-- If a section is `< min_tokens`, merge it **forward** into the next sibling section under the same parent, concatenating bodies under the deeper/again-stated breadcrumb, until the merged chunk reaches `min_tokens` or the parent's sections are exhausted. Never merge across an h1 boundary. Track `sections_merged`.
-- A section that cannot reach `min_tokens` and has no valid forward target is emitted as-is (small chunk allowed).
+- If a section body is `≤ hard_maximum_tokens`, it is emitted as a single `prose` chunk (breadcrumb + body).
+- If a section is `< minimum_tokens`, merge it **forward** into the next sibling section under the same parent, concatenating bodies under the deeper/again-stated breadcrumb, until the merged chunk reaches `minimum_tokens` or the parent's sections are exhausted. Never merge across an h1 boundary. Track `sections_merged`.
+- A section that cannot reach `minimum_tokens` and has no valid forward target is emitted as-is (small chunk allowed).
 
 ### 4.4 Oversize Prose Sections
 
-If a section body exceeds `hard_max_tokens`, split it into windows at **paragraph boundaries** (blank-line separated blocks), packing paragraphs toward `target_tokens` and never exceeding `hard_max_tokens`:
+If a section body exceeds `hard_maximum_tokens`, split it into windows at **paragraph boundaries** (blank-line separated blocks), packing paragraphs toward `target_tokens` and never exceeding `hard_maximum_tokens`:
 
-- Consecutive windows carry `overlap_tokens` (40) of trailing text from the previous window, taken at a paragraph or sentence boundary — never mid-line.
-- A window **never splits a fenced code block or a table row** (§4.5, §4.6). If a single fenced block or table alone exceeds `hard_max_tokens`, it becomes its own chunk handled by §4.5 / §4.6 rather than by prose windowing.
+- Consecutive forced-split windows select the largest previous-window suffix whose exact token count is `≤ overlap_tokens`. Boundary priority is paragraph → sentence → line → exact token-offset fallback. Breadcrumb text is excluded from the overlap content but is repeated and included in the next chunk's total token budget. The overlap may therefore be smaller than 64 tokens and is never an exact-size requirement.
+- A window **never splits a fenced code block or a table row** (§4.5, §4.6). If a single fenced block or table alone exceeds `hard_maximum_tokens`, it is handled by §4.5 / §4.6 rather than by prose windowing.
 - Each window is its own chunk with `content_kind: prose`, `part_index` (0-based) and `part_total` set. The breadcrumb prefix is repeated on every window.
 
 ### 4.5 Fenced Code Blocks Inside Pages
 
-- A fenced code block (from a Confluence `code` macro or literal fence) that fits within `hard_max_tokens` becomes one chunk with `content_kind: code_block`, breadcrumb prefixed, language tag preserved in the body.
-- If it exceeds `hard_max_tokens`, split into token-packed line windows (accumulate lines up to `code_window_target_tokens`, never exceeding `hard_max_tokens` or `code_window_max_lines`, with `code_window_overlap_lines` overlap), each part `content_kind: code_block`, with `part_index`/`part_total`.
+- A fenced code block (from a Confluence `code` macro or literal fence) that fits within `hard_maximum_tokens` becomes one chunk with `content_kind: code_block`, breadcrumb prefixed, language tag preserved in the body.
+- If it exceeds `hard_maximum_tokens`, split into token-packed complete-line windows (accumulate lines up to `code_window_target_tokens`, never exceeding `hard_maximum_tokens` or `code_window_max_lines`, with `code_window_overlap_lines` overlap), each part `content_kind: code_block`, with `part_index`/`part_total`. The breadcrumb and valid repeated fences count toward every window. A single over-budget line fails closed as `unsplittable_code_line`; it is never divided or truncated.
 - Small code blocks may remain inline inside the surrounding `prose` chunk if they were already part of a section body under `target_tokens`; they are only pulled out when the section is oversize and windowing would otherwise cut them.
 
 ### 4.6 Tables
 
-- A Markdown table that fits within `hard_max_tokens` is emitted atomically as one `content_kind: table` chunk (breadcrumb prefixed).
-- A larger table is split into **row-groups**, each group repeating the header row and the alignment row so every chunk is a valid, self-describing table. `part_index`/`part_total` set; `content_kind: table`. A table row is never split across chunks.
+- A Markdown table that fits within `hard_maximum_tokens` is emitted atomically as one `content_kind: table` chunk (breadcrumb prefixed).
+- A larger table is split into **row-groups**, each group repeating the header row and the alignment row so every chunk is a valid, self-describing table. `part_index`/`part_total` set; `content_kind: table`. A table row is never split across chunks. A single row that cannot fit with breadcrumb and repeated header/alignment fails closed as `unsplittable_table_row`.
 
 ---
 
@@ -156,7 +156,7 @@ Applies to files scanned by the Git connector. Symbol boundaries come from the t
 The first line of every code chunk's `text` is a comment giving provenance, followed by a blank line, then the code:
 
 ```
-// spensdk · src/native/ObjectManager.cpp · ObjectManager::Release
+// spen-sdk · src/native/ObjectManager.cpp · ObjectManager::Release
 
 void ObjectManager::Release(Object* obj) {
     …
@@ -167,12 +167,12 @@ The prefix comment is part of the normalized text (counted and hashed), using th
 
 ### 5.3 Oversize Symbols
 
-A single function/method whose body exceeds `hard_max_tokens` is split into token-packed line windows (packed to `code_window_target_tokens`, capped at `hard_max_tokens` and `code_window_max_lines`, with `code_window_overlap_lines` overlap), `content_kind: code_symbol`, `part_index`/`part_total` set, prefix comment repeated. Splitting is by line only; it does not attempt to parse sub-blocks. Note that code tokenizes to many more word pieces than prose, so a single method often exceeds 240 WP and will be split into several parts — this is expected.
+A single function/method whose body exceeds `hard_maximum_tokens` is split into token-packed line windows (packed to `code_window_target_tokens`, capped at `hard_maximum_tokens` and `code_window_max_lines`, with `code_window_overlap_lines` overlap), `content_kind: code_symbol`, `part_index`/`part_total` set, prefix comment repeated. Splitting is by complete lines only; it does not attempt to parse sub-blocks. A single line that cannot fit with the repeated prefix fails closed as `unsplittable_code_line`.
 
 ### 5.4 Symbol-less Files and Fallback Windows
 
-- Files with no extractable symbols (XML, Kotlin in MVP, or a C++ file that produced only ERROR nodes) are chunked into token-packed line windows (accumulate lines up to `code_window_target_tokens`, never exceeding `hard_max_tokens` or `code_window_max_lines`, with `code_window_overlap_lines` overlap). `content_kind: code_window`; `symbol` is null; `line_start`/`line_end` and `part_index`/`part_total` are set.
-- A short **file preamble** (license header, includes) below `min_tokens` is merged forward into the first following chunk rather than emitted alone.
+- Files with no extractable symbols (XML, Kotlin in MVP, or a C++ file that produced only ERROR nodes) are chunked into token-packed line windows (accumulate lines up to `code_window_target_tokens`, never exceeding `hard_maximum_tokens` or `code_window_max_lines`, with `code_window_overlap_lines` overlap). `content_kind: code_window`; `symbol` is null; `line_start`/`line_end` and `part_index`/`part_total` are set.
+- A short **file preamble** (license header, includes) below `minimum_tokens` is merged forward into the first following chunk rather than emitted alone.
 
 ---
 
@@ -199,7 +199,7 @@ Chunking participates in incremental sync as defined in master spec §18.3. Rest
    - `chunk_id` present in both → unchanged; **not re-emitted** in a `delta` export.
    - `chunk_id` new → emitted.
    - `chunk_id` absent from the new set → **tombstoned** with reason `content_updated` (master spec §16.2).
-3. **chunker_version stamped.** Every ChunkRecord carries `chunker_version`; `manifest.json` carries the `chunker_version` used for the run. A change to `chunker_version` invalidates all chunks (`config_invalidated`) and forces a `full_snapshot` (master spec §16.1, §16.2). Version history: `1.0.0` used a model-agnostic `cl100k_base` budget (target 450 / hard max 1000); `1.1.0` tunes the budget to the selected embedding model all-MiniLM-L6-v2 (WordPiece, target 200 / hard max 240; §1). Selecting a different embedding model later is itself such a change.
+3. **chunker_version stamped.** Every ChunkRecord carries `chunker_version`; `manifest.json` carries the `chunker_version` used for the run. A change to `chunker_version` invalidates all chunks (`config_invalidated`) and forces a `full_snapshot` (master spec §16.1, §16.2). Version history: `1.0.0` used a model-agnostic `cl100k_base` budget (target 450 / hard maximum 1000); `1.1.0` used all-MiniLM-L6-v2 WordPiece (target 200 / hard maximum 240); `1.2.0` locks BAAI/bge-m3 and the provisional medium profile (target 450 / minimum 96 / hard maximum 1000 / overlap upper bound 64). Selecting another model/tokenizer or changing semantic splitting behavior requires a later version.
 4. **ACL-only change.** If page content is identical but restrictions changed, the same `chunk_id`s are re-emitted with updated `acl_tags` — no tombstones (master spec §18.3).
 
 ---
@@ -219,8 +219,8 @@ The chunking stage contributes the following to `quality_report.md`:
 | `chunks_total` | Total chunks emitted this run. |
 | `chunks_by_kind{content_kind}` | Count per `content_kind`. |
 | `chunks_over_hard_max` | MUST be 0 (invariant check). |
-| `sections_merged` | Wiki sections merged forward for being under `min_tokens` (§4.3). |
-| `oversize_splits` | Units force-split for exceeding `hard_max_tokens` (§4.4, §4.5, §4.6, §5.3). |
+| `sections_merged` | Wiki sections merged forward for being under `minimum_tokens` (§4.3). |
+| `oversize_splits` | Units force-split for exceeding `hard_maximum_tokens` (§4.4, §4.5, §4.6, §5.3). |
 | `fallback_window_files` | Files chunked by the symbol-less fallback (§5.4). |
 | `empty_sections_skipped` | Heading sections whose normalized body was empty. |
 | `token_count_p50` / `token_count_p95` | Chunk token-count distribution, for tuning against `target_tokens`. |
@@ -229,7 +229,7 @@ The chunking stage contributes the following to `quality_report.md`:
 
 ## 10. Open Items (tracked in master spec §20.3)
 
-- Token budget is **resolved**: tuned to the selected model all-MiniLM-L6-v2 (target 200 / hard max 240 / overlap 40 WordPiece; §1). Revisit only if the embedding model changes (→ `chunker_version` bump + `full_snapshot`).
-- Model fit: all-MiniLM-L6-v2 is English-only and not code-trained. If wiki content is substantially Korean/Vietnamese, or code retrieval quality proves insufficient, Task 2 should evaluate a multilingual and/or code-aware model. That changes Task 2 config (and possibly `chunker_version`), not the Part 1 record shapes.
+- Token budget is **active but provisional**: BAAI/bge-m3 medium = target 450 / minimum 96 / hard maximum 1000 / overlap upper bound 64 (§1). The two-round benchmark may propose a later explicit configuration migration; M6D does not tune it.
+- Model fit and retrieval quality remain benchmark questions. The multilingual BGE-M3 identity is locked for the POC, while code retrieval quality must be measured rather than inferred from tokenizer behavior.
 - `ChunkRecord.language` detection method is unspecified; MVP may emit `"unknown"`. Decide detector and whether it is per-chunk or per-document.
 - Kotlin symbol extraction (would move `.kt` files from §5.4 fallback to §5.1 symbol chunks) is deferred to Phase 1.5.
