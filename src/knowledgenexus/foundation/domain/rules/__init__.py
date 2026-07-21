@@ -8,6 +8,10 @@ from knowledgenexus.foundation.domain.rules.document_id_generator import Documen
 from knowledgenexus.foundation.domain.rules.relation_id_generator import RelationIdGenerator
 from knowledgenexus.foundation.domain.rules.text_normalization import TextNormalizationRules
 from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
+from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
+    WikiStructureParseError,
+    WikiStructureParser,
+)
 
 __all__ = [
     "AclIdGenerator",
@@ -18,4 +22,6 @@ __all__ = [
     "RelationIdGenerator",
     "TextNormalizationRules",
     "TombstoneIdGenerator",
+    "WikiStructureParseError",
+    "WikiStructureParser",
 ]
