@@ -35,7 +35,7 @@ class ConfluenceDataCenterRawPageMapper(ConfluenceRawPageMapperPort):
 
         payload = _decode_object(raw_bytes)
         page_id = _require_page_identity(payload, expected_page_id)
-        if payload.get("type") != "page":
+        if "type" in payload and payload.get("type") != "page":
             raise ConfluenceRawPageMappingError(
                 "page response.type must equal 'page'"
             )

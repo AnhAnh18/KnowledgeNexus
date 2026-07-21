@@ -58,6 +58,16 @@ def test_accepts_numeric_json_page_id_but_returns_canonical_string() -> None:
     assert result.page_id == PAGE_ID
 
 
+def test_missing_optional_type_is_accepted() -> None:
+    payload = _payload()
+    del payload["type"]
+    result = ConfluenceDataCenterRawPageMapper().map_page(
+        raw_bytes=_raw(payload),
+        expected_page_id=PAGE_ID,
+    )
+    assert result.page_id == PAGE_ID
+
+
 @pytest.mark.parametrize(
     ("raw_bytes", "expected_message"),
     [

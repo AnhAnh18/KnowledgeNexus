@@ -2,12 +2,12 @@
 
 ## Current Milestone
 
-M6 - M6B (collect and preserve one page's restriction observations and
-attachment metadata) is complete and approved. Its focused detached re-review
-passed after the accepted P1/P2 fixes and one P3 regression test, and its
-controlled live run passed on the connected primary machine. M6A is also
-complete. No live request was performed from the Codex machine, no raw
-production artifact exists in this repository, and M6C is the next task.
+M6 - M6C (normalize one preserved Confluence page and build one
+`CanonicalDocument`) is implemented in a clean lettered review stack. Focused
+and broad offline tests pass. Detached review and local real-artifact acceptance
+remain pending, so M6C is not yet approved. M6A and M6B are complete and
+approved. No live request was performed from the Codex machine, no raw
+production artifact exists in this repository, and M6D has not started.
 
 ## Done
 
@@ -953,8 +953,41 @@ Review artifact:
 - `.local_ai/review/m6b-page-observations-implementation-summary.md`
 - `.local_ai/review/m6b-live-evidence-summary.md`
 
+## M6C - One-Page Confluence Normalization
+
+- Status: implemented; pending detached review and pending local real-artifact
+  acceptance. `M6C_BASE_COMMIT`: `97a6747`.
+- Reads exactly one deterministic M6A page through `RawPageReadPort`; performs
+  no network request and does not refetch the page.
+- Validates UTF-8 JSON, object shape, numeric page identity, page type, trusted
+  title/space/version fields, and the `body.storage` representation before
+  normalization.
+- Parses storage XHTML with a deterministic namespace wrapper and the standard
+  library XML parser. DOCTYPE/entity declarations, unknown entities, and
+  malformed XML fail closed without raw-source disclosure.
+- Produces deterministic Markdown/text with NFC, LF endings, stripped trailing
+  whitespace, collapsed blank runs, stable source order, and no prepended page
+  title.
+- Implements the M6C baseline element, simple-table, macro, media-placeholder,
+  warning, and counter policies. Complex tables preserve cell text through a
+  deterministic fallback and warning. Unsupported elements preserve descendant
+  text where safe.
+- Builds the schema-shaped record with the existing
+  `CanonicalDocumentRecordBuilder`, `DocumentIdGenerator`, `AclIdGenerator`, and
+  `ContentHasher`. `crawled_at` is an explicit caller value; no wall clock or
+  file mtime is read.
+- The offline CLI validates the record with `FoundationSchemaValidator`, emits
+  counts and fixed status fields only, and persists no normalized output.
+- Focused M6C plus architecture verification: 93 passed. Broad Foundation,
+  Shared, and architecture verification: 898 passed.
+- M6C does not emit ChunkRecord, ACLRecord, MediaAsset, or RelationRecord and
+  does not implement export, attachment-body processing, or M6D.
+
+Review artifact:
+- `.local_ai/review/m6c-one-page-normalization-implementation-summary.md`
+
 ## Next Planned Task
 
-Implement M6C: read the preserved M6A page offline, normalize its
-`body.storage` XHTML deterministically, and build one schema-valid
-`CanonicalDocument`. M6C must not make a live network request.
+Run the detached M6C review against the lettered stack. If it passes, run the
+sanitized offline command against the retained M6A real artifact and register
+only sanitized acceptance evidence. Do not start M6D until both gates pass.

@@ -71,7 +71,7 @@ Sync-state clarification:
 | M6-0 - Confluence page fetch live evidence | done | Operator live probe on the primary machine; approved sanitized conclusion registered in state and `.local_ai/review/m6-0-...` | Confirms page/restriction/attachment request shapes; no raw artifact in repo by design. |
 | M6A - Fetch and preserve one raw page | done; controlled live PASS | Source review head `5542311`; target production head `e2823f9ca492becb17d6b2352aeada6bdf85d3ae`; owner-accepted sanitized live evidence | `M6A_FINAL_HEAD` is the controlled-live documentation/state closeout commit; no raw artifact is tracked. |
 | M6B - Page-adjacent observations | done; controlled live PASS | Local reviewed source head `fc06d15`; independent target production head `6ac6a622ddde74bb9756daea040e82ff1df3e48a`; owner-accepted sanitized live evidence | All 12 restriction observations and 8 attachment metadata windows were preserved; no page-body refetch, ACLRecord, or attachment download. |
-| M6C - One-page deterministic normalization | next | Reads the preserved M6A raw page offline and emits one schema-valid `CanonicalDocument` | No network, chunking, ACL materialization, relation extraction, or normalized-output persistence. |
+| M6C - One-page deterministic normalization | implemented; review and local artifact acceptance pending | Clean stack over `97a6747`; 93 focused and 898 broad offline tests pass | Reads preserved M6A bytes, emits one schema-valid `CanonicalDocument`, and persists no normalized output; not yet approved. |
 | M6 (D-G) - Rest of one-page vertical slice | planned after M6C gates | M6A raw provenance and M6B observation gates passed | Chunking, ACL, relation, and export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
@@ -760,7 +760,8 @@ Status:
 - M6B: complete and approved. Controlled live PASS at independent target
   production head `6ac6a622ddde74bb9756daea040e82ff1df3e48a`; sanitized evidence is registered
   without production identities or content.
-- M6C: next.
+- M6C: implemented in a clean lettered stack; detached review and local
+  real-artifact acceptance pending.
 - M6D-M6G: planned.
 
 Tasks:

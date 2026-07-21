@@ -5,6 +5,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
+from collections.abc import Callable
 from urllib.parse import urlsplit
 
 from knowledgenexus.foundation.domain.models.confluence_page_content import (
@@ -18,6 +19,7 @@ from knowledgenexus.foundation.ports.confluence_page_normalization_port import (
 _AC_NAMESPACE = "urn:knowledgenexus:confluence:ac"
 _RI_NAMESPACE = "urn:knowledgenexus:confluence:ri"
 _FORBIDDEN_DECLARATION = re.compile(r"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
+_XML_LITERAL_SECTION = re.compile(r"<!\[CDATA\[.*?\]\]>|<!--.*?-->", re.DOTALL)
 _NAMED_ENTITY = re.compile(r"&([A-Za-z][A-Za-z0-9]+);")
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_.+-]{0,63}$")
 _SAFE_LANGUAGE = re.compile(r"^[A-Za-z0-9_+.-]{1,32}$")
@@ -48,7 +50,7 @@ class ConfluenceStorageXhtmlNormalizer(ConfluenceStorageNormalizerPort):
     def normalize(self, *, storage_xhtml: str) -> ConfluenceStorageNormalization:
         if not isinstance(storage_xhtml, str):
             raise TypeError("storage_xhtml expects str")
-        if _FORBIDDEN_DECLARATION.search(storage_xhtml):
+        if _contains_forbidden_declaration(storage_xhtml):
             raise ConfluenceStorageNormalizationError(
                 "storage XHTML contains a forbidden declaration"
             )
@@ -224,7 +226,7 @@ class _Renderer:
             if not cells:
                 complex_shape = True
                 continue
-            if any(_has_span(cell) for cell in cells):
+            if any(_has_span(cell) or _has_nested_table(cell) for cell in cells):
                 complex_shape = True
             values = [
                 _single_line(self.render_children(cell)).replace("|", "\\|")
@@ -306,7 +308,11 @@ class _Renderer:
         if name in _ADMONITION_LABELS:
             self.handled_macros[name] += 1
             body = self.render_children(rich_body) if rich_body is not None else ""
-            return _blockquote(f"**{_ADMONITION_LABELS[name]}:** {body}")
+            body = _normalize_final_text(body)
+            content = f"**{_ADMONITION_LABELS[name]}:**"
+            if body:
+                content = f"{content}\n{body}"
+            return _blockquote(content)
 
         self.unhandled_macros[name] += 1
         self.warn("unhandled_macro", name)
@@ -329,7 +335,37 @@ def _replace_named_entities(fragment: str) -> str:
             )
         return "".join(f"&#x{ord(character):X};" for character in value)
 
-    return _NAMED_ENTITY.sub(replace, fragment)
+    return _transform_outside_xml_literals(
+        fragment,
+        lambda value: _NAMED_ENTITY.sub(replace, value),
+    )
+
+
+def _contains_forbidden_declaration(fragment: str) -> bool:
+    found = False
+
+    def inspect(value: str) -> str:
+        nonlocal found
+        if _FORBIDDEN_DECLARATION.search(value):
+            found = True
+        return value
+
+    _transform_outside_xml_literals(fragment, inspect)
+    return found
+
+
+def _transform_outside_xml_literals(
+    fragment: str,
+    transform: Callable[[str], str],
+) -> str:
+    parts: list[str] = []
+    start = 0
+    for match in _XML_LITERAL_SECTION.finditer(fragment):
+        parts.append(transform(fragment[start : match.start()]))
+        parts.append(match.group(0))
+        start = match.end()
+    parts.append(transform(fragment[start:]))
+    return "".join(parts)
 
 
 def _local_name(tag: object) -> str:
@@ -393,6 +429,13 @@ def _has_span(cell: ET.Element) -> bool:
     return False
 
 
+def _has_nested_table(cell: ET.Element) -> bool:
+    return any(
+        descendant is not cell and _local_name(descendant.tag) == "table"
+        for descendant in cell.iter()
+    )
+
+
 def _escape_markdown_text(value: str) -> str:
     value = value.replace("\\", "\\\\")
     return re.sub(r"([*_])", r"\\\1", value)
@@ -429,7 +472,10 @@ def _single_line(value: str) -> str:
 def _is_safe_link_target(value: str) -> bool:
     if any(character in value for character in "\r\n\x00"):
         return False
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
     return parsed.scheme.lower() in {"", "http", "https", "mailto"}
 
 

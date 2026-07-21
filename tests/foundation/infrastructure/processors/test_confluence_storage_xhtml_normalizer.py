@@ -54,17 +54,30 @@ def test_renders_simple_rectangular_table_as_markdown() -> None:
 
 
 @pytest.mark.parametrize(
-    "storage",
+    ("storage", "expected_text"),
     [
-        "<table><tr><td rowspan='2'>A</td><td>B</td></tr><tr><td>C</td></tr></table>",
-        "<table><tr><td>A</td></tr><tr><td>B</td><td>C</td></tr></table>",
+        (
+            "<table><tr><td rowspan='2'>A</td><td>B</td></tr><tr><td>C</td></tr></table>",
+            "B",
+        ),
+        (
+            "<table><tr><td>A</td></tr><tr><td>B</td><td>C</td></tr></table>",
+            "B",
+        ),
+        (
+            "<table><tr><td>A<table><tr><td>nested</td></tr></table></td></tr></table>",
+            "nested",
+        ),
     ],
 )
-def test_complex_table_falls_back_without_dropping_cell_text(storage: str) -> None:
+def test_complex_table_falls_back_without_dropping_cell_text(
+    storage: str,
+    expected_text: str,
+) -> None:
     result = _normalize(storage)
     assert result.normalized_body_text.startswith("[table]")
     assert "A" in result.normalized_body_text
-    assert "B" in result.normalized_body_text
+    assert expected_text in result.normalized_body_text
     assert result.counters["complex_tables"] == 1
     assert result.warnings == (
         {"code": "complex_table_fallback", "name": "table", "ordinal": 1},
@@ -79,6 +92,12 @@ def test_renders_links_and_omits_unsafe_link_target() -> None:
     assert unsafe.warnings == (
         {"code": "link_target_omitted", "name": "a", "ordinal": 1},
     )
+
+
+def test_malformed_link_target_is_omitted_instead_of_escaping_taxonomy() -> None:
+    result = _normalize('<p><a href="http://[">label</a></p>')
+    assert result.normalized_body_text == "label"
+    assert result.warnings[0]["code"] == "link_target_omitted"
 
 
 def test_inline_and_block_code_choose_safe_backtick_fences() -> None:
@@ -99,6 +118,22 @@ def test_code_macro_preserves_code_language_title_and_safe_fence() -> None:
         '**Example**\n\n````python\nprint("```")\n````'
     )
     assert result.counters["handled_macros"] == {"code": 1}
+
+
+def test_code_cdata_preserves_literal_declaration_and_entity_text() -> None:
+    result = _normalize(
+        '<ac:structured-macro ac:name="code">'
+        "<ac:plain-text-body><![CDATA[<!DOCTYPE html> &unknown;]]>"
+        "</ac:plain-text-body></ac:structured-macro>"
+    )
+    assert result.normalized_body_text == (
+        "```\n<!DOCTYPE html> &unknown;\n```"
+    )
+
+
+def test_declaration_text_inside_xml_comment_is_not_treated_as_active() -> None:
+    result = _normalize("<!-- <!ENTITY harmless 'literal'> --><p>body</p>")
+    assert result.normalized_body_text == "body"
 
 
 def test_unsafe_code_language_is_omitted_with_sanitized_warning() -> None:
@@ -128,8 +163,7 @@ def test_expand_excerpt_and_admonition_preserve_bodies() -> None:
     )
     assert "**More**\n\nexpanded" in result.normalized_body_text
     assert "excerpted" in result.normalized_body_text
-    assert "> **Note:**" in result.normalized_body_text
-    assert "> careful" in result.normalized_body_text
+    assert "> **Note:**\n> careful" in result.normalized_body_text
 
 
 @pytest.mark.parametrize("name", ["include", "excerpt-include"])
