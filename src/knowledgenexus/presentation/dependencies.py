@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from knowledgenexus.chat.application.use_cases.rag_chat import RagChatUseCase
 from knowledgenexus.retrieval.application.use_cases.delete_document import DeleteDocumentUseCase
 from knowledgenexus.retrieval.application.use_cases.list_documents import ListDocumentsUseCase
 from knowledgenexus.retrieval.application.use_cases.retrieve_chunks import RetrieveChunksUseCase
@@ -57,3 +58,22 @@ def build_delete_document_use_case() -> DeleteDocumentUseCase:
     )
 
 
+def build_rag_chat_use_case() -> RagChatUseCase:
+    from knowledgenexus.chat.infrastructure.llm import AgentBuilderAdapter
+    from knowledgenexus.chat.infrastructure.retrieval_adapter import RetrievalAdapter
+    from knowledgenexus.shared.di import get_container
+
+    container = get_container()
+    settings = container.settings
+
+    retrieve_use_case = get_retrieve_chunks_use_case()
+    retrieval_port = RetrievalAdapter(retrieve_use_case)
+
+    llm = AgentBuilderAdapter(
+        base_url=settings.agent_builder_api_url,
+        api_key=settings.agent_builder_api_key,
+        agent_id=settings.agent_builder_agent_id,
+        timeout=settings.agent_builder_timeout,
+    )
+
+    return RagChatUseCase(retrieval_port=retrieval_port, llm=llm)
