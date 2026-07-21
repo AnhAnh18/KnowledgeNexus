@@ -955,8 +955,10 @@ Review artifact:
 
 ## M6C - One-Page Confluence Normalization
 
-- Status: implemented; pending detached review and pending local real-artifact
-  acceptance. `M6C_BASE_COMMIT`: `97a6747`.
+- Status: implemented. Detached review round 1 requested changes; the accepted
+  P1/P2 fixes and P3 regression test are implemented in `[M6C-E]` and pending
+  focused detached re-review. Local real-artifact acceptance remains pending.
+  `M6C_BASE_COMMIT`: `97a6747`.
 - Reads exactly one deterministic M6A page through `RawPageReadPort`; performs
   no network request and does not refetch the page.
 - Validates UTF-8 JSON, object shape, numeric page identity, page type, trusted
@@ -972,14 +974,18 @@ Review artifact:
   warning, and counter policies. Complex tables preserve cell text through a
   deterministic fallback and warning. Unsupported elements preserve descendant
   text where safe.
+- Review fixes retain observed media filenames, diagram names, and included-page
+  title/ID values in the contract-mandated placeholders; preserve unknown
+  `plain-text-body` content; and keep fenced code multiline inside lists and
+  complex-table fallback output.
 - Builds the schema-shaped record with the existing
   `CanonicalDocumentRecordBuilder`, `DocumentIdGenerator`, `AclIdGenerator`, and
   `ContentHasher`. `crawled_at` is an explicit caller value; no wall clock or
   file mtime is read.
 - The offline CLI validates the record with `FoundationSchemaValidator`, emits
   counts and fixed status fields only, and persists no normalized output.
-- Focused M6C plus architecture verification: 93 passed. Broad Foundation,
-  Shared, and architecture verification: 898 passed.
+- Focused M6C plus architecture verification: 101 passed. Broad Foundation,
+  Shared, and architecture verification: 906 passed.
 - M6C does not emit ChunkRecord, ACLRecord, MediaAsset, or RelationRecord and
   does not implement export, attachment-body processing, or M6D.
 

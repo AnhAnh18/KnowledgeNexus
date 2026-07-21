@@ -123,10 +123,22 @@ class _Renderer:
             return self._render_macro(element)
         if name == "image" or name == "img":
             self.media_placeholders += 1
-            return "[media]"
+            attachment = _descendant(element, "attachment")
+            identity = (
+                _attribute(attachment, "filename")
+                if attachment is not None
+                else _attribute(element, "alt")
+            )
+            return f"[media: {_placeholder_value(identity)}]"
         if name == "link" and _has_descendant(element, "attachment"):
             self.media_placeholders += 1
-            return "[attachment]"
+            attachment = _descendant(element, "attachment")
+            identity = (
+                _attribute(attachment, "filename")
+                if attachment is not None
+                else None
+            )
+            return f"[media: {_placeholder_value(identity)}]"
 
         if name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             level = int(name[1])
@@ -200,10 +212,18 @@ class _Renderer:
                 if item_child.tail:
                     direct_parts.append(_escape_markdown_text(item_child.tail))
 
-            body = _single_line("".join(direct_parts))
+            body = _normalize_final_text("".join(direct_parts))
+            body_lines = body.split("\n") if body else [""]
             prefix = f"{item_number}. " if ordered else "- "
             indentation = "  " * depth
-            lines.append(f"{indentation}{prefix}{body}".rstrip())
+            lines.append(f"{indentation}{prefix}{body_lines[0]}".rstrip())
+            continuation = indentation + " " * len(prefix)
+            for body_line in body_lines[1:]:
+                lines.append(
+                    f"{continuation}{body_line}".rstrip()
+                    if body_line
+                    else ""
+                )
             for nested_list in nested:
                 nested_rendered = self._render_list(
                     nested_list,
@@ -218,6 +238,7 @@ class _Renderer:
     def _render_table(self, element: ET.Element) -> str:
         rows = _table_rows(element)
         rendered_rows: list[list[str]] = []
+        raw_rows: list[list[str]] = []
         complex_shape = not rows
         expected_width: int | None = None
 
@@ -226,22 +247,33 @@ class _Renderer:
             if not cells:
                 complex_shape = True
                 continue
-            if any(_has_span(cell) or _has_nested_table(cell) for cell in cells):
-                complex_shape = True
-            values = [
-                _single_line(self.render_children(cell)).replace("|", "\\|")
+            if any(
+                _has_span(cell)
+                or _has_nested_table(cell)
+                or _has_block_code(cell)
                 for cell in cells
+            ):
+                complex_shape = True
+            raw_values = [
+                _normalize_final_text(self.render_children(cell)) for cell in cells
             ]
+            values = [_single_line(value).replace("|", "\\|") for value in raw_values]
             if expected_width is None:
                 expected_width = len(values)
             elif len(values) != expected_width:
                 complex_shape = True
             rendered_rows.append(values)
+            raw_rows.append(raw_values)
 
         if complex_shape or expected_width is None:
             self.complex_tables += 1
             self.warn("complex_table_fallback", "table")
-            meaningful = [" | ".join(row) for row in rendered_rows if any(row)]
+            meaningful: list[str] = []
+            for raw_row in raw_rows:
+                if any("\n" in cell for cell in raw_row):
+                    meaningful.extend(cell for cell in raw_row if cell)
+                elif any(raw_row):
+                    meaningful.append(" | ".join(raw_row))
             if not meaningful:
                 fallback = _single_line(self.render_children(element))
                 meaningful = [fallback] if fallback else []
@@ -285,12 +317,30 @@ class _Renderer:
 
         if name in {"include", "excerpt-include"}:
             self.handled_macros[name] += 1
-            return "[included-page]"
+            page = _descendant(element, "page")
+            identity = None
+            if page is not None:
+                identity = _attribute(page, "content-title") or _attribute(
+                    page,
+                    "content-id",
+                )
+            if not identity:
+                identity = parameters.get("page") or parameters.get("title")
+            return f"[included from page: {_placeholder_value(identity)}]"
 
         if name in _DRAWIO_MACROS:
             self.handled_macros[name] += 1
             self.media_placeholders += 1
-            return "[diagram]"
+            identity = (
+                parameters.get("diagramname")
+                or parameters.get("name")
+                or parameters.get("diagram")
+            )
+            if not identity:
+                attachment = _descendant(element, "attachment")
+                if attachment is not None:
+                    identity = _attribute(attachment, "filename")
+            return f"[diagram: {_placeholder_value(identity)}]"
 
         if name == "jira":
             self.handled_macros[name] += 1
@@ -316,10 +366,16 @@ class _Renderer:
 
         self.unhandled_macros[name] += 1
         self.warn("unhandled_macro", name)
-        if rich_body is not None:
-            body = self.render_children(rich_body).strip()
-            if body:
-                return f"\n\n[macro:{name}]\n\n{body}\n\n"
+        body_parts: list[str] = []
+        for child in element:
+            child_name = _local_name(child.tag)
+            if child_name == "rich-text-body":
+                body_parts.append(self.render_children(child))
+            elif child_name == "plain-text-body":
+                body_parts.append(_escape_markdown_text(_plain_text(child)))
+        body = _normalize_final_text("\n\n".join(body_parts))
+        if body:
+            return f"\n\n[macro:{name}]\n\n{body}\n\n"
         return f"[macro:{name} omitted]"
 
 
@@ -390,6 +446,17 @@ def _child(element: ET.Element, name: str) -> ET.Element | None:
     return next((child for child in element if _local_name(child.tag) == name), None)
 
 
+def _descendant(element: ET.Element, name: str) -> ET.Element | None:
+    return next(
+        (
+            child
+            for child in element.iter()
+            if child is not element and _local_name(child.tag) == name
+        ),
+        None,
+    )
+
+
 def _has_descendant(element: ET.Element, name: str) -> bool:
     return any(_local_name(child.tag) == name for child in element.iter())
 
@@ -433,6 +500,32 @@ def _has_nested_table(cell: ET.Element) -> bool:
     return any(
         descendant is not cell and _local_name(descendant.tag) == "table"
         for descendant in cell.iter()
+    )
+
+
+def _has_block_code(cell: ET.Element) -> bool:
+    for descendant in cell.iter():
+        name = _local_name(descendant.tag)
+        if name == "pre":
+            return True
+        if name in {"structured-macro", "macro"}:
+            macro_name = _sanitize_name(_attribute(descendant, "name") or "unknown")
+            if macro_name == "code":
+                return True
+    return False
+
+
+def _placeholder_value(value: str | None) -> str:
+    if not value:
+        return "unknown"
+    normalized = unicodedata.normalize("NFC", value)
+    normalized = _single_line(normalized)
+    if not normalized:
+        return "unknown"
+    return (
+        normalized.replace("\\", "\\\\")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
     )
 
 

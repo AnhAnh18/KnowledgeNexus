@@ -7,12 +7,33 @@
   - `566394a` `[M6C-A]` trusted raw-page extraction boundary and tests;
   - `3b2c7da` `[M6C-B]` deterministic XHTML/macro processor and tests;
   - `84afd0c` `[M6C-C]` canonical-document use case, offline CLI, and tests;
-  - `[M6C-D]` production-store integration proof and this state registration.
-- Production review head: the `[M6C-D]` commit containing this summary.
+  - `9b795a2` `[M6C-D]` production-store integration proof and state registration;
+  - `[M6C-E]` accepted detached-review fixes and regression tests.
+- Production review head: the `[M6C-E]` commit containing this updated summary.
 - Detached reviewer: Claude, Extra High.
-- Detached review: pending.
+- Detached review round 1: changes required. All accepted findings are fixed;
+  focused detached re-review is pending.
 - Local real-artifact acceptance: pending until detached review passes.
 - No network request was performed. M6D was not started.
+
+## Detached review round 1
+
+Verdict: **Changes required**. No P0 finding. Codex accepted and implemented:
+
+- **P1 contract placeholder identity:** media filenames, drawio diagram names,
+  and included-page titles/IDs are now retained in the exact §10.1 placeholder
+  families. These source values belong in normalized content, while warnings,
+  errors, and CLI output remain identity-free.
+- **P2 unknown plain body:** an unhandled macro now retains both rich and
+  plain-text bodies in source order instead of treating a plain body as absent.
+- **P2 nested code structure:** list continuation lines are indented without
+  whitespace flattening; table cells containing `pre` or code macros use the
+  complex-table fallback and retain fences, lines, and code indentation.
+- **P3 namespace test:** an explicit unbound-prefix regression test confirms the
+  existing fail-closed parser behavior.
+
+Additional adversarial tests cover Markdown-safe placeholder values and all
+three observed identity shapes. Focused re-review is pending.
 
 ## Implemented boundary
 
@@ -46,14 +67,14 @@ Handled macro policy:
 - code: optional safe language/title and a fence longer than embedded backtick
   runs;
 - expand/excerpt: body text retained; expand title is bold;
-- include/excerpt-include: `[included-page]` without a fetch;
-- drawio variants: `[diagram]`;
+- include/excerpt-include: `[included from page: {title-or-id}]` without a fetch;
+- drawio variants: `[diagram: {name}]`;
 - jira: a syntactically valid observed issue key only, otherwise a generic
   placeholder;
 - toc: dropped and counted;
 - info/note/warning/tip/panel: stable blockquote prefix and body;
-- Confluence images and attachment links: generic media placeholders;
-- unknown rich macro: `[macro:name]` plus retained body;
+- Confluence images and attachment links: `[media: {filename}]`;
+- unknown rich or plain-text macro: `[macro:name]` plus retained body;
 - unknown bodyless macro: `[macro:name omitted]`.
 
 No MediaAsset or RelationRecord is created.
@@ -91,10 +112,10 @@ python -m pytest \
   tests/foundation/cli/test_normalize_confluence_page_cli.py \
   tests/foundation/integration/test_normalize_confluence_page_e2e.py \
   tests/architecture -q
--> 93 passed in 2.26s
+-> 101 passed in 3.18s
 
 python -m pytest tests/foundation tests/shared tests/architecture -q
--> 898 passed in 20.57s
+-> 906 passed in 19.37s
 
 git diff --check
 -> exit 0
@@ -124,8 +145,8 @@ hash in review documentation.
 
 - M6C is not a complete HTML or complex-table engine; M8 owns production-depth
   rendering and table semantics.
-- Media and included-page references remain generic placeholders; no resolution
-  or attachment-body access occurs.
+- Media, diagram, and included-page placeholders retain their observed textual
+  identity but perform no resolution, fetch, or attachment-body access.
 - Unknown safe elements/macros use deterministic fallbacks and warnings rather
   than a plugin registry.
 - M6C does not use M6B restrictions to materialize ACL semantics. M6F owns that

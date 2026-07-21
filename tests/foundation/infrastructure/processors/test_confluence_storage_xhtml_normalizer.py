@@ -167,19 +167,43 @@ def test_expand_excerpt_and_admonition_preserve_bodies() -> None:
 
 
 @pytest.mark.parametrize("name", ["include", "excerpt-include"])
-def test_include_macros_use_identity_free_placeholder(name: str) -> None:
+def test_include_macros_use_unknown_placeholder_when_identity_absent(name: str) -> None:
     result = _normalize(
         f'<ac:structured-macro ac:name="{name}"><ac:parameter ac:name="">SECRET</ac:parameter>'
         "</ac:structured-macro>"
     )
-    assert result.normalized_body_text == "[included-page]"
+    assert result.normalized_body_text == "[included from page: unknown]"
+
+
+def test_include_macro_preserves_observed_page_title_or_id() -> None:
+    titled = _normalize(
+        '<ac:structured-macro ac:name="include">'
+        '<ri:page ri:content-title="Target Page" ri:content-id="2000"/>'
+        "</ac:structured-macro>"
+    )
+    identified = _normalize(
+        '<ac:structured-macro ac:name="excerpt-include">'
+        '<ri:page ri:content-id="2000"/>'
+        "</ac:structured-macro>"
+    )
+    assert titled.normalized_body_text == "[included from page: Target Page]"
+    assert identified.normalized_body_text == "[included from page: 2000]"
 
 
 @pytest.mark.parametrize("name", ["drawio", "drawio-sketch", "drawio-board"])
 def test_drawio_macros_emit_media_placeholder(name: str) -> None:
     result = _normalize(f'<ac:structured-macro ac:name="{name}"/>')
-    assert result.normalized_body_text == "[diagram]"
+    assert result.normalized_body_text == "[diagram: unknown]"
     assert result.counters["media_placeholders"] == 1
+
+
+def test_drawio_macro_preserves_observed_diagram_name() -> None:
+    result = _normalize(
+        '<ac:structured-macro ac:name="drawio">'
+        '<ac:parameter ac:name="diagramName">flow-v2</ac:parameter>'
+        "</ac:structured-macro>"
+    )
+    assert result.normalized_body_text == "[diagram: flow-v2]"
 
 
 def test_jira_macro_emits_only_valid_issue_key() -> None:
@@ -209,9 +233,18 @@ def test_confluence_image_and_attachment_link_use_generic_placeholders() -> None
         '<ac:image><ri:attachment ri:filename="SECRET.png"/></ac:image>'
         '<ac:link><ri:attachment ri:filename="OTHER.pdf"/></ac:link>'
     )
-    assert result.normalized_body_text == "[media][attachment]"
+    assert result.normalized_body_text == (
+        "[media: SECRET.png][media: OTHER.pdf]"
+    )
     assert result.counters["media_placeholders"] == 2
     assert "SECRET" not in str(result.warnings)
+
+
+def test_placeholder_identity_is_markdown_safe_without_losing_text() -> None:
+    result = _normalize(
+        '<ac:image><ri:attachment ri:filename="arch[final].png"/></ac:image>'
+    )
+    assert result.normalized_body_text == "[media: arch\\[final\\].png]"
 
 
 def test_unknown_macro_preserves_rich_body_and_warns_in_source_order() -> None:
@@ -229,6 +262,18 @@ def test_unknown_macro_preserves_rich_body_and_warns_in_source_order() -> None:
         {"code": "unhandled_macro", "name": "widget", "ordinal": 1},
         {"code": "unhandled_macro", "name": "empty", "ordinal": 2},
     )
+
+
+def test_unknown_macro_preserves_plain_text_body_lines() -> None:
+    result = _normalize(
+        '<ac:structured-macro ac:name="noformat">'
+        "<ac:plain-text-body>raw log line 1\nraw log line 2</ac:plain-text-body>"
+        "</ac:structured-macro>"
+    )
+    assert result.normalized_body_text == (
+        "[macro:noformat]\n\nraw log line 1\nraw log line 2"
+    )
+    assert result.counters["unhandled_macros"] == {"noformat": 1}
 
 
 def test_unsafe_unknown_macro_name_is_not_disclosed() -> None:
@@ -286,6 +331,40 @@ def test_malformed_xhtml_fails_closed_without_raw_content(storage: str) -> None:
     with pytest.raises(ConfluenceStorageNormalizationError) as caught:
         _normalize(storage)
     assert storage not in str(caught.value)
+
+
+def test_unbound_namespace_prefix_fails_closed() -> None:
+    with pytest.raises(ConfluenceStorageNormalizationError, match="malformed"):
+        _normalize("<at:var>value</at:var>")
+
+
+def test_preformatted_code_inside_list_keeps_fence_and_line_structure() -> None:
+    result = _normalize("<ul><li>intro<pre>line1\nline2\nline3</pre></li></ul>")
+    assert result.normalized_body_text == (
+        "- intro\n\n  ```\n  line1\n  line2\n  line3\n  ```"
+    )
+    assert "line1 line2" not in result.normalized_body_text
+
+
+def test_code_macro_inside_list_keeps_indentation() -> None:
+    result = _normalize(
+        '<ul><li>code<ac:structured-macro ac:name="code">'
+        '<ac:plain-text-body>def f():\n    return 1</ac:plain-text-body>'
+        "</ac:structured-macro></li></ul>"
+    )
+    assert "  def f():\n      return 1" in result.normalized_body_text
+    assert "def f(): return 1" not in result.normalized_body_text
+
+
+def test_code_inside_table_uses_complex_fallback_without_flattening() -> None:
+    result = _normalize(
+        "<table><tr><th>Code</th></tr><tr><td><pre>line1\nline2</pre></td></tr></table>"
+    )
+    assert result.normalized_body_text.startswith("[table]")
+    assert "```\nline1\nline2\n```" in result.normalized_body_text
+    assert "line1 line2" not in result.normalized_body_text
+    assert result.counters["complex_tables"] == 1
+    assert result.warnings[-1]["code"] == "complex_table_fallback"
 
 
 def test_result_repr_does_not_disclose_normalized_body() -> None:
