@@ -6,10 +6,16 @@ from knowledgenexus.foundation.application.use_cases.collect_confluence_page_obs
     PageObservationCollectionError,
     PageObservationCollectionResult,
 )
+from knowledgenexus.foundation.application.use_cases.normalize_confluence_page import (
+    ConfluencePageNormalizationError,
+    NormalizeConfluencePage,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
     "CollectConfluencePageObservations",
     "PageObservationCollectionError",
     "PageObservationCollectionResult",
+    "ConfluencePageNormalizationError",
+    "NormalizeConfluencePage",
 ]
