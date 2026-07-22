@@ -74,8 +74,8 @@ Sync-state clarification:
 | M6C - One-page deterministic normalization | done; local real-artifact PASS | Production code head `2202061`; focused re-review approved; offline real-artifact run passed schema, immutability, no-output, leak, and no-network gates | Contract-mandated placeholder identities and multiline macro/code content are retained; no normalized artifact is persisted. |
 | M6D-A - BGE-M3 contract/profile synchronization | done; independently approved | Approved head `7642e5c`; strict profile and external tokenizer bundle identity verified offline | No tokenizer binary is committed. |
 | M6D-B - Exact offline tokenizer boundary | done; independently approved | Approved head `740ede5`; 978-test reviewed battery | Produces character spans only; no chunking or embedding. |
-| M6D-C - Structural wiki parsing | complete; independently approved | Implementation head `72e4826`; Codex found/fixed mutable collection retention; Claude re-review approved after 93 focused and 1,072 broad tests | Final head is pending the authorized code/test plus documentation commit. |
-| M6D-D - Wiki packing and deterministic `ChunkRecord`s | next after M6D-C head freeze | Requires the approved M6D-C final head | Do not start before the closeout commit is frozen. |
+| M6D-C - Structural wiki parsing | complete; independently approved | Final approved head `9b4fec0`; Codex found/fixed mutable collection retention; Claude re-review approved after 93 focused and 1,072 broad tests | Immutable structural input is frozen for M6D-D. |
+| M6D-D - Wiki packing and deterministic `ChunkRecord`s | complete; independently approved | Reviewed code head `bacc22a`; full offline matrix 1,122 passed with exact pinned BGE-M3 bundle | No unresolved P0-P2; no M6E work started. |
 | M6 (E-G) - Rest of one-page vertical slice | planned after M6D | M6A-M6C gates passed | ACL, relation, and export end to end. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
@@ -84,8 +84,7 @@ Sync-state clarification:
 
 ## 2. Current Task
 
-Current area: M6D-C approved-head closeout for deterministic structural wiki
-parsing.
+Current area: M6D-D approved closeout, followed by M6E relation extraction.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -769,10 +768,10 @@ Status:
   real-artifact acceptance passed without network or output persistence.
 - M6D-A: complete and independently approved at `7642e5c`.
 - M6D-B: complete and independently approved at `740ede5`.
-- M6D-C: complete and independently approved. Implementation head `72e4826`
-  plus the reviewed immutability fix passed 93 focused and 1,072 broad tests;
-  final head is pending the authorized closeout commit.
-- M6D-D: next after the M6D-C approved head is frozen.
+- M6D-C: complete and independently approved at final head `9b4fec0`.
+- M6D-D: complete and independently approved at reviewed code head `bacc22a`;
+  full offline matrix 1,122 passed with the exact pinned BGE-M3 bundle and no
+  unresolved P0-P2 finding.
 - M6E-M6G: planned.
 
 Tasks:

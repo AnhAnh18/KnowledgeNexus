@@ -8,9 +8,10 @@ exact offline tokenizer boundary; both are independently approved at heads
 `7642e5c` and `740ede5`. M6D-C structural parsing was implemented at `72e4826`.
 An independent Codex pass found and fixed one mutable-collection hole in its
 otherwise frozen domain models; Claude independently re-reviewed and approved
-that fix with no remaining P0-P3 finding. M6D-C is complete and approved; its
-final head will be frozen by the pending code/test plus documentation commit.
-M6D-D has not started. No raw production artifact exists in this repository.
+that fix with no remaining P0-P3 finding. M6D-C is complete and approved at
+final head `9b4fec0`. M6D-D is complete and independently approved with no
+remaining P0-P2 finding; its reviewed code head is `bacc22a`. No raw production
+artifact exists in this repository.
 
 ## Done
 
@@ -1026,10 +1027,21 @@ Review artifact:
 - Claude independently re-reviewed the candidate fix, confirmed both patch
   checksums and exact working-tree equivalence, reran 93 focused and 1,072 broad
   offline tests, and approved M6D-C with no remaining P0-P3 finding.
-- M6D-C is complete and approved. Its final head is pending the authorized
-  code/test plus documentation commit. M6D-D has not started.
+- M6D-C is complete and approved at final head `9b4fec0`.
+- M6D-D is complete and independently approved at reviewed code head `bacc22a`.
+  It adds the
+  deterministic config-driven Confluence wiki chunking use case, exact
+  prose/table/code splitting and overlap rules, schema-valid default-deny
+  `ChunkRecord` production, deterministic metrics, and an aggregate-only
+  offline one-page acceptance CLI.
+- Verification uses the exact pinned external BGE-M3 tokenizer bundle with
+  offline environment flags and no asset-backed skips. The focused fake and
+  real-tokenizer coverage is green, and the full Foundation, Shared,
+  Architecture, and Indexing embedding matrix passes: 1,122 tests.
+- M6D-D performs no network request or output publication and contains no M6E
+  relation extraction, ACL resolution, media processing, embedding, or export.
 
 ## Next Planned Task
 
-Freeze the approved M6D-C head with the authorized code/test plus documentation
-commit. Then plan M6D-D packing/splitting from that frozen head.
+Close the approved M6D-D documentation state, then plan M6E relation extraction
+from the frozen M6D-D final head. Do not begin M6F ACL resolution or export.
