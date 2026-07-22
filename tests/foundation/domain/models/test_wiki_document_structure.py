@@ -48,6 +48,92 @@ def test_models_are_frozen_immutable() -> None:
         document.sections[0].blocks[0].text = "mutated"  # type: ignore[misc]
 
 
+def test_ordered_collections_are_defensively_copied_to_tuples() -> None:
+    prose = WikiProseBlock(text="hello", source_ordinal=1)
+    blocks = [prose]
+    heading_path = ["Page"]
+    section = WikiSection(
+        heading_path=heading_path,  # type: ignore[arg-type]
+        heading_level=None,
+        heading_source_line=None,
+        source_ordinal=0,
+        blocks=blocks,  # type: ignore[arg-type]
+    )
+    sections = [section]
+    document = WikiDocumentStructure(
+        page_title="Page",
+        sections=sections,  # type: ignore[arg-type]
+    )
+
+    heading_path.append("mutated")
+    blocks.clear()
+    sections.clear()
+
+    assert section.heading_path == ("Page",)
+    assert section.blocks == (prose,)
+    assert document.sections == (section,)
+    assert hash(document)
+
+
+def test_table_and_code_line_collections_are_defensively_copied() -> None:
+    rows = ["| value |"]
+    body_lines = ["line"]
+    table = WikiTableBlock(
+        raw_text="| h |\n| --- |\n| value |",
+        header_line="| h |",
+        separator_line="| --- |",
+        row_lines=rows,  # type: ignore[arg-type]
+        column_count=1,
+        source_ordinal=1,
+    )
+    code = WikiCodeBlock(
+        raw_text="```\nline\n```",
+        fence_marker="```",
+        info_string="",
+        body_lines=body_lines,  # type: ignore[arg-type]
+        source_ordinal=2,
+    )
+
+    rows.clear()
+    body_lines.clear()
+
+    assert table.row_lines == ("| value |",)
+    assert code.body_lines == ("line",)
+
+
+@pytest.mark.parametrize(
+    "values",
+    ["scalar", b"bytes", {"unordered"}, {"key": "value"}],
+)
+def test_ordered_collections_reject_scalar_or_unordered_inputs(
+    values: object,
+) -> None:
+    with pytest.raises(TypeError):
+        WikiDocumentStructure(
+            page_title="Page",
+            sections=values,  # type: ignore[arg-type]
+        )
+
+
+def test_ordered_collections_reject_wrong_entry_types() -> None:
+    with pytest.raises(TypeError):
+        WikiSection(
+            heading_path=("Page",),
+            heading_level=None,
+            heading_source_line=None,
+            source_ordinal=0,
+            blocks=(object(),),  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError):
+        WikiCodeBlock(
+            raw_text="```\nline\n```",
+            fence_marker="```",
+            info_string="",
+            body_lines=(1,),  # type: ignore[arg-type]
+            source_ordinal=1,
+        )
+
+
 def test_equal_structures_compare_equal_and_hash_equal() -> None:
     assert _document() == _document()
     assert hash(_document()) == hash(_document())

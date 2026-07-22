@@ -2,12 +2,15 @@
 
 ## Current Milestone
 
-M6 - M6C (normalize one preserved Confluence page and build one
-`CanonicalDocument`) is complete and approved. Focused detached re-review
-approved production code head `2202061`, and the offline local real-artifact
-run passed every sanitized integrity gate. M6A-M6C are complete. M6D is the next
-planned task and has not started. No raw production artifact exists in this
-repository.
+M6 - M6D deterministic one-page chunking is in progress. M6A-M6C are complete
+and approved. M6D-A synchronized the BGE-M3 contract/profile and M6D-B added the
+exact offline tokenizer boundary; both are independently approved at heads
+`7642e5c` and `740ede5`. M6D-C structural parsing was implemented at `72e4826`.
+An independent Codex pass found and fixed one mutable-collection hole in its
+otherwise frozen domain models; Claude independently re-reviewed and approved
+that fix with no remaining P0-P3 finding. M6D-C is complete and approved; its
+final head will be frozen by the pending code/test plus documentation commit.
+M6D-D has not started. No raw production artifact exists in this repository.
 
 ## Done
 
@@ -1003,7 +1006,30 @@ Review artifact:
 - `.local_ai/review/m6c-one-page-normalization-implementation-summary.md`
 - `.local_ai/review/m6c-local-real-artifact-summary.md`
 
+## M6D Progress
+
+- M6D-A is complete and independently approved at `7642e5c`: BGE-M3 contract,
+  immutable profile, strict profile loader, external tokenizer-asset identity,
+  and shared text-normalization rules are synchronized.
+- M6D-B is complete and independently approved at `740ede5`: the exact pinned
+  BGE-M3 fast tokenizer is loaded from explicit verified local bytes and exposes
+  sanitized character spans without cache, network, truncation, padding,
+  embedding, or chunking behavior.
+- M6D-C is implemented at `72e4826`: normalized M6C Markdown is parsed into
+  ordered heading sections and prose/table/code blocks without I/O, tokenization,
+  budgeting, overlap, or `ChunkRecord` production.
+- Independent review reproduced one P2 in the public immutability contract:
+  caller-owned lists were retained by frozen dataclasses and remained mutable.
+  The candidate fix defensively copies ordered sequences to tuples and rejects
+  scalar/unordered/wrong-entry inputs. Verification after the fix: 93 focused
+  tests and 1,072 Foundation/Shared/Architecture/Indexing tests passed offline.
+- Claude independently re-reviewed the candidate fix, confirmed both patch
+  checksums and exact working-tree equivalence, reran 93 focused and 1,072 broad
+  offline tests, and approved M6D-C with no remaining P0-P3 finding.
+- M6D-C is complete and approved. Its final head is pending the authorized
+  code/test plus documentation commit. M6D-D has not started.
+
 ## Next Planned Task
 
-Plan M6D: deterministically chunk the one normalized page and build
-schema-valid `ChunkRecord`s. M6D implementation has not started.
+Freeze the approved M6D-C head with the authorized code/test plus documentation
+commit. Then plan M6D-D packing/splitting from that frozen head.

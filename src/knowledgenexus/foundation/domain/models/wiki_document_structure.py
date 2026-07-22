@@ -1,12 +1,29 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TypeVar
 
 # These are internal Foundation domain models, not export records. They carry
 # page content, so ``repr`` is disabled to keep prose, code, and table text out
 # of tracebacks and logs (sanitization requirement). Equality and hashing stay
 # enabled by the frozen dataclass so the same input yields an exactly equal,
 # immutable structure.
+
+_T = TypeVar("_T")
+
+
+def _copy_ordered_tuple(
+    field_name: str,
+    values: object,
+    entry_type: type[_T] | tuple[type, ...],
+) -> tuple[_T, ...]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise TypeError(f"{field_name} expects an ordered collection")
+    copied = tuple(values)
+    if not all(isinstance(value, entry_type) for value in copied):
+        raise TypeError(f"{field_name} contains an invalid entry")
+    return copied
 
 
 @dataclass(frozen=True, repr=False)
@@ -28,6 +45,13 @@ class WikiTableBlock:
     column_count: int
     source_ordinal: int
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "row_lines",
+            _copy_ordered_tuple("WikiTableBlock.row_lines", self.row_lines, str),
+        )
+
 
 @dataclass(frozen=True, repr=False)
 class WikiCodeBlock:
@@ -38,6 +62,13 @@ class WikiCodeBlock:
     info_string: str
     body_lines: tuple[str, ...]
     source_ordinal: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "body_lines",
+            _copy_ordered_tuple("WikiCodeBlock.body_lines", self.body_lines, str),
+        )
 
 
 WikiBlock = WikiProseBlock | WikiTableBlock | WikiCodeBlock
@@ -58,6 +89,22 @@ class WikiSection:
     source_ordinal: int
     blocks: tuple[WikiBlock, ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "heading_path",
+            _copy_ordered_tuple("WikiSection.heading_path", self.heading_path, str),
+        )
+        object.__setattr__(
+            self,
+            "blocks",
+            _copy_ordered_tuple(
+                "WikiSection.blocks",
+                self.blocks,
+                (WikiProseBlock, WikiTableBlock, WikiCodeBlock),
+            ),
+        )
+
 
 @dataclass(frozen=True, repr=False)
 class WikiDocumentStructure:
@@ -65,3 +112,14 @@ class WikiDocumentStructure:
 
     page_title: str
     sections: tuple[WikiSection, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "sections",
+            _copy_ordered_tuple(
+                "WikiDocumentStructure.sections",
+                self.sections,
+                WikiSection,
+            ),
+        )
