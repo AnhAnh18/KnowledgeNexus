@@ -26,6 +26,11 @@ from knowledgenexus.foundation.domain.models.chunking_profile import (
     ChunkingProfile,
     TokenizerAsset,
 )
+from knowledgenexus.foundation.domain.models.confluence_chunking import (
+    ChunkingResult,
+    ConfluenceChunkingError,
+    ConfluenceChunkingFailureCategory,
+)
 from knowledgenexus.foundation.domain.models.tokenization import (
     CharacterSpan,
     TokenizationResult,
@@ -54,6 +59,9 @@ __all__ = [
     "ConfluenceStorageNormalization",
     "ChunkingProfile",
     "TokenizerAsset",
+    "ChunkingResult",
+    "ConfluenceChunkingError",
+    "ConfluenceChunkingFailureCategory",
     "CharacterSpan",
     "TokenizationResult",
     "WikiBlock",
