@@ -30,6 +30,14 @@ from knowledgenexus.foundation.domain.models.tokenization import (
     CharacterSpan,
     TokenizationResult,
 )
+from knowledgenexus.foundation.domain.models.wiki_document_structure import (
+    WikiBlock,
+    WikiCodeBlock,
+    WikiDocumentStructure,
+    WikiProseBlock,
+    WikiSection,
+    WikiTableBlock,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -48,4 +56,10 @@ __all__ = [
     "TokenizerAsset",
     "CharacterSpan",
     "TokenizationResult",
+    "WikiBlock",
+    "WikiCodeBlock",
+    "WikiDocumentStructure",
+    "WikiProseBlock",
+    "WikiSection",
+    "WikiTableBlock",
 ]
