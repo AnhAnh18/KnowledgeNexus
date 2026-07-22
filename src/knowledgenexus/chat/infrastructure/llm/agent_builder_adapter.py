@@ -48,7 +48,7 @@ class AgentBuilderAdapter(LLMPort):
                 f"Malformed Agent Builder response: {e}"
             ) from e
 
-        if not text:
+        if not text or not text.strip():
             raise LLMProviderError("Empty response from Agent Builder")
 
         model = f"agent-builder:{self._agent_id[:8]}"

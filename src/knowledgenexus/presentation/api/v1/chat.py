@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from knowledgenexus.chat.application.use_cases.rag_chat import RagChatUseCase
+from knowledgenexus.chat.infrastructure.llm.agent_builder_adapter import LLMProviderError
 from knowledgenexus.chat.domain.models.chat_request import ChatRequest
 from knowledgenexus.presentation.api.v1.schemas.chat_schema import (
     ChatAnswerSchema,
@@ -16,7 +17,13 @@ router = APIRouter(prefix="/api/v1", tags=["chat"])
 
 def get_chat_use_case() -> RagChatUseCase:
     from knowledgenexus.presentation.dependencies import build_rag_chat_use_case
-    return build_rag_chat_use_case()
+    try:
+        return build_rag_chat_use_case()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Chat service unavailable: {e}",
+        )
 
 
 @router.post("/chat", response_model=ChatResponseSchema)
@@ -69,3 +76,5 @@ async def chat(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error: {e}")

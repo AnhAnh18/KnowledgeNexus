@@ -5,6 +5,12 @@ from knowledgenexus.retrieval.domain.models.retrieve_result import RetrievedChun
 # Maximum question length to prevent abuse
 _MAX_QUESTION_LEN = 2000
 
+# Maximum total context size (chars) to stay within LLM token limits
+_MAX_CONTEXT_LEN = 8000
+
+# Maximum characters per chunk to include in prompt
+_MAX_CHUNK_LEN = 2000
+
 
 def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
     # Sanitize: truncate excessively long questions
@@ -14,10 +20,18 @@ def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
         return f"Question: {question}\n\nNo relevant context found. Answer based on your general knowledge."
 
     context_parts = []
+    total_len = 0
     for i, chunk in enumerate(chunks, 1):
         title = chunk.citation.title
         source = f"{chunk.citation.source_type} | {chunk.citation.source_id}"
-        context_parts.append(f"[{i}] {title} ({source})\n{chunk.content}")
+        # Truncate individual chunk content
+        content = chunk.content[:_MAX_CHUNK_LEN]
+        part = f"[{i}] {title} ({source})\n{content}"
+        # Stop if adding this chunk would exceed context limit
+        if total_len + len(part) > _MAX_CONTEXT_LEN:
+            break
+        context_parts.append(part)
+        total_len += len(part)
 
     context = "\n\n".join(context_parts)
 

@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     agent_builder_api_url: str = "https://agent.sec.samsung.net"
     agent_builder_api_key: str = ""
     agent_builder_agent_id: str = ""
-    agent_builder_timeout: int = 60
+    agent_builder_timeout: int = 120
 
     @property
     def project_root(self) -> Path:
