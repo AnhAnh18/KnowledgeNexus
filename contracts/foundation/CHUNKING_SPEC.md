@@ -63,7 +63,11 @@ US = "\x1f"   # ASCII unit separator, never appears in the inputs
 chunk_id = "chunk:" + source_system + ":" + sha256(document_stable_key + US + unit_key + US + normalized_text)[:16]
 ```
 
-If two chunks in one export produce a byte-identical hash (genuinely duplicated content), append `-1`, `-2`, … in stable document order to disambiguate.
+If two chunks in one export produce the same base ID from a byte-identical full
+preimage (genuinely duplicated content), append `-1`, `-2`, … in stable
+document order to disambiguate. The same base ID from different full preimages
+is a hash collision and MUST fail closed; an output index must never conceal
+it.
 
 **`document_stable_key`** (identity of the source document, deliberately excluding volatile provenance):
 
@@ -88,6 +92,11 @@ Branch and commit hash are **not** part of `document_stable_key` or `chunk_id`; 
 | `code_window` | `file_path` + `#w{n}` |
 
 Consequence to keep in mind: editing one section or symbol changes only that unit's `normalized_text` (and possibly its window split), so its neighbours keep their IDs. Editing tokens *above* a `code_window` shifts window boundaries and will re-chunk the tail of that file — this is the accepted limitation for symbol-less files (§5.4).
+
+Split wiki `code_block` parts deliberately share the same
+`breadcrumb#code{ordinal}` unit key. Their exact normalized text distinguishes
+their ID preimages; identical repeated parts use the duplicate suffix rule
+above.
 
 ---
 
@@ -116,7 +125,7 @@ The breadcrumb is part of the normalized text: it is counted in `token_count` an
 ### 4.3 Packing and Merging
 
 - If a section body is `≤ hard_maximum_tokens`, it is emitted as a single `prose` chunk (breadcrumb + body).
-- If a section is `< minimum_tokens`, merge it **forward** into the next sibling section under the same parent, concatenating bodies under the deeper/again-stated breadcrumb, until the merged chunk reaches `minimum_tokens` or the parent's sections are exhausted. Never merge across an h1 boundary. Track `sections_merged`.
+- If an explicitly headed, prose-only h2 or h3 section is `< minimum_tokens`, it may merge **forward** only into the immediately following source-adjacent prose-only section with the same heading level and the same immediate structural parent. The parent is derived from the complete source section stream with a level stack keyed by source ordinal; the document root is a valid parent for root-level h2/h3 sections. No section of any level, table, or code block may intervene. Preambles and h1 sections never merge. The first section keeps its breadcrumb and each absorbed section is introduced in the body by the exact ATX heading reconstructed from its heading level and label. Track `sections_merged`.
 - A section that cannot reach `minimum_tokens` and has no valid forward target is emitted as-is (small chunk allowed).
 
 ### 4.4 Oversize Prose Sections
@@ -131,7 +140,7 @@ If a section body exceeds `hard_maximum_tokens`, split it into windows at **para
 
 - A fenced code block (from a Confluence `code` macro or literal fence) that fits within `hard_maximum_tokens` becomes one chunk with `content_kind: code_block`, breadcrumb prefixed, language tag preserved in the body.
 - If it exceeds `hard_maximum_tokens`, split into token-packed complete-line windows (accumulate lines up to `code_window_target_tokens`, never exceeding `hard_maximum_tokens` or `code_window_max_lines`, with `code_window_overlap_lines` overlap), each part `content_kind: code_block`, with `part_index`/`part_total`. The breadcrumb and valid repeated fences count toward every window. A single over-budget line fails closed as `unsplittable_code_line`; it is never divided or truncated.
-- Small code blocks may remain inline inside the surrounding `prose` chunk if they were already part of a section body under `target_tokens`; they are only pulled out when the section is oversize and windowing would otherwise cut them.
+- Code blocks identified by the M6D-C structural parser remain isolated code candidates. M6D-D never reparses or folds them into surrounding prose.
 
 ### 4.6 Tables
 
@@ -224,6 +233,13 @@ The chunking stage contributes the following to `quality_report.md`:
 | `fallback_window_files` | Files chunked by the symbol-less fallback (§5.4). |
 | `empty_sections_skipped` | Heading sections whose normalized body was empty. |
 | `token_count_p50` / `token_count_p95` | Chunk token-count distribution, for tuning against `target_tokens`. |
+
+For `chunker_version` 1.2.0, p50 and p95 use deterministic ascending
+nearest-rank selection with no interpolation. For an empty collection the
+value is `0`; otherwise, for `p_percent` in `{50, 95}` and `n = len(values)`,
+the 1-based rank is `(p_percent * n + 99) // 100` and the reported value is
+`sorted(values)[rank - 1]`. This metrics-only clarification does not change
+chunk boundaries and therefore does not require a chunker-version bump.
 
 ---
 
