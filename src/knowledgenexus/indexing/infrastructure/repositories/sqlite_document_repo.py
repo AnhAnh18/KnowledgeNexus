@@ -28,11 +28,9 @@ class SqliteDocumentRepository(DocumentRepositoryPort):
                 updated_at=model.updated_at,
             )
             stmt = stmt.on_conflict_do_update(
-                index_elements=[DocumentModel.id],
+                index_elements=["source_type", "source_id"],
                 set_={
                     "title": model.title,
-                    "source_type": model.source_type,
-                    "source_id": model.source_id,
                     "url": model.url,
                     "metadata": model.metadata_json,
                     "updated_at": model.updated_at,

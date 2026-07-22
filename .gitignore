@@ -36,3 +36,7 @@ data/exports/
 # Models cache
 *.bin
 *.safetensors
+
+# MCP server (Node.js)
+mcp/node_modules/
+mcp/build/

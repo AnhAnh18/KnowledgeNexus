@@ -125,6 +125,23 @@ directories. The current Confluence work covers inventory metadata only; page
 bodies, rendered HTML, comments, attachments, and permissions remain outside
 the current milestone.
 
+## MCP Server (Cline Integration)
+
+KnowledgeNexus includes an MCP server (`mcp/`) that bridges Cline with the RAG platform, allowing AI assistants to search knowledge and export results.
+
+### Quick Setup
+
+```bash
+# 1. Build the MCP server
+cd mcp
+npm install
+npm run build
+
+# 2. Add to Cline MCP settings (see docs/MCP_SETUP.md for details)
+```
+
+See **[docs/MCP_SETUP.md](docs/MCP_SETUP.md)** for full setup instructions.
+
 ## License
 
 Internal use.
