@@ -2,7 +2,7 @@
 
 This file is local execution guidance, not a normative contract.
 
-Last workspace verification: 2026-07-22.
+Last workspace verification: 2026-07-23.
 
 Precedence:
 1. `contracts/foundation/schemas/`
@@ -77,7 +77,9 @@ Sync-state clarification:
 | M6D-C - Structural wiki parsing | complete; independently approved | Final approved head `9b4fec0`; Codex found/fixed mutable collection retention; Claude re-review approved after 93 focused and 1,072 broad tests | Immutable structural input is frozen for M6D-D. |
 | M6D-D - Wiki packing and deterministic `ChunkRecord`s | complete; independently approved | Reviewed code head `bacc22a`; full offline matrix 1,122 passed with exact pinned BGE-M3 bundle | No unresolved P0-P2; no M6E work started. |
 | M6E - Regex-only Jira relations and linkage | complete; independently approved | Production review head `68a4b08`; 67 focused and 1,190 full offline tests passed with the exact pinned BGE-M3 bundle | No Jira API/PAT/network, ACL resolution, media/page-link relations, or export. |
-| M6 (F-G) - Rest of one-page vertical slice | planned after M6E | M6A-M6E gates passed | Deny-safe ACL materialization, then one-page export through M3. |
+| M6F-A - ACL materialization contract and input validators | complete on `main` | Head `0df1818`; A1 locks the contract, A2 adds principal projection, A3 validates M6E ACL-stage provenance, A4 validates M6B restriction observations | Boundary stage only: no effective ACL intersection, no `ACLRecord`, no chunk ACL mutation, no network, no M6G. |
+| M6F-B - Deny-safe ACL materialization | planning | M6E final result plus M6F-A validated boundaries are available | Compute effective ACL, build `ACLRecord`, and propagate chunk `acl_tags`; do not start M6F-C or M6G. |
+| M6G - One-page export through M3 | planned after M6F | M6A-M6F gates required | Final one-page snapshot export after deny-safe ACL is complete. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -85,8 +87,8 @@ Sync-state clarification:
 
 ## 2. Current Task
 
-Current area: M6E complete and approved; M6F deny-safe ACL materialization is
-next.
+Current area: M6F-A is complete on `main` through `0df1818`; M6F-B deny-safe
+ACL materialization is being planned next.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -777,7 +779,11 @@ Status:
 - M6E: complete and independently approved at production review head `68a4b08`;
   detached review reproduced 67 focused and 1,190 full offline tests with no
   P0-P2 finding.
-- M6F-M6G: planned.
+- M6F-A: complete on `main` through `0df1818`; contract, principal projection,
+  M6E provenance validation, and M6B restriction-observation validation are in
+  place for the next stage.
+- M6F-B: planning next.
+- M6G: planned after M6F.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).
@@ -786,7 +792,9 @@ Tasks:
 - M6C normalize one page and produce `CanonicalDocument`.
 - M6D chunk one normalized page and produce `ChunkRecord`s.
 - M6E extract one relation path and produce `RelationRecord`s.
-- M6F materialize deny-safe ACL and propagate ACL tags to chunks.
+- M6F-A lock ACL materialization boundaries and validators (done).
+- M6F-B materialize deny-safe ACL and propagate ACL tags to chunks.
+- M6F-C capture/acceptance work only after M6F-B scope is complete and approved.
 - M6G export one-page real snapshot through M3.
 
 Completion gate:
@@ -940,9 +948,12 @@ Acceptance categories:
 
 ## 13. Immediate Execution Order
 
-1. M5C run and manually review one small real inventory.
-2. M6 prove the first real page content vertical slice.
-3. M7 add crawl reliability before scaling inventory/content collection.
+1. Review and approve the M6F-B plan against
+   `contracts/foundation/ACL_MATERIALIZATION_SPEC.md`.
+2. Implement M6F-B only: deny-safe effective ACL computation, `ACLRecord`
+   construction, and chunk ACL-tag propagation.
+3. After M6F-B approval, plan the remaining M6F-C capture/acceptance work or
+   M6G export as the contract requires.
 
 ### Completed task - M2C3 RelationRecordBuilder
 

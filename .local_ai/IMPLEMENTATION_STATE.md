@@ -2,15 +2,17 @@
 
 ## Current Milestone
 
-M6 - the deterministic one-page path through Jira relation extraction is
-complete and independently approved. M6A-M6C established the live raw-page,
-observation, and normalization boundaries. M6D-A through M6D-D established the
-exact offline BGE-M3 tokenizer, structural parsing, and schema-valid chunking.
-M6E is approved at production review head `68a4b08`: it extracts allowlisted
-standalone Jira keys from the normalized page body, builds deterministic
-`RelationRecord`s, and links them to the canonical document and all chunks.
-M6F deny-safe ACL materialization is next. No raw production artifact exists in
-this repository.
+M6 - the deterministic one-page path is complete through Jira relation
+extraction and is now in deny-safe ACL materialization. M6A-M6C established the
+live raw-page, observation, and normalization boundaries. M6D-A through M6D-D
+established the exact offline BGE-M3 tokenizer, structural parsing, and
+schema-valid chunking. M6E is approved at production review head `68a4b08`: it
+extracts allowlisted standalone Jira keys from the normalized page body, builds
+deterministic `RelationRecord`s, and links them to the canonical document and
+all chunks. M6F-A1 through M6F-A4 are present on `main` through `0df1818`,
+locking the ACL materialization contract and validating the M6E/M6B input
+boundaries needed by M6F-B. M6F-B planning is the next active step. No raw
+production artifact exists in this repository.
 
 ## Done
 
@@ -1066,8 +1068,28 @@ Review artifact:
 Review artifact:
 - `.local_ai/review/m6e-working-tree-review-summary.md`
 
+## M6F Progress
+
+- M6F-A1 is complete on `main` at `2f2325a`: the deny-safe ACL materialization
+  contract is active for Foundation M6F and splits the work into focused stages.
+  M6F-A locks the trusted M6E result boundary, trusted M6B restriction
+  observation boundary, principal projection rules, M6F-B ACL policy, quality
+  vocabulary, and future M6F-C capture/acceptance boundaries.
+- M6F-A2 is complete on `main` at `2a784b2`: pure ACL principal models and
+  projection rules exist for M6F-B. It canonicalizes supported user/group
+  principals into deny-safe ACL tags without computing the effective ACL.
+- M6F-A3 is complete on `main` at `97c7d7e`: M6E ACL-stage provenance is
+  validated before ACL materialization can consume the relation result.
+- M6F-A4 is complete on `main` at `0df1818`: M6B restriction observations are
+  validated as the normalized source of truth for later ACL materialization.
+- M6F-A remains a boundary and validation stage only. It does not build an
+  `ACLRecord`, does not change `ChunkRecord.acl_tags`, does not compute the
+  effective ACL intersection, performs no network request, and does not start
+  M6G export.
+
 ## Next Planned Task
 
-Plan M6F deny-safe ACL materialization from the frozen M6E final head. Do not
-begin M6G export or broaden M6E into Jira API enrichment, media relations, or
-page-link extraction.
+Plan M6F-B deny-safe effective ACL computation, `ACLRecord` construction, and
+chunk ACL-tag propagation from the frozen M6E/M6F-A boundaries. Do not begin
+M6G export, M6F-C capture/acceptance work, Jira API enrichment, media
+relations, or page-link extraction.
