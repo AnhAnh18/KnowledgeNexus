@@ -43,6 +43,18 @@ from knowledgenexus.foundation.domain.models.wiki_document_structure import (
     WikiSection,
     WikiTableBlock,
 )
+from knowledgenexus.foundation.domain.models.jira_relation_profile import (
+    JIRA_EXTRACTION_MODE,
+    JIRA_KEY_PATTERN,
+    JIRA_RELATION_SCHEMA_VERSION,
+    JiraRelationProfile,
+)
+from knowledgenexus.foundation.domain.models.confluence_jira_relations import (
+    ConfluenceJiraRelationError,
+    ConfluenceJiraRelationFailureCategory,
+    ConfluenceJiraRelationResult,
+    JiraRelationQualityObservation,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -70,4 +82,12 @@ __all__ = [
     "WikiProseBlock",
     "WikiSection",
     "WikiTableBlock",
+    "JIRA_EXTRACTION_MODE",
+    "JIRA_KEY_PATTERN",
+    "JIRA_RELATION_SCHEMA_VERSION",
+    "JiraRelationProfile",
+    "ConfluenceJiraRelationError",
+    "ConfluenceJiraRelationFailureCategory",
+    "ConfluenceJiraRelationResult",
+    "JiraRelationQualityObservation",
 ]

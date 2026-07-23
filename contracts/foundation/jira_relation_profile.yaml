@@ -1,0 +1,5 @@
+schema_version: 1
+extraction_mode: regex_only
+key_pattern: '(?<![A-Za-z0-9_])(?P<key>[A-Z][A-Z0-9_]+-[0-9]+)(?![A-Za-z0-9_])'
+allowed_project_keys:
+  - SVMCSPEN
