@@ -2,16 +2,15 @@
 
 ## Current Milestone
 
-M6 - M6D deterministic one-page chunking is in progress. M6A-M6C are complete
-and approved. M6D-A synchronized the BGE-M3 contract/profile and M6D-B added the
-exact offline tokenizer boundary; both are independently approved at heads
-`7642e5c` and `740ede5`. M6D-C structural parsing was implemented at `72e4826`.
-An independent Codex pass found and fixed one mutable-collection hole in its
-otherwise frozen domain models; Claude independently re-reviewed and approved
-that fix with no remaining P0-P3 finding. M6D-C is complete and approved at
-final head `9b4fec0`. M6D-D is complete and independently approved with no
-remaining P0-P2 finding; its reviewed code head is `bacc22a`. No raw production
-artifact exists in this repository.
+M6 - the deterministic one-page path through Jira relation extraction is
+complete and independently approved. M6A-M6C established the live raw-page,
+observation, and normalization boundaries. M6D-A through M6D-D established the
+exact offline BGE-M3 tokenizer, structural parsing, and schema-valid chunking.
+M6E is approved at production review head `68a4b08`: it extracts allowlisted
+standalone Jira keys from the normalized page body, builds deterministic
+`RelationRecord`s, and links them to the canonical document and all chunks.
+M6F deny-safe ACL materialization is next. No raw production artifact exists in
+this repository.
 
 ## Done
 
@@ -1041,7 +1040,34 @@ Review artifact:
 - M6D-D performs no network request or output publication and contains no M6E
   relation extraction, ACL resolution, media processing, embedding, or export.
 
+## M6E Progress
+
+- Status: complete and independently approved. Base: `e336261`; production
+  review head: `68a4b08`.
+- Adds a strict Jira relation profile and loader, regex-only extraction from the
+  M6C normalized body, deterministic page-level `mentions_jira_key` records,
+  and canonical/chunk linkage without mutating inputs.
+- Entry validation binds the normalized body to the canonical content hash and
+  validates canonical/chunk identity, version, provenance, hash, uniqueness,
+  and count coherence before relation extraction.
+- Extraction uses the locked standalone-token grammar, preserves first-source
+  order, deduplicates deterministically, and links only configured project keys.
+  Zero relations remains a valid result.
+- The result is frozen, `repr=False`, and recursively ownership-isolated. It
+  deliberately does not claim deep immutability for nested JSON values.
+- The aggregate-only acceptance CLI performs no network request and creates no
+  output file. M6E adds no Jira API/PAT, ACL resolution, media/page-link
+  relation, embedding, or export behavior.
+- Independent detached review found no P0-P2. It reproduced 67 focused tests
+  and the complete 1,190-test Foundation/Shared/Architecture/Indexing matrix
+  with the exact pinned external BGE-M3 tokenizer bundle and no asset-backed
+  skip.
+
+Review artifact:
+- `.local_ai/review/m6e-working-tree-review-summary.md`
+
 ## Next Planned Task
 
-Close the approved M6D-D documentation state, then plan M6E relation extraction
-from the frozen M6D-D final head. Do not begin M6F ACL resolution or export.
+Plan M6F deny-safe ACL materialization from the frozen M6E final head. Do not
+begin M6G export or broaden M6E into Jira API enrichment, media relations, or
+page-link extraction.

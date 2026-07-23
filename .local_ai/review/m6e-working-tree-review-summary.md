@@ -1,6 +1,6 @@
-# M6E working-tree review notice
+# M6E implementation and independent-review summary
 
-Status: committed candidate stack ready for detached review.
+Status: complete and independently approved.
 
 Base commit: `e33626155f7017fc17e3521876064d2e130ee26f`
 
@@ -129,6 +129,26 @@ e336261
 
 Production review head: `68a4b08`.
 
-The review-summary commit contains no production behavior. M6E documentation
-and state closeout remain deferred until independent approval. No patch has been
-created and nothing has been pushed.
+## Independent review closure
+
+Detached review verdict: Approve. No P0, P1, or P2 finding remains. The reviewer
+read the production range `e336261..68a4b08` directly, confirmed all negotiated
+provenance, extraction, linkage, ownership-isolation, sanitization, and boundary
+requirements, and did not modify the working tree during the first pass.
+
+Independent verification reproduced:
+
+```text
+focused M6E: 67 passed
+full Foundation/Shared/Architecture/Indexing matrix: 1,190 passed
+git diff --check: pass
+```
+
+The full matrix used the exact pinned external BGE-M3 tokenizer bundle. No
+asset-backed test skipped. The remaining observations are non-blocking P3s:
+generic fail-closed categorization can mask an unexpected internal exception,
+and `created_at` is deliberately checked both before extraction and by relation
+schema validation.
+
+The review-summary and closeout commits contain no production behavior. M6F was
+not started.

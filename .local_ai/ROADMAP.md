@@ -76,7 +76,8 @@ Sync-state clarification:
 | M6D-B - Exact offline tokenizer boundary | done; independently approved | Approved head `740ede5`; 978-test reviewed battery | Produces character spans only; no chunking or embedding. |
 | M6D-C - Structural wiki parsing | complete; independently approved | Final approved head `9b4fec0`; Codex found/fixed mutable collection retention; Claude re-review approved after 93 focused and 1,072 broad tests | Immutable structural input is frozen for M6D-D. |
 | M6D-D - Wiki packing and deterministic `ChunkRecord`s | complete; independently approved | Reviewed code head `bacc22a`; full offline matrix 1,122 passed with exact pinned BGE-M3 bundle | No unresolved P0-P2; no M6E work started. |
-| M6 (E-G) - Rest of one-page vertical slice | planned after M6D | M6A-M6C gates passed | ACL, relation, and export end to end. |
+| M6E - Regex-only Jira relations and linkage | complete; independently approved | Production review head `68a4b08`; 67 focused and 1,190 full offline tests passed with the exact pinned BGE-M3 bundle | No Jira API/PAT/network, ACL resolution, media/page-link relations, or export. |
+| M6 (F-G) - Rest of one-page vertical slice | planned after M6E | M6A-M6E gates passed | Deny-safe ACL materialization, then one-page export through M3. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -84,7 +85,8 @@ Sync-state clarification:
 
 ## 2. Current Task
 
-Current area: M6D-D approved closeout, followed by M6E relation extraction.
+Current area: M6E complete and approved; M6F deny-safe ACL materialization is
+next.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -772,7 +774,10 @@ Status:
 - M6D-D: complete and independently approved at reviewed code head `bacc22a`;
   full offline matrix 1,122 passed with the exact pinned BGE-M3 bundle and no
   unresolved P0-P2 finding.
-- M6E-M6G: planned.
+- M6E: complete and independently approved at production review head `68a4b08`;
+  detached review reproduced 67 focused and 1,190 full offline tests with no
+  P0-P2 finding.
+- M6F-M6G: planned.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).
