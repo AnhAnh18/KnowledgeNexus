@@ -55,6 +55,12 @@ from knowledgenexus.foundation.domain.models.confluence_jira_relations import (
     ConfluenceJiraRelationResult,
     JiraRelationQualityObservation,
 )
+from knowledgenexus.foundation.domain.models.acl_materialization import (
+    AclMaterializationError,
+    AclMaterializationFailureCategory,
+    ProjectedPrincipal,
+    ProjectedPrincipalUnion,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -90,4 +96,8 @@ __all__ = [
     "ConfluenceJiraRelationFailureCategory",
     "ConfluenceJiraRelationResult",
     "JiraRelationQualityObservation",
+    "AclMaterializationError",
+    "AclMaterializationFailureCategory",
+    "ProjectedPrincipal",
+    "ProjectedPrincipalUnion",
 ]
