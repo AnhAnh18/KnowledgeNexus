@@ -4,6 +4,9 @@ from knowledgenexus.foundation.application.use_cases.build_confluence_inventory 
 from knowledgenexus.foundation.application.use_cases.build_confluence_chunks import (
     BuildConfluenceChunks,
 )
+from knowledgenexus.foundation.application.use_cases.build_confluence_jira_relations import (
+    BuildConfluenceJiraRelations,
+)
 from knowledgenexus.foundation.application.use_cases.collect_confluence_page_observations import (  # noqa: E501
     CollectConfluencePageObservations,
     PageObservationCollectionError,
@@ -17,6 +20,7 @@ from knowledgenexus.foundation.application.use_cases.normalize_confluence_page i
 __all__ = [
     "BuildConfluenceInventory",
     "BuildConfluenceChunks",
+    "BuildConfluenceJiraRelations",
     "CollectConfluencePageObservations",
     "PageObservationCollectionError",
     "PageObservationCollectionResult",
