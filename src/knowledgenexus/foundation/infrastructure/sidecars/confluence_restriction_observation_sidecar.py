@@ -5,13 +5,22 @@ import os
 import stat
 import tempfile
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
 RESTRICTION_SIDECAR_FORMAT_VERSION: Final = "1.0"
 CAPTURED_M6B_EVIDENCE_KIND: Final = "captured_m6b_result"
+SYNTHETIC_FIXTURE_EVIDENCE_KIND: Final = "synthetic_fixture"
 MAX_RESTRICTION_SIDECAR_BYTES: Final = 16 * 1024 * 1024
+
+_LOADED_EVIDENCE_KINDS = frozenset(
+    {CAPTURED_M6B_EVIDENCE_KIND, SYNTHETIC_FIXTURE_EVIDENCE_KIND}
+)
+_SIDECAR_FIELDS = frozenset(
+    {"format_version", "evidence_kind", "restriction_observations"}
+)
 
 _FILE_ATTRIBUTE_REPARSE_POINT = getattr(
     stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
@@ -48,6 +57,35 @@ class RestrictionSidecarPublicationError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__("sidecar_publication")
+
+
+class RestrictionSidecarLoadError(RuntimeError):
+    """Sanitized strict-loader failure safe for operator output."""
+
+    def __init__(self) -> None:
+        super().__init__("restriction_sidecar")
+
+
+@dataclass(frozen=True, repr=False)
+class LoadedRestrictionSidecar:
+    """Ownership-isolated parsed sidecar values without source-path identity."""
+
+    evidence_kind: str
+    restriction_observations: tuple[object, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.evidence_kind, str)
+            or self.evidence_kind not in _LOADED_EVIDENCE_KINDS
+        ):
+            raise ValueError("evidence_kind is invalid")
+        if not isinstance(self.restriction_observations, (list, tuple)):
+            raise TypeError("restriction_observations expects a collection")
+        object.__setattr__(
+            self,
+            "restriction_observations",
+            tuple(deepcopy(tuple(self.restriction_observations))),
+        )
 
 
 @dataclass(frozen=True, repr=False)
@@ -131,6 +169,31 @@ def serialize_restriction_observations(
     return rendered
 
 
+def load_restriction_sidecar(
+    path: Path,
+) -> tuple[LoadedRestrictionSidecar, bytes]:
+    """Strict-load one stable regular sidecar and retain its exact bytes."""
+
+    try:
+        exact_bytes = _read_stable_regular_file(path)
+        payload = _decode_strict_sidecar(exact_bytes)
+        evidence_kind = payload["evidence_kind"]
+        observations = payload["restriction_observations"]
+        if not isinstance(evidence_kind, str):
+            raise ValueError("evidence_kind is invalid")
+        if not isinstance(observations, list):
+            raise ValueError("restriction_observations is invalid")
+        loaded = LoadedRestrictionSidecar(
+            evidence_kind=evidence_kind,
+            restriction_observations=tuple(observations),
+        )
+    except RestrictionSidecarLoadError:
+        raise
+    except (OSError, RuntimeError, TypeError, ValueError, UnicodeError):
+        raise RestrictionSidecarLoadError() from None
+    return loaded, exact_bytes
+
+
 def publish_restriction_sidecar(
     *,
     prepared_target: PreparedRestrictionSidecarTarget,
@@ -186,6 +249,126 @@ def publish_restriction_sidecar(
 
     if published:
         _fsync_directory_best_effort(target_path.parent)
+
+
+def _read_stable_regular_file(path: Path) -> bytes:
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise RestrictionSidecarLoadError()
+    _require_plain_directory_chain(path.parent)
+    before = _lstat_regular_file(path)
+
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        _require_regular_stat(opened)
+        if _entry_identity(before) != _entry_identity(opened):
+            raise RestrictionSidecarLoadError()
+        if _stable_metadata(before) != _stable_metadata(opened):
+            raise RestrictionSidecarLoadError()
+
+        remaining = MAX_RESTRICTION_SIDECAR_BYTES + 1
+        chunks: list[bytes] = []
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        content = b"".join(chunks)
+
+        after_descriptor = os.fstat(descriptor)
+        after_path = _lstat_regular_file(path)
+        expected_metadata = _stable_metadata(before)
+        if (
+            _entry_identity(after_descriptor) != _entry_identity(before)
+            or _entry_identity(after_path) != _entry_identity(before)
+            or _stable_metadata(after_descriptor) != expected_metadata
+            or _stable_metadata(after_path) != expected_metadata
+        ):
+            raise RestrictionSidecarLoadError()
+    except RestrictionSidecarLoadError:
+        raise
+    except (OSError, TypeError, ValueError):
+        raise RestrictionSidecarLoadError() from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+    if not content or len(content) > MAX_RESTRICTION_SIDECAR_BYTES:
+        raise RestrictionSidecarLoadError()
+    return content
+
+
+def _lstat_regular_file(path: Path) -> os.stat_result:
+    try:
+        details = os.lstat(path)
+    except OSError:
+        raise RestrictionSidecarLoadError() from None
+    _require_regular_stat(details)
+    return details
+
+
+def _require_regular_stat(details: os.stat_result) -> None:
+    if _is_link_or_reparse(details) or not stat.S_ISREG(details.st_mode):
+        raise RestrictionSidecarLoadError()
+
+
+def _entry_identity(details: os.stat_result) -> tuple[int, int]:
+    return details.st_dev, details.st_ino
+
+
+def _stable_metadata(details: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        details.st_size,
+        details.st_mtime_ns,
+        details.st_mode,
+        getattr(details, "st_file_attributes", 0),
+    )
+
+
+def _decode_strict_sidecar(content: bytes) -> dict[str, object]:
+    if content.startswith(b"\xef\xbb\xbf"):
+        raise RestrictionSidecarLoadError()
+    try:
+        text = content.decode("utf-8")
+        payload = json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_object_keys,
+            parse_constant=_reject_non_finite_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise RestrictionSidecarLoadError() from None
+    if not isinstance(payload, dict) or set(payload) != _SIDECAR_FIELDS:
+        raise RestrictionSidecarLoadError()
+    if payload.get("format_version") != RESTRICTION_SIDECAR_FORMAT_VERSION:
+        raise RestrictionSidecarLoadError()
+    if payload.get("evidence_kind") not in _LOADED_EVIDENCE_KINDS:
+        raise RestrictionSidecarLoadError()
+    if not isinstance(payload.get("restriction_observations"), list):
+        raise RestrictionSidecarLoadError()
+    return payload
+
+
+def _reject_duplicate_object_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite_constant(value: str) -> object:
+    raise ValueError("non-finite JSON constant")
 
 
 def _validate_target(
