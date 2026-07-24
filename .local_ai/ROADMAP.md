@@ -79,8 +79,8 @@ Sync-state clarification:
 | M6E - Regex-only Jira relations and linkage | complete; independently approved | Production review head `68a4b08`; 67 focused and 1,190 full offline tests passed with the exact pinned BGE-M3 bundle | No Jira API/PAT/network, ACL resolution, media/page-link relations, or export. |
 | M6F-A - ACL materialization contract and input validators | complete; independently approved | Head `0df1818`; A1 locks the contract, A2 adds principal projection, A3 validates M6E ACL-stage provenance, A4 validates M6B restriction observations | Boundary stage only; no network or materialization. |
 | M6F-B - Deny-safe ACL materialization | complete; independently approved | Approved merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`; contained code commit `cd764f3`; focused M6F-A+B closeout suite 248 passed | Fully offline; no open P0-P2; live/full-page acceptance remains later. |
-| M6F-C1 - Opt-in M6B observation sidecar capture | offline implementation complete; independently approved; controlled live capture pending | Approved review head `bf6b79a`; 56 focused and 1,487 full offline tests passed on the implementer environment; reviewer reproduced 1,436 non-asset offline tests; no P0-P2 | Default M6B behavior is unchanged; capture target must be external and hard-link-capable; no live capture has occurred. |
-| M6F-C2 - Offline ACL composition acceptance | blocked on M6F-C1 live capture | Requires an approved real sidecar plus preserved M6A raw bytes | Consume the sidecar offline, bind exact M6A ancestry, and run full M6F composition acceptance. |
+| M6F-C1 - Opt-in M6B observation sidecar capture | complete; controlled live capture independently approved | Source-review head `bf6b79a` is provenance only; offline tests passed and exactly one authorized live capture passed with no open P0-P2 | External sidecar remains uncommitted and unmodified; the pre-existing documentation-only worktree deviation was accepted as non-blocking P3 and did not require recapture. |
+| M6F-C2 - Offline ACL composition acceptance | next; unblocked; not started | Approved real sidecar plus preserved M6A raw bytes are available externally | Activate the C2 contract, consume the sidecar offline, bind exact M6A ancestry, and run full M6F composition acceptance. |
 | M6F-D - Final M6F documentation closeout | blocked on M6F-C2 | Requires accepted real captured evidence | Planning/documentation stage only; not a new focused-spec implementation stage. |
 | M6G - Downstream ACL persistence and one-page export through M3 | blocked on M6F-D | M6A-M6F gates required | Persist/export the approved one-page record graph; persistence/export does not move into M6F-C1/C2. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
@@ -92,8 +92,8 @@ Sync-state clarification:
 
 Current area: M6F-A and M6F-B are complete and independently approved through
 production merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`.
-M6F overall is not complete. M6F-C1 code is independently approved at
-`bf6b79a`; its separately authorized controlled live capture is the next gate.
+M6F overall is not complete. M6F-C1 offline code and its separately authorized
+controlled live capture are approved; M6F-C2 is the next task.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -788,9 +788,10 @@ Status:
 - M6F-B: complete and independently approved at production merge head
   `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`; contained implementation commit
   `cd764f3`; focused M6F-A+B closeout suite 248 passed with no open P0-P2.
-- M6F-C1: offline implementation complete and independently approved at
-  `bf6b79a`; controlled live read-only capture pending.
-- M6F-C2: blocked on the M6F-C1 controlled live capture.
+- M6F-C1: complete; controlled live read-only capture independently approved;
+  source-review head `bf6b79a` is provenance only for independent transfer
+  repositories.
+- M6F-C2: next and unblocked; not started.
 - M6F-D: final documentation closeout, blocked on M6F-C2.
 - M6G: downstream ACL persistence/export integration, blocked on M6F-D.
 
@@ -804,8 +805,8 @@ Tasks:
 - M6F-A lock ACL materialization boundaries and validators (done and approved).
 - M6F-B materialize deny-safe ACL and propagate ACL tags to chunks (done and
   approved; fully offline).
-- M6F-C1 add opt-in M6B normalized-observation sidecar capture (offline code
-  approved; controlled live capture pending).
+- M6F-C1 add opt-in M6B normalized-observation sidecar capture (done; offline
+  code and controlled live capture approved).
 - M6F-C2 consume the sidecar offline, bind M6A ancestry, and run full M6F
   composition acceptance.
 - M6F-D perform the final M6F documentation closeout.
@@ -962,17 +963,14 @@ Acceptance categories:
 
 ## 13. Immediate Execution Order
 
-1. Use the frozen approved M6F-C1 code head and prepare the controlled-live
-   operator runbook. The external target filesystem must support atomic hard
-   links; unsupported filesystems fail closed.
-2. Perform one separately authorized controlled live read-only M6B capture,
-   keep the sidecar external and uncommitted, and register aggregate-only
-   sanitized evidence.
-3. After that capture passes, implement M6F-C2 offline sidecar consumption,
-   exact M6A ancestry binding, and full M6F composition acceptance.
-4. After accepted real captured evidence, perform the M6F-D final
+1. Implement M6F-C2 only: first activate the focused C2 contract, then add
+   strict offline sidecar consumption, single-byte M6A ancestry binding, and
+   full M6F composition acceptance.
+2. Independently review and freeze the local C2 production head before running
+   real captured-sidecar offline acceptance.
+3. After accepted real captured evidence, perform the M6F-D final
    documentation closeout.
-5. Begin M6G downstream ACL persistence/export integration only after M6F is
+4. Begin M6G downstream ACL persistence/export integration only after M6F is
    complete.
 
 ### Completed task - M2C3 RelationRecordBuilder

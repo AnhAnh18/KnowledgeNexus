@@ -1,19 +1,36 @@
-# M6F-C1 Working-Tree Review Summary
+# M6F-C1 Review and Live-Capture Summary
 
 ## Review range
 
 ```text
-M6F_B_FINAL_HEAD=ee83d9f6c00236a741de4a9ad12d3869b882354d
-M6F_C1_A=855789d7ee499598e87e4829908c5ea11a33153f
-M6F_C1_REVIEW_HEAD=bf6b79a033362de6197508e7a1f9953d0597bb77
-TASK_STATE=independently approved offline implementation
+M6F_B_FINAL_HEAD=ee83d9f
+M6F_C1_A=855789d
+M6F_C1_REVIEW_HEAD=bf6b79a
+TASK_STATE=complete and approved
 IMPLEMENTER=Codex
 INDEPENDENT_REVIEWER=Claude
 ```
 
-M6F-C1 has not performed a live Confluence request. The offline implementation
-is independently approved and its review head is frozen; the real sidecar
-capture remains a separate operator-authorized gate.
+The source-review SHAs above identify the reviewed source-repository tree only.
+They are provenance, not checkout requirements for an independent repository
+that received the code through approved patches.
+
+## Controlled live closure
+
+- Exactly one separately authorized controlled live read-only capture ran.
+- Exit code was zero, the approved seven-line stdout contract passed, stderr
+  was empty, and the bounded sidecar envelope gates passed.
+- The external sidecar remains external, uncommitted, and unmodified.
+- The live execution changed no tracked file and no C2 work started.
+- A pre-existing tracked documentation-only contract modification was
+  independently inspected. It changed no capture behavior, serialization,
+  publication, evidence acceptance, or C2 semantics.
+- The dirty-worktree condition is accepted as P3/non-blocking, with no semantic
+  impact and no recapture required.
+- Final live verdict: **APPROVE**. Open findings: P0=0, P1=0, P2=0.
+
+No credential, internal URL, filesystem path, sidecar name, source identifier,
+principal, content, exact artifact size, or full hash is retained here.
 
 ## Delivered behavior
 

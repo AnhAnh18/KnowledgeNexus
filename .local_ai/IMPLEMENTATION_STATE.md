@@ -10,9 +10,9 @@ independently approved and links deterministic Jira `RelationRecord`s to the
 canonical document and all chunks. M6F-A and M6F-B are complete and approved:
 the contract and trusted-input boundaries are locked, one deny-safe `ACLRecord`
 is materialized, and its ACL tags are propagated to the trusted chunks. M6F is
-not yet complete. M6F-C1 offline implementation is independently approved; its
-separately authorized controlled live read-only capture is the next gate. No
-raw production artifact exists in this repository.
+not yet complete. M6F-C1 is complete and approved, including its separately
+authorized controlled live read-only capture; M6F-C2 is the next task. No raw
+production artifact exists in this repository.
 
 ## Done
 
@@ -1095,20 +1095,28 @@ Review artifact:
   capture and M6F-C2 offline composition-acceptance stages.
 - Code-only patch sets are transfer artifacts. They are not additional
   production commits and do not define an alternative approved history.
-- M6F overall is not complete. M6F-C1 controlled live capture is next;
-  M6F-C2, the M6F-D final documentation closeout, and M6G remain blocked on
-  the preceding stages.
+- M6F overall is not complete. M6F-C2 is next; the M6F-D final documentation
+  closeout and M6G remain blocked on the preceding stages.
 - M6F-C1 offline implementation is complete and independently approved at
-  review head `bf6b79a033362de6197508e7a1f9953d0597bb77` (`bf6b79a`), over
-  sidecar foundation commit `855789d7ee499598e87e4829908c5ea11a33153f`
-  (`855789d`). Independent review found no P0, P1, or P2.
+  source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
+  These foreign-source references are provenance only. Independent review
+  found no P0, P1, or P2.
 - C1 verification passed 56 focused tests with one Windows-expected POSIX
   permission skip. The implementer full offline matrix passed 1,487 tests with
   the exact pinned BGE-M3 bundle and one skip; the independent reviewer
   reproduced 1,436 non-asset offline tests with one skip.
-- No C1 live request or real sidecar capture has occurred. The approved code
-  remains opt-in, preserves the default M6B command behavior, and performs
-  target preflight before credential, transport, or network work.
+- Exactly one separately authorized controlled live read-only C1 capture
+  completed successfully in the independent execution repository. Exit code
+  was zero, the approved seven-line stdout contract passed, stderr was empty,
+  and the bounded sidecar envelope gates passed.
+- The real sidecar remains external, uncommitted, and unmodified. Its path,
+  name, content, exact size, identifiers, principals, and hashes are not
+  registered in this repository.
+- The execution repository contained one pre-existing tracked
+  documentation-only contract deviation. Independent inspection classified it
+  P3/non-blocking with no semantic impact on capture, serialization,
+  publication, evidence acceptance, or C2 behavior. The live run changed no
+  tracked file, no recapture is required, and no P0, P1, or P2 remains.
 - C1 live capture must use an external filesystem supporting atomic hard links
   (NTFS or a suitable POSIX filesystem). Unsupported filesystems fail closed as
   `sidecar_publication`; Windows directory fsync is intentionally unsupported
@@ -1117,16 +1125,16 @@ Review artifact:
   `.local_ai/review/m6f-c1-working-tree-review-summary.md`. The filesystem and
   fsync documentation points are recorded above; the defensive non-bytes
   publication category is explicitly accepted.
-- M6F-C2 remains blocked until one separately authorized controlled live
-  read-only capture from the frozen approved C1 head produces an external,
-  unmodified sidecar.
+- Source-review SHAs in this repository are provenance only for an independent
+  patch-transfer repository. Future operator gates must bind to that
+  repository's local transfer/execution commit and separately prove production
+  tree equivalence to the approved patch set.
+- M6F-C2 is unblocked and has not started.
 
 ## Next Planned Task
 
-Use the frozen approved M6F-C1 head, prepare the explicit operator runbook, and
-perform one separately authorized controlled live read-only M6B capture to an
-external hard-link-capable filesystem. Do not commit the sidecar or disclose
-its path, IDs, principals, or contents. Do not begin M6F-C2 offline
-sidecar-consumption/composition acceptance, the M6F-D documentation closeout,
-M6G persistence/export integration, Jira API enrichment, media relations, or
-page-link extraction before the capture gate passes.
+Implement M6F-C2 only: activate the focused C2 contract, strict-load the
+external sidecar offline, bind its exact ordered observations to the single
+preserved M6A raw-byte snapshot, and run full M6F composition acceptance. Do
+not begin M6F-D, M6G persistence/export integration, Jira API enrichment,
+media relations, or page-link extraction.

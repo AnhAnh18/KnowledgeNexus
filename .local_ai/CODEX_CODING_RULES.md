@@ -228,3 +228,20 @@ Applies only when a patch was explicitly requested.
 - If a patch is incremental, state which previous patch it must be applied after.
 - When a patch represents already-applied workspace changes, validate it with `git apply --reverse --check <patch>`.
 - A patch file must exclude `.local_ai` and unrelated working-tree changes.
+
+### Cross-repository transfer provenance
+
+- A commit SHA identifies a tree in its own repository history. Treat a SHA
+  from a separate implementation or review repository as source-review
+  provenance only; never require an independent target repository to check out
+  that foreign SHA.
+- After applying approved patches to an independent repository, create a local
+  transfer commit before an operator acceptance run. Record that local commit
+  as the execution base.
+- Record source-review provenance and local execution provenance separately.
+  Demonstrate that the local production tree is equivalent to the approved
+  patch set; do not infer equivalence from similar commit messages or filenames.
+- A patch transfer does not preserve commit identity when the parent history
+  differs. Do not claim that `git apply`, `git am`, or a reconstructed commit
+  retained the source SHA unless the complete commit object and parent history
+  are actually identical.
