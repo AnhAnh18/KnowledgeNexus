@@ -151,6 +151,46 @@ def test_stage_failures_are_sanitized(
     assert "SENSITIVE" not in captured.err
 
 
+@pytest.mark.parametrize("number", ("1e309", "-1e309", "1e999999"))
+def test_exponent_overflow_sidecar_fails_at_initial_loader_boundary(
+    tmp_path: Path,
+    number: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sidecar_path = tmp_path / "sensitive-sidecar.json"
+    sidecar_path.write_bytes(
+        (
+            '{"format_version":"1.0",'
+            '"evidence_kind":"captured_m6b_result",'
+            '"restriction_observations":[{'
+            '"source_page_id":"1000",'
+            f'"http_status":{number},'
+            '"classification":"unavailable",'
+            '"users":[],"groups":[]}]}'
+        ).encode("ascii")
+    )
+    monkeypatch.setattr(
+        cli,
+        "_read_raw_page",
+        lambda **_kwargs: _raw_page(),
+    )
+    args = _argv()
+    args[args.index("--raw-root") + 1] = str(tmp_path / "raw")
+    args[args.index("--restriction-sidecar-path") + 1] = str(sidecar_path)
+
+    assert cli.main(args) == cli.EXIT_RESTRICTION_SIDECAR
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "failed",
+        "category": "restriction_sidecar",
+    }
+    assert number not in captured.err
+    assert sidecar_path.name not in captured.err
+
+
 def test_argparse_failure_never_echoes_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

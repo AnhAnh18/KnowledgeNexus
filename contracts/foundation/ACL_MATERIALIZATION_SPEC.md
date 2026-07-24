@@ -456,15 +456,20 @@ The loader accepts an explicit existing regular file and never modifies,
 normalizes, republishes, or deletes it. It rejects missing files, directories,
 symlinks, Windows reparse points, unstable/replaced entries, empty files, UTF-8
 BOMs, invalid UTF-8, malformed JSON, duplicate object keys at any depth,
-non-finite JSON constants, unknown or extra top-level fields, wrong versions,
-unknown evidence kinds, and non-array observation collections.
+non-finite JSON constants or exponent-overflow numbers, unknown or extra
+top-level fields, wrong versions, unknown evidence kinds, and non-array
+observation collections.
 
 The loader performs a descriptor-based bounded binary read of at most
 `MAX_RESTRICTION_SIDECAR_BYTES + 1`, uses no unbounded convenience read,
 verifies that the pre-open path entry, opened descriptor, and post-read path
 entry identify the same stable regular file, and closes the descriptor on every
-path. `O_NOFOLLOW` is used where the platform provides it. The accepted
-evidence kinds are exactly `captured_m6b_result` and `synthetic_fixture`.
+path. The complete parent chain is traversed component-by-component without
+following links and the final file is opened relative to the bound parent
+descriptor/handle; a pathname-only parent check is insufficient. POSIX uses
+descriptor-relative no-follow operations. Windows uses handle-relative
+no-follow operations with reparse inspection. The accepted evidence kinds are
+exactly `captured_m6b_result` and `synthetic_fixture`.
 Observation array order and every decoded JSON scalar value are preserved; the
 loader never sorts, trims, repairs, normalizes, or infers observation values.
 

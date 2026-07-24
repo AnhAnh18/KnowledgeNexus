@@ -212,6 +212,34 @@ def test_strict_loader_rejects_invalid_bytes_with_sanitized_failure(
     assert "userKey" not in repr(captured.value)
 
 
+@pytest.mark.parametrize("number", ("1e309", "-1e309", "1e999999"))
+def test_strict_loader_rejects_nested_exponent_overflow_as_non_finite(
+    tmp_path: Path,
+    number: str,
+) -> None:
+    target = tmp_path / "sensitive-name.json"
+    target.write_bytes(
+        (
+            '{"format_version":"1.0",'
+            '"evidence_kind":"captured_m6b_result",'
+            '"restriction_observations":[{'
+            '"source_page_id":"1000",'
+            f'"http_status":{number},'
+            '"classification":"unavailable",'
+            '"users":[],"groups":[]}]}'
+        ).encode("ascii")
+    )
+
+    with pytest.raises(
+        RestrictionSidecarLoadError,
+        match="^restriction_sidecar$",
+    ) as captured:
+        load_restriction_sidecar(target)
+
+    assert target.name not in repr(captured.value)
+    assert number not in repr(captured.value)
+
+
 def test_strict_loader_rejects_missing_directory_and_relative_paths(
     tmp_path: Path,
 ) -> None:
@@ -255,28 +283,173 @@ def test_strict_loader_rejects_path_identity_change_during_read(
 ) -> None:
     target = tmp_path / "sidecar.json"
     _write_loaded_sidecar(target)
-    real_lstat = sidecar._lstat_regular_file
     calls = 0
+    if os.name == "nt":
+        real_stat = sidecar._stat_windows_bound_entry
 
-    def changed_identity(path: Path) -> object:
-        nonlocal calls
-        details = real_lstat(path)
-        calls += 1
-        if calls == 1:
-            return details
-        return SimpleNamespace(
-            st_dev=details.st_dev,
-            st_ino=details.st_ino + 1,
-            st_size=details.st_size,
-            st_mtime_ns=details.st_mtime_ns,
-            st_mode=details.st_mode,
-            st_file_attributes=getattr(details, "st_file_attributes", 0),
+        def changed_identity(
+            *,
+            parent_handle: int,
+            name: str,
+        ) -> object:
+            nonlocal calls
+            details = real_stat(
+                parent_handle=parent_handle,
+                name=name,
+            )
+            calls += 1
+            if calls == 1:
+                return details
+            return SimpleNamespace(
+                st_dev=details.st_dev,
+                st_ino=details.st_ino + 1,
+                st_size=details.st_size,
+                st_mtime_ns=details.st_mtime_ns,
+                st_mode=details.st_mode,
+                st_file_attributes=getattr(
+                    details,
+                    "st_file_attributes",
+                    0,
+                ),
+            )
+
+        monkeypatch.setattr(
+            sidecar,
+            "_stat_windows_bound_entry",
+            changed_identity,
         )
+    else:
+        real_stat = sidecar._stat_posix_bound_entry
 
-    monkeypatch.setattr(sidecar, "_lstat_regular_file", changed_identity)
+        def changed_identity(
+            *,
+            parent_descriptor: int,
+            name: str,
+        ) -> object:
+            nonlocal calls
+            details = real_stat(
+                parent_descriptor=parent_descriptor,
+                name=name,
+            )
+            calls += 1
+            if calls == 1:
+                return details
+            return SimpleNamespace(
+                st_dev=details.st_dev,
+                st_ino=details.st_ino + 1,
+                st_size=details.st_size,
+                st_mtime_ns=details.st_mtime_ns,
+                st_mode=details.st_mode,
+                st_file_attributes=getattr(
+                    details,
+                    "st_file_attributes",
+                    0,
+                ),
+            )
+
+        monkeypatch.setattr(
+            sidecar,
+            "_stat_posix_bound_entry",
+            changed_identity,
+        )
 
     with pytest.raises(RestrictionSidecarLoadError):
         load_restriction_sidecar(target)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor-relative race")
+def test_strict_loader_does_not_follow_parent_swap_after_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    safe_parent = tmp_path / "safe-parent"
+    safe_parent.mkdir()
+    target = safe_parent / "sidecar.json"
+    expected = _write_loaded_sidecar(target)
+    moved_safe_parent = tmp_path / "moved-safe-parent"
+    attacker_parent = tmp_path / "attacker-parent"
+    attacker_parent.mkdir()
+    attacker_target = attacker_parent / target.name
+    attacker_target.write_bytes(
+        expected.replace(b'"900"', b'"777"', 1)
+    )
+    real_stat = sidecar._stat_posix_bound_entry
+    swapped = False
+
+    def swap_then_stat(
+        *,
+        parent_descriptor: int,
+        name: str,
+    ) -> os.stat_result:
+        nonlocal swapped
+        if not swapped:
+            safe_parent.rename(moved_safe_parent)
+            safe_parent.symlink_to(attacker_parent, target_is_directory=True)
+            swapped = True
+        return real_stat(
+            parent_descriptor=parent_descriptor,
+            name=name,
+        )
+
+    monkeypatch.setattr(
+        sidecar,
+        "_stat_posix_bound_entry",
+        swap_then_stat,
+    )
+
+    loaded, exact_bytes = load_restriction_sidecar(target)
+
+    assert swapped
+    assert exact_bytes == expected
+    assert loaded.restriction_observations[0]["source_page_id"] == "900"  # type: ignore[index]
+    assert target.read_bytes() == attacker_target.read_bytes()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows parent handle guard")
+def test_strict_loader_holds_parent_against_replacement_during_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "guarded-parent"
+    parent.mkdir()
+    target = parent / "sidecar.json"
+    expected = _write_loaded_sidecar(target)
+    moved_parent = tmp_path / "moved-parent"
+    attacker_parent = tmp_path / "attacker-parent"
+    attacker_parent.mkdir()
+    attacker_target = attacker_parent / target.name
+    attacker_bytes = expected.replace(b'"900"', b'"777"', 1)
+    attacker_target.write_bytes(attacker_bytes)
+    real_stat = sidecar._stat_windows_bound_entry
+    swapped = False
+
+    def swap_then_stat(
+        *,
+        parent_handle: int,
+        name: str,
+    ) -> os.stat_result:
+        nonlocal swapped
+        if not swapped:
+            parent.rename(moved_parent)
+            attacker_parent.rename(parent)
+            swapped = True
+        return real_stat(
+            parent_handle=parent_handle,
+            name=name,
+        )
+
+    monkeypatch.setattr(
+        sidecar,
+        "_stat_windows_bound_entry",
+        swap_then_stat,
+    )
+
+    assert load_restriction_sidecar(target)[1] == expected
+    assert swapped
+    assert target.read_bytes() == attacker_bytes
+    assert (moved_parent / target.name).read_bytes() == expected
+    assert target.exists()
+    assert moved_parent.exists()
 
 
 def test_strict_loader_rejects_reparse_file_attribute(
@@ -285,22 +458,21 @@ def test_strict_loader_rejects_reparse_file_attribute(
 ) -> None:
     target = tmp_path / "sidecar.json"
     _write_loaded_sidecar(target)
-    real_lstat = sidecar.os.lstat
+    if os.name != "nt":
+        pytest.skip("Windows reparse attribute assertion")
+    real_attributes = sidecar._windows_file_attributes
 
-    def mark_file_as_reparse(path: object) -> object:
-        details = real_lstat(path)
-        if Path(path) != target:
-            return details
-        return SimpleNamespace(
-            st_dev=details.st_dev,
-            st_ino=details.st_ino,
-            st_size=details.st_size,
-            st_mtime_ns=details.st_mtime_ns,
-            st_mode=details.st_mode,
-            st_file_attributes=sidecar._FILE_ATTRIBUTE_REPARSE_POINT,
-        )
+    def mark_file_as_reparse(handle: int) -> int:
+        attributes = real_attributes(handle)
+        if attributes & 0x10:  # FILE_ATTRIBUTE_DIRECTORY
+            return attributes
+        return attributes | sidecar._FILE_ATTRIBUTE_REPARSE_POINT
 
-    monkeypatch.setattr(sidecar.os, "lstat", mark_file_as_reparse)
+    monkeypatch.setattr(
+        sidecar,
+        "_windows_file_attributes",
+        mark_file_as_reparse,
+    )
 
     with pytest.raises(RestrictionSidecarLoadError):
         load_restriction_sidecar(target)
@@ -313,10 +485,21 @@ def test_strict_loader_sanitizes_open_failure(
     target = tmp_path / "sensitive-sidecar.json"
     _write_loaded_sidecar(target)
 
-    def fail_open(path: object, flags: int) -> int:
+    def fail_open(*_args: object, **_kwargs: object) -> object:
         raise OSError("SENSITIVE PATH OR CONTENT")
 
-    monkeypatch.setattr(sidecar.os, "open", fail_open)
+    if os.name == "nt":
+        monkeypatch.setattr(
+            sidecar,
+            "_open_windows_regular_file_descriptor",
+            fail_open,
+        )
+    else:
+        monkeypatch.setattr(
+            sidecar,
+            "_open_posix_bound_regular_file",
+            fail_open,
+        )
 
     with pytest.raises(RestrictionSidecarLoadError) as captured:
         load_restriction_sidecar(target)
