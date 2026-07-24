@@ -16,6 +16,9 @@ from knowledgenexus.foundation.application.use_cases.normalize_confluence_page i
     ConfluencePageNormalizationError,
     NormalizeConfluencePage,
 )
+from knowledgenexus.foundation.application.use_cases.materialize_confluence_acl import (
+    MaterializeConfluenceAcl,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -26,4 +29,5 @@ __all__ = [
     "PageObservationCollectionResult",
     "ConfluencePageNormalizationError",
     "NormalizeConfluencePage",
+    "MaterializeConfluenceAcl",
 ]
