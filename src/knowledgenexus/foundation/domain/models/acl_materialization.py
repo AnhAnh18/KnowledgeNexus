@@ -12,9 +12,9 @@ _WHITESPACE = re.compile(r"\s")
 class AclMaterializationFailureCategory(StrEnum):
     """Sanitized M6F failures safe for operator output.
 
-    Only the categories raised by M6F-A validators/models are listed here. The
-    complete later-stage vocabulary (adding ``invalid_crawler_identity`` and
-    ``invalid_extracted_at`` for M6F-B ``ACLRecord`` construction) is locked in
+    M6F-A introduced the boundary/validation categories; M6F-B adds
+    ``invalid_crawler_identity`` and ``invalid_extracted_at`` for ``ACLRecord``
+    construction. The full vocabulary is locked in
     ``contracts/foundation/ACL_MATERIALIZATION_SPEC.md`` §12.
     """
 
@@ -28,6 +28,9 @@ class AclMaterializationFailureCategory(StrEnum):
     CANONICAL_OBSERVATION_IDENTITY_MISMATCH = (
         "canonical_observation_identity_mismatch"
     )
+    # Reserved by M6F-A §12 for M6F-B ``ACLRecord`` construction.
+    INVALID_CRAWLER_IDENTITY = "invalid_crawler_identity"
+    INVALID_EXTRACTED_AT = "invalid_extracted_at"
     ACL_MATERIALIZATION_FAILED = "acl_materialization_failed"
 
 

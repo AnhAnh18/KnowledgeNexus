@@ -26,7 +26,9 @@ def test_error_rejects_non_category() -> None:
         AclMaterializationError("m6e_relation_provenance_invalid")  # type: ignore[arg-type]
 
 
-def test_failure_vocabulary_is_the_m6f_a_subset() -> None:
+def test_failure_vocabulary_is_the_full_m6f_vocabulary() -> None:
+    # The nine original M6F-A boundary/validation categories, unchanged, plus
+    # the two M6F-B ``ACLRecord``-construction categories reserved by spec §12.
     assert {category.value for category in AclMaterializationFailureCategory} == {
         "canonical_document_invalid",
         "chunk_record_invalid",
@@ -36,6 +38,8 @@ def test_failure_vocabulary_is_the_m6f_a_subset() -> None:
         "m6e_result_provenance_invalid",
         "invalid_restriction_observations",
         "canonical_observation_identity_mismatch",
+        "invalid_crawler_identity",
+        "invalid_extracted_at",
         "acl_materialization_failed",
     }
 

@@ -61,6 +61,10 @@ from knowledgenexus.foundation.domain.models.acl_materialization import (
     ProjectedPrincipal,
     ProjectedPrincipalUnion,
 )
+from knowledgenexus.foundation.domain.models.acl_materialization_result import (
+    AclQualityObservation,
+    ConfluenceAclMaterializationResult,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -100,4 +104,6 @@ __all__ = [
     "AclMaterializationFailureCategory",
     "ProjectedPrincipal",
     "ProjectedPrincipalUnion",
+    "AclQualityObservation",
+    "ConfluenceAclMaterializationResult",
 ]
