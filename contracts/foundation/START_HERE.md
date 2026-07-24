@@ -11,14 +11,15 @@ Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)*
 1. `schemas/*.json` — the data contract; **wins all field-level disputes**. Start with `defs.schema.json` (ID grammars + enums, referenced by the rest), then the record schemas, then `manifest.schema.json`.
 2. `CHUNKING_SPEC.md` — chunking behavior & token budget. §1 now locks BGE-M3 and `chunker_version 1.2.0`; the active medium budget remains provisional until benchmark evidence exists.
 3. `JIRA_RELATION_SPEC.md` + `jira_relation_profile.yaml` — the active M6E regex-only Jira relation and allowlist contract.
-4. `decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` — architecture, policies, scope (the normative base).
-5. `decision_logs/AI_Knowledge_Platform_v7_2_Update.md` — export layout, storage roles, verbatim embedding, ACL repo tag (D1–D7).
-6. `decision_logs/AI_Knowledge_Platform_v7_3_Update.md` — bge-m3 direction, benchmark plan (D8–D13).
-7. `decision_logs/AI_Knowledge_Platform_v7_4_Update.md` — POC source binding, dataset, Jira, bge-m3 lock, scope classifier, media policy, D22 consumer pointer (D14–D22).
-8. `decision_logs/AI_Knowledge_Platform_v7_5_Update.md` — single-repo modular-monolith layout + Clean Architecture bounded-context dependency rules (D23–D35).
-9. `Task2_Task3_Integration_Contract.md` — the consumer contract KnowledgeNexus implements against (10 hard constraints + mapping + roadmap).
+4. `ACL_MATERIALIZATION_SPEC.md` — the active M6F deny-safe ACL materialization contract: audit-vs-enforcement policy, `userKey`/group-name principal projection, and the strict M6E/M6B provenance boundaries validated in M6F-A.
+5. `decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` — architecture, policies, scope (the normative base).
+6. `decision_logs/AI_Knowledge_Platform_v7_2_Update.md` — export layout, storage roles, verbatim embedding, ACL repo tag (D1–D7).
+7. `decision_logs/AI_Knowledge_Platform_v7_3_Update.md` — bge-m3 direction, benchmark plan (D8–D13).
+8. `decision_logs/AI_Knowledge_Platform_v7_4_Update.md` — POC source binding, dataset, Jira, bge-m3 lock, scope classifier, media policy, D22 consumer pointer (D14–D22).
+9. `decision_logs/AI_Knowledge_Platform_v7_5_Update.md` — single-repo modular-monolith layout + Clean Architecture bounded-context dependency rules (D23–D35).
+10. `Task2_Task3_Integration_Contract.md` — the consumer contract KnowledgeNexus implements against (10 hard constraints + mapping + roadmap).
 
-Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKING_SPEC`, `JIRA_RELATION_SPEC`) → v7.1 → v7.2 → v7.3 → v7.4 → v7.5 → integration contract. `AI_Knowledge_Platform_Master_Spec_v7.md` is a **historical baseline** (audit/diff only). `reference/` holds the other team's KnowledgeNexus plan and the project README — context, not normative.
+Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKING_SPEC`, `JIRA_RELATION_SPEC`, `ACL_MATERIALIZATION_SPEC`) → v7.1 → v7.2 → v7.3 → v7.4 → v7.5 → integration contract. `AI_Knowledge_Platform_Master_Spec_v7.md` is a **historical baseline** (audit/diff only). `reference/` holds the other team's KnowledgeNexus plan and the project README — context, not normative.
 
 ## Locked decisions (quick reference)
 
