@@ -2,17 +2,16 @@
 
 ## Current Milestone
 
-M6 - the deterministic one-page path is complete through Jira relation
-extraction and is now in deny-safe ACL materialization. M6A-M6C established the
-live raw-page, observation, and normalization boundaries. M6D-A through M6D-D
-established the exact offline BGE-M3 tokenizer, structural parsing, and
-schema-valid chunking. M6E is approved at production review head `68a4b08`: it
-extracts allowlisted standalone Jira keys from the normalized page body, builds
-deterministic `RelationRecord`s, and links them to the canonical document and
-all chunks. M6F-A1 through M6F-A4 are present on `main` through `0df1818`,
-locking the ACL materialization contract and validating the M6E/M6B input
-boundaries needed by M6F-B. M6F-B planning is the next active step. No raw
-production artifact exists in this repository.
+M6 - the deterministic one-page path is complete through deny-safe ACL
+materialization. M6A-M6C established the live raw-page, observation, and
+normalization boundaries. M6D-A through M6D-D established the exact offline
+BGE-M3 tokenizer, structural parsing, and schema-valid chunking. M6E is
+independently approved and links deterministic Jira `RelationRecord`s to the
+canonical document and all chunks. M6F-A and M6F-B are complete and approved:
+the contract and trusted-input boundaries are locked, one deny-safe `ACLRecord`
+is materialized, and its ACL tags are propagated to the trusted chunks. M6F is
+not yet complete; M6F-C1 opt-in normalized-observation sidecar capture is the
+next task. No raw production artifact exists in this repository.
 
 ## Done
 
@@ -1082,14 +1081,26 @@ Review artifact:
   validated before ACL materialization can consume the relation result.
 - M6F-A4 is complete on `main` at `0df1818`: M6B restriction observations are
   validated as the normalized source of truth for later ACL materialization.
-- M6F-A remains a boundary and validation stage only. It does not build an
-  `ACLRecord`, does not change `ChunkRecord.acl_tags`, does not compute the
-  effective ACL intersection, performs no network request, and does not start
-  M6G export.
+- M6F-A is complete and approved. It remains a boundary and validation stage
+  only; the later M6F-B stage owns materialization.
+- M6F-B is complete and approved at production merge head
+  `c05f36d7009fd3aac2466eb08ea2be8b0af014f4` (`c05f36d`). The contained
+  implementation commit is `cd764f32fbda3bd8338815c08268d13a13a807ae`
+  (`cd764f3`).
+- The focused M6F-A+B closeout suite passed 248 tests across nine focused test
+  files. Independent review has no open P0, P1, or P2 finding.
+- M6F-B is fully offline. It required no live Confluence execution and performs
+  no network request. Live/full-page acceptance belongs to the later M6F-C1
+  capture and M6F-C2 offline composition-acceptance stages.
+- Code-only patch sets are transfer artifacts. They are not additional
+  production commits and do not define an alternative approved history.
+- M6F overall is not complete. M6F-C1 is next; M6F-C2, the M6F-D final
+  documentation closeout, and M6G remain blocked on the preceding stages.
 
 ## Next Planned Task
 
-Plan M6F-B deny-safe effective ACL computation, `ACLRecord` construction, and
-chunk ACL-tag propagation from the frozen M6E/M6F-A boundaries. Do not begin
-M6G export, M6F-C capture/acceptance work, Jira API enrichment, media
-relations, or page-link extraction.
+Implement M6F-C1 only: add opt-in M6B normalized-observation sidecar capture
+without changing the default M6B operator behavior. Do not begin M6F-C2 offline
+sidecar consumption/composition acceptance, the M6F-D documentation closeout,
+M6G persistence/export integration, Jira API enrichment, media relations, or
+page-link extraction.

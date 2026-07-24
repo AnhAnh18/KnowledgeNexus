@@ -77,9 +77,12 @@ Sync-state clarification:
 | M6D-C - Structural wiki parsing | complete; independently approved | Final approved head `9b4fec0`; Codex found/fixed mutable collection retention; Claude re-review approved after 93 focused and 1,072 broad tests | Immutable structural input is frozen for M6D-D. |
 | M6D-D - Wiki packing and deterministic `ChunkRecord`s | complete; independently approved | Reviewed code head `bacc22a`; full offline matrix 1,122 passed with exact pinned BGE-M3 bundle | No unresolved P0-P2; no M6E work started. |
 | M6E - Regex-only Jira relations and linkage | complete; independently approved | Production review head `68a4b08`; 67 focused and 1,190 full offline tests passed with the exact pinned BGE-M3 bundle | No Jira API/PAT/network, ACL resolution, media/page-link relations, or export. |
-| M6F-A - ACL materialization contract and input validators | complete on `main` | Head `0df1818`; A1 locks the contract, A2 adds principal projection, A3 validates M6E ACL-stage provenance, A4 validates M6B restriction observations | Boundary stage only: no effective ACL intersection, no `ACLRecord`, no chunk ACL mutation, no network, no M6G. |
-| M6F-B - Deny-safe ACL materialization | planning | M6E final result plus M6F-A validated boundaries are available | Compute effective ACL, build `ACLRecord`, and propagate chunk `acl_tags`; do not start M6F-C or M6G. |
-| M6G - One-page export through M3 | planned after M6F | M6A-M6F gates required | Final one-page snapshot export after deny-safe ACL is complete. |
+| M6F-A - ACL materialization contract and input validators | complete; independently approved | Head `0df1818`; A1 locks the contract, A2 adds principal projection, A3 validates M6E ACL-stage provenance, A4 validates M6B restriction observations | Boundary stage only; no network or materialization. |
+| M6F-B - Deny-safe ACL materialization | complete; independently approved | Approved merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`; contained code commit `cd764f3`; focused M6F-A+B closeout suite 248 passed | Fully offline; no open P0-P2; live/full-page acceptance remains later. |
+| M6F-C1 - Opt-in M6B observation sidecar capture | next; not started | M6F-B approved | Add the opt-in normalized-observation capture capability; do not add persistence/export. |
+| M6F-C2 - Offline ACL composition acceptance | blocked on M6F-C1 | Requires a sidecar plus preserved M6A raw bytes | Consume the sidecar offline, bind exact M6A ancestry, and run full M6F composition acceptance. |
+| M6F-D - Final M6F documentation closeout | blocked on M6F-C2 | Requires accepted real captured evidence | Planning/documentation stage only; not a new focused-spec implementation stage. |
+| M6G - Downstream ACL persistence and one-page export through M3 | blocked on M6F-D | M6A-M6F gates required | Persist/export the approved one-page record graph; persistence/export does not move into M6F-C1/C2. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -87,8 +90,9 @@ Sync-state clarification:
 
 ## 2. Current Task
 
-Current area: M6F-A is complete on `main` through `0df1818`; M6F-B deny-safe
-ACL materialization is being planned next.
+Current area: M6F-A and M6F-B are complete and independently approved through
+production merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`.
+M6F overall is not complete; M6F-C1 is the next task.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -779,11 +783,14 @@ Status:
 - M6E: complete and independently approved at production review head `68a4b08`;
   detached review reproduced 67 focused and 1,190 full offline tests with no
   P0-P2 finding.
-- M6F-A: complete on `main` through `0df1818`; contract, principal projection,
-  M6E provenance validation, and M6B restriction-observation validation are in
-  place for the next stage.
-- M6F-B: planning next.
-- M6G: planned after M6F.
+- M6F-A: complete and independently approved on `main` through `0df1818`.
+- M6F-B: complete and independently approved at production merge head
+  `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`; contained implementation commit
+  `cd764f3`; focused M6F-A+B closeout suite 248 passed with no open P0-P2.
+- M6F-C1: next; not started.
+- M6F-C2: blocked on M6F-C1.
+- M6F-D: final documentation closeout, blocked on M6F-C2.
+- M6G: downstream ACL persistence/export integration, blocked on M6F-D.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).
@@ -792,10 +799,14 @@ Tasks:
 - M6C normalize one page and produce `CanonicalDocument`.
 - M6D chunk one normalized page and produce `ChunkRecord`s.
 - M6E extract one relation path and produce `RelationRecord`s.
-- M6F-A lock ACL materialization boundaries and validators (done).
-- M6F-B materialize deny-safe ACL and propagate ACL tags to chunks.
-- M6F-C capture/acceptance work only after M6F-B scope is complete and approved.
-- M6G export one-page real snapshot through M3.
+- M6F-A lock ACL materialization boundaries and validators (done and approved).
+- M6F-B materialize deny-safe ACL and propagate ACL tags to chunks (done and
+  approved; fully offline).
+- M6F-C1 add opt-in M6B normalized-observation sidecar capture.
+- M6F-C2 consume the sidecar offline, bind M6A ancestry, and run full M6F
+  composition acceptance.
+- M6F-D perform the final M6F documentation closeout.
+- M6G persist/export the one-page real snapshot through M3.
 
 Completion gate:
 - One real page has raw provenance.
@@ -948,12 +959,15 @@ Acceptance categories:
 
 ## 13. Immediate Execution Order
 
-1. Review and approve the M6F-B plan against
-   `contracts/foundation/ACL_MATERIALIZATION_SPEC.md`.
-2. Implement M6F-B only: deny-safe effective ACL computation, `ACLRecord`
-   construction, and chunk ACL-tag propagation.
-3. After M6F-B approval, plan the remaining M6F-C capture/acceptance work or
-   M6G export as the contract requires.
+1. Plan and implement M6F-C1 only: opt-in normalized-observation sidecar
+   capture on the existing M6B operator path.
+2. After M6F-C1 approval and controlled capture, implement M6F-C2 offline
+   sidecar consumption, exact M6A ancestry binding, and full M6F composition
+   acceptance.
+3. After accepted real captured evidence, perform the M6F-D final
+   documentation closeout.
+4. Begin M6G downstream ACL persistence/export integration only after M6F is
+   complete.
 
 ### Completed task - M2C3 RelationRecordBuilder
 
