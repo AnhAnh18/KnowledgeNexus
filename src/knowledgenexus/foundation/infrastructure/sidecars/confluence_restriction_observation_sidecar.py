@@ -335,6 +335,7 @@ def _open_posix_bound_regular_file(
     Callable[[], os.stat_result],
     tuple[int, ...],
 ]:
+    _require_plain_relative_components(path.parts[1:])
     if (
         not getattr(os, "O_NOFOLLOW", 0)
         or not getattr(os, "O_DIRECTORY", 0)
@@ -581,13 +582,8 @@ def _open_windows_relative_handle(
     import ctypes
     from ctypes import wintypes
 
-    if (
-        not isinstance(name, str)
-        or not name
-        or name in {".", ".."}
-        or "\\" in name
-        or "/" in name
-    ):
+    _require_plain_relative_components((name,))
+    if "\\" in name or "/" in name:
         raise RestrictionSidecarLoadError()
 
     class _UnicodeString(ctypes.Structure):
@@ -671,6 +667,16 @@ def _open_windows_relative_handle(
     if status < 0 or not opened_handle.value:
         raise OSError("unable to open bound file-system handle")
     return int(opened_handle.value)
+
+
+def _require_plain_relative_components(components: Sequence[str]) -> None:
+    if any(
+        not isinstance(component, str)
+        or not component
+        or component in {".", ".."}
+        for component in components
+    ):
+        raise RestrictionSidecarLoadError()
 
 
 def _create_windows_handle(

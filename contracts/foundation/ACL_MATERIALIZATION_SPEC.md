@@ -468,8 +468,10 @@ path. The complete parent chain is traversed component-by-component without
 following links and the final file is opened relative to the bound parent
 descriptor/handle; a pathname-only parent check is insufficient. POSIX uses
 descriptor-relative no-follow operations. Windows uses handle-relative
-no-follow operations with reparse inspection. The accepted evidence kinds are
-exactly `captured_m6b_result` and `synthetic_fixture`.
+no-follow operations with reparse inspection. A `..` relative component is
+rejected before parent-chain traversal; the loader never resolves a literal
+dot-dot component through an opened directory descriptor. The accepted
+evidence kinds are exactly `captured_m6b_result` and `synthetic_fixture`.
 Observation array order and every decoded JSON scalar value are preserved; the
 loader never sorts, trims, repairs, normalizes, or infers observation values.
 

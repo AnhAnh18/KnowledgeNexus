@@ -191,6 +191,34 @@ def test_exponent_overflow_sidecar_fails_at_initial_loader_boundary(
     assert sidecar_path.name not in captured.err
 
 
+def test_dot_dot_sidecar_path_fails_at_initial_loader_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    traversed_parent = tmp_path / "safe" / "a"
+    traversed_parent.mkdir(parents=True)
+    sidecar_path = traversed_parent / ".." / "target" / "sidecar.json"
+    monkeypatch.setattr(
+        cli,
+        "_read_raw_page",
+        lambda **_kwargs: _raw_page(),
+    )
+    args = _argv()
+    args[args.index("--raw-root") + 1] = str(tmp_path / "raw")
+    args[args.index("--restriction-sidecar-path") + 1] = str(sidecar_path)
+
+    assert cli.main(args) == cli.EXIT_RESTRICTION_SIDECAR
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "failed",
+        "category": "restriction_sidecar",
+    }
+    assert str(sidecar_path) not in captured.err
+
+
 def test_argparse_failure_never_echoes_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

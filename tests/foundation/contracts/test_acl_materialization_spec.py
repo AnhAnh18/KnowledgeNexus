@@ -84,6 +84,8 @@ def test_spec_activates_and_locks_the_c2_offline_contract() -> None:
     assert "non-finite JSON constants or exponent-overflow numbers" in spec
     assert "final file is opened relative to the bound parent" in spec
     assert "Windows uses handle-relative no-follow operations" in spec
+    assert "rejected before parent-chain traversal" in spec
+    assert "never resolves a literal dot-dot component" in spec
     assert "restriction_sidecar, exit 10" in spec
     assert "restriction_ancestry, exit 11" in spec
     assert "acceptance, exit 13" in spec

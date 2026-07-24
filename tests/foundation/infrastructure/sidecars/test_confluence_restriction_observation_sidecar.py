@@ -4,7 +4,7 @@ import json
 import os
 import stat
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -252,6 +252,33 @@ def test_strict_loader_rejects_missing_directory_and_relative_paths(
     ):
         with pytest.raises(RestrictionSidecarLoadError):
             load_restriction_sidecar(path)
+
+
+def test_posix_dot_dot_path_is_rejected_before_any_descriptor_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempted_open = False
+
+    def unexpected_open(*_args: object, **_kwargs: object) -> int:
+        nonlocal attempted_open
+        attempted_open = True
+        raise AssertionError("dot-dot traversal reached the filesystem")
+
+    monkeypatch.setattr(
+        sidecar,
+        "_open_posix_plain_directory",
+        unexpected_open,
+    )
+
+    with pytest.raises(
+        RestrictionSidecarLoadError,
+        match="^restriction_sidecar$",
+    ):
+        sidecar._open_posix_bound_regular_file(  # type: ignore[arg-type]
+            PurePosixPath("/safe/a/../target/sidecar.json")
+        )
+
+    assert not attempted_open
 
 
 def test_strict_loader_rejects_symlink_and_symlink_parent(
