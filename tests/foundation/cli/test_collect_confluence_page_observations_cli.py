@@ -7,11 +7,19 @@ from pathlib import Path
 import pytest
 
 from knowledgenexus.foundation.cli import collect_confluence_page_observations as cli
+from knowledgenexus.foundation.application.use_cases.collect_confluence_page_observations import (
+    PageObservationCollectionResult,
+)
 from knowledgenexus.foundation.infrastructure.confluence import (
     ConfluenceHttpResponse,
 )
 from knowledgenexus.foundation.infrastructure.confluence import (
     confluence_http_transport as transport_module,
+)
+from knowledgenexus.foundation.infrastructure.sidecars import (
+    RestrictionSidecarPublicationError,
+    RestrictionSidecarSerializationError,
+    RestrictionSidecarTargetError,
 )
 
 PAGE_ID = "1000"
@@ -98,6 +106,14 @@ def _argv(root: Path) -> list[str]:
     ]
 
 
+def _capture_argv(root: Path, target: Path) -> list[str]:
+    return [
+        *_argv(root),
+        "--restriction-observations-sidecar-out",
+        str(target),
+    ]
+
+
 def test_success_composes_production_adapters_and_prints_only_booleans(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -109,7 +125,9 @@ def test_success_composes_production_adapters_and_prints_only_booleans(
     assert cli.main(_argv(tmp_path)) == 0
 
     captured = capsys.readouterr()
-    assert set(captured.out.split()) == {f"{name}=true" for name in cli._SUCCESS_CHECKS}
+    assert captured.out.splitlines() == [
+        f"{name}=true" for name in cli._SUCCESS_CHECKS
+    ]
     assert captured.err == ""
     transport = FakeTransport.last
     assert transport is not None
@@ -125,6 +143,276 @@ def test_success_composes_production_adapters_and_prints_only_booleans(
         "900",
         "2000",
         SECRET_FILENAME,
+        SECRET_PRINCIPAL,
+    ):
+        assert sensitive not in captured.out
+        assert sensitive not in captured.err
+
+
+def test_default_mode_never_invokes_sidecar_validator_or_publisher(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_page(tmp_path)
+    _install(monkeypatch)
+
+    def explode(*args: object, **kwargs: object) -> object:
+        raise AssertionError("default mode must not invoke sidecar components")
+
+    monkeypatch.setattr(cli, "prepare_restriction_sidecar_target", explode)
+    monkeypatch.setattr(cli, "serialize_restriction_observations", explode)
+    monkeypatch.setattr(cli, "publish_restriction_sidecar", explode)
+
+    assert cli.main(_argv(tmp_path)) == 0
+
+
+def test_capture_mode_publishes_direct_result_and_appends_one_boolean(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    target = tmp_path / "external-captured-sidecar.json"
+    _write_page(raw_root)
+    _install(monkeypatch)
+
+    assert cli.main(_capture_argv(raw_root, target)) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        *(f"{name}=true" for name in cli._SUCCESS_CHECKS),
+        "restriction_sidecar_written=true",
+    ]
+    assert captured.err == ""
+    payload = json.loads(target.read_bytes())
+    assert set(payload) == {
+        "format_version",
+        "evidence_kind",
+        "restriction_observations",
+    }
+    assert payload["format_version"] == "1.0"
+    assert payload["evidence_kind"] == "captured_m6b_result"
+    assert [
+        observation["source_page_id"]
+        for observation in payload["restriction_observations"]
+    ] == ["900", PAGE_ID]
+    assert SECRET_PRINCIPAL in target.read_text(encoding="utf-8")
+    assert FakeTransport.last is not None
+    assert len(FakeTransport.last.calls) == 3
+    for sensitive in (
+        str(target),
+        target.name,
+        PAT,
+        BASE_URL,
+        PAGE_ID,
+        "900",
+        SECRET_PRINCIPAL,
+    ):
+        assert sensitive not in captured.out
+        assert sensitive not in captured.err
+
+
+def test_cli_passes_the_exact_returned_observation_tuple_to_serializer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "sidecar.json"
+    observations = (
+        {
+            "source_page_id": "1000",
+            "http_status": 404,
+            "classification": "unavailable",
+            "users": [],
+            "groups": [],
+        },
+    )
+    result = PageObservationCollectionResult(
+        restriction_observations=observations,
+        attachment_observations=(),
+        attachment_window_count=0,
+    )
+    run_calls = 0
+    observed_identity = False
+
+    def run(args: object) -> PageObservationCollectionResult:
+        nonlocal run_calls
+        run_calls += 1
+        return result
+
+    def serialize(value: object) -> bytes:
+        nonlocal observed_identity
+        observed_identity = value is observations
+        return b'{"fixture":true}\n'
+
+    monkeypatch.setattr(cli, "_run", run)
+    monkeypatch.setattr(cli, "serialize_restriction_observations", serialize)
+
+    assert cli.main(_capture_argv(tmp_path, target)) == 0
+    assert run_calls == 1
+    assert observed_identity is True
+    assert target.read_bytes() == b'{"fixture":true}\n'
+
+
+@pytest.mark.parametrize(
+    "target_factory",
+    [
+        lambda tmp: Path("relative-sidecar.json"),
+        lambda tmp: tmp / "missing" / "sidecar.json",
+        lambda tmp: cli._resolve_repository_root(Path(cli.__file__))
+        / "forbidden-sidecar.json",
+    ],
+    ids=("relative", "missing-parent", "repository-internal"),
+)
+def test_invalid_sidecar_target_precedes_credentials_transport_and_network(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    target_factory: object,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = target_factory(tmp_path)  # type: ignore[operator]
+    credential_reads = 0
+
+    def read_credentials() -> tuple[str, str]:
+        nonlocal credential_reads
+        credential_reads += 1
+        raise AssertionError("credentials must not be read")
+
+    monkeypatch.setattr(cli, "_require_credentials", read_credentials)
+    FakeTransport.last = None
+
+    assert cli.main(_capture_argv(tmp_path, target)) == 11
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "failed",
+        "category": "sidecar_target",
+    }
+    assert credential_reads == 0
+    assert FakeTransport.last is None
+    assert not target.exists()
+
+
+def test_unresolved_repository_boundary_fails_before_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    credential_reads = 0
+
+    def fail_root(module_path: Path) -> Path:
+        raise RestrictionSidecarTargetError()
+
+    def read_credentials() -> tuple[str, str]:
+        nonlocal credential_reads
+        credential_reads += 1
+        raise AssertionError("credentials must not be read")
+
+    monkeypatch.setattr(cli, "_resolve_repository_root", fail_root)
+    monkeypatch.setattr(cli, "_require_credentials", read_credentials)
+
+    assert cli.main(_capture_argv(tmp_path, tmp_path / "sidecar.json")) == 11
+    assert credential_reads == 0
+
+
+def test_repository_root_requires_both_locked_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert cli._resolve_repository_root(Path(cli.__file__)).is_dir()
+    monkeypatch.setattr(
+        cli,
+        "_REPOSITORY_MARKERS",
+        (Path("missing-c1-marker"),),
+    )
+
+    with pytest.raises(RestrictionSidecarTargetError):
+        cli._resolve_repository_root(Path(cli.__file__))
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_exit", "expected_category"),
+    [
+        (
+            RestrictionSidecarSerializationError(),
+            12,
+            "sidecar_serialization",
+        ),
+        (
+            RestrictionSidecarPublicationError(),
+            13,
+            "sidecar_publication",
+        ),
+    ],
+)
+def test_post_collection_sidecar_failure_is_sanitized_and_preserves_raw_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failure: Exception,
+    expected_exit: int,
+    expected_category: str,
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    target = tmp_path / "private-output-sidecar.json"
+    _write_page(raw_root)
+    _install(monkeypatch)
+
+    if isinstance(failure, RestrictionSidecarSerializationError):
+        def fail_serialize(observations: object) -> bytes:
+            raise failure
+
+        monkeypatch.setattr(
+            cli, "serialize_restriction_observations", fail_serialize
+        )
+    else:
+        def fail_publish(*args: object, **kwargs: object) -> None:
+            raise failure
+
+        monkeypatch.setattr(cli, "publish_restriction_sidecar", fail_publish)
+
+    assert cli.main(_capture_argv(raw_root, target)) == expected_exit
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "failed",
+        "category": expected_category,
+    }
+    assert not target.exists()
+    assert (
+        raw_root
+        / "confluence"
+        / "restrictions"
+        / "view"
+        / PAGE_ID
+        / "900.body"
+    ).is_file()
+    assert (
+        raw_root
+        / "confluence"
+        / "restrictions"
+        / "view"
+        / PAGE_ID
+        / f"{PAGE_ID}.body"
+    ).is_file()
+    assert (
+        raw_root
+        / "confluence"
+        / "attachments"
+        / "metadata"
+        / PAGE_ID
+        / "start-0_limit-2.json"
+    ).is_file()
+    assert FakeTransport.last is not None
+    assert len(FakeTransport.last.calls) == 3
+    for sensitive in (
+        str(target),
+        target.name,
+        PAT,
+        BASE_URL,
+        PAGE_ID,
+        "900",
         SECRET_PRINCIPAL,
     ):
         assert sensitive not in captured.out

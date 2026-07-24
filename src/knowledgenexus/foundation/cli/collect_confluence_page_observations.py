@@ -13,6 +13,7 @@ from typing import NoReturn
 from knowledgenexus.foundation.application.use_cases.collect_confluence_page_observations import (
     CollectConfluencePageObservations,
     PageObservationCollectionError,
+    PageObservationCollectionResult,
 )
 from knowledgenexus.foundation.infrastructure.confluence import (
     ConfluenceDataCenterPageObservationAdapter,
@@ -21,6 +22,15 @@ from knowledgenexus.foundation.infrastructure.confluence import (
 from knowledgenexus.foundation.infrastructure.raw_store import (
     ConfluencePageObservationStore,
 )
+from knowledgenexus.foundation.infrastructure.sidecars import (
+    PreparedRestrictionSidecarTarget,
+    RestrictionSidecarPublicationError,
+    RestrictionSidecarSerializationError,
+    RestrictionSidecarTargetError,
+    prepare_restriction_sidecar_target,
+    publish_restriction_sidecar,
+    serialize_restriction_observations,
+)
 
 BASE_URL_ENV = "CONFLUENCE_BASE_URL"
 PAT_ENV = "CONFLUENCE_PAT"
@@ -28,6 +38,9 @@ DEFAULT_RAW_ROOT = "data/raw"
 
 CATEGORY_CONFIGURATION = "configuration"
 CATEGORY_UNEXPECTED = "unexpected"
+CATEGORY_SIDECAR_TARGET = "sidecar_target"
+CATEGORY_SIDECAR_SERIALIZATION = "sidecar_serialization"
+CATEGORY_SIDECAR_PUBLICATION = "sidecar_publication"
 
 EXIT_CODES = {
     CATEGORY_UNEXPECTED: 1,
@@ -40,6 +53,9 @@ EXIT_CODES = {
     "store": 8,
     "attachment_payload": 9,
     "pagination": 10,
+    CATEGORY_SIDECAR_TARGET: 11,
+    CATEGORY_SIDECAR_SERIALIZATION: 12,
+    CATEGORY_SIDECAR_PUBLICATION: 13,
 }
 
 _SUCCESS_CHECKS = (
@@ -51,19 +67,44 @@ _SUCCESS_CHECKS = (
     "pagination_safe",
 )
 
+_REPOSITORY_MARKERS = (
+    Path("contracts/foundation/ACL_MATERIALIZATION_SPEC.md"),
+    Path(
+        "src/knowledgenexus/foundation/cli/"
+        "collect_confluence_page_observations.py"
+    ),
+)
+
 
 class _ConfigurationError(Exception):
     pass
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    sidecar_written = False
     try:
         args = _parse_args(argv)
-        _run(args)
+        prepared_target = _prepare_sidecar_target(args)
+        result = _run(args)
+        if prepared_target is not None:
+            content = serialize_restriction_observations(
+                result.restriction_observations
+            )
+            publish_restriction_sidecar(
+                prepared_target=prepared_target,
+                content=content,
+            )
+            sidecar_written = True
     except SystemExit as exc:
         return int(exc.code or 0)
     except _ConfigurationError:
         return _fail(CATEGORY_CONFIGURATION)
+    except RestrictionSidecarTargetError:
+        return _fail(CATEGORY_SIDECAR_TARGET)
+    except RestrictionSidecarSerializationError:
+        return _fail(CATEGORY_SIDECAR_SERIALIZATION)
+    except RestrictionSidecarPublicationError:
+        return _fail(CATEGORY_SIDECAR_PUBLICATION)
     except PageObservationCollectionError as exc:
         return _fail(exc.category)
     except BaseException:
@@ -71,14 +112,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     for check in _SUCCESS_CHECKS:
         sys.stdout.write(f"{check}=true\n")
+    if sidecar_written:
+        sys.stdout.write("restriction_sidecar_written=true\n")
     return 0
 
 
-def _run(args: argparse.Namespace) -> None:
-    base_url = os.environ.get(BASE_URL_ENV)
-    personal_access_token = os.environ.get(PAT_ENV)
-    if not base_url or not personal_access_token:
-        raise _ConfigurationError
+def _run(args: argparse.Namespace) -> PageObservationCollectionResult:
+    base_url, personal_access_token = _require_credentials()
 
     transport_kwargs: dict[str, object] = {
         "base_url": base_url,
@@ -103,7 +143,44 @@ def _run(args: argparse.Namespace) -> None:
         attachment_page_size=args.attachment_page_size,
         max_attachment_pages=args.max_attachment_pages,
     )
-    use_case.execute(selected_page_id=args.page_id)
+    return use_case.execute(selected_page_id=args.page_id)
+
+
+def _prepare_sidecar_target(
+    args: argparse.Namespace,
+) -> PreparedRestrictionSidecarTarget | None:
+    target_path = args.restriction_observations_sidecar_out
+    if target_path is None:
+        return None
+    repository_root = _resolve_repository_root(Path(__file__))
+    return prepare_restriction_sidecar_target(
+        target_path=target_path,
+        repository_root=repository_root,
+    )
+
+
+def _resolve_repository_root(module_path: Path) -> Path:
+    try:
+        resolved_module = module_path.resolve(strict=True)
+        repository_root = resolved_module.parents[4]
+    except (IndexError, OSError, RuntimeError):
+        raise RestrictionSidecarTargetError() from None
+    for marker in _REPOSITORY_MARKERS:
+        marker_path = repository_root / marker
+        try:
+            if not marker_path.is_file() or marker_path.is_symlink():
+                raise RestrictionSidecarTargetError()
+        except OSError:
+            raise RestrictionSidecarTargetError() from None
+    return repository_root
+
+
+def _require_credentials() -> tuple[str, str]:
+    base_url = os.environ.get(BASE_URL_ENV)
+    personal_access_token = os.environ.get(PAT_ENV)
+    if not base_url or not personal_access_token:
+        raise _ConfigurationError
+    return base_url, personal_access_token
 
 
 def _fail(category: str) -> int:
@@ -153,6 +230,15 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--max-attachment-pages", type=_positive_int, required=True)
     parser.add_argument("--timeout-seconds", type=_positive_float, default=None)
     parser.add_argument("--max-response-bytes", type=_positive_int, default=None)
+    parser.add_argument(
+        "--restriction-observations-sidecar-out",
+        type=Path,
+        default=None,
+        help=(
+            "Opt in to an external normalized restriction-observation "
+            "sidecar. The absolute target must not already exist."
+        ),
+    )
     return parser.parse_args(argv)
 
 
