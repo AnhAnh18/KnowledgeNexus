@@ -49,3 +49,26 @@ def test_spec_has_no_blanket_no_confluence_contradiction() -> None:
     # The retired wording bundled the Confluence claim into an unqualified
     # conjunction; it must not reappear and re-introduce the contradiction.
     assert "and never calls Confluence" not in spec
+
+
+def test_spec_locks_the_shared_sidecar_byte_bound() -> None:
+    spec = _normalized_spec()
+
+    assert (
+        "`MAX_RESTRICTION_SIDECAR_BYTES = 16 * 1024 * 1024` (16 MiB)"
+        in spec
+    )
+    assert "including the trailing LF" in spec
+    assert "shared by the M6F-C1 producer and M6F-C2 loader" in spec
+
+
+def test_spec_keeps_cli_failures_out_of_the_acl_domain_taxonomy() -> None:
+    spec = _normalized_spec()
+
+    assert "separate CLI/infrastructure vocabulary" in spec
+    for category in (
+        "sidecar_target",
+        "sidecar_serialization",
+        "sidecar_publication",
+    ):
+        assert category in spec

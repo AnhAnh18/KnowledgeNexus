@@ -395,7 +395,7 @@ unavailable_acl_records
 manual_review_records
 ```
 
-## 10. Future M6F-C1 capture contract (document only)
+## 10. M6F-C1 capture contract
 
 M6F-C1 adds an opt-in mode to the existing M6B operator command. Default
 behavior without the option remains: no sidecar file. With explicit capture, the
@@ -421,6 +421,14 @@ Serialization is deterministic, UTF-8 without BOM, `allow_nan=False`.
 `PageObservationCollectionResult.restriction_observations`. A hand-authored
 fixture is always `synthetic_fixture`. `evidence_kind` is descriptive metadata,
 not cryptographic proof.
+
+The exact serialized UTF-8 bytes, including the trailing LF, must not exceed
+`MAX_RESTRICTION_SIDECAR_BYTES = 16 * 1024 * 1024` (16 MiB). This independent
+artifact safety cap is shared by the M6F-C1 producer and M6F-C2 loader; it is not
+derived from the per-response Confluence transport limit and does not guarantee
+that every otherwise-valid M6B result is capturable. An oversized sidecar fails
+closed after M6B collection without publishing a final target or rolling back
+raw M6B artifacts.
 
 Publication-failure semantics: if sidecar publication fails after M6B
 collection, the command fails and the final sidecar target must not exist;
@@ -481,3 +489,15 @@ models: `canonical_document_invalid`, `chunk_record_invalid`,
 `invalid_restriction_observations`, `canonical_observation_identity_mismatch`,
 and the wrapper `acl_materialization_failed`. `invalid_crawler_identity` and
 `invalid_extracted_at` are reserved for M6F-B `ACLRecord` construction.
+
+M6F-C1 operator failures use a separate CLI/infrastructure vocabulary rather
+than extending the ACL materialization domain taxonomy:
+
+```
+sidecar_target
+sidecar_serialization
+sidecar_publication
+```
+
+They map respectively to invalid preflight target, deterministic
+serialization/size-limit failure, and post-collection publication failure.
