@@ -80,7 +80,7 @@ Sync-state clarification:
 | M6F-A - ACL materialization contract and input validators | complete; independently approved | Head `0df1818`; A1 locks the contract, A2 adds principal projection, A3 validates M6E ACL-stage provenance, A4 validates M6B restriction observations | Boundary stage only; no network or materialization. |
 | M6F-B - Deny-safe ACL materialization | complete; independently approved | Approved merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`; contained code commit `cd764f3`; focused M6F-A+B closeout suite 248 passed | Fully offline; no open P0-P2; live/full-page acceptance remains later. |
 | M6F-C1 - Opt-in M6B observation sidecar capture | complete; controlled live capture independently approved | Source-review head `bf6b79a` is provenance only; offline tests passed and exactly one authorized live capture passed with no open P0-P2 | External sidecar remains uncommitted and unmodified; the pre-existing documentation-only worktree deviation was accepted as non-blocking P3 and did not require recapture. |
-| M6F-C2 - Offline ACL composition acceptance | next; unblocked; not started | Approved real sidecar plus preserved M6A raw bytes are available externally | Activate the C2 contract, consume the sidecar offline, bind exact M6A ancestry, and run full M6F composition acceptance. |
+| M6F-C2 - Offline ACL composition acceptance | implementation complete and independently approved; real acceptance next | Approved source head `74fdbf1`; source merge head `c12dcc2`; 105 focused and 1,555 full offline tests passed with no open P0-P2 | Transfer the approved tree, then run one offline acceptance against the retained real C1 sidecar and preserved M6A bytes. |
 | M6F-D - Final M6F documentation closeout | blocked on M6F-C2 | Requires accepted real captured evidence | Planning/documentation stage only; not a new focused-spec implementation stage. |
 | M6G - Downstream ACL persistence and one-page export through M3 | blocked on M6F-D | M6A-M6F gates required | Persist/export the approved one-page record graph; persistence/export does not move into M6F-C1/C2. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
@@ -93,7 +93,8 @@ Sync-state clarification:
 Current area: M6F-A and M6F-B are complete and independently approved through
 production merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`.
 M6F overall is not complete. M6F-C1 offline code and its separately authorized
-controlled live capture are approved; M6F-C2 is the next task.
+controlled live capture are approved. M6F-C2 implementation is independently
+approved; its real captured-sidecar offline acceptance is next.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -791,7 +792,8 @@ Status:
 - M6F-C1: complete; controlled live read-only capture independently approved;
   source-review head `bf6b79a` is provenance only for independent transfer
   repositories.
-- M6F-C2: next and unblocked; not started.
+- M6F-C2: implementation complete and independently approved at source head
+  `74fdbf1` and source merge head `c12dcc2`; real offline acceptance pending.
 - M6F-D: final documentation closeout, blocked on M6F-C2.
 - M6G: downstream ACL persistence/export integration, blocked on M6F-D.
 
@@ -807,8 +809,8 @@ Tasks:
   approved; fully offline).
 - M6F-C1 add opt-in M6B normalized-observation sidecar capture (done; offline
   code and controlled live capture approved).
-- M6F-C2 consume the sidecar offline, bind M6A ancestry, and run full M6F
-  composition acceptance.
+- M6F-C2 implementation is done; transfer the approved tree and run the real
+  sidecar offline composition acceptance.
 - M6F-D perform the final M6F documentation closeout.
 - M6G persist/export the one-page real snapshot through M3.
 
@@ -963,11 +965,10 @@ Acceptance categories:
 
 ## 13. Immediate Execution Order
 
-1. Implement M6F-C2 only: first activate the focused C2 contract, then add
-   strict offline sidecar consumption, single-byte M6A ancestry binding, and
-   full M6F composition acceptance.
-2. Independently review and freeze the local C2 production head before running
-   real captured-sidecar offline acceptance.
+1. Transfer the approved M6F-C2 source tree into the main-machine repository
+   and prove scoped production/contracts/tests tree equivalence.
+2. Freeze that repository's local C2 execution head, then run one controlled
+   real captured-sidecar offline acceptance with no network or output artifact.
 3. After accepted real captured evidence, perform the M6F-D final
    documentation closeout.
 4. Begin M6G downstream ACL persistence/export integration only after M6F is

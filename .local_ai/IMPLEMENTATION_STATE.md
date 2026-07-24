@@ -11,8 +11,9 @@ canonical document and all chunks. M6F-A and M6F-B are complete and approved:
 the contract and trusted-input boundaries are locked, one deny-safe `ACLRecord`
 is materialized, and its ACL tags are propagated to the trusted chunks. M6F is
 not yet complete. M6F-C1 is complete and approved, including its separately
-authorized controlled live read-only capture; M6F-C2 is the next task. No raw
-production artifact exists in this repository.
+authorized controlled live read-only capture. M6F-C2 implementation and
+independent source review are complete; one real captured-sidecar offline
+acceptance run is next. No raw production artifact exists in this repository.
 
 ## Done
 
@@ -1095,8 +1096,9 @@ Review artifact:
   capture and M6F-C2 offline composition-acceptance stages.
 - Code-only patch sets are transfer artifacts. They are not additional
   production commits and do not define an alternative approved history.
-- M6F overall is not complete. M6F-C2 is next; the M6F-D final documentation
-  closeout and M6G remain blocked on the preceding stages.
+- M6F overall is not complete. M6F-C2 implementation is approved, but its real
+  captured-sidecar offline acceptance remains pending; the M6F-D final
+  documentation closeout and M6G remain blocked on that acceptance.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
@@ -1129,12 +1131,23 @@ Review artifact:
   patch-transfer repository. Future operator gates must bind to that
   repository's local transfer/execution commit and separately prove production
   tree equivalence to the approved patch set.
-- M6F-C2 is unblocked and has not started.
+- M6F-C2 implementation is complete and independently approved at source-review
+  head `74fdbf1c34560b3063fe416d9c746c8b73c0424f` (`74fdbf1`) and source
+  production merge head `c12dcc2b685c846f23a013c1b7b4c7950025f2a1`
+  (`c12dcc2`). Focused verification passed 105 tests with two
+  platform-inapplicable skips; the full offline Foundation/Shared/Architecture/
+  embedding matrix passed 1,555 tests with the exact pinned BGE-M3 bundle and
+  the same two platform-inapplicable skips. Independent review found no open
+  P0, P1, or P2; one non-blocking P3 test-quality note remains.
+- The two M6F-C2 code-only patch files are transfer artifacts grouped by strict
+  sidecar consumption and offline composition acceptance. They reproduce the
+  approved source tree exactly and are not alternative production commits.
 
 ## Next Planned Task
 
-Implement M6F-C2 only: activate the focused C2 contract, strict-load the
-external sidecar offline, bind its exact ordered observations to the single
-preserved M6A raw-byte snapshot, and run full M6F composition acceptance. Do
-not begin M6F-D, M6G persistence/export integration, Jira API enrichment,
-media relations, or page-link extraction.
+Run one controlled offline M6F-C2 acceptance on the main-machine repository
+using its retained real C1 sidecar, preserved M6A raw-byte snapshot, exact
+pinned BGE-M3 bundle, and a locally transferred tree proven equivalent to the
+approved source head. Do not perform network access or create output artifacts.
+Do not begin M6F-D, M6G persistence/export integration, Jira API enrichment,
+media relations, or page-link extraction before that acceptance passes.
