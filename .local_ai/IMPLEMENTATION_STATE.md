@@ -1100,10 +1100,11 @@ Review artifact:
   production commits and do not define an alternative approved history.
 - M6F-D documentation-only closeout is complete. M6F is complete and approved
   with no unresolved P0, P1, or P2 finding.
-- M6G-A is the current documentation/contract task. It activates the focused
-  one-page export contract over the approved M3 and M6F boundaries. No M6G
-  production code has started, and M6 overall remains incomplete until the
-  approved one-page snapshot is exported through M3.
+- M6G-A is complete and independently approved at source-review head
+  `dbe5c2f`. It activates the focused one-page export contract over the
+  approved M3 and M6F boundaries. No M6G production code existed at that head,
+  and M6 overall remains incomplete until the approved one-page snapshot is
+  exported through M3.
 - The owner accepted and froze the documentation-only M6F-D closeout source
   head at `03c206f`. This closes the M6F-D documentation gate without claiming
   a separate production-code review; M6G-A still requires its own reviewed
@@ -1111,8 +1112,11 @@ Review artifact:
 - The owner-approval registration commit is working-repository head `56e7750`;
   it is `SOURCE_REVIEW_BASE` provenance for M6G-A, not a checkout requirement
   for the independent main-machine repository.
-- M6G-B, M6G-C, M6G-D, and M7 remain blocked until M6G-A receives independent
-  approval and its source-review head is frozen.
+- Independent review found no P0, P1, or P2. Two P3 items are deferred to the
+  appropriate implementation gates: add contract-consistency coverage in
+  M6G-B, and require the byte-identical M4 golden snapshot test in M6G-C.
+- M6G-B is the next unblocked planning task. M6G-C, M6G-D, and M7 remain
+  blocked by their preceding approval gates.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
@@ -1171,7 +1175,8 @@ Review artifact:
 
 ## Next Planned Task
 
-Independently review the M6G-A `ONE_PAGE_EXPORT_SPEC.md` candidate and its
-minimal navigation/state changes. Freeze its source-review head only after no
-P0, P1, or P2 remains. Do not begin M6G-B, M6G-C, M6G-D, or M7 before that
-gate. No M6G production work has started.
+Plan M6G-B against approved M6G-A source-review head `dbe5c2f`. M6G-B owns only
+the reusable M6A-through-M6F composition boundary, trusted export projection,
+and deterministic profile/config derivation. It must add the deferred
+contract-consistency coverage. Do not begin M6G-C, M6G-D, or M7 as part of
+M6G-B.
