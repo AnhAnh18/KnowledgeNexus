@@ -11,9 +11,10 @@ canonical document and all chunks. M6F-A and M6F-B are complete and approved:
 the contract and trusted-input boundaries are locked, one deny-safe `ACLRecord`
 is materialized, and its ACL tags are propagated to the trusted chunks. M6F is
 not yet complete. M6F-C1 is complete and approved, including its separately
-authorized controlled live read-only capture. M6F-C2 implementation and
-independent source review are complete; one real captured-sidecar offline
-acceptance run is next. No raw production artifact exists in this repository.
+authorized controlled live read-only capture. M6F-C2 implementation, source
+review, and real captured-sidecar offline acceptance are complete and approved.
+M6F-D documentation closeout is next. No raw production artifact exists in
+this repository.
 
 ## Done
 
@@ -1096,9 +1097,8 @@ Review artifact:
   capture and M6F-C2 offline composition-acceptance stages.
 - Code-only patch sets are transfer artifacts. They are not additional
   production commits and do not define an alternative approved history.
-- M6F overall is not complete. M6F-C2 implementation is approved, but its real
-  captured-sidecar offline acceptance remains pending; the M6F-D final
-  documentation closeout and M6G remain blocked on that acceptance.
+- M6F overall is not complete. M6F-C2 is complete and approved; M6F-D final
+  documentation closeout is next, and M6G remains blocked on M6F-D.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
@@ -1142,12 +1142,22 @@ Review artifact:
 - The two M6F-C2 code-only patch files are transfer artifacts grouped by strict
   sidecar consumption and offline composition acceptance. They reproduce the
   approved source tree exactly and are not alternative production commits.
+- M6F-C2 real captured-sidecar offline acceptance passed at main-machine
+  execution head `2034ea4`, transferred from main-machine head `7feae06`.
+  Operator transcript evidence proves that the execution head was committed,
+  the tracked worktree was clean before the run, and the run left it unchanged.
+- All nine scoped production, contract, and test blobs at the main-machine
+  execution head exactly match approved source-review head `74fdbf1`.
+- The acceptance passed exact ancestry binding, ACL/chunk schema validation,
+  ACL-only chunk mutation, ACL propagation, deterministic repeat, raw/sidecar
+  immutability, tokenizer integrity, no-network, no-output, and leak-scan gates.
+  The independent provenance review approved the evidence and requires no
+  rerun. Aggregate evidence is registered in
+  `.local_ai/review/m6f-c2-real-offline-acceptance-summary.md`.
 
 ## Next Planned Task
 
-Run one controlled offline M6F-C2 acceptance on the main-machine repository
-using its retained real C1 sidecar, preserved M6A raw-byte snapshot, exact
-pinned BGE-M3 bundle, and a locally transferred tree proven equivalent to the
-approved source head. Do not perform network access or create output artifacts.
-Do not begin M6F-D, M6G persistence/export integration, Jira API enrichment,
-media relations, or page-link extraction before that acceptance passes.
+Perform M6F-D only: synchronize the final M6F durable state and close the M6F
+milestone without changing production code, contracts, schemas, or tests. Do
+not begin M6G persistence/export integration, Jira API enrichment, media
+relations, or page-link extraction during that closeout.
