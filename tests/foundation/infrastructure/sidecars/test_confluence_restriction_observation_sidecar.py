@@ -4,7 +4,7 @@ import json
 import os
 import stat
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -13,10 +13,14 @@ from knowledgenexus.foundation.infrastructure.sidecars import (
     CAPTURED_M6B_EVIDENCE_KIND,
     MAX_RESTRICTION_SIDECAR_BYTES,
     RESTRICTION_SIDECAR_FORMAT_VERSION,
+    SYNTHETIC_FIXTURE_EVIDENCE_KIND,
+    LoadedRestrictionSidecar,
     PreparedRestrictionSidecarTarget,
+    RestrictionSidecarLoadError,
     RestrictionSidecarPublicationError,
     RestrictionSidecarSerializationError,
     RestrictionSidecarTargetError,
+    load_restriction_sidecar,
     prepare_restriction_sidecar_target,
     publish_restriction_sidecar,
     serialize_restriction_observations,
@@ -49,6 +53,496 @@ def _prepare(target: Path) -> PreparedRestrictionSidecarTarget:
     return prepare_restriction_sidecar_target(
         target_path=target,
         repository_root=REPOSITORY_ROOT,
+    )
+
+
+def _write_loaded_sidecar(
+    path: Path,
+    *,
+    evidence_kind: str = CAPTURED_M6B_EVIDENCE_KIND,
+    observations: object = OBSERVATIONS,
+) -> bytes:
+    content = (
+        json.dumps(
+            {
+                "format_version": RESTRICTION_SIDECAR_FORMAT_VERSION,
+                "evidence_kind": evidence_kind,
+                "restriction_observations": observations,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    path.write_bytes(content)
+    return content
+
+
+@pytest.mark.parametrize(
+    "evidence_kind",
+    [CAPTURED_M6B_EVIDENCE_KIND, SYNTHETIC_FIXTURE_EVIDENCE_KIND],
+)
+def test_strict_loader_accepts_both_evidence_kinds_and_preserves_order(
+    tmp_path: Path,
+    evidence_kind: str,
+) -> None:
+    target = tmp_path / "sidecar.json"
+    exact = _write_loaded_sidecar(target, evidence_kind=evidence_kind)
+
+    loaded, source_bytes = load_restriction_sidecar(target)
+
+    assert isinstance(loaded, LoadedRestrictionSidecar)
+    assert loaded.evidence_kind == evidence_kind
+    assert source_bytes == exact
+    assert [
+        item["source_page_id"]  # type: ignore[index]
+        for item in loaded.restriction_observations
+    ] == ["900", "1000"]
+
+
+def test_loaded_sidecar_is_ownership_isolated_and_repr_safe(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "private-sidecar-name.json"
+    _write_loaded_sidecar(target)
+
+    loaded, _ = load_restriction_sidecar(target)
+    payload = loaded.restriction_observations[0]
+    assert isinstance(payload, dict)
+    payload["source_page_id"] = "changed"
+    reloaded, _ = load_restriction_sidecar(target)
+
+    assert (
+        reloaded.restriction_observations[0]["source_page_id"]  # type: ignore[index]
+        == "900"
+    )
+    assert target.name not in repr(loaded)
+    assert "900" not in repr(loaded)
+
+
+def test_strict_loader_accepts_exact_byte_cap_and_rejects_cap_plus_one(
+    tmp_path: Path,
+) -> None:
+    prefix = (
+        b'{"evidence_kind":"synthetic_fixture","format_version":"1.0",'
+        b'"restriction_observations":["'
+    )
+    suffix = b'"]}'
+    content = (
+        prefix
+        + (
+            b"x"
+            * (
+                MAX_RESTRICTION_SIDECAR_BYTES
+                - len(prefix)
+                - len(suffix)
+            )
+        )
+        + suffix
+    )
+    target = tmp_path / "sidecar.json"
+    target.write_bytes(content)
+
+    assert load_restriction_sidecar(target)[1] == content
+
+    target.write_bytes(content + b" ")
+    with pytest.raises(RestrictionSidecarLoadError):
+        load_restriction_sidecar(target)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"",
+        b"\xef\xbb\xbf{}",
+        b"\xff",
+        b"{",
+        b"[]",
+        b'{"format_version":"1.0","evidence_kind":"captured_m6b_result"}',
+        (
+            b'{"format_version":"1.0","evidence_kind":"captured_m6b_result",'
+            b'"restriction_observations":[],"extra":true}'
+        ),
+        (
+            b'{"format_version":"2.0","evidence_kind":"captured_m6b_result",'
+            b'"restriction_observations":[]}'
+        ),
+        (
+            b'{"format_version":"1.0","evidence_kind":"unknown",'
+            b'"restriction_observations":[]}'
+        ),
+        (
+            b'{"format_version":"1.0","evidence_kind":"captured_m6b_result",'
+            b'"restriction_observations":{}}'
+        ),
+        (
+            b'{"format_version":"1.0","format_version":"1.0",'
+            b'"evidence_kind":"captured_m6b_result","restriction_observations":[]}'
+        ),
+        (
+            b'{"format_version":"1.0","evidence_kind":"captured_m6b_result",'
+            b'"restriction_observations":[{"users":[{"userKey":"a",'
+            b'"userKey":"b"}]}]}'
+        ),
+        (
+            b'{"format_version":"1.0","evidence_kind":"captured_m6b_result",'
+            b'"restriction_observations":[NaN]}'
+        ),
+        (
+            b'{"format_version":"1.0","evidence_kind":"captured_m6b_result",'
+            b'"restriction_observations":[Infinity]}'
+        ),
+    ],
+)
+def test_strict_loader_rejects_invalid_bytes_with_sanitized_failure(
+    tmp_path: Path,
+    content: bytes,
+) -> None:
+    target = tmp_path / "sensitive-name.json"
+    target.write_bytes(content)
+
+    with pytest.raises(
+        RestrictionSidecarLoadError, match="^restriction_sidecar$"
+    ) as captured:
+        load_restriction_sidecar(target)
+
+    assert target.name not in repr(captured.value)
+    assert "userKey" not in repr(captured.value)
+
+
+@pytest.mark.parametrize("number", ("1e309", "-1e309", "1e999999"))
+def test_strict_loader_rejects_nested_exponent_overflow_as_non_finite(
+    tmp_path: Path,
+    number: str,
+) -> None:
+    target = tmp_path / "sensitive-name.json"
+    target.write_bytes(
+        (
+            '{"format_version":"1.0",'
+            '"evidence_kind":"captured_m6b_result",'
+            '"restriction_observations":[{'
+            '"source_page_id":"1000",'
+            f'"http_status":{number},'
+            '"classification":"unavailable",'
+            '"users":[],"groups":[]}]}'
+        ).encode("ascii")
+    )
+
+    with pytest.raises(
+        RestrictionSidecarLoadError,
+        match="^restriction_sidecar$",
+    ) as captured:
+        load_restriction_sidecar(target)
+
+    assert target.name not in repr(captured.value)
+    assert number not in repr(captured.value)
+
+
+def test_strict_loader_rejects_missing_directory_and_relative_paths(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    for path in (
+        tmp_path / "missing.json",
+        directory,
+        Path("relative.json"),
+    ):
+        with pytest.raises(RestrictionSidecarLoadError):
+            load_restriction_sidecar(path)
+
+
+def test_posix_dot_dot_path_is_rejected_before_any_descriptor_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempted_open = False
+
+    def unexpected_open(*_args: object, **_kwargs: object) -> int:
+        nonlocal attempted_open
+        attempted_open = True
+        raise AssertionError("dot-dot traversal reached the filesystem")
+
+    monkeypatch.setattr(
+        sidecar,
+        "_open_posix_plain_directory",
+        unexpected_open,
+    )
+
+    with pytest.raises(
+        RestrictionSidecarLoadError,
+        match="^restriction_sidecar$",
+    ):
+        sidecar._open_posix_bound_regular_file(  # type: ignore[arg-type]
+            PurePosixPath("/safe/a/../target/sidecar.json")
+        )
+
+    assert not attempted_open
+
+
+def test_strict_loader_rejects_symlink_and_symlink_parent(
+    tmp_path: Path,
+) -> None:
+    real = tmp_path / "real.json"
+    _write_loaded_sidecar(real)
+    linked = tmp_path / "linked.json"
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    nested = real_parent / "nested.json"
+    _write_loaded_sidecar(nested)
+    linked_parent = tmp_path / "linked-parent"
+    try:
+        linked.symlink_to(real)
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    with pytest.raises(RestrictionSidecarLoadError):
+        load_restriction_sidecar(linked)
+    with pytest.raises(RestrictionSidecarLoadError):
+        load_restriction_sidecar(linked_parent / "nested.json")
+
+
+def test_strict_loader_rejects_path_identity_change_during_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "sidecar.json"
+    _write_loaded_sidecar(target)
+    calls = 0
+    if os.name == "nt":
+        real_stat = sidecar._stat_windows_bound_entry
+
+        def changed_identity(
+            *,
+            parent_handle: int,
+            name: str,
+        ) -> object:
+            nonlocal calls
+            details = real_stat(
+                parent_handle=parent_handle,
+                name=name,
+            )
+            calls += 1
+            if calls == 1:
+                return details
+            return SimpleNamespace(
+                st_dev=details.st_dev,
+                st_ino=details.st_ino + 1,
+                st_size=details.st_size,
+                st_mtime_ns=details.st_mtime_ns,
+                st_mode=details.st_mode,
+                st_file_attributes=getattr(
+                    details,
+                    "st_file_attributes",
+                    0,
+                ),
+            )
+
+        monkeypatch.setattr(
+            sidecar,
+            "_stat_windows_bound_entry",
+            changed_identity,
+        )
+    else:
+        real_stat = sidecar._stat_posix_bound_entry
+
+        def changed_identity(
+            *,
+            parent_descriptor: int,
+            name: str,
+        ) -> object:
+            nonlocal calls
+            details = real_stat(
+                parent_descriptor=parent_descriptor,
+                name=name,
+            )
+            calls += 1
+            if calls == 1:
+                return details
+            return SimpleNamespace(
+                st_dev=details.st_dev,
+                st_ino=details.st_ino + 1,
+                st_size=details.st_size,
+                st_mtime_ns=details.st_mtime_ns,
+                st_mode=details.st_mode,
+                st_file_attributes=getattr(
+                    details,
+                    "st_file_attributes",
+                    0,
+                ),
+            )
+
+        monkeypatch.setattr(
+            sidecar,
+            "_stat_posix_bound_entry",
+            changed_identity,
+        )
+
+    with pytest.raises(RestrictionSidecarLoadError):
+        load_restriction_sidecar(target)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor-relative race")
+def test_strict_loader_does_not_follow_parent_swap_after_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    safe_parent = tmp_path / "safe-parent"
+    safe_parent.mkdir()
+    target = safe_parent / "sidecar.json"
+    expected = _write_loaded_sidecar(target)
+    moved_safe_parent = tmp_path / "moved-safe-parent"
+    attacker_parent = tmp_path / "attacker-parent"
+    attacker_parent.mkdir()
+    attacker_target = attacker_parent / target.name
+    attacker_target.write_bytes(
+        expected.replace(b'"900"', b'"777"', 1)
+    )
+    real_stat = sidecar._stat_posix_bound_entry
+    swapped = False
+
+    def swap_then_stat(
+        *,
+        parent_descriptor: int,
+        name: str,
+    ) -> os.stat_result:
+        nonlocal swapped
+        if not swapped:
+            safe_parent.rename(moved_safe_parent)
+            safe_parent.symlink_to(attacker_parent, target_is_directory=True)
+            swapped = True
+        return real_stat(
+            parent_descriptor=parent_descriptor,
+            name=name,
+        )
+
+    monkeypatch.setattr(
+        sidecar,
+        "_stat_posix_bound_entry",
+        swap_then_stat,
+    )
+
+    loaded, exact_bytes = load_restriction_sidecar(target)
+
+    assert swapped
+    assert exact_bytes == expected
+    assert loaded.restriction_observations[0]["source_page_id"] == "900"  # type: ignore[index]
+    assert target.read_bytes() == attacker_target.read_bytes()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows parent handle guard")
+def test_strict_loader_holds_parent_against_replacement_during_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "guarded-parent"
+    parent.mkdir()
+    target = parent / "sidecar.json"
+    expected = _write_loaded_sidecar(target)
+    moved_parent = tmp_path / "moved-parent"
+    attacker_parent = tmp_path / "attacker-parent"
+    attacker_parent.mkdir()
+    attacker_target = attacker_parent / target.name
+    attacker_bytes = expected.replace(b'"900"', b'"777"', 1)
+    attacker_target.write_bytes(attacker_bytes)
+    real_stat = sidecar._stat_windows_bound_entry
+    swapped = False
+
+    def swap_then_stat(
+        *,
+        parent_handle: int,
+        name: str,
+    ) -> os.stat_result:
+        nonlocal swapped
+        if not swapped:
+            parent.rename(moved_parent)
+            attacker_parent.rename(parent)
+            swapped = True
+        return real_stat(
+            parent_handle=parent_handle,
+            name=name,
+        )
+
+    monkeypatch.setattr(
+        sidecar,
+        "_stat_windows_bound_entry",
+        swap_then_stat,
+    )
+
+    assert load_restriction_sidecar(target)[1] == expected
+    assert swapped
+    assert target.read_bytes() == attacker_bytes
+    assert (moved_parent / target.name).read_bytes() == expected
+    assert target.exists()
+    assert moved_parent.exists()
+
+
+def test_strict_loader_rejects_reparse_file_attribute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "sidecar.json"
+    _write_loaded_sidecar(target)
+    if os.name != "nt":
+        pytest.skip("Windows reparse attribute assertion")
+    real_attributes = sidecar._windows_file_attributes
+
+    def mark_file_as_reparse(handle: int) -> int:
+        attributes = real_attributes(handle)
+        if attributes & 0x10:  # FILE_ATTRIBUTE_DIRECTORY
+            return attributes
+        return attributes | sidecar._FILE_ATTRIBUTE_REPARSE_POINT
+
+    monkeypatch.setattr(
+        sidecar,
+        "_windows_file_attributes",
+        mark_file_as_reparse,
+    )
+
+    with pytest.raises(RestrictionSidecarLoadError):
+        load_restriction_sidecar(target)
+
+
+def test_strict_loader_sanitizes_open_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "sensitive-sidecar.json"
+    _write_loaded_sidecar(target)
+
+    def fail_open(*_args: object, **_kwargs: object) -> object:
+        raise OSError("SENSITIVE PATH OR CONTENT")
+
+    if os.name == "nt":
+        monkeypatch.setattr(
+            sidecar,
+            "_open_windows_regular_file_descriptor",
+            fail_open,
+        )
+    else:
+        monkeypatch.setattr(
+            sidecar,
+            "_open_posix_bound_regular_file",
+            fail_open,
+        )
+
+    with pytest.raises(RestrictionSidecarLoadError) as captured:
+        load_restriction_sidecar(target)
+
+    assert "SENSITIVE" not in str(captured.value)
+    assert target.name not in repr(captured.value)
+
+
+def test_existing_c1_serializer_remains_byte_identical_after_loader_added() -> None:
+    assert serialize_restriction_observations(OBSERVATIONS) == (
+        b'{"evidence_kind":"captured_m6b_result","format_version":"1.0",'
+        b'"restriction_observations":[{"classification":"restricted",'
+        b'"groups":[{"name":"group-b"},{"name":"group-a"}],"http_status":200,'
+        b'"source_page_id":"900","users":[{"userKey":"first"},'
+        b'{"userKey":"second"}]},{"classification":"unavailable","groups":[],'
+        b'"http_status":404,"source_page_id":"1000","users":[]}]}\n'
     )
 
 
@@ -418,3 +912,4 @@ def test_published_file_retains_user_restrictive_temp_permissions(
     )
 
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    load_restriction_sidecar,

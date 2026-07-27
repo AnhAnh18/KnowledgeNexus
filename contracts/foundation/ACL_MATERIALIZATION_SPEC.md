@@ -395,7 +395,7 @@ unavailable_acl_records
 manual_review_records
 ```
 
-## 10. Future M6F-C1 capture contract (document only)
+## 10. M6F-C1 capture contract
 
 M6F-C1 adds an opt-in mode to the existing M6B operator command. Default
 behavior without the option remains: no sidecar file. With explicit capture, the
@@ -422,6 +422,14 @@ Serialization is deterministic, UTF-8 without BOM, `allow_nan=False`.
 fixture is always `synthetic_fixture`. `evidence_kind` is descriptive metadata,
 not cryptographic proof.
 
+The exact serialized UTF-8 bytes, including the trailing LF, must not exceed
+`MAX_RESTRICTION_SIDECAR_BYTES = 16 * 1024 * 1024` (16 MiB). This independent
+artifact safety cap is shared by the M6F-C1 producer and M6F-C2 loader; it is not
+derived from the per-response Confluence transport limit and does not guarantee
+that every otherwise-valid M6B result is capturable. An oversized sidecar fails
+closed after M6B collection without publishing a final target or rolling back
+raw M6B artifacts.
+
 Publication-failure semantics: if sidecar publication fails after M6B
 collection, the command fails and the final sidecar target must not exist;
 temporary sidecar cleanup is best-effort; the sidecar writer must not modify,
@@ -433,12 +441,100 @@ Implementation, review, and tests for C1 are offline using fake transports. One
 separately authorized controlled live read-only M6B run is allowed later to
 create real evidence.
 
-## 11. Future M6F-C2 acceptance contract (document only)
+## 11. M6F-C2 offline composition acceptance contract
 
-M6F-C2 is offline. It loads a strict bounded sidecar, binds its full ordered
-`source_page_id` sequence to `extract_ordered_restriction_targets()` from
-preserved M6A raw bytes, runs M6F composition without network, and supports
-synthetic and captured evidence explicitly.
+M6F-C2 is an active offline acceptance stage. It strict-loads one bounded
+sidecar, binds its full ordered `source_page_id` sequence to
+`extract_ordered_restriction_targets()` from the exact preserved M6A byte
+snapshot used for normalization, and composes the approved M6A through M6F-B
+path without network access. It supports synthetic and captured evidence
+explicitly and writes no output artifact.
+
+### 11.1 Strict sidecar consumption
+
+The loader accepts an explicit existing regular file and never modifies,
+normalizes, republishes, or deletes it. It rejects missing files, directories,
+symlinks, Windows reparse points, unstable/replaced entries, empty files, UTF-8
+BOMs, invalid UTF-8, malformed JSON, duplicate object keys at any depth,
+non-finite JSON constants or exponent-overflow numbers, unknown or extra
+top-level fields, wrong versions, unknown evidence kinds, and non-array
+observation collections.
+
+The loader performs a descriptor-based bounded binary read of at most
+`MAX_RESTRICTION_SIDECAR_BYTES + 1`, uses no unbounded convenience read,
+verifies that the pre-open path entry, opened descriptor, and post-read path
+entry identify the same stable regular file, and closes the descriptor on every
+path. The complete parent chain is traversed component-by-component without
+following links and the final file is opened relative to the bound parent
+descriptor/handle; a pathname-only parent check is insufficient. POSIX uses
+descriptor-relative no-follow operations. Windows uses handle-relative
+no-follow operations with reparse inspection. A `..` relative component is
+rejected before parent-chain traversal; the loader never resolves a literal
+dot-dot component through an opened directory descriptor. The accepted
+evidence kinds are exactly `captured_m6b_result` and `synthetic_fixture`.
+Observation array order and every decoded JSON scalar value are preserved; the
+loader never sorts, trims, repairs, normalizes, or infers observation values.
+
+The loader returns ownership-isolated parsed observations plus the exact byte
+snapshot retained privately by the composition boundary for the final
+unchanged check. Its exceptions and representations expose only stable
+categories, never a path, filename, content value, identifier, principal, URL,
+crawler identity, or hash.
+
+### 11.2 Single-byte raw lineage and exact ancestry
+
+`ConfluencePageObservationStore.read_page(page_id)` reads the preserved M6A
+artifact exactly once into an immutable byte snapshot. A private fixed-byte
+`RawPageReadPort`, bound to the selected page identity, supplies that same
+snapshot to `NormalizeConfluencePage`; it performs no filesystem access. The
+same bytes are passed to `extract_ordered_restriction_targets()`.
+
+After the existing observation validator succeeds, the validated
+`source_page_id` tuple must equal the extracted raw-page target tuple exactly:
+same length, values, order, uniqueness, and selected page last. Sets, normalized
+metadata, reconstructed ancestry, and Confluence refetches are forbidden.
+Both deterministic composition runs use the same raw and sidecar byte
+snapshots with independently ownership-copied observations.
+
+After composition, the real raw store and strict sidecar loader read their
+respective artifacts again. Exact byte equality is required. A final raw read
+failure retains the existing normalization failure category; a successful
+reread with changed bytes, or any final sidecar reread/identity/byte failure,
+is an acceptance failure.
+
+### 11.3 Composition and acceptance
+
+The CLI composes the existing chunking profile and exact local BGE-M3
+tokenizer, Jira relation profile, normalizer, structure parser, chunk builder,
+Jira relation builder, exact ancestry binding, and `MaterializeConfluenceAcl`.
+It derives no time and accepts explicit `crawled_at`, relation `created_at`, ACL
+`extracted_at`, and crawler identity values. It imports or constructs no
+transport/connector, reads no credential, performs no network request, and
+creates no output file.
+
+Acceptance requires one schema-valid ACLRecord; schema-valid final chunks;
+unchanged CanonicalDocument and ordered RelationRecords; unchanged chunk count
+and order; exact equality of every non-ACL chunk field; every final
+`acl_tags` equal to the non-empty schema-valid ACLRecord tags; valid zero-chunk
+and zero-relation paths; equal results from two identical runs; unmutated M6E,
+raw-byte, validated-observation, and sidecar inputs; no network; and no output
+artifact.
+
+Stage-specific CLI failures are:
+
+```
+initial sidecar load/shape/encoding/identity  -> restriction_sidecar, exit 10
+pre-materialization validation or ancestry   -> restriction_ancestry, exit 11
+MaterializeConfluenceAcl AclMaterializationError
+                                               -> exact category.value, exit 12
+post-composition invariant/unchanged failure -> acceptance, exit 13
+```
+
+The same `AclMaterializationError` class is intentionally mapped differently
+by call stage: validation errors raised before materialization are ancestry
+failures, while errors raised inside `MaterializeConfluenceAcl.execute()` keep
+their exact domain category. Existing M6E exit mappings 1 through 9 remain
+unchanged.
 
 The safe CLI success summary always includes `restriction_evidence_kind` and
 `real_captured_evidence`. For synthetic input, `restriction_evidence_kind =
@@ -450,6 +546,12 @@ Final real M6F closeout may pass only when `restriction_evidence_kind ==
 "captured_m6b_result"` and `real_captured_evidence == true`. This prevents a
 synthetic acceptance run from being mistaken for a real captured-evidence
 acceptance. The field is still not cryptographic proof.
+
+`real_captured_evidence` becomes true only after strict loading, exact ancestry
+binding, complete composition, unchanged checks, and every acceptance
+invariant pass. It means accepted evidence carrying the captured label, not
+cryptographic authenticity. Durable closeout additionally references the
+separately approved sanitized M6F-C1 operator evidence.
 
 ## 12. Failure taxonomy
 
@@ -481,3 +583,15 @@ models: `canonical_document_invalid`, `chunk_record_invalid`,
 `invalid_restriction_observations`, `canonical_observation_identity_mismatch`,
 and the wrapper `acl_materialization_failed`. `invalid_crawler_identity` and
 `invalid_extracted_at` are reserved for M6F-B `ACLRecord` construction.
+
+M6F-C1 operator failures use a separate CLI/infrastructure vocabulary rather
+than extending the ACL materialization domain taxonomy:
+
+```
+sidecar_target
+sidecar_serialization
+sidecar_publication
+```
+
+They map respectively to invalid preflight target, deterministic
+serialization/size-limit failure, and post-collection publication failure.
