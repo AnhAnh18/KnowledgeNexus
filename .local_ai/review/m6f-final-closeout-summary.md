@@ -1,7 +1,7 @@
 # M6F Final Closeout Summary
 
-Status: documentation closeout candidate. Its final state becomes durable only
-after independent review approves and freezes the M6F-D documentation head.
+Status: complete and owner-approved. The documentation-only closeout tree was
+frozen at source head `03c206f`; no production behavior was changed.
 
 ## Verdict
 
@@ -29,11 +29,13 @@ M6F is complete and approved.
 - Main-machine transfer provenance: `7feae06`.
 - Main-machine execution provenance: `2034ea4`.
 - Repository acceptance-closeout base: `ed0a113`.
+- M6F-D documentation-only source head: `03c206f`.
 
 The references above belong to their respective repository histories.
 Cross-repository equivalence was established by exact scoped blob comparison,
-not by requiring commit-identity equality. The future M6F-D commit identity is
-intentionally not recorded inside this candidate summary.
+not by requiring commit-identity equality. The owner explicitly accepted the
+documentation-only M6F-D closeout; this statement does not claim a separate
+independent production-code review for a task that changed no production code.
 
 ## Acceptance
 
@@ -73,6 +75,6 @@ The conclusions above reference the already approved stage evidence.
   export through M3 remain.
 - M6G is next and unblocked, but has not started.
 - M6G must be planned and reviewed separately from current repository evidence.
-- M6G implementation remains operationally blocked until this documentation
-  closeout is independently approved and its head is frozen.
+- The M6F-D documentation gate is closed. M6G-A may proceed only through its
+  separately reviewed focused-contract task; no M6G production code has begun.
 - Foundation still does not own embedding, Qdrant, retrieval, chat, or Gauss.

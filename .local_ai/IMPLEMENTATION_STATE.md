@@ -1103,9 +1103,10 @@ Review artifact:
 - M6G is the next unblocked planning task and has not started. M6 overall
   remains incomplete until M6G persists the deny-safe ACL graph and exports
   the approved one-page snapshot through M3.
-- The M6F-D documentation head must be independently approved and frozen
-  before M6G implementation begins; this closeout does not itself authorize
-  M6G production changes.
+- The owner accepted and froze the documentation-only M6F-D closeout source
+  head at `03c206f`. This closes the M6F-D documentation gate without claiming
+  a separate production-code review; M6G-A still requires its own reviewed
+  focused contract before any M6G production implementation.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
