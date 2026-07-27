@@ -1100,13 +1100,19 @@ Review artifact:
   production commits and do not define an alternative approved history.
 - M6F-D documentation-only closeout is complete. M6F is complete and approved
   with no unresolved P0, P1, or P2 finding.
-- M6G is the next unblocked planning task and has not started. M6 overall
-  remains incomplete until M6G persists the deny-safe ACL graph and exports
-  the approved one-page snapshot through M3.
+- M6G-A is the current documentation/contract task. It activates the focused
+  one-page export contract over the approved M3 and M6F boundaries. No M6G
+  production code has started, and M6 overall remains incomplete until the
+  approved one-page snapshot is exported through M3.
 - The owner accepted and froze the documentation-only M6F-D closeout source
   head at `03c206f`. This closes the M6F-D documentation gate without claiming
   a separate production-code review; M6G-A still requires its own reviewed
   focused contract before any M6G production implementation.
+- The owner-approval registration commit is working-repository head `56e7750`;
+  it is `SOURCE_REVIEW_BASE` provenance for M6G-A, not a checkout requirement
+  for the independent main-machine repository.
+- M6G-B, M6G-C, M6G-D, and M7 remain blocked until M6G-A receives independent
+  approval and its source-review head is frozen.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
@@ -1165,8 +1171,7 @@ Review artifact:
 
 ## Next Planned Task
 
-Plan M6G as a separate task. First inspect the actual approved M3 exporter and
-M6F result/record APIs, then define the downstream ACL persistence and
-one-page export boundary from repository evidence. Do not infer APIs, DTOs,
-schemas, persistence behavior, or export sequencing from stale chat context.
-No M6G production work has started.
+Independently review the M6G-A `ONE_PAGE_EXPORT_SPEC.md` candidate and its
+minimal navigation/state changes. Freeze its source-review head only after no
+P0, P1, or P2 remains. Do not begin M6G-B, M6G-C, M6G-D, or M7 before that
+gate. No M6G production work has started.
