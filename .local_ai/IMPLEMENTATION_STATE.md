@@ -9,12 +9,13 @@ BGE-M3 tokenizer, structural parsing, and schema-valid chunking. M6E is
 independently approved and links deterministic Jira `RelationRecord`s to the
 canonical document and all chunks. M6F-A and M6F-B are complete and approved:
 the contract and trusted-input boundaries are locked, one deny-safe `ACLRecord`
-is materialized, and its ACL tags are propagated to the trusted chunks. M6F is
-not yet complete. M6F-C1 is complete and approved, including its separately
-authorized controlled live read-only capture. M6F-C2 implementation, source
-review, and real captured-sidecar offline acceptance are complete and approved.
-M6F-D documentation closeout is next. No raw production artifact exists in
-this repository.
+is materialized, and its ACL tags are propagated to the trusted chunks. M6F-A
+through M6F-D are complete and approved, including the separately authorized
+C1 controlled live read-only capture and C2 real captured-sidecar offline
+acceptance. M6G planning is the next unblocked task, but M6G implementation has
+not started. M6 overall remains incomplete until downstream ACL persistence and
+the one-page export through M3 are complete. No raw production artifact exists
+in this repository.
 
 ## Done
 
@@ -1097,8 +1098,14 @@ Review artifact:
   capture and M6F-C2 offline composition-acceptance stages.
 - Code-only patch sets are transfer artifacts. They are not additional
   production commits and do not define an alternative approved history.
-- M6F overall is not complete. M6F-C2 is complete and approved; M6F-D final
-  documentation closeout is next, and M6G remains blocked on M6F-D.
+- M6F-D documentation-only closeout is complete. M6F is complete and approved
+  with no unresolved P0, P1, or P2 finding.
+- M6G is the next unblocked planning task and has not started. M6 overall
+  remains incomplete until M6G persists the deny-safe ACL graph and exports
+  the approved one-page snapshot through M3.
+- The M6F-D documentation head must be independently approved and frozen
+  before M6G implementation begins; this closeout does not itself authorize
+  M6G production changes.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
@@ -1157,7 +1164,8 @@ Review artifact:
 
 ## Next Planned Task
 
-Perform M6F-D only: synchronize the final M6F durable state and close the M6F
-milestone without changing production code, contracts, schemas, or tests. Do
-not begin M6G persistence/export integration, Jira API enrichment, media
-relations, or page-link extraction during that closeout.
+Plan M6G as a separate task. First inspect the actual approved M3 exporter and
+M6F result/record APIs, then define the downstream ACL persistence and
+one-page export boundary from repository evidence. Do not infer APIs, DTOs,
+schemas, persistence behavior, or export sequencing from stale chat context.
+No M6G production work has started.

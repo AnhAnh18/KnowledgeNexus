@@ -81,8 +81,8 @@ Sync-state clarification:
 | M6F-B - Deny-safe ACL materialization | complete; independently approved | Approved merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`; contained code commit `cd764f3`; focused M6F-A+B closeout suite 248 passed | Fully offline; no open P0-P2; live/full-page acceptance remains later. |
 | M6F-C1 - Opt-in M6B observation sidecar capture | complete; controlled live capture independently approved | Source-review head `bf6b79a` is provenance only; offline tests passed and exactly one authorized live capture passed with no open P0-P2 | External sidecar remains uncommitted and unmodified; the pre-existing documentation-only worktree deviation was accepted as non-blocking P3 and did not require recapture. |
 | M6F-C2 - Offline ACL composition acceptance | complete and independently approved | Approved source head `74fdbf1`; source merge head `c12dcc2`; main execution head `2034ea4`; scoped blob equivalence and real offline acceptance passed | No rerun required; real raw and sidecar artifacts remain external and uncommitted. |
-| M6F-D - Final M6F documentation closeout | next; unblocked | M6F-C2 real captured evidence independently approved | Planning/documentation stage only; not a new focused-spec implementation stage. |
-| M6G - Downstream ACL persistence and one-page export through M3 | blocked on M6F-D | M6A-M6F gates required | Persist/export the approved one-page record graph; persistence/export does not move into M6F-C1/C2. |
+| M6F-D - Final M6F documentation closeout | complete | M6F-A through M6F-C2 approvals and sanitized evidence reconciled | Documentation-only closeout; M6F is complete and approved. |
+| M6G - Downstream ACL persistence and one-page export through M3 | next; unblocked; not started | M6F complete and approved | Inspect approved M3/M6F APIs, then plan persistence/export separately before implementation. |
 | M7 - Crawl reliability and scale | planned | No crawler reliability layer yet | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -90,11 +90,11 @@ Sync-state clarification:
 
 ## 2. Current Task
 
-Current area: M6F-A and M6F-B are complete and independently approved through
-production merge head `c05f36d7009fd3aac2466eb08ea2be8b0af014f4`.
-M6F overall is not complete. M6F-C1 offline code and its separately authorized
-controlled live capture are approved. M6F-C2 implementation and real
-captured-sidecar offline acceptance are independently approved. M6F-D is next.
+Current area: M6F-A through M6F-D are complete and approved. M6F includes the
+approved C1 controlled live capture and C2 real captured-sidecar offline
+acceptance. M6G is the next unblocked planning task and has not started. M6
+overall remains in progress until downstream ACL persistence and one-page
+export through M3 are complete.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -795,8 +795,9 @@ Status:
 - M6F-C2: complete and independently approved at source head `74fdbf1`,
   source merge head `c12dcc2`, and main execution head `2034ea4`; scoped blob
   equivalence and real offline acceptance passed.
-- M6F-D: final documentation closeout, next and unblocked.
-- M6G: downstream ACL persistence/export integration, blocked on M6F-D.
+- M6F-D: final documentation-only closeout complete; M6F complete and approved.
+- M6G: downstream ACL persistence/export integration next and unblocked, but
+  not started.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).
@@ -812,8 +813,9 @@ Tasks:
   code and controlled live capture approved).
 - M6F-C2 consume the real sidecar offline, bind M6A ancestry, and run full M6F
   composition acceptance (done and independently approved).
-- M6F-D perform the final M6F documentation closeout.
-- M6G persist/export the one-page real snapshot through M3.
+- M6F-D perform the final M6F documentation closeout (done).
+- M6G inspect the approved M3/M6F APIs, then separately plan persistence and
+  one-page export through M3 (next; not started).
 
 Completion gate:
 - One real page has raw provenance.
@@ -966,10 +968,13 @@ Acceptance categories:
 
 ## 13. Immediate Execution Order
 
-1. Perform M6F-D documentation-only final closeout and mark M6F complete
-   without changing production code, contracts, schemas, or tests.
-2. Begin M6G downstream ACL persistence/export integration only after M6F is
-   complete.
+1. Freeze and independently approve the M6F-D documentation-only closeout
+   head.
+2. Inspect the current repository contracts and approved M3/M6F APIs before
+   planning M6G.
+3. Plan M6G as a separate task for downstream ACL persistence and one-page
+   export through the approved M3 path.
+4. Do not implement M6G as part of M6F-D.
 
 ### Completed task - M2C3 RelationRecordBuilder
 

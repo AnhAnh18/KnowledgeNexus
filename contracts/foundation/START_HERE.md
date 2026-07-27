@@ -1,10 +1,10 @@
-# START HERE — AI Knowledge Platform context pack (as of 2026-07-08)
+# START HERE — AI Knowledge Platform context pack (as of 2026-07-27)
 
 This bundle is the complete authoritative state of the **AI Knowledge Platform — Part 1 (Knowledge Foundation)** project, ready to load into a new conversation. Read this file first, then the contracts in the order below.
 
 ## What this project is
 
-Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. The project is at the **spec/planning stage**: contracts are being finalized; no production export or crawl has run yet.
+Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6F deny-safe ACL composition, including read-only capture and offline real-artifact acceptance. No real one-page Foundation export snapshot has been produced yet; downstream ACL persistence and one-page export remain M6G work.
 
 ## Read order (priority)
 
@@ -43,7 +43,8 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 - **Never silently amend contracts:** schema/CHUNKING_SPEC changes are raised as explicit patch items (v7.x Part B), not made quietly.
 - **Layered decision logs, not rewrites:** keep stacking v7.x updates on Master v7.1. v8 is reserved for a post-POC consolidation or a genuinely breaking change (see v7.5 Part B).
 
-## Suggested next steps (two clean entry points)
+## Suggested next steps
 
-1. **Implement M6D against the migrated contract** — use the explicit external BGE-M3 tokenizer bundle and the injected immutable active profile; do not tune the provisional budget from a single page.
-2. **Complete the later retrieval benchmark** — compare profiles only after representative corpus anchors exist, then record any accepted configuration migration explicitly.
+1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6F as complete and approved.
+2. Inspect the actual approved M3 export and M6F ACL APIs before planning M6G downstream ACL persistence and one-page export. Do not implement persistence/export from stale chat assumptions.
+3. Complete the later retrieval benchmark only after representative corpus anchors exist, then record any accepted configuration migration explicitly.
