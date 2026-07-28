@@ -4,7 +4,7 @@ This bundle is the complete authoritative state of the **AI Knowledge Platform �
 
 ## What this project is
 
-Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6F deny-safe ACL composition, including read-only capture and offline real-artifact acceptance. M6G-A is now the active focused-contract task for the one-page Foundation export. No M6G production exporter or real one-page snapshot exists yet.
+Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6G-C (Snapshot Exporter & CLI), including read-only capture, offline real-artifact acceptance, and M3 exporter integration. M6G-D (Real offline export evidence review) is the next pending step.
 
 ## Read order (priority)
 
@@ -12,7 +12,7 @@ Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)*
 2. `CHUNKING_SPEC.md` — chunking behavior & token budget. §1 now locks BGE-M3 and `chunker_version 1.2.0`; the active medium budget remains provisional until benchmark evidence exists.
 3. `JIRA_RELATION_SPEC.md` + `jira_relation_profile.yaml` — the active M6E regex-only Jira relation and allowlist contract.
 4. `ACL_MATERIALIZATION_SPEC.md` — the active M6F deny-safe ACL materialization contract: audit-vs-enforcement policy, `userKey`/group-name principal projection, and the strict M6E/M6B provenance boundaries validated in M6F-A.
-5. `ONE_PAGE_EXPORT_SPEC.md` — the active M6G one-page full-snapshot projection, configuration, M3 reuse, quality, publication, and acceptance contract.
+ 5. `ONE_PAGE_EXPORT_SPEC.md` — the active M6G one-page full-snapshot projection, configuration, M3 reuse, quality, publication, and acceptance contract (implemented up to M6G-C).
 6. `decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` — architecture, policies, scope (the normative base).
 7. `decision_logs/AI_Knowledge_Platform_v7_2_Update.md` — export layout, storage roles, verbatim embedding, ACL repo tag (D1–D7).
 8. `decision_logs/AI_Knowledge_Platform_v7_3_Update.md` — bge-m3 direction, benchmark plan (D8–D13).
@@ -46,7 +46,7 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 
 ## Suggested next steps
 
-1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6F as complete and approved.
-2. Independently review and freeze M6G-A before beginning M6G-B. No M6G production code exists yet.
-3. Implement the one-page export only through the approved M3 writer, completer, publisher, and dataset-version rule.
+1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6F and M6G-C as complete and approved.
+2. Proceed with M6G-D (Real offline export evidence review and documentation closeout).
+3. Ensure the one-page export uses the approved M3 writer, completer, publisher, and dataset-version rule (as implemented in M6G-C).
 4. Complete the later retrieval benchmark only after representative corpus anchors exist, then record any accepted configuration migration explicitly.

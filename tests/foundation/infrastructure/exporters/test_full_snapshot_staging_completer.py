@@ -14,12 +14,18 @@ from knowledgenexus.foundation.infrastructure.exporters import (
 from knowledgenexus.foundation.infrastructure.exporters import (
     full_snapshot_staging_completer as completer_module,
 )
+from knowledgenexus.foundation.domain.models.confluence_jira_relations import (
+    JiraRelationQualityObservation,
+)
 from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import (
     EXPECTED_MACHINE_FILES,
 )
 from knowledgenexus.shared.contracts.foundation.schema_validator import (
     FoundationSchemaValidator,
     FoundationValidationError,
+)
+from tests.fixtures.foundation.one_page_export_snapshot_fixtures import (
+    build_quality_report_input,
 )
 from tests.fixtures.foundation.record_factories import (
     build_sample_acl_record,
@@ -376,23 +382,23 @@ def test_invalid_count_values_are_rejected_by_producer_boundary(
         completer_module._verify_full_snapshot_invariants(manifest)
 
 
-def test_report_replace_failure_cleans_only_m3e_temp_file(
+def test_report_link_failure_cleans_only_m3e_temp_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     staging_path = tmp_path / "staging"
     _write_machine_staging(staging_path)
     before = _machine_file_bytes(staging_path)
-    original_replace = Path.replace
+    original_link = completer_module.os.link
 
-    def fail_report_replace(path: Path, target: Path) -> Path:
-        if target.name == "quality_report.md":
-            raise OSError("forced report replace failure")
-        return original_replace(path, target)
+    def fail_report_link(src: object, dst: object) -> None:
+        if Path(dst).name == "quality_report.md":
+            raise OSError("forced report link failure")
+        original_link(src, dst)
 
-    monkeypatch.setattr(Path, "replace", fail_report_replace)
+    monkeypatch.setattr(completer_module.os, "link", fail_report_link)
 
-    with pytest.raises(OSError, match="forced report replace failure"):
+    with pytest.raises(OSError, match="forced report link failure"):
         _complete(staging_path)
 
     assert _entry_names(staging_path) == EXPECTED_MACHINE_FILES
@@ -541,3 +547,252 @@ def _jsonl_file_bytes(staging_path: Path) -> dict[str, bytes]:
         for name in EXPECTED_MACHINE_FILES
         if name.endswith(".jsonl")
     }
+
+
+# --- extended path (M6G-C) ------------------------------------------------
+
+
+def _complete_extended(staging_path: Path, **overrides: object) -> dict[str, object]:
+    return FullSnapshotStagingCompleter.complete(
+        staging_path=staging_path,
+        validator=FoundationSchemaValidator(),
+        one_page_quality=build_quality_report_input(**overrides),
+    )
+
+
+def test_legacy_call_shape_is_unaffected_by_extended_path_addition(
+    tmp_path: Path,
+) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    # The exact two-keyword legacy call shape the golden fixture exercises.
+    manifest = FullSnapshotStagingCompleter.complete(
+        staging_path=staging_path,
+        validator=FoundationSchemaValidator(),
+    )
+
+    assert manifest is not None
+    assert (staging_path / "quality_report.md").read_bytes() == EXPECTED_REPORT
+
+
+def test_extended_report_has_nine_sections_in_locked_order(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    _complete_extended(staging_path)
+
+    report = (staging_path / "quality_report.md").read_text(encoding="utf-8")
+    section_order = [
+        "## Snapshot",
+        "## Active Profiles",
+        "## Record Counts",
+        "## Jira Relation Quality",
+        "## ACL Quality",
+        "## Empty and Deferred Streams",
+        "## Completion Checks",
+        "## Publication State",
+        "## Scope",
+    ]
+    positions = [report.index(section) for section in section_order]
+    assert positions == sorted(positions)
+    assert report.endswith("\n")
+    assert not report.endswith("\n\n")
+
+
+def test_extended_report_field_content(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    _complete_extended(staging_path)
+
+    report = (staging_path / "quality_report.md").read_text(encoding="utf-8")
+    assert "- Active profile: `medium`" in report
+    assert "- Profile status: `provisional_until_benchmark`" in report
+    assert "- Chunker version: `1.0.0`" in report
+    assert "media_assets: empty; deferred" in report
+    assert "symbols: empty; deferred" in report
+    assert "sync_state: empty; checkpoint persistence deferred to M7" in report
+    assert "tombstones: empty; delta/deletion production deferred" in report
+    assert "- Final-directory verification: PENDING_AT_REPORT_COMPLETION" in report
+    assert "- LATEST.txt verification: PENDING_AT_REPORT_COMPLETION" in report
+    assert "- Post-publication acceptance: PENDING_AT_REPORT_COMPLETION" in report
+    assert "- Manifest counts match emitted records: PASS" in report
+    assert "- JSONL schema validation: PASS" in report
+    assert "- Deferred streams are empty: PASS" in report
+    assert "true" in report or "false" in report
+    assert "- Default deny applied: false" in report
+    assert "- Manual review required: false" in report
+    # Snapshot section must not repeat chunker version (moved to Active Profiles).
+    snapshot_section = report.split("## Active Profiles")[0]
+    assert "Chunker version" not in snapshot_section
+
+
+def test_extended_report_empty_jira_lists_render_none(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    _complete_extended(
+        staging_path,
+        jira_quality_observation=JiraRelationQualityObservation(
+            unique_key_like_candidates=(),
+            allowlisted_keys=(),
+            outside_allowlist_keys=(),
+        ),
+        jira_metrics={
+            "candidate_occurrences": 0,
+            "unique_key_like_count": 0,
+            "allowlisted_unique_count": 0,
+            "outside_allowlist_unique_count": 0,
+            "duplicate_occurrences": 0,
+            "relations_total": 1,
+            "documents_enriched": 1,
+            "chunks_enriched": 1,
+        },
+    )
+
+    report = (staging_path / "quality_report.md").read_text(encoding="utf-8")
+    jira_section = report.split("## Jira Relation Quality")[1].split("## ACL Quality")[0]
+    assert jira_section.count("- None") == 3
+
+
+def test_extended_report_never_leaks_acl_tags_or_principals(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    _complete_extended(staging_path)
+
+    report = (staging_path / "quality_report.md").read_text(encoding="utf-8")
+    for forbidden in (
+        "acl_tags",
+        "allowed_users",
+        "allowed_groups",
+        "crawler_identity",
+        "restriction_source_page_ids",
+        "space:SVMC",
+    ):
+        assert forbidden not in report
+
+
+def test_extended_path_rejects_expected_counts_mismatch(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+    mismatched_counts = {
+        "documents": 1,
+        "chunks": 1,
+        "relations": 1,
+        "acl": 1,
+        "media_assets": 0,
+        "symbols": 0,
+        "sync_state": 0,
+        "tombstones": 1,
+    }
+
+    with pytest.raises(ValueError):
+        _complete_extended(staging_path, expected_counts=mismatched_counts)
+
+    assert not (staging_path / "quality_report.md").exists()
+
+
+def test_extended_path_rejects_non_empty_deferred_stream(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+    (staging_path / "media_assets.jsonl").write_text(
+        json.dumps({"unexpected": True}) + "\n", encoding="utf-8"
+    )
+    counts = dict(_read_manifest(staging_path)["counts"])
+    counts["media_assets"] = 1
+    _write_manifest_value(
+        staging_path,
+        {**_read_manifest(staging_path), "counts": counts},
+    )
+
+    with pytest.raises(ValueError):
+        _complete_extended(staging_path)
+
+    assert not (staging_path / "quality_report.md").exists()
+
+
+def test_extended_path_rejects_wrong_quality_input_type(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    with pytest.raises(TypeError):
+        FullSnapshotStagingCompleter.complete(
+            staging_path=staging_path,
+            validator=FoundationSchemaValidator(),
+            one_page_quality=object(),
+        )
+
+
+def test_extended_path_does_not_mutate_quality_input(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+    quality_input = build_quality_report_input()
+    before = copy.deepcopy(quality_input)
+
+    FullSnapshotStagingCompleter.complete(
+        staging_path=staging_path,
+        validator=FoundationSchemaValidator(),
+        one_page_quality=quality_input,
+    )
+
+    assert quality_input == before
+
+
+# --- R12 TOCTOU hardening --------------------------------------------------
+
+
+def test_r12_concurrent_creation_between_check_and_write_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+    report_path = staging_path / "quality_report.md"
+    winner_bytes = b"# winner wrote this first\n"
+
+    original_link = completer_module.os.link
+
+    def concurrent_writer_wins_the_race(src: object, dst: object) -> None:
+        # Simulate a second process creating the report between this
+        # process's existence pre-check and its own attempt to link the
+        # report into place.
+        report_path.write_bytes(winner_bytes)
+        original_link(src, dst)
+
+    monkeypatch.setattr(completer_module.os, "link", concurrent_writer_wins_the_race)
+
+    with pytest.raises(FileExistsError):
+        _complete(staging_path)
+
+    assert report_path.read_bytes() == winner_bytes
+
+
+def test_r12_hardening_preserves_legacy_byte_identical_output(
+    tmp_path: Path,
+) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    FullSnapshotStagingCompleter.complete(
+        staging_path=staging_path,
+        validator=FoundationSchemaValidator(),
+    )
+
+    assert (staging_path / "quality_report.md").read_bytes() == EXPECTED_REPORT
+    assert _entry_names(staging_path) == EXPECTED_COMPLETE_FILES
+
+
+def test_r12_write_leaves_no_leftover_temp_file_on_success(tmp_path: Path) -> None:
+    staging_path = tmp_path / "staging"
+    _write_machine_staging(staging_path)
+
+    _complete(staging_path)
+
+    leftovers = [
+        entry.name
+        for entry in staging_path.iterdir()
+        if entry.name.startswith(".quality_report.md.")
+    ]
+    assert leftovers == []
