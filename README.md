@@ -53,6 +53,16 @@ Health: http://localhost:8000/api/v1/health
 
 ```bash
 uv run pytest
+uv run pytest tests/eval -q   # two-layer eval unit tests (no API)
+```
+
+## Two-layer eval (Retrieval + Skill)
+
+See **[docs/EVAL_TWO_LAYER.md](docs/EVAL_TWO_LAYER.md)**.  
+Team roadmap (chunk → skill → filter → hybrid): **[docs/SEARCH_QUALITY_ROADMAP.md](docs/SEARCH_QUALITY_ROADMAP.md)**.
+
+```bash
+uv run kn-eval --layer all --label baseline
 ```
 
 ## Project structure

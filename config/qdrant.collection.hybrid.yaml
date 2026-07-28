@@ -1,0 +1,23 @@
+collection_name: knowledgenexus_hybrid_test
+vectors:
+  dense:
+    size: 1024
+    distance: Cosine
+  sparse:
+    size: null
+    distance: DotProduct
+payload_indexes:
+  - field: source_type
+    type: keyword
+  - field: source_id
+    type: keyword
+  - field: document_id
+    type: keyword
+  - field: chunk_id
+    type: keyword
+  - field: indexed_at
+    type: datetime
+retrieval:
+  mode: hybrid
+  rrf_k: 60
+  prefetch: 40

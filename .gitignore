@@ -25,6 +25,7 @@ data/raw/
 data/work/
 data/index/
 data/exports/
+data/eval/results/*.json
 *.db
 
 # IDE

@@ -26,6 +26,7 @@ embedding = [
 [project.scripts]
 knowledgenexus = "knowledgenexus.main:main"
 kn = "knowledgenexus.presentation.cli.agent.__main__:main"
+kn-eval = "knowledgenexus.eval.runner:main"
 kn-foundation = "knowledgenexus.foundation.cli.main:main"
 kn-indexer = "knowledgenexus.indexing.cli.main:main"
 
