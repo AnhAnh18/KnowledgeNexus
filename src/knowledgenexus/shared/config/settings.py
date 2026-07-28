@@ -36,13 +36,6 @@ class Settings(BaseSettings):
     embedding_cache_dir: str = "./data/index/models"
     embedding_batch_size: int = 32
 
-    # LLM / Agent Builder
-    llm_provider: str = "agent_builder"
-    agent_builder_api_url: str = "https://agent.sec.samsung.net"
-    agent_builder_api_key: str = ""
-    agent_builder_agent_id: str = ""
-    agent_builder_timeout: int = 120
-
     @property
     def project_root(self) -> Path:
         # src/knowledgenexus/shared/config/settings.py -> repo root

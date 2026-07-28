@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from knowledgenexus.presentation.middleware.cors import get_cors_middleware_kwargs
-from knowledgenexus.presentation.api.v1 import chat_router, documents_router, health_router, ingest_job_router, retrieve_router, store_router
+from knowledgenexus.presentation.api.v1 import documents_router, health_router, ingest_job_router, retrieve_router, store_router
 
 
 @asynccontextmanager
@@ -34,7 +34,6 @@ app.add_middleware(CORSMiddleware, **get_cors_middleware_kwargs())
 
 app.include_router(health_router)
 app.include_router(retrieve_router)
-app.include_router(chat_router)
 app.include_router(documents_router)
 app.include_router(store_router)
 app.include_router(ingest_job_router)
