@@ -23,6 +23,14 @@ def load_jira_relation_profile(profile_path: Path) -> JiraRelationProfile:
         raise JiraRelationProfileLoadError(
             "jira relation profile could not be read"
         ) from None
+    return parse_jira_relation_profile_text(raw_text)
+
+
+def parse_jira_relation_profile_text(raw_text: str) -> JiraRelationProfile:
+    """Parse and validate one already-decoded Jira relation profile YAML string."""
+
+    if not isinstance(raw_text, str):
+        raise TypeError("raw_text expects str")
     try:
         loaded = yaml.safe_load(raw_text)
     except yaml.YAMLError:

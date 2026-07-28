@@ -61,6 +61,14 @@ def load_chunking_profile(profile_path: Path) -> ChunkingProfile:
         raw_text = profile_path.read_text(encoding="utf-8")
     except OSError:
         raise ChunkingProfileLoadError("chunking profile could not be read") from None
+    return parse_chunking_profile_text(raw_text)
+
+
+def parse_chunking_profile_text(raw_text: str) -> ChunkingProfile:
+    """Parse and validate one already-decoded chunking profile YAML string."""
+
+    if not isinstance(raw_text, str):
+        raise TypeError("raw_text expects str")
     try:
         loaded = yaml.safe_load(raw_text)
     except yaml.YAMLError:

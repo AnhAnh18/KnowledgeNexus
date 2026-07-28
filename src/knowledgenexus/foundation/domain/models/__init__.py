@@ -65,6 +65,11 @@ from knowledgenexus.foundation.domain.models.acl_materialization_result import (
     AclQualityObservation,
     ConfluenceAclMaterializationResult,
 )
+from knowledgenexus.foundation.domain.models.confluence_acl_composition import (
+    ConfluenceAclCompositionAcceptanceError,
+    ConfluenceAclCompositionResult,
+    ConfluenceAclRestrictionAncestryError,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -106,4 +111,7 @@ __all__ = [
     "ProjectedPrincipalUnion",
     "AclQualityObservation",
     "ConfluenceAclMaterializationResult",
+    "ConfluenceAclCompositionAcceptanceError",
+    "ConfluenceAclCompositionResult",
+    "ConfluenceAclRestrictionAncestryError",
 ]

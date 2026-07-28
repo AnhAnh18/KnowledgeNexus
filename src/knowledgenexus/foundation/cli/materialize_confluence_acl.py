@@ -11,49 +11,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from knowledgenexus.foundation.application.use_cases.build_confluence_chunks import (
-    BuildConfluenceChunks,
-)
-from knowledgenexus.foundation.application.use_cases.build_confluence_jira_relations import (
-    BuildConfluenceJiraRelations,
-)
-from knowledgenexus.foundation.application.use_cases.materialize_confluence_acl import (
-    MaterializeConfluenceAcl,
+from knowledgenexus.foundation.application.use_cases.compose_confluence_acl import (
+    ComposeConfluenceAcl,
 )
 from knowledgenexus.foundation.application.use_cases.normalize_confluence_page import (
     CATEGORY_INVALID_PAGE_ID,
     CATEGORY_RAW_PAGE_INPUT,
     ConfluencePageNormalizationError,
-    NormalizeConfluencePage,
-)
-from knowledgenexus.foundation.application.use_cases.parse_wiki_document_structure import (
-    parse_wiki_document_structure,
 )
 from knowledgenexus.foundation.domain.models import (
     AclMaterializationError,
-    ConfluenceAclMaterializationResult,
+    ConfluenceAclCompositionAcceptanceError,
+    ConfluenceAclCompositionResult,
+    ConfluenceAclRestrictionAncestryError,
     ConfluenceChunkingError,
     ConfluenceJiraRelationError,
-    ConfluenceJiraRelationResult,
-)
-from knowledgenexus.foundation.domain.records import (
-    ChunkRecordBuilder,
-    RelationRecordBuilder,
-)
-from knowledgenexus.foundation.domain.rules import (
-    ChunkIdGenerator,
-    DocumentIdGenerator,
-    RelationIdGenerator,
-)
-from knowledgenexus.foundation.domain.rules.acl_restriction_observations import (
-    validate_restriction_observations,
 )
 from knowledgenexus.foundation.domain.rules.confluence_page_id import (
     require_confluence_page_id,
-)
-from knowledgenexus.foundation.domain.rules.confluence_page_observations import (
-    ConfluencePageObservationPayloadError,
-    extract_ordered_restriction_targets,
 )
 from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
     WikiStructureParseError,
@@ -73,7 +48,6 @@ from knowledgenexus.foundation.infrastructure.raw_store import (
 )
 from knowledgenexus.foundation.infrastructure.sidecars import (
     CAPTURED_M6B_EVIDENCE_KIND,
-    LoadedRestrictionSidecar,
     RestrictionSidecarLoadError,
     load_restriction_sidecar,
 )
@@ -82,7 +56,6 @@ from knowledgenexus.foundation.infrastructure.tokenization import (
 )
 from knowledgenexus.foundation.ports.raw_page_observation_store_port import (
     RawPageReadError,
-    RawPageReadPort,
 )
 from knowledgenexus.foundation.ports.tokenizer_port import TokenizerError
 from knowledgenexus.shared.contracts.foundation.schema_validator import (
@@ -120,7 +93,13 @@ class _ConfigurationError(Exception):
 
 
 class _RestrictionAncestryError(Exception):
-    """A sanitized pre-materialization observation/ancestry failure."""
+    """A sanitized pre-materialization observation/ancestry failure.
+
+    Kept as a distinct CLI-local marker (alongside the reusable
+    ``ConfluenceAclRestrictionAncestryError`` the composition boundary raises
+    in production) so tests can exercise ``main()``'s exit-code mapping in
+    isolation from composition internals.
+    """
 
 
 class _AcceptanceError(Exception):
@@ -128,43 +107,16 @@ class _AcceptanceError(Exception):
 
 
 class _AclMaterializationStageError(Exception):
-    """Retain only the exact M6F-B category across the CLI boundary."""
+    """Retain only the exact M6F-B category across the CLI boundary.
+
+    Kept as a distinct CLI-local marker for the same reason as
+    ``_RestrictionAncestryError``: production now lets the reusable
+    ``AclMaterializationError`` propagate directly from ``ComposeConfluenceAcl``.
+    """
 
     def __init__(self, category: str) -> None:
         self.category = category
         super().__init__(category)
-
-
-@dataclass(frozen=True, repr=False)
-class _FixedRawPageReader(RawPageReadPort):
-    expected_page_id: str
-    raw_bytes: bytes
-
-    def __post_init__(self) -> None:
-        try:
-            page_id = require_confluence_page_id(self.expected_page_id)
-        except (TypeError, ValueError):
-            raise ValueError("expected page identity is invalid") from None
-        if not isinstance(self.raw_bytes, bytes):
-            raise TypeError("raw_bytes expects bytes")
-        object.__setattr__(self, "expected_page_id", page_id)
-        object.__setattr__(self, "raw_bytes", bytes(self.raw_bytes))
-
-    def read_page(self, *, page_id: str) -> bytes:
-        try:
-            observed = require_confluence_page_id(page_id)
-        except (TypeError, ValueError):
-            raise RawPageReadError("raw page identity is invalid") from None
-        if observed != self.expected_page_id:
-            raise RawPageReadError("raw page identity does not match")
-        return self.raw_bytes
-
-
-@dataclass(frozen=True, repr=False)
-class _Composition:
-    relation_result: ConfluenceJiraRelationResult
-    acl_result: ConfluenceAclMaterializationResult
-    validated_observations: tuple[dict[str, object], ...]
 
 
 @dataclass(frozen=True, repr=False)
@@ -206,11 +158,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _fail(exc.category.value, EXIT_RELATION)
     except RestrictionSidecarLoadError:
         return _fail(CATEGORY_RESTRICTION_SIDECAR, EXIT_RESTRICTION_SIDECAR)
-    except _RestrictionAncestryError:
+    except (ConfluenceAclRestrictionAncestryError, _RestrictionAncestryError):
         return _fail(CATEGORY_RESTRICTION_ANCESTRY, EXIT_RESTRICTION_ANCESTRY)
+    except AclMaterializationError as exc:
+        return _fail(exc.category.value, EXIT_ACL_MATERIALIZATION)
     except _AclMaterializationStageError as exc:
         return _fail(exc.category, EXIT_ACL_MATERIALIZATION)
-    except _AcceptanceError:
+    except (ConfluenceAclCompositionAcceptanceError, _AcceptanceError):
         return _fail(CATEGORY_ACCEPTANCE, EXIT_ACCEPTANCE)
     except BaseException:
         return _fail(CATEGORY_UNEXPECTED, EXIT_UNEXPECTED)
@@ -270,32 +224,32 @@ def _run(args: argparse.Namespace) -> _RunOutcome:
         tokenizer_assets_dir=tokenizer_assets_dir,
     )
     validator = FoundationSchemaValidator()
-
-    first = _compose_once(
-        page_id=args.page_id,
-        raw_bytes=raw_bytes,
-        loaded_sidecar=loaded_sidecar,
-        crawled_at=args.crawled_at,
-        relation_created_at=args.relation_created_at,
-        crawler_identity=args.crawler_identity,
-        acl_extracted_at=args.acl_extracted_at,
+    composer = ComposeConfluenceAcl(
         chunking_profile=chunking_profile,
-        jira_profile=jira_profile,
+        jira_relation_profile=jira_profile,
         tokenizer=tokenizer,
-        validator=validator,
+        raw_page_mapper=ConfluenceDataCenterRawPageMapper(),
+        storage_normalizer=ConfluenceStorageXhtmlNormalizer(),
+        schema_validator=validator,
     )
-    second = _compose_once(
+
+    first = composer.execute(
         page_id=args.page_id,
-        raw_bytes=raw_bytes,
-        loaded_sidecar=loaded_sidecar,
+        raw_page_bytes=raw_bytes,
+        restriction_observations=loaded_sidecar.restriction_observations,
         crawled_at=args.crawled_at,
         relation_created_at=args.relation_created_at,
         crawler_identity=args.crawler_identity,
         acl_extracted_at=args.acl_extracted_at,
-        chunking_profile=chunking_profile,
-        jira_profile=jira_profile,
-        tokenizer=tokenizer,
-        validator=validator,
+    )
+    second = composer.execute(
+        page_id=args.page_id,
+        raw_page_bytes=raw_bytes,
+        restriction_observations=loaded_sidecar.restriction_observations,
+        crawled_at=args.crawled_at,
+        relation_created_at=args.relation_created_at,
+        crawler_identity=args.crawler_identity,
+        acl_extracted_at=args.acl_extracted_at,
     )
 
     raw_after = _read_raw_page(raw_store=raw_store, page_id=args.page_id)
@@ -335,125 +289,15 @@ def _read_raw_page(
         raise ConfluencePageNormalizationError(CATEGORY_RAW_PAGE_INPUT) from None
 
 
-def _compose_once(
-    *,
-    page_id: str,
-    raw_bytes: bytes,
-    loaded_sidecar: LoadedRestrictionSidecar,
-    crawled_at: str,
-    relation_created_at: str,
-    crawler_identity: str,
-    acl_extracted_at: str,
-    chunking_profile: object,
-    jira_profile: object,
-    tokenizer: object,
-    validator: FoundationSchemaValidator,
-) -> _Composition:
-    normalization = NormalizeConfluencePage(
-        raw_page_reader=_FixedRawPageReader(
-            expected_page_id=page_id,
-            raw_bytes=raw_bytes,
-        ),
-        raw_page_mapper=ConfluenceDataCenterRawPageMapper(),
-        storage_normalizer=ConfluenceStorageXhtmlNormalizer(),
-    ).execute(page_id=page_id, crawled_at=crawled_at)
-    structure = parse_wiki_document_structure(normalization)
-    chunks = BuildConfluenceChunks(
-        profile=chunking_profile,  # type: ignore[arg-type]
-        tokenizer=tokenizer,  # type: ignore[arg-type]
-        chunk_id_generator=ChunkIdGenerator,
-        chunk_record_builder=ChunkRecordBuilder,
-        schema_validator=validator,
-    ).execute(
-        canonical_document=normalization.canonical_document,
-        structure=structure,
-    )
-    relation_result = BuildConfluenceJiraRelations(
-        profile=jira_profile,  # type: ignore[arg-type]
-        document_id_generator=DocumentIdGenerator,
-        relation_id_generator=RelationIdGenerator,
-        relation_record_builder=RelationRecordBuilder,
-        schema_validator=validator,
-    ).execute(
-        normalized_body_text=normalization.normalized_body_text,
-        canonical_document=normalization.canonical_document,
-        chunking_result=chunks,
-        created_at=relation_created_at,
-    )
-
-    canonical_page_id = relation_result.enriched_canonical_document.get("page_id")
-    validated = _bind_restriction_ancestry(
-        loaded_sidecar=loaded_sidecar,
-        canonical_page_id=canonical_page_id,
-        raw_bytes=raw_bytes,
-        selected_page_id=page_id,
-    )
-
-    relation_before = deepcopy(relation_result)
-    observations_before = deepcopy(validated)
-    try:
-        acl_result = MaterializeConfluenceAcl(
-            schema_validator=validator
-        ).execute(
-            jira_relation_result=relation_result,
-            restriction_observations=validated,
-            crawler_identity=crawler_identity,
-            extracted_at=acl_extracted_at,
-        )
-    except AclMaterializationError as exc:
-        raise _AclMaterializationStageError(exc.category.value) from None
-    if relation_result != relation_before or validated != observations_before:
-        raise _AcceptanceError
-
-    return _Composition(
-        relation_result=relation_result,
-        acl_result=acl_result,
-        validated_observations=validated,
-    )
-
-
-def _bind_restriction_ancestry(
-    *,
-    loaded_sidecar: LoadedRestrictionSidecar,
-    canonical_page_id: object,
-    raw_bytes: bytes,
-    selected_page_id: str,
-) -> tuple[dict[str, object], ...]:
-    try:
-        observations_input = deepcopy(loaded_sidecar.restriction_observations)
-        validated = validate_restriction_observations(
-            observations_input,
-            canonical_page_id=canonical_page_id,
-        )
-        expected_targets = extract_ordered_restriction_targets(
-            raw_page=raw_bytes,
-            selected_page_id=selected_page_id,
-        )
-    except (
-        AclMaterializationError,
-        ConfluencePageObservationPayloadError,
-        TypeError,
-        ValueError,
-    ):
-        raise _RestrictionAncestryError from None
-
-    observed_targets = tuple(
-        str(observation["source_page_id"]) for observation in validated
-    )
-    if observed_targets != expected_targets:
-        raise _RestrictionAncestryError
-    return validated
-
-
 def _accept(
     *,
-    first: _Composition,
-    second: _Composition,
+    first: ConfluenceAclCompositionResult,
+    second: ConfluenceAclCompositionResult,
     validator: FoundationSchemaValidator,
     evidence_kind: str,
 ) -> _RunOutcome:
-    acl = first.acl_result
-    trusted = first.relation_result
+    acl = first.acl_materialization_result
+    trusted = first.jira_relation_result
     try:
         validator.validate_record("ACLRecord", acl.acl_record)
         for chunk in acl.enriched_chunks:
