@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from knowledgenexus.foundation.domain.models.confluence_jira_relations import (
+    JiraRelationQualityObservation,
     copy_json_object,
 )
 
@@ -103,6 +104,10 @@ class ConfluenceAclMaterializationResult:
     result's ownership model; deep immutability of nested dict/list values is
     deliberately not claimed (spec §5.7). ``repr`` is suppressed so record
     contents (IDs, hashes, principals, page IDs) never render.
+
+    ``jira_quality_observation`` and ``jira_metrics`` carry the trusted M6E
+    Jira relation quality/metrics forward unchanged (M6G-B), so a later export
+    quality report does not need to reopen the M6E stage.
     """
 
     enriched_canonical_document: dict[str, object]
@@ -111,6 +116,8 @@ class ConfluenceAclMaterializationResult:
     acl_record: dict[str, object]
     quality_observation: AclQualityObservation
     metrics: dict[str, object]
+    jira_quality_observation: JiraRelationQualityObservation
+    jira_metrics: dict[str, object]
 
     def __post_init__(self) -> None:
         if not isinstance(self.enriched_canonical_document, dict):
@@ -131,6 +138,14 @@ class ConfluenceAclMaterializationResult:
             raise TypeError("quality_observation expects AclQualityObservation")
         if not isinstance(self.metrics, dict):
             raise TypeError("metrics expects dict")
+        if not isinstance(
+            self.jira_quality_observation, JiraRelationQualityObservation
+        ):
+            raise TypeError(
+                "jira_quality_observation expects JiraRelationQualityObservation"
+            )
+        if not isinstance(self.jira_metrics, dict):
+            raise TypeError("jira_metrics expects dict")
 
         object.__setattr__(
             self,
@@ -151,3 +166,16 @@ class ConfluenceAclMaterializationResult:
             self, "acl_record", copy_json_object(self.acl_record)
         )
         object.__setattr__(self, "metrics", copy_json_object(self.metrics))
+        jira_quality = self.jira_quality_observation
+        object.__setattr__(
+            self,
+            "jira_quality_observation",
+            JiraRelationQualityObservation(
+                unique_key_like_candidates=jira_quality.unique_key_like_candidates,
+                allowlisted_keys=jira_quality.allowlisted_keys,
+                outside_allowlist_keys=jira_quality.outside_allowlist_keys,
+            ),
+        )
+        object.__setattr__(
+            self, "jira_metrics", copy_json_object(self.jira_metrics)
+        )

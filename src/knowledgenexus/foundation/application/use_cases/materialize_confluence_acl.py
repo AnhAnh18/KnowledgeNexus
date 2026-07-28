@@ -591,6 +591,8 @@ class MaterializeConfluenceAcl:
             acl_record=acl_record,
             quality_observation=quality,
             metrics=metrics,
+            jira_quality_observation=jira_relation_result.quality_observation,
+            jira_metrics=jira_relation_result.metrics,
         )
 
     def _build_acl_record(

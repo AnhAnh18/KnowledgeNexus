@@ -6,6 +6,19 @@ from knowledgenexus.foundation.domain.models.acl_materialization_result import (
     AclQualityObservation,
     ConfluenceAclMaterializationResult,
 )
+from knowledgenexus.foundation.domain.models.confluence_jira_relations import (
+    JiraRelationQualityObservation,
+)
+
+
+def _jira_quality(**overrides: object) -> JiraRelationQualityObservation:
+    fields: dict[str, object] = {
+        "unique_key_like_candidates": (),
+        "allowlisted_keys": (),
+        "outside_allowlist_keys": (),
+    }
+    fields.update(overrides)
+    return JiraRelationQualityObservation(**fields)  # type: ignore[arg-type]
 
 
 def _quality(**overrides: object) -> AclQualityObservation:
@@ -131,6 +144,8 @@ def _result(**overrides: object) -> ConfluenceAclMaterializationResult:
         "acl_record": {"acl_id": "acl:x", "acl_tags": ["space:X"]},
         "quality_observation": _quality(),
         "metrics": {"acl_records_total": 1},
+        "jira_quality_observation": _jira_quality(),
+        "jira_metrics": {"relations_total": 0},
     }
     fields.update(overrides)
     return ConfluenceAclMaterializationResult(**fields)  # type: ignore[arg-type]
@@ -172,6 +187,7 @@ def test_result_repr_does_not_expose_contents() -> None:
         ("relations", "not-a-collection"),
         ("acl_record", None),
         ("metrics", ["not-a-dict"]),
+        ("jira_metrics", ["not-a-dict"]),
     ],
 )
 def test_result_rejects_wrong_types(field: str, value: object) -> None:
@@ -182,3 +198,25 @@ def test_result_rejects_wrong_types(field: str, value: object) -> None:
 def test_result_rejects_non_quality_observation() -> None:
     with pytest.raises(TypeError):
         _result(quality_observation={"not": "quality"})
+
+
+def test_result_rejects_non_jira_quality_observation() -> None:
+    with pytest.raises(TypeError):
+        _result(jira_quality_observation={"not": "quality"})
+
+
+def test_result_carries_jira_quality_and_metrics_forward() -> None:
+    quality = _jira_quality(allowlisted_keys=("SVMCSPEN-1",))
+    result = _result(
+        jira_quality_observation=quality,
+        jira_metrics={"relations_total": 1},
+    )
+    assert result.jira_quality_observation.allowlisted_keys == ("SVMCSPEN-1",)
+    assert result.jira_metrics == {"relations_total": 1}
+
+
+def test_result_isolates_jira_metrics_from_caller_mutation() -> None:
+    source_metrics = {"relations_total": 1, "nested": {"k": ["v"]}}
+    result = _result(jira_metrics=source_metrics)
+    source_metrics["nested"]["k"].append("late")
+    assert result.jira_metrics["nested"]["k"] == ["v"]
