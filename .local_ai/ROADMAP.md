@@ -83,9 +83,9 @@ Sync-state clarification:
 | M6F-C2 - Offline ACL composition acceptance | complete and independently approved | Approved source head `74fdbf1`; source merge head `c12dcc2`; main execution head `2034ea4`; scoped blob equivalence and real offline acceptance passed | No rerun required; real raw and sidecar artifacts remain external and uncommitted. |
 | M6F-D - Final M6F documentation closeout | complete; owner-approved | Documentation source head `03c206f`; owner-approval registration head `56e7750` in the working repository | Documentation-only closeout; M6F is complete and approved; neither SHA is a required main-machine checkout target. |
 | M6G-A - One-page export focused contract | complete; independently approved | Approved source-review head `dbe5c2f`; no P0-P2 | Contract/docs only; two P3 items are assigned to M6G-B and M6G-C. |
-| M6G-B - Reusable composition and export projection | next; unblocked; not started | M6G-A approved and frozen | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests only. |
-| M6G-C - M3 export composition and synthetic acceptance | blocked; not started | Requires approved M6G-B | Reuse M3 staging/completion/publication; no parallel exporter. |
-| M6G-D - Real offline export acceptance and closeout | blocked; not started | Requires approved M6G-C and transferred-tree equivalence | One controlled offline snapshot, independent evidence review, docs closeout. |
+| M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
+| M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
+| M6G-D - Real offline export acceptance and closeout | next; unblocked; not started | Requires approved M6G-C and transferred-tree equivalence | One controlled offline snapshot, independent evidence review, docs closeout. |
 | M7 - Crawl reliability and scale | blocked; planned | M6G one-page vertical-slice gate incomplete | Retry, rate limit, checkpoint, resume. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
@@ -95,9 +95,9 @@ Sync-state clarification:
 
 Current area: M6F-A through M6F-D are complete and approved. M6F includes the
 approved C1 controlled live capture and C2 real captured-sidecar offline
-acceptance. M6G-A is complete and independently approved; M6G-B is the next
-unblocked planning task and has not started. M6 overall remains in progress
-until the one-page export through M3 is complete.
+acceptance. M6G-A and M6G-B are complete and independently approved; M6G-C is
+the next unblocked implementation task. M6 overall remains in progress until
+the one-page export through M3 is complete.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -801,8 +801,10 @@ Status:
 - M6F-D: final documentation-only closeout complete; M6F complete and approved.
 - M6G-A: complete and independently approved at source-review head `dbe5c2f`;
   no production implementation existed at that head.
-- M6G-B: next and unblocked for planning; not started.
-- M6G-C, M6G-D, and M7: blocked by their preceding approval gates.
+- M6G-B: complete and independently approved at production head `5ee5126`.
+- M6G-C: complete and independently approved at production head `5f62bdb`.
+- M6G-D: next and unblocked; M7 remains blocked by the one-page vertical-slice
+  gate.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).
@@ -822,9 +824,10 @@ Tasks:
 - M6G-A activate the one-page export focused contract (done and independently
   approved).
 - M6G-B expose reusable composition and implement trusted export projection
-  (next; not started).
-- M6G-C compose the approved M3 export path and synthetic acceptance (blocked).
-- M6G-D run/review the real offline export and close documentation (blocked).
+  (done and independently approved at `5ee5126`).
+- M6G-C compose the approved M3 export path and synthetic acceptance (done and
+  independently approved at `5f62bdb`).
+- M6G-D run/review the real offline export and close documentation (next).
 
 Completion gate:
 - One real page has raw provenance.

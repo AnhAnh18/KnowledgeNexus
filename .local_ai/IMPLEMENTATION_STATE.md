@@ -1115,8 +1115,21 @@ Review artifact:
 - Independent review found no P0, P1, or P2. Two P3 items are deferred to the
   appropriate implementation gates: add contract-consistency coverage in
   M6G-B, and require the byte-identical M4 golden snapshot test in M6G-C.
-- M6G-B is the next unblocked planning task. M6G-C, M6G-D, and M7 remain
-  blocked by their preceding approval gates.
+- M6G-B is complete and independently approved at production head
+  `5ee5126db07b2b6cf28453d3224ea902b641068a`, split into the approved B1–B4
+  commits. It provides the reusable M6A–M6F composition boundary, trusted
+  one-page projection, deterministic profile/config derivation, and contract
+  consistency coverage. No staging or publication is performed by M6G-B.
+- M6G-C is now the next implementation task. M6G-D and M7 remain blocked by
+  their preceding approval gates.
+- M6G-C is complete and independently approved at production head
+  `5f62bdb`. It composes the trusted one-page projection through the existing
+  M3 writer, extended completer, publisher, and offline synthetic acceptance.
+  The legacy M3 report/golden path remains compatible; no real raw page,
+  sidecar, or production export was used.
+- M6G-D is the next task: one controlled real offline export and sanitized
+  evidence closeout. M7 remains blocked until the one-page vertical slice is
+  complete.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
@@ -1175,8 +1188,6 @@ Review artifact:
 
 ## Next Planned Task
 
-Plan M6G-B against approved M6G-A source-review head `dbe5c2f`. M6G-B owns only
-the reusable M6A-through-M6F composition boundary, trusted export projection,
-and deterministic profile/config derivation. It must add the deferred
-contract-consistency coverage. Do not begin M6G-C, M6G-D, or M7 as part of
-M6G-B.
+Plan M6G-D against approved M6G-C production head `5f62bdb`. M6G-D owns one
+controlled real offline export, independent sanitized-evidence review, and
+documentation closeout. It must not add new production export behavior.
