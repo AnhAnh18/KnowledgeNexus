@@ -4,7 +4,7 @@ This bundle is the complete authoritative state of the **AI Knowledge Platform �
 
 ## What this project is
 
-Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6F deny-safe ACL composition, including read-only capture and offline real-artifact acceptance. M6G-A is now the active focused-contract task for the one-page Foundation export. No M6G production exporter or real one-page snapshot exists yet.
+Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6F deny-safe ACL composition, including read-only capture and offline real-artifact acceptance. M6G-A, M6G-B, and M6G-C are complete and approved for the one-page Foundation export path. M6G-D remains for the controlled real offline export and evidence closeout; no real one-page snapshot has been produced yet.
 
 ## Read order (priority)
 
@@ -46,7 +46,7 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 
 ## Suggested next steps
 
-1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6F as complete and approved.
-2. Independently review and freeze M6G-A before beginning M6G-B. No M6G production code exists yet.
-3. Implement the one-page export only through the approved M3 writer, completer, publisher, and dataset-version rule.
+1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6F and M6G-A through M6G-C as complete and approved.
+2. Run M6G-D only from a clean transferred execution head, using the approved one-page CLI and external raw/sidecar artifacts.
+3. Keep the real export outside Git history and register only sanitized aggregate evidence plus documentation closeout.
 4. Complete the later retrieval benchmark only after representative corpus anchors exist, then record any accepted configuration migration explicitly.
