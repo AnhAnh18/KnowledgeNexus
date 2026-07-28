@@ -3,10 +3,21 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+from knowledgenexus.foundation.application.use_cases import (
+    compose_confluence_acl,
+    project_one_page_export,
+)
 from knowledgenexus.foundation.cli import materialize_confluence_acl as cli
 from knowledgenexus.foundation.infrastructure.sidecars import (
     confluence_restriction_observation_sidecar as sidecar,
 )
+
+# M6G-B moves the C2 CLI's composition logic into compose_confluence_acl.py
+# and adds project_one_page_export.py; both must uphold the same no-transport/
+# no-credential/no-environment guarantees the CLI itself was already held to.
+_GUARDED_MODULES = (cli, compose_confluence_acl, project_one_page_export)
 
 
 def _imports(path: Path) -> set[str]:
@@ -20,8 +31,11 @@ def _imports(path: Path) -> set[str]:
     return names
 
 
-def test_c2_cli_imports_no_transport_connector_or_network_adapter() -> None:
-    imports = _imports(Path(cli.__file__))
+@pytest.mark.parametrize("module", _GUARDED_MODULES, ids=lambda m: m.__name__)
+def test_c2_boundary_module_imports_no_transport_connector_or_network_adapter(
+    module: object,
+) -> None:
+    imports = _imports(Path(module.__file__))
     forbidden = (
         "confluence_http_transport",
         "confluence_data_center_inventory_adapter",
@@ -38,8 +52,11 @@ def test_c2_cli_imports_no_transport_connector_or_network_adapter() -> None:
     )
 
 
-def test_c2_cli_reads_no_credentials_or_environment() -> None:
-    source = Path(cli.__file__).read_text(encoding="utf-8")
+@pytest.mark.parametrize("module", _GUARDED_MODULES, ids=lambda m: m.__name__)
+def test_c2_boundary_module_reads_no_credentials_or_environment(
+    module: object,
+) -> None:
+    source = Path(module.__file__).read_text(encoding="utf-8")
 
     for forbidden in (
         "CONFLUENCE_PAT",

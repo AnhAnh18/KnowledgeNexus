@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from argparse import Namespace
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -10,6 +9,9 @@ import pytest
 from knowledgenexus.foundation.cli import materialize_confluence_acl as cli
 from knowledgenexus.foundation.application.use_cases.normalize_confluence_page import (
     ConfluencePageNormalizationError,
+)
+from knowledgenexus.foundation.domain.models.acl_materialization import (
+    AclMaterializationFailureCategory,
 )
 from knowledgenexus.foundation.infrastructure.sidecars import (
     CAPTURED_M6B_EVIDENCE_KIND,
@@ -151,6 +153,57 @@ def test_stage_failures_are_sanitized(
     assert "SENSITIVE" not in captured.err
 
 
+@pytest.mark.parametrize(
+    ("failure", "exit_code", "category"),
+    [
+        (
+            cli.ConfluenceAclRestrictionAncestryError(),
+            cli.EXIT_RESTRICTION_ANCESTRY,
+            "restriction_ancestry",
+        ),
+        (cli.ConfluenceAclCompositionAcceptanceError(), cli.EXIT_ACCEPTANCE, "acceptance"),
+    ],
+)
+def test_reusable_composition_domain_failures_are_sanitized(
+    failure: BaseException,
+    exit_code: int,
+    category: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(args: object) -> object:
+        raise failure
+
+    monkeypatch.setattr(cli, "_run", fail)
+
+    assert cli.main(_argv()) == exit_code
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "failed",
+        "category": category,
+    }
+
+
+def test_acl_materialization_error_from_composition_maps_exact_category(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(args: object) -> object:
+        raise cli.AclMaterializationError(
+            AclMaterializationFailureCategory.INVALID_EXTRACTED_AT
+        )
+
+    monkeypatch.setattr(cli, "_run", fail)
+
+    assert cli.main(_argv()) == cli.EXIT_ACL_MATERIALIZATION
+    captured = capsys.readouterr()
+    assert json.loads(captured.err) == {
+        "status": "failed",
+        "category": "invalid_extracted_at",
+    }
+
+
 @pytest.mark.parametrize("number", ("1e309", "-1e309", "1e999999"))
 def test_exponent_overflow_sidecar_fails_at_initial_loader_boundary(
     tmp_path: Path,
@@ -249,19 +302,6 @@ def test_invalid_page_id_preserves_existing_normalization_mapping(
     assert "SENSITIVE" not in captured.err
 
 
-def test_fixed_raw_reader_returns_only_bound_snapshot() -> None:
-    reader = cli._FixedRawPageReader(
-        expected_page_id="1000",
-        raw_bytes=b"SENSITIVE-RAW",
-    )
-
-    assert reader.read_page(page_id="1000") == b"SENSITIVE-RAW"
-    with pytest.raises(RawPageReadError):
-        reader.read_page(page_id="1001")
-    assert "1000" not in repr(reader)
-    assert "SENSITIVE" not in repr(reader)
-
-
 def _raw_page(
     *,
     page_id: str = "1000",
@@ -294,93 +334,6 @@ def _loaded(ids: list[str]) -> LoadedRestrictionSidecar:
     )
 
 
-def test_exact_ancestry_binding_preserves_validated_order() -> None:
-    loaded = _loaded(["800", "900", "1000"])
-
-    validated = cli._bind_restriction_ancestry(
-        loaded_sidecar=loaded,
-        canonical_page_id="1000",
-        raw_bytes=_raw_page(),
-        selected_page_id="1000",
-    )
-
-    assert tuple(item["source_page_id"] for item in validated) == (
-        "800",
-        "900",
-        "1000",
-    )
-
-
-@pytest.mark.parametrize(
-    ("ids", "raw_bytes", "canonical_page_id", "selected_page_id"),
-    [
-        (["900", "1000"], _raw_page(), "1000", "1000"),
-        (["700", "800", "900", "1000"], _raw_page(), "1000", "1000"),
-        (["900", "800", "1000"], _raw_page(), "1000", "1000"),
-        (["800", "1000", "900"], _raw_page(), "1000", "1000"),
-        (["800", "900", "1001"], _raw_page(), "1000", "1000"),
-        (["800", "900", "1000", "1000"], _raw_page(), "1000", "1000"),
-        (
-            ["800", "900", "1000"],
-            _raw_page(page_id="1001"),
-            "1000",
-            "1000",
-        ),
-        (
-            ["800", "900", "1000"],
-            _raw_page(ancestors=["800", "800"]),
-            "1000",
-            "1000",
-        ),
-        (
-            ["800", "900", "1000"],
-            _raw_page(ancestors=["800", "1000"]),
-            "1000",
-            "1000",
-        ),
-        (
-            ["800", "900", "1000"],
-            b'{"id":"1000","ancestors":{}}',
-            "1000",
-            "1000",
-        ),
-        (
-            ["800", "900", "1000"],
-            b"not-json",
-            "1000",
-            "1000",
-        ),
-    ],
-)
-def test_invalid_or_mismatched_ancestry_fails_in_stage_11(
-    ids: list[str],
-    raw_bytes: bytes,
-    canonical_page_id: str,
-    selected_page_id: str,
-) -> None:
-    with pytest.raises(cli._RestrictionAncestryError):
-        cli._bind_restriction_ancestry(
-            loaded_sidecar=_loaded(ids),
-            canonical_page_id=canonical_page_id,
-            raw_bytes=raw_bytes,
-            selected_page_id=selected_page_id,
-        )
-
-
-def test_ancestry_binding_does_not_mutate_loaded_observations() -> None:
-    loaded = _loaded(["800", "900", "1000"])
-    before = deepcopy(loaded)
-
-    cli._bind_restriction_ancestry(
-        loaded_sidecar=loaded,
-        canonical_page_id="1000",
-        raw_bytes=_raw_page(),
-        selected_page_id="1000",
-    )
-
-    assert loaded == before
-
-
 class _SequenceRawStore:
     values: list[bytes | BaseException] = []
 
@@ -392,6 +345,17 @@ class _SequenceRawStore:
         if isinstance(value, BaseException):
             raise value
         return value
+
+
+class _StubComposer:
+    """Stands in for ``ComposeConfluenceAcl`` so ``_run()``'s own raw/sidecar
+    before-after reread logic can be exercised without a real composition."""
+
+    def __init__(self, **_kwargs: object) -> None:
+        pass
+
+    def execute(self, **_kwargs: object) -> object:
+        return object()
 
 
 def _run_args() -> Namespace:
@@ -414,7 +378,7 @@ def _stub_run_dependencies(
         "BgeM3LocalTokenizer",
         lambda **kwargs: object(),
     )
-    monkeypatch.setattr(cli, "_compose_once", lambda **kwargs: object())
+    monkeypatch.setattr(cli, "ComposeConfluenceAcl", _StubComposer)
     calls = iter(sidecar_values)
 
     def load(path: Path) -> object:
