@@ -8,6 +8,7 @@ from knowledgenexus.retrieval.domain.models.retrieve_result import (
     RetrieveResult,
     RetrievedChunk,
 )
+from knowledgenexus.indexing.domain.value_objects.embedding_vector import SparseVector
 from knowledgenexus.retrieval.domain.ports import (
     QueryEmbedderPort,
     RetrievalChunkPort,
@@ -35,10 +36,21 @@ class RetrieveChunksUseCase:
 
         embedding = await self._query_embedder.embed_query(request.query)
 
+        # Always extract sparse vector if the embedder supports it.
+        # The search port (QdrantVectorStore) decides whether to use it
+        # based on its own collection config (is_hybrid).
+        sparse_vector: SparseVector | None = None
+        if (
+            getattr(self._query_embedder, "supports_sparse", False)
+            and embedding.sparse is not None
+        ):
+            sparse_vector = embedding.sparse
+
         scored_chunks = await self._search_port.search(
-            query_vector=embedding.values,
+            dense_vector=embedding.values,
             top_k=request.top_k,
             filters=request.filters or None,
+            sparse_vector=sparse_vector,
         )
 
         if request.score_threshold > 0:

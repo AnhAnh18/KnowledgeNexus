@@ -17,6 +17,12 @@ class QueryEmbedderPort(ABC):
     def dimension(self) -> int:
         ...
 
+    @property
+    @abstractmethod
+    def supports_sparse(self) -> bool:
+        """Whether this embedder can produce sparse vectors."""
+        ...
+
     @abstractmethod
     async def embed_query(self, query: str) -> EmbeddingVector:
         ...

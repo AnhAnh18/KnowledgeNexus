@@ -10,6 +10,8 @@ from qdrant_client.models import (
     MatchValue,
     PointIdsList,
     PointStruct,
+    SparseVector,
+    SparseVectorParams,
     VectorParams,
 )
 
@@ -17,6 +19,7 @@ from knowledgenexus.indexing.domain.enums.source_type import SourceType
 from knowledgenexus.indexing.domain.models.chunk import Chunk
 from knowledgenexus.shared.errors import StorageError, ValidationError
 from knowledgenexus.indexing.domain.ports.vector_store_port import VectorStorePort
+from knowledgenexus.indexing.domain.value_objects.embedding_vector import SparseVector as DomainSparseVector
 from knowledgenexus.indexing.domain.value_objects.scored_chunk import ScoredChunk
 
 from knowledgenexus.indexing.infrastructure.vector_store.qdrant_schema import (
@@ -88,6 +91,42 @@ def _slim_chunk_from_payload(payload: dict[str, Any], score: float) -> ScoredChu
     return ScoredChunk(chunk=slim_chunk, score=score)
 
 
+def _rrf_fuse(
+    dense_hits: list,
+    sparse_hits: list,
+    k: int = 60,
+    top_k: int = 10,
+) -> list:
+    """Reciprocal Rank Fusion of dense + sparse results."""
+    scores: dict[str, float] = {}
+    payloads: dict[str, dict] = {}
+
+    for rank, hit in enumerate(dense_hits, start=1):
+        pid = str(hit.id)
+        scores[pid] = scores.get(pid, 0.0) + 1.0 / (k + rank)
+        payloads[pid] = hit.payload or {}
+
+    for rank, hit in enumerate(sparse_hits, start=1):
+        pid = str(hit.id)
+        scores[pid] = scores.get(pid, 0.0) + 1.0 / (k + rank)
+        payloads[pid] = hit.payload or {}
+
+    sorted_ids = sorted(scores.keys(), key=lambda pid: scores[pid], reverse=True)
+
+    class _FusedHit:
+        __slots__ = ("id", "score", "payload")
+
+        def __init__(self, pid: str, score: float, payload: dict) -> None:
+            self.id = pid
+            self.score = score
+            self.payload = payload
+
+    return [
+        _FusedHit(pid, scores[pid], payloads[pid])
+        for pid in sorted_ids[:top_k]
+    ]
+
+
 class QdrantVectorStore(VectorStorePort):
     def __init__(
         self,
@@ -112,6 +151,11 @@ class QdrantVectorStore(VectorStorePort):
                 vector_size=config.vector_size,
                 distance=config.distance,
                 payload_indexes=config.payload_indexes,
+                is_hybrid=config.is_hybrid,
+                sparse_name=config.sparse_name,
+                dense_name=config.dense_name,
+                rrf_k=config.rrf_k,
+                prefetch_limit=config.prefetch_limit,
             )
         client = AsyncQdrantClient(url=url, api_key=api_key)
         store = cls(client=client, config=config)
@@ -122,13 +166,31 @@ class QdrantVectorStore(VectorStorePort):
         collections = await self._client.get_collections()
         names = {c.name for c in collections.collections}
         if self._config.collection_name not in names:
-            await self._client.create_collection(
-                collection_name=self._config.collection_name,
-                vectors_config=VectorParams(
+            if self._config.is_hybrid:
+                # Hybrid: named dense vector + separate sparse vector
+                dense_params = VectorParams(
                     size=self._config.vector_size,
                     distance=self._config.distance,
-                ),
-            )
+                )
+                sparse_params = SparseVectorParams()
+                await self._client.create_collection(
+                    collection_name=self._config.collection_name,
+                    vectors_config={
+                        self._config.dense_name: dense_params,
+                    },
+                    sparse_vectors_config={
+                        self._config.sparse_name: sparse_params,
+                    },
+                )
+            else:
+                # Dense-only: single unnamed vector
+                await self._client.create_collection(
+                    collection_name=self._config.collection_name,
+                    vectors_config=VectorParams(
+                        size=self._config.vector_size,
+                        distance=self._config.distance,
+                    ),
+                )
         for index_def in self._config.payload_indexes:
             try:
                 await self._client.create_payload_index(
@@ -145,43 +207,115 @@ class QdrantVectorStore(VectorStorePort):
             return
         points: list[PointStruct] = []
         for chunk in chunks:
-            if chunk.vector is None:
+            if chunk.dense_vector is None:
                 raise ValidationError(f"Chunk {chunk.id} missing embedding vector")
-            if len(chunk.vector) != self._config.vector_size:
+            if len(chunk.dense_vector) != self._config.vector_size:
                 raise ValidationError(
-                    f"Chunk {chunk.id} vector size {len(chunk.vector)} "
+                    f"Chunk {chunk.id} vector size {len(chunk.dense_vector)} "
                     f"!= expected {self._config.vector_size}"
                 )
-            points.append(
-                PointStruct(
-                    id=_to_point_id(chunk.id),
-                    vector=chunk.vector,
-                    payload=_slim_payload(chunk),
+
+            if self._config.is_hybrid:
+                # Hybrid: named vectors
+                vector_map: dict[str, Any] = {
+                    self._config.dense_name: chunk.dense_vector,
+                }
+                if chunk.sparse_vector is not None:
+                    vector_map[self._config.sparse_name] = SparseVector(
+                        indices=chunk.sparse_vector.indices,
+                        values=chunk.sparse_vector.values,
+                    )
+                points.append(
+                    PointStruct(
+                        id=_to_point_id(chunk.id),
+                        vector=vector_map,
+                        payload=_slim_payload(chunk),
+                    )
                 )
-            )
+            else:
+                # Dense-only: single unnamed vector
+                points.append(
+                    PointStruct(
+                        id=_to_point_id(chunk.id),
+                        vector=chunk.dense_vector,
+                        payload=_slim_payload(chunk),
+                    )
+                )
         await self._client.upsert(collection_name=self._config.collection_name, points=points)
 
     async def search(
         self,
-        query_vector: list[float],
+        dense_vector: list[float],
         top_k: int,
         filters: dict[str, Any] | None = None,
+        sparse_vector: DomainSparseVector | None = None,
     ) -> list[ScoredChunk]:
-        if len(query_vector) != self._config.vector_size:
+        if len(dense_vector) != self._config.vector_size:
             raise ValidationError(
-                f"Query vector size {len(query_vector)} != {self._config.vector_size}"
+                f"Query vector size {len(dense_vector)} != {self._config.vector_size}"
             )
-        response = await self._client.query_points(
-            collection_name=self._config.collection_name,
-            query=query_vector,
-            limit=top_k,
-            query_filter=_build_filter(filters),
-        )
-        return [
-            _slim_chunk_from_payload(hit.payload or {}, hit.score or 0.0)
-            for hit in response.points
-        ]
 
+        qdrant_filter = _build_filter(filters)
+
+        if self._config.is_hybrid and sparse_vector is not None:
+            # Hybrid search: dense + sparse with RRF fusion
+            prefetch_limit = max(self._config.prefetch_limit, top_k)
+
+            # Dense prefetch
+            dense_response = await self._client.query_points(
+                collection_name=self._config.collection_name,
+                query=dense_vector,
+                using=self._config.dense_name,
+                limit=prefetch_limit,
+                query_filter=qdrant_filter,
+            )
+
+            # Sparse prefetch
+            sparse_qv = SparseVector(
+                indices=sparse_vector.indices,
+                values=sparse_vector.values,
+            )
+            sparse_response = await self._client.query_points(
+                collection_name=self._config.collection_name,
+                query=sparse_qv,
+                using=self._config.sparse_name,
+                limit=prefetch_limit,
+                query_filter=qdrant_filter,
+            )
+
+            # RRF fusion
+            fused = _rrf_fuse(
+                dense_response.points,
+                sparse_response.points,
+                k=self._config.rrf_k,
+                top_k=top_k,
+            )
+            return [
+                _slim_chunk_from_payload(hit.payload or {}, hit.score or 0.0)
+                for hit in fused
+            ]
+        else:
+            # Dense-only search
+            if self._config.is_hybrid:
+                # Hybrid collection but no sparse provided → use dense named vector
+                response = await self._client.query_points(
+                    collection_name=self._config.collection_name,
+                    query=dense_vector,
+                    using=self._config.dense_name,
+                    limit=top_k,
+                    query_filter=qdrant_filter,
+                )
+            else:
+                response = await self._client.query_points(
+                    collection_name=self._config.collection_name,
+                    query=dense_vector,
+                    limit=top_k,
+                    query_filter=qdrant_filter,
+                )
+            return [
+                _slim_chunk_from_payload(hit.payload or {}, hit.score or 0.0)
+                for hit in response.points
+            ]
 
     async def delete_by_source_id(self, source_type: SourceType, source_id: str) -> int:
         await self._client.delete(
@@ -218,6 +352,7 @@ class QdrantVectorStore(VectorStorePort):
             "collection": self._config.collection_name,
             "points_count": info.points_count,
             "vector_size": self._config.vector_size,
+            "is_hybrid": self._config.is_hybrid,
             "status": str(info.status),
         }
 

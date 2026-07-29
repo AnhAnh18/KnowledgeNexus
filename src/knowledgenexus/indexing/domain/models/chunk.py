@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from knowledgenexus.indexing.domain.enums import SourceType
+
+if TYPE_CHECKING:
+    from knowledgenexus.indexing.domain.value_objects.embedding_vector import SparseVector
 
 
 @dataclass
@@ -29,16 +35,17 @@ class ChunkPayload:
 class Chunk:
     id: str     # chunk PK - UUID string or AKP chunk_id
     payload: ChunkPayload
-    vector: list[float] | None = None
-    
+    dense_vector: list[float] | None = None
+    sparse_vector: SparseVector | None = None
+
     @property
     def document_id(self) -> UUID:
         return self.payload.core.document_id
-    
+
     @property
     def chunk_index(self) -> int:
         return self.payload.core.chunk_index
-    
+
     @property
     def content(self) -> str:
         return self.payload.content

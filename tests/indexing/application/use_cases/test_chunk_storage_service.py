@@ -23,7 +23,7 @@ class InMemoryVectorStore(VectorStorePort):
             self.points[chunk.id] = chunk
 
     async def search(
-        self, query_vector: list[float], top_k: int, filters: dict[str, Any] | None = None
+        self, dense_vector: list[float], top_k: int, filters: dict[str, Any] | None = None
     ) -> list[ScoredChunk]:
         results = []
         for chunk in list(self.points.values())[:top_k]:
@@ -71,7 +71,7 @@ def _chunk(doc_id: UUID) -> Chunk:
     return Chunk(
         id=str(uuid4()),
         payload=ChunkPayload(core=core, content="hello world", extra={"k": "v"}),
-        vector=[0.0] * 4,
+        dense_vector=[0.0] * 4,
     )
 
 
@@ -89,7 +89,7 @@ async def test_chunk_storage_save_search_hydrate():
     chunk = _chunk(doc_id)
     await storage.save([chunk])
 
-    results = await storage.search(query_vector=[0.0] * 4, top_k=5)
+    results = await storage.search(dense_vector=[0.0] * 4, top_k=5)
     assert len(results) == 1
     assert results[0].chunk.content == "hello world"
     assert results[0].chunk.payload.extra["k"] == "v"

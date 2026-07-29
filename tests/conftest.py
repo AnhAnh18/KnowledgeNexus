@@ -76,5 +76,5 @@ def make_chunk(
     return Chunk(
         id=chunk_id or str(uuid4()),
         payload=ChunkPayload(core=core, content=content, extra=extra or {}),
-        vector=[vector_value] * vector_size,
+        dense_vector=[vector_value] * vector_size,
     )

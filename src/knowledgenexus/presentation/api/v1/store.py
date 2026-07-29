@@ -39,7 +39,7 @@ def _to_chunk(item) -> Chunk:
     return Chunk(
         id=item.chunk_id,
         payload=payload,
-        vector=item.vector,
+        dense_vector=item.vector,
     )
 
 

@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from knowledgenexus.indexing.domain.enums.source_type import SourceType
 from knowledgenexus.indexing.domain.models.chunk import Chunk, ChunkPayload, CoreChunkMetadata
 from knowledgenexus.indexing.domain.models.document import Document
+from knowledgenexus.indexing.domain.value_objects.embedding_vector import SparseVector
 from knowledgenexus.shared.config.settings import get_settings
 from knowledgenexus.shared.di.container import get_container, init_container, shutdown_container
 
@@ -94,14 +95,14 @@ async def ingest_file(path: Path, root: Path, container) -> int:
 
     embedder = container.get_embedder()
     vectors: list[list[float]] = []
-    sparse_vectors: list[dict[str, list] | None] = []
+    sparse_vectors: list[SparseVector | None] = []
     for i in range(0, len(parts), EMBEDDING_BATCH_SIZE):
         batch = parts[i : i + EMBEDDING_BATCH_SIZE]
         embeddings = await embedder.embed(batch)
         vectors.extend([e.values for e in embeddings])
         for e in embeddings:
             if e.sparse is not None:
-                sparse_vectors.append(e.sparse.to_qdrant())
+                sparse_vectors.append(e.sparse)
             else:
                 sparse_vectors.append(None)
 

@@ -17,7 +17,7 @@ def _store_request_body(chunk):
             {
                 "chunk_id": chunk.id,
                 "document_id": doc_id,
-                "vector": chunk.vector,
+                "vector": chunk.dense_vector,
                 "core": {
                     "document_id": doc_id,
                     "source_type": chunk.payload.core.source_type.value,

@@ -57,7 +57,7 @@ def _chunk(
     return Chunk(
         id=chunk_id or str(uuid4()),
         payload=ChunkPayload(core=core, content="full text", extra={}),
-        vector=vector if vector is not None else [0.01] * VECTOR_SIZE,
+        dense_vector=vector if vector is not None else [0.01] * VECTOR_SIZE,
     )
 
 
@@ -71,7 +71,7 @@ async def test_upsert_slim_empty_is_no_op(store: QdrantVectorStore, mock_client:
 @pytest.mark.asyncio
 async def test_upsert_slim_missing_vector_raises(store: QdrantVectorStore):
     chunk = _chunk()
-    chunk.vector = None
+    chunk.dense_vector = None
 
     with pytest.raises(ValidationError, match="missing embedding vector"):
         await store.upsert_slim([chunk])
@@ -123,7 +123,7 @@ async def test_upsert_slim_calls_client_with_slim_payload(
 @pytest.mark.asyncio
 async def test_search_wrong_query_vector_size_raises(store: QdrantVectorStore):
     with pytest.raises(ValidationError, match="Query vector size"):
-        await store.search(query_vector=[0.1] * 8, top_k=5)
+        await store.search(dense_vector=[0.1] * 8, top_k=5)
 
 
 @pytest.mark.asyncio
@@ -131,7 +131,7 @@ async def test_search_maps_hits_to_scored_chunks(store: QdrantVectorStore, mock_
     chunk_id = str(uuid4())
     doc_id = str(uuid4())
     indexed_at = datetime.now(UTC).isoformat()
-    mock_client.search.return_value = [
+    mock_client.query_points.return_value = MagicMock(points=[
         ScoredPoint(
             id=chunk_id,
             version=1,
@@ -146,9 +146,9 @@ async def test_search_maps_hits_to_scored_chunks(store: QdrantVectorStore, mock_
             },
             vector=None,
         )
-    ]
+    ])
 
-    results = await store.search(query_vector=[0.01] * VECTOR_SIZE, top_k=1)
+    results = await store.search(dense_vector=[0.01] * VECTOR_SIZE, top_k=1)
 
     assert len(results) == 1
     assert results[0].score == 0.91
@@ -160,15 +160,15 @@ async def test_search_maps_hits_to_scored_chunks(store: QdrantVectorStore, mock_
 
 @pytest.mark.asyncio
 async def test_search_passes_filters(store: QdrantVectorStore, mock_client: AsyncMock):
-    mock_client.search.return_value = []
+    mock_client.query_points.return_value = MagicMock(points=[])
 
     await store.search(
-        query_vector=[0.01] * VECTOR_SIZE,
+        dense_vector=[0.01] * VECTOR_SIZE,
         top_k=3,
         filters={"source_type": "CONFLUENCE", "source_id": "abc"},
     )
 
-    call_kwargs = mock_client.search.await_args.kwargs
+    call_kwargs = mock_client.query_points.await_args.kwargs
     assert call_kwargs["limit"] == 3
     query_filter = call_kwargs["query_filter"]
     assert query_filter is not None
@@ -225,6 +225,7 @@ async def test_get_stats(store: QdrantVectorStore, mock_client: AsyncMock):
         "collection": "test_collection",
         "points_count": 7,
         "vector_size": VECTOR_SIZE,
+        "is_hybrid": False,
         "status": "green",
     }
 

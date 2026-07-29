@@ -9,6 +9,11 @@ class StorageMode(StrEnum):
     POSTGRES = "postgres"
 
 
+class RetrievalMode(StrEnum):
+    DENSE = "dense"
+    HYBRID = "hybrid"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -24,6 +29,9 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "knowledgenexus"
     qdrant_api_key: str | None = None
+
+    # Retrieval mode: "dense" (default) or "hybrid" (dense + sparse + RRF)
+    retrieval_mode: RetrievalMode = RetrievalMode.DENSE
 
     # CORS (comma-separated origins, or "*" for all)
     cors_origins: str = "*"
@@ -43,6 +51,8 @@ class Settings(BaseSettings):
 
     @property
     def qdrant_collection_config_path(self) -> Path:
+        if self.retrieval_mode == RetrievalMode.HYBRID:
+            return self.project_root / "config" / "qdrant.collection.hybrid.yaml"
         return self.project_root / "config" / "qdrant.collection.yaml"
 
 

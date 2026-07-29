@@ -35,11 +35,11 @@ class ChunkStorageService:
 
     async def search(
         self,
-        query_vector: list[float],
+        dense_vector: list[float],
         top_k: int,
         filters: dict[str, Any] | None = None,
     ) -> list[ScoredChunk]:
-        slim_results = await self._vector_store.search(query_vector, top_k, filters)
+        slim_results = await self._vector_store.search(dense_vector, top_k, filters)
         return await self._chunk_repo.hydrate(slim_results)
 
     async def get_by_ids(self, chunk_ids: list[str]) -> list[Chunk]:
