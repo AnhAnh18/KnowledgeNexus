@@ -4,7 +4,7 @@ This bundle is the complete authoritative state of the **AI Knowledge Platform �
 
 ## What this project is
 
-Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6G, including the controlled real offline one-page export and evidence closeout. The M7-A1 crawl-reliability scope and owner-decision contract candidate is complete but pending independent detached review. M7-A2 and all M7 production implementation remain blocked until that review approves the M7-A1 contract gate.
+Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6G, including the controlled real offline one-page export and evidence closeout. The owner has accepted the M7-A1 crawl-reliability scope and owner-decision contract and explicitly waived the independent-review gate because the designated reviewer was unavailable. M7-A2 contract work is unblocked; all M7 production implementation remains blocked until the complete A1/A2/A3 contract gate is approved.
 
 ## Read order (priority)
 
@@ -48,6 +48,6 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 ## Suggested next steps
 
 1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6, including M6G-D real one-page export acceptance, as complete and approved.
-2. Independently review `CRAWL_RELIABILITY_SPEC.md` and `decision_logs/M7_OWNER_DECISIONS.md`; freeze the M7-A1 contract gate only after an `APPROVE` verdict, then plan M7-A2 failure/retry contract work.
+2. Treat `CRAWL_RELIABILITY_SPEC.md` and `decision_logs/M7_OWNER_DECISIONS.md` as the owner-accepted M7-A1 gate, including the recorded independent-review waiver, then plan and review M7-A2 failure/retry contract work.
 3. Keep raw crawl generations, checkpoint databases, operational evidence, and real exports outside Git history; register only sanitized aggregate evidence and milestone status.
 4. Complete the later retrieval benchmark only after representative corpus anchors exist, then record any accepted configuration migration explicitly.
