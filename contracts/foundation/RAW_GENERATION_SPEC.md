@@ -2,7 +2,7 @@
 
 ## 1. Status, authority, and scope
 
-Status: contract-only M7-A3b candidate, complete and pending integrated review.
+Status: contract-only M7-A3b contract complete and owner-approved.
 
 This specification narrows `CRAWL_RELIABILITY_SPEC.md` owner decisions C, D,
 and H. It is authoritative for future M7 raw-generation isolation,
@@ -13,10 +13,10 @@ It does not implement a raw store, lock, checkpoint, request, retry, or
 filesystem operation. It does not migrate or reinterpret M6 raw artifacts.
 
 ```text
-M7-A2 contract candidate: COMPLETE, PENDING REVIEW
-M7-A3a contract candidate: COMPLETE, PENDING REVIEW
-M7-A3b contract candidate: COMPLETE, PENDING REVIEW
-M7-CONTRACT-GATE: PENDING INTEGRATED REVIEW
+M7-A2: COMPLETE AND APPROVED
+M7-A3a: COMPLETE AND APPROVED
+M7-A3b: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
@@ -435,6 +435,6 @@ An independent reviewer must confirm:
 Until integrated review:
 
 ```text
-M7-CONTRACT-GATE: PENDING INTEGRATED REVIEW
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```

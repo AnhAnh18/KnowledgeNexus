@@ -2,15 +2,15 @@
 
 ## 1. Status, authority, and scope
 
-Status: contract-only M7-A3a candidate, complete and pending integrated review.
+Status: contract-only M7-A3a contract complete and owner-approved.
 
 ```text
 M7-A1: OWNER-APPROVED
 M7-A1 independent review: WAIVED BY OWNER
-M7-A2 contract candidate: COMPLETE, PENDING REVIEW
-M7-A3a contract candidate: COMPLETE, PENDING REVIEW
+M7-A2: COMPLETE AND APPROVED
+M7-A3a: COMPLETE AND APPROVED
 M7-A3b/A3c contract candidates: NOT YET RECORDED BY THIS DOCUMENT
-M7-CONTRACT-GATE: PENDING INTEGRATED REVIEW
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
@@ -347,6 +347,6 @@ An independent reviewer must confirm:
 Until integrated review accepts A1/A2/A3:
 
 ```text
-M7-CONTRACT-GATE: PENDING INTEGRATED REVIEW
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```

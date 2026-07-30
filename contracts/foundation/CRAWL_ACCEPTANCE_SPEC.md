@@ -2,16 +2,16 @@
 
 ## 1. Status, authority, and scope
 
-Status: contract-only M7-A3c candidate, complete and pending integrated review.
+Status: contract-only M7-A3c contract complete and owner-approved.
 
 ```text
 M7-A1: OWNER-APPROVED
 M7-A1 independent review: WAIVED BY OWNER
-M7-A2 contract candidate: COMPLETE, PENDING REVIEW
-M7-A3a contract candidate: COMPLETE, PENDING REVIEW
-M7-A3b contract candidate: COMPLETE, PENDING REVIEW
-M7-A3c contract candidate: COMPLETE, PENDING REVIEW
-M7-CONTRACT-GATE: PENDING INTEGRATED REVIEW
+M7-A2: COMPLETE AND APPROVED
+M7-A3a: COMPLETE AND APPROVED
+M7-A3b: COMPLETE AND APPROVED
+M7-A3c: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
@@ -490,21 +490,21 @@ The reviewer must inspect A1, A2, A3a, A3b, and A3c together and confirm:
 - no contract changes M5/M6 schemas or semantics;
 - no source/test/schema implementation exists.
 
-## 19. Candidate completion state
+## 19. Contract completion state
 
-After drafting but before integrated approval:
+The owner approved the complete M7-A2/A3 contract stack:
 
 ```text
 M7-A1: OWNER-APPROVED
 M7-A1 independent review: WAIVED BY OWNER
-M7-A2 contract candidate: COMPLETE, PENDING REVIEW
-M7-A3a contract candidate: COMPLETE, PENDING REVIEW
-M7-A3b contract candidate: COMPLETE, PENDING REVIEW
-M7-A3c contract candidate: COMPLETE, PENDING REVIEW
-M7-CONTRACT-GATE: PENDING INTEGRATED REVIEW
+M7-A2: COMPLETE AND APPROVED
+M7-A3a: COMPLETE AND APPROVED
+M7-A3b: COMPLETE AND APPROVED
+M7-A3c: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
-Only an accepted integrated review and separate owner authorization may open
-production implementation. This document MUST NOT record
-`M7-CONTRACT-GATE: APPROVED`.
+The approved contract gate opens production implementation planning only.
+Production code remains unauthorized until a later plan is reviewed and the
+owner separately authorizes implementation.

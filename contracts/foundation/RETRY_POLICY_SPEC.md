@@ -2,12 +2,12 @@
 
 ## 1. Status, authority, and precedence
 
-Status: M7-A2 contract candidate, complete and pending independent review.
+Status: M7-A2 contract complete and owner-approved.
 
 ```text
 M7-A1: OWNER-APPROVED
 M7-A1 independent review: WAIVED BY OWNER
-M7-A2 contract candidate: COMPLETE, PENDING REVIEW
+M7-A2: COMPLETE AND APPROVED
 M7-A3 contract work: BLOCKED BY M7-A2 REVIEW/ACCEPTANCE
 M7-CONTRACT-GATE: PENDING
 M7 production implementation: NOT AUTHORIZED
@@ -430,7 +430,7 @@ M7-A2 may be accepted only when an independent reviewer verifies:
 Until that verdict:
 
 ```text
-M7-A2 contract candidate: COMPLETE, PENDING REVIEW
+M7-A2: COMPLETE AND APPROVED
 M7-A3 contract work: BLOCKED
 M7-CONTRACT-GATE: PENDING
 M7 production implementation: NOT AUTHORIZED
