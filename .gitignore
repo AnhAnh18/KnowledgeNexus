@@ -18,6 +18,10 @@ akp_context_bundle_*.zip
 # Confluence, they were consumed by M5B-0, and they have no cross-machine value.
 .local_ai/evidence/
 
+# Repository-local SHA mappings differ across independent patch-transfer
+# histories. The example format is tracked; the populated mapping is not.
+.local_ai/LOCAL_PROVENANCE.md
+
 # Environment
 .env
 .env.local

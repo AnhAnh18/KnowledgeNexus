@@ -171,9 +171,11 @@ BASE -> [TASK-A] -> [TASK-B] -> [TASK-C]
   the full suite at that point. Later commits may depend on earlier commits;
   they are reviewed in order and are not required to be independently
   cherry-pickable onto `BASE`.
-- Record `BASE`, every lettered commit SHA, and `REVIEW_HEAD` in the review
-  summary. Review each commit/range directly from git; do not create patches by
-  default.
+- Record `BASE`, every lettered commit SHA, and `REVIEW_HEAD` in the ignored
+  `LOCAL_PROVENANCE.md` and provide them directly to the live reviewer. The
+  portable review summary records the ordered letter labels and verdict without
+  depending on repository-local SHAs. Review each commit/range directly from
+  git; do not create patches by default.
 
 ### Squashing is opt-in
 
@@ -186,7 +188,8 @@ BASE -> [TASK-A] -> [TASK-B] -> [TASK-C]
 - When a squash *is* requested, it must not change content. Verify the final
   squashed commit and the approved `REVIEW_HEAD` have identical trees with
   `git diff --exit-code <REVIEW_HEAD> <SQUASHED_HEAD>` (or equal tree IDs), and
-  record `TREE_EQUIVALENCE=PASS` plus the final SHA in the review summary.
+  record `TREE_EQUIVALENCE=PASS` in the portable review summary and the final
+  SHA mapping in `LOCAL_PROVENANCE.md`.
 - Any content change made during or after the squash invalidates tree
   equivalence and requires focused re-review before the final commit is used.
 
@@ -215,10 +218,31 @@ implementation and its proof together.
   artifact. A reviewer reads `git show <sha>` or `git diff <base>..<head>`.
 - Still write `.local_ai/review/<task>-review-summary.md`: it records decisions,
   probes, accepted findings, and verification, none of which git holds.
-- Record the exact `BASE` and `TASK` commit range the review covers, so the
-  reviewer does not have to guess.
+- Portable review summaries identify the task/milestone, reviewed file set,
+  verdict, tests, findings, and acceptance gates. They do not require a commit
+  SHA to remain meaningful in another repository.
+- Exact `BASE`, `TASK`, `SOURCE_REVIEW_HEAD`, `MAIN_TRANSFER_HEAD`, and
+  `MAIN_EXECUTION_HEAD` values belong in the ignored
+  `.local_ai/LOCAL_PROVENANCE.md`. They may still be supplied directly in a
+  live reviewer prompt for that repository.
 - Create a patch only when explicitly asked, for example to move work to a
   machine without this git history.
+
+## Durable Milestone State
+
+- `IMPLEMENTATION_STATE.md`, `ROADMAP.md`, and portable review summaries use
+  milestone/task IDs as their primary identity.
+- Record `COMPLETE`, `APPROVED`, `PASS`, `NEXT`, and `BLOCKED` against named
+  gates such as `M6G-D-O1`, `M6G-D-R3`, and `M6G-D3`.
+- Commit SHAs are local Git metadata, not durable cross-repository state.
+- A copied document must remain correct when the destination repository has
+  different parent history and different commit SHAs.
+- Never make a foreign SHA a checkout requirement, completion condition, or
+  prerequisite for understanding the current milestone.
+- Store populated SHA mappings only in the gitignored
+  `.local_ai/LOCAL_PROVENANCE.md`.
+- Historical documents may retain old SHA references for audit, but the active
+  state must label them non-authoritative and must not depend on them.
 
 ## Patch Discipline
 
@@ -237,8 +261,9 @@ Applies only when a patch was explicitly requested.
   that foreign SHA.
 - After applying approved patches to an independent repository, create a local
   transfer commit before an operator acceptance run. Record that local commit
-  as the execution base.
-- Record source-review provenance and local execution provenance separately.
+  in `LOCAL_PROVENANCE.md` as the execution base.
+- Record source-review provenance and local execution provenance separately in
+  the ignored local mapping; record milestone gates in portable documents.
   Demonstrate that the local production tree is equivalent to the approved
   patch set; do not infer equivalence from similar commit messages or filenames.
 - A patch transfer does not preserve commit identity when the parent history

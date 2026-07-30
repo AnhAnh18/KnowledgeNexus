@@ -7,10 +7,9 @@ Foundation vertical slice are complete. M7 planning is unblocked.
 
 ## Provenance
 
-- Working/source-review repository O1 head: `48a7abb`.
-- Independent main-machine execution head: `68f3927`.
-- These are separately named provenance references from independent histories;
-  they are not interchangeable checkout requirements.
+- O1 was independently approved in the working-review and main-machine
+  histories.
+- The exact local SHA mappings are stored outside this portable summary.
 - The main-machine tracked worktree was clean at execution and recovery review.
 
 ## Controlled execution

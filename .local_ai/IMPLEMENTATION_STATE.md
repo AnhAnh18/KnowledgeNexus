@@ -15,6 +15,13 @@ post-run acceptance passed without invoking the exporter again. M7 crawl
 reliability and scale planning is now unblocked. No raw production artifact or
 published snapshot exists in this repository.
 
+## Durable State Convention
+
+Milestone IDs and gate outcomes are authoritative. Commit SHAs appearing in
+older historical notes are non-authoritative repository-local audit references
+and may not exist in an independent patch-transfer repository. Current SHA
+mappings belong only in the gitignored `.local_ai/LOCAL_PROVENANCE.md`.
+
 ## Done
 
 - Ensured `src/knowledgenexus/__init__.py` exists.
@@ -1124,14 +1131,12 @@ Review artifact:
   The legacy M3 report/golden path remains compatible; no real raw page,
   sidecar, or production export was used.
 - M6G-D-O1 sanitized configuration-failure observability is complete and
-  independently approved. Working-repository source head `48a7abb` and
-  main-machine execution head `68f3927` are separate provenance references;
-  neither SHA is interchangeable across repositories.
+  independently approved in both working-review and main-machine histories.
 - M6G-D-R3 completed exactly one authorized offline exporter invocation at
-  main-machine execution head `68f3927`. The exporter exited zero. The initial
-  post-run validator encountered an operator-script-only empty-stderr handling
-  defect after publication; recovery validation invoked the exporter zero
-  additional times.
+  the approved main-machine execution gate. The exporter exited zero. The
+  initial post-run validator encountered an operator-script-only empty-stderr
+  handling defect after publication; recovery validation invoked the exporter
+  zero additional times.
 - R3 recovery acceptance passed the approved-head, clean-worktree, sanitized
   success payload, exact published file set, `LATEST` pointer, independent
   manifest row-count, no-staging-residue, and leak gates. The production CLI

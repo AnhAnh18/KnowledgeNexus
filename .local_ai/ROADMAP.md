@@ -40,6 +40,10 @@ Absence of future folders is not a problem. The canonical tree is a destination
 guide, not an instruction to scaffold empty folders.
 
 Sync-state clarification:
+
+Milestone IDs and gate results are the portable source of truth. Any commit SHA
+in older rows is a non-authoritative historical note local to its repository;
+current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 - Foundation owns sync/checkpoint semantics.
 - The authoritative mutable sync state lives in Foundation's SQLite metadata
   store or equivalent `MetadataStorePort` implementation.
@@ -85,7 +89,7 @@ Sync-state clarification:
 | M6G-A - One-page export focused contract | complete; independently approved | Approved source-review head `dbe5c2f`; no P0-P2 | Contract/docs only; two P3 items are assigned to M6G-B and M6G-C. |
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
-| M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation at `68f3927` exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
+| M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
 | M7 - Crawl reliability and scale | next; unblocked; planned | M6 one-page vertical slice complete and approved | Retry, rate limit, checkpoint, resume without changing approved semantics. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |

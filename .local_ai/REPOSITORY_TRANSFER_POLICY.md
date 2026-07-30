@@ -3,6 +3,38 @@
 Status: local workflow policy for this KnowledgeNexus working/review repository.
 Do not assume that another repository shares this Git history.
 
+## Durable milestone-first state
+
+Cross-repository durable documentation is milestone-based, not commit-based.
+The authoritative portable identity is the task or acceptance gate, for
+example:
+
+```text
+M6G-D-O1: COMPLETE AND APPROVED
+M6G-D-R3: ACCEPTANCE PASS
+M6G-D3: DOCUMENTATION CLOSEOUT COMPLETE
+M7: NEXT AND UNBLOCKED
+```
+
+`IMPLEMENTATION_STATE.md`, `ROADMAP.md`, and portable review summaries record:
+
+```text
+milestone or task ID
+status and review verdict
+verification and acceptance gates
+transferred file set or artifact kind
+next and blocked tasks
+```
+
+They must remain correct when copied into an independent repository that has
+different commit history. A foreign commit SHA must never be a completion gate,
+checkout requirement, or prerequisite for understanding current state.
+
+Commit mappings are local execution metadata. Store them only in the ignored
+`.local_ai/LOCAL_PROVENANCE.md`, using
+`.local_ai/LOCAL_PROVENANCE.example.md` as the format. Do not transfer or commit
+the populated local file.
+
 ## Repository roles
 
 ### Working/review repository
@@ -17,8 +49,9 @@ SOURCE_REVIEW_BASE
 SOURCE_REVIEW_HEAD
 ```
 
-These SHAs identify commits in this repository's history. They must not be used
-as mandatory checkout targets in an independent repository.
+These SHAs identify commits in this repository's history. They are used in
+local review commands and `LOCAL_PROVENANCE.md`; they must not be used as
+mandatory checkout targets or durable milestone identities.
 
 ### Main-machine repository
 
@@ -52,8 +85,9 @@ than assumed.
 - If an acceptance run necessarily starts with a known tracked deviation,
   record the before/after tracked diff and obtain an explicit deviation
   verdict; never silently call that state clean.
-- Record source-review and main-machine provenance separately in prompts,
-  summaries, and runbooks.
+- Record source-review and main-machine provenance separately in runtime
+  prompts, runbooks, and the ignored local provenance file. Portable summaries
+  record the milestone and equivalence verdict, not the local SHAs.
 - A source-review approval does not approve unrelated local changes present in
   the main-machine repository.
 
@@ -83,7 +117,17 @@ Equivalence must be demonstrated from exact file content or Git tree/blob
 identities for the transferred set. Similar filenames, commit messages, test
 counts, or short SHAs are not proof.
 
-Record:
+Record the portable result:
+
+```text
+TASK_ID=<milestone/task identifier>
+TRANSFER_METHOD=<approved patch or exact-content mechanism>
+TRANSFERRED_FILE_SET=<explicit manifest>
+TREE_EQUIVALENCE=PASS
+EXECUTION_GATE=PASS
+```
+
+Record the repository-local mapping only in `LOCAL_PROVENANCE.md`:
 
 ```text
 SOURCE_REVIEW_BASE=<working/review repository commit>
@@ -115,10 +159,13 @@ main-machine repository
 Documentation closeouts created in the working/review repository remain source
 documentation provenance. If they are required on the main-machine repository,
 transfer their exact approved changes and create a separate local
-documentation-only commit there.
+documentation-only commit there. Portable closeout text must identify the
+milestone and gates without requiring either local commit SHA.
 
 ## Prompt requirement
 
-Every cross-repository implementation, review, or acceptance prompt must name
-the repository role for each SHA. Avoid ambiguous labels such as only `BASE`,
-`HEAD`, or `production head` when more than one repository is involved.
+Every live cross-repository implementation, review, or acceptance prompt that
+uses a SHA must name its repository role. Avoid ambiguous labels such as only
+`BASE`, `HEAD`, or `production head`. After the session, keep those mappings in
+the ignored local provenance file; durable shared documents use task IDs and
+gate results.
