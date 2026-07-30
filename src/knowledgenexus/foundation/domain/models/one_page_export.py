@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import InitVar, dataclass, field
+from enum import StrEnum
 
 from knowledgenexus.foundation.domain.models.chunking_profile import ChunkingProfile
 from knowledgenexus.foundation.domain.models.jira_relation_profile import (
@@ -34,10 +35,52 @@ ONE_PAGE_CONFIG_CONTRACT_VERSION = "one-page-export-v1"
 ONE_PAGE_SPACE_KEY = "SVMC"
 
 
-class OnePageExportConfigurationError(Exception):
-    """A sanitized one-page export configuration/profile failure."""
+# Configuration-failure observability vocabulary locked by spec §10.1.
+class OnePageExportStage(StrEnum):
+    """Stage values for configuration failure metadata."""
 
-    def __init__(self) -> None:
+    EMBEDDING_PROFILE_READ = "embedding_profile_read"
+    EMBEDDING_PROFILE_DECODE = "embedding_profile_decode"
+    EMBEDDING_PROFILE_PARSE = "embedding_profile_parse"
+    JIRA_PROFILE_READ = "jira_profile_read"
+    JIRA_PROFILE_DECODE = "jira_profile_decode"
+    JIRA_PROFILE_PARSE = "jira_profile_parse"
+    PROFILE_BUNDLE_CONSTRUCTION = "profile_bundle_construction"
+    EXPORT_INPUT_VALIDATION = "export_input_validation"
+    GENERATED_AT_VALIDATION = "generated_at_validation"
+    DATASET_ROOT_VALIDATION = "dataset_root_validation"
+    DATASET_VERSION_GENERATION = "dataset_version_generation"
+
+
+class OnePageExportCauseFamily(StrEnum):
+    """Cause family values for configuration failure metadata."""
+
+    IO_ERROR = "io_error"
+    TEXT_DECODE_ERROR = "text_decode_error"
+    PROFILE_VALIDATION_ERROR = "profile_validation_error"
+    TYPE_ERROR = "type_error"
+    VALUE_ERROR = "value_error"
+    UNEXPECTED_ERROR = "unexpected_error"
+
+
+class OnePageExportConfigurationError(Exception):
+    """A sanitized one-page export configuration/profile failure.
+
+    Carries typed ``stage`` and ``cause_family`` metadata. ``str(error)``
+    returns the category "export_configuration" for backward compatibility.
+    """
+
+    def __init__(
+        self,
+        stage: OnePageExportStage,
+        cause_family: OnePageExportCauseFamily,
+    ) -> None:
+        if not isinstance(stage, OnePageExportStage):
+            raise TypeError("stage expects OnePageExportStage")
+        if not isinstance(cause_family, OnePageExportCauseFamily):
+            raise TypeError("cause_family expects OnePageExportCauseFamily")
+        self.stage = stage
+        self.cause_family = cause_family
         super().__init__("export_configuration")
 
 

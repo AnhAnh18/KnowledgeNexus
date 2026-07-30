@@ -8,6 +8,12 @@ import pytest
 
 from knowledgenexus.foundation.domain.models.one_page_export import (
     ONE_PAGE_DATASET_NAME,
+    OnePageExportCauseFamily,
+    OnePageExportConfigurationError,
+    OnePageExportStage,
+)
+from knowledgenexus.foundation.infrastructure.exporters import (
+    one_page_full_snapshot_exporter as exporter_module,
 )
 from knowledgenexus.foundation.infrastructure.exporters.one_page_full_snapshot_exporter import (
     OnePageFullSnapshotExportError,
@@ -57,17 +63,19 @@ def test_success_exports_full_snapshot(tmp_path: Path) -> None:
 
 
 def test_dataset_root_missing_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(OnePageFullSnapshotExportError) as excinfo:
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
         _export(tmp_path)
-    assert excinfo.value.category == "export_configuration"
+    assert excinfo.value.stage == OnePageExportStage.DATASET_ROOT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.IO_ERROR
     assert not (tmp_path / ONE_PAGE_DATASET_NAME).exists()
 
 
 def test_dataset_root_as_file_is_rejected(tmp_path: Path) -> None:
     (tmp_path / ONE_PAGE_DATASET_NAME).write_text("not a directory", encoding="utf-8")
-    with pytest.raises(OnePageFullSnapshotExportError) as excinfo:
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
         _export(tmp_path)
-    assert excinfo.value.category == "export_configuration"
+    assert excinfo.value.stage == OnePageExportStage.DATASET_ROOT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.IO_ERROR
 
 
 @pytest.mark.skipif(
@@ -82,15 +90,51 @@ def test_dataset_root_as_symlink_is_rejected(tmp_path: Path) -> None:
     except OSError:
         pytest.skip("symlink creation not permitted in this environment")
 
-    with pytest.raises(OnePageFullSnapshotExportError) as excinfo:
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
         _export(tmp_path)
-    assert excinfo.value.category == "export_configuration"
+    assert excinfo.value.stage == OnePageExportStage.DATASET_ROOT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.VALUE_ERROR
 
 
 def test_export_root_wrong_type_is_rejected() -> None:
-    with pytest.raises(OnePageFullSnapshotExportError) as excinfo:
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
         _export("not-a-path")  # type: ignore[arg-type]
-    assert excinfo.value.category == "export_configuration"
+    assert excinfo.value.stage == OnePageExportStage.DATASET_ROOT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.TYPE_ERROR
+
+
+def test_projection_wrong_type_has_export_input_stage(tmp_path: Path) -> None:
+    _dataset_root(tmp_path)
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
+        _export(tmp_path, projection={})
+    assert excinfo.value.stage == OnePageExportStage.EXPORT_INPUT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.TYPE_ERROR
+
+
+def test_generated_at_wrong_type_has_type_cause(tmp_path: Path) -> None:
+    _dataset_root(tmp_path)
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
+        _export(tmp_path, generated_at=123)
+    assert excinfo.value.stage == OnePageExportStage.GENERATED_AT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.TYPE_ERROR
+
+
+def test_general_dataset_root_oserror_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _dataset_root(tmp_path)
+
+    def fail_is_symlink(path: Path) -> bool:
+        raise PermissionError("SENSITIVE C:/private/path")
+
+    monkeypatch.setattr(Path, "is_symlink", fail_is_symlink)
+
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
+        _export(tmp_path)
+    assert excinfo.value.stage == OnePageExportStage.DATASET_ROOT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.IO_ERROR
+    assert "SENSITIVE" not in str(excinfo.value)
 
 
 @pytest.mark.parametrize(
@@ -104,9 +148,10 @@ def test_export_root_wrong_type_is_rejected() -> None:
 )
 def test_malformed_generated_at_is_rejected(tmp_path: Path, generated_at: str) -> None:
     _dataset_root(tmp_path)
-    with pytest.raises(OnePageFullSnapshotExportError) as excinfo:
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
         _export(tmp_path, generated_at=generated_at)
-    assert excinfo.value.category == "export_configuration"
+    assert excinfo.value.stage == OnePageExportStage.GENERATED_AT_VALIDATION
+    assert excinfo.value.cause_family == OnePageExportCauseFamily.VALUE_ERROR
     assert not any((tmp_path / ONE_PAGE_DATASET_NAME).iterdir())
 
 
@@ -131,9 +176,49 @@ def test_fractional_seconds_generated_at_is_accepted(tmp_path: Path) -> None:
 
 
 def test_no_directory_is_auto_created_on_configuration_failure(tmp_path: Path) -> None:
-    with pytest.raises(OnePageFullSnapshotExportError):
+    with pytest.raises(OnePageExportConfigurationError):
         _export(tmp_path)
     assert not tmp_path.exists() or list(tmp_path.iterdir()) == []
+
+
+def _raise(error: Exception) -> None:
+    raise error
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_cause"),
+    [
+        (TypeError("SENSITIVE type"), OnePageExportCauseFamily.TYPE_ERROR),
+        (ValueError("SENSITIVE value"), OnePageExportCauseFamily.VALUE_ERROR),
+        (OSError("SENSITIVE path"), OnePageExportCauseFamily.IO_ERROR),
+        (RuntimeError("SENSITIVE internal"), OnePageExportCauseFamily.UNEXPECTED_ERROR),
+    ],
+)
+def test_dataset_version_failures_map_to_sanitized_cause(
+    tmp_path: Path,
+    failure: Exception,
+    expected_cause: OnePageExportCauseFamily,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_root = _dataset_root(tmp_path)
+    monkeypatch.setattr(
+        exporter_module.DatasetVersionGenerator,
+        "generate",
+        staticmethod(lambda **kwargs: _raise(failure)),
+    )
+
+    with pytest.raises(OnePageExportConfigurationError) as excinfo:
+        _export(tmp_path)
+
+    assert excinfo.value.stage == OnePageExportStage.DATASET_VERSION_GENERATION
+    assert excinfo.value.cause_family == expected_cause
+    assert "SENSITIVE" not in str(excinfo.value)
+    assert list(dataset_root.iterdir()) == []
+
+
+def test_legacy_export_error_rejects_configuration_category() -> None:
+    with pytest.raises(ValueError):
+        OnePageFullSnapshotExportError("export_configuration")
 
 
 # --- B/C: staging + manifest-count closure -----------------------------------

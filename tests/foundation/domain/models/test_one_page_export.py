@@ -20,8 +20,10 @@ from knowledgenexus.foundation.domain.models.one_page_export import (
     ONE_PAGE_SCHEMAS_VERSION,
     ONE_PAGE_SOURCE_ID,
     ONE_PAGE_SPACE_KEY,
+    OnePageExportCauseFamily,
     OnePageExportConfigurationError,
     OnePageExportProfileBundle,
+    OnePageExportStage,
 )
 
 
@@ -199,4 +201,30 @@ def test_bundle_is_frozen_and_repr_hides_contents() -> None:
 
 
 def test_export_configuration_error_str_is_stable_category() -> None:
-    assert str(OnePageExportConfigurationError()) == "export_configuration"
+    error = OnePageExportConfigurationError(
+        stage=OnePageExportStage.EMBEDDING_PROFILE_READ,
+        cause_family=OnePageExportCauseFamily.IO_ERROR,
+    )
+    assert str(error) == "export_configuration"
+    assert "embedding_profile_read" not in repr(error)
+    assert "io_error" not in repr(error)
+
+
+@pytest.mark.parametrize(
+    ("stage", "cause_family"),
+    [
+        ("embedding_profile_read", OnePageExportCauseFamily.IO_ERROR),
+        (OnePageExportStage.EMBEDDING_PROFILE_READ, "io_error"),
+        (object(), OnePageExportCauseFamily.IO_ERROR),
+        (OnePageExportStage.EMBEDDING_PROFILE_READ, object()),
+    ],
+)
+def test_export_configuration_error_requires_typed_closed_values(
+    stage: object,
+    cause_family: object,
+) -> None:
+    with pytest.raises(TypeError):
+        OnePageExportConfigurationError(  # type: ignore[arg-type]
+            stage=stage,
+            cause_family=cause_family,
+        )

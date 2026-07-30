@@ -108,7 +108,6 @@ EXIT_EXPORT_PUBLICATION = 18
 EXIT_EXPORT_ACCEPTANCE = 19
 
 _EXPORT_ERROR_EXIT_CODES: dict[str, int] = {
-    "export_configuration": EXIT_EXPORT_CONFIGURATION,
     "export_projection": EXIT_EXPORT_PROJECTION,
     "export_staging": EXIT_EXPORT_STAGING,
     "export_completion": EXIT_EXPORT_COMPLETION,
@@ -184,8 +183,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(exc.code or 0)
     except _ConfigurationError:
         return _fail(CATEGORY_CONFIGURATION, EXIT_CONFIGURATION)
-    except OnePageExportConfigurationError:
-        return _fail(CATEGORY_EXPORT_CONFIGURATION, EXIT_EXPORT_CONFIGURATION)
+    except OnePageExportConfigurationError as exc:
+        return _fail_export_configuration(exc)
     except ConfluencePageNormalizationError as exc:
         return _fail(exc.category, EXIT_NORMALIZATION)
     except WikiStructureParseError as exc:
@@ -462,8 +461,13 @@ def _chunks_equal_except_acl(
     return True
 
 
-def _fail(category: str, exit_code: int, *, detail: str | None = None) -> int:
-    payload = {"status": "failed", "category": category}
+def _fail(
+    category: str,
+    exit_code: int,
+    *,
+    detail: str | None = None,
+) -> int:
+    payload: dict[str, object] = {"status": "failed", "category": category}
     if detail is not None:
         payload["detail"] = detail
     sys.stderr.write(
@@ -471,6 +475,22 @@ def _fail(category: str, exit_code: int, *, detail: str | None = None) -> int:
         + "\n"
     )
     return exit_code
+
+
+def _fail_export_configuration(error: OnePageExportConfigurationError) -> int:
+    """Project only typed, closed-vocabulary configuration diagnostics."""
+
+    payload = {
+        "status": "failed",
+        "category": CATEGORY_EXPORT_CONFIGURATION,
+        "stage": error.stage.value,
+        "cause_family": error.cause_family.value,
+    }
+    sys.stderr.write(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        + "\n"
+    )
+    return EXIT_EXPORT_CONFIGURATION
 
 
 class _SanitizedArgumentParser(argparse.ArgumentParser):

@@ -25,7 +25,9 @@ from knowledgenexus.foundation.domain.models.acl_materialization import (
     AclMaterializationFailureCategory,
 )
 from knowledgenexus.foundation.domain.models.one_page_export import (
+    OnePageExportCauseFamily,
     OnePageExportConfigurationError,
+    OnePageExportStage,
 )
 from knowledgenexus.foundation.domain.models.one_page_export_snapshot import (
     OnePageExportAcceptanceResult,
@@ -282,7 +284,10 @@ def test_profile_bundle_failure_maps_to_export_configuration_14(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def fail(args: object) -> object:
-        raise OnePageExportConfigurationError()
+        raise OnePageExportConfigurationError(
+            stage=OnePageExportStage.EMBEDDING_PROFILE_READ,
+            cause_family=OnePageExportCauseFamily.IO_ERROR,
+        )
 
     monkeypatch.setattr(cli, "_run", fail)
 
@@ -291,6 +296,8 @@ def test_profile_bundle_failure_maps_to_export_configuration_14(
     assert json.loads(captured.err) == {
         "status": "failed",
         "category": "export_configuration",
+        "stage": "embedding_profile_read",
+        "cause_family": "io_error",
     }
 
 
@@ -314,7 +321,6 @@ def test_projection_failure_maps_to_export_projection_15(
 @pytest.mark.parametrize(
     ("category", "exit_code"),
     [
-        ("export_configuration", cli.EXIT_EXPORT_CONFIGURATION),
         ("export_projection", cli.EXIT_EXPORT_PROJECTION),
         ("export_staging", cli.EXIT_EXPORT_STAGING),
         ("export_completion", cli.EXIT_EXPORT_COMPLETION),
@@ -337,6 +343,42 @@ def test_exporter_error_category_maps_to_correct_exit_code(
     captured = capsys.readouterr()
     assert json.loads(captured.err) == {"status": "failed", "category": category}
     assert "SENSITIVE" not in captured.err
+
+
+def test_generic_failure_helper_cannot_accept_configuration_metadata() -> None:
+    signature = inspect.signature(cli._fail)
+    assert "stage" not in signature.parameters
+    assert "cause_family" not in signature.parameters
+
+
+@pytest.mark.parametrize("marker", ["SENSITIVE", "https://internal.invalid", "a" * 64])
+def test_configuration_failure_never_leaks_runtime_markers(
+    marker: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(args: object) -> object:
+        error = OnePageExportConfigurationError(
+            stage=OnePageExportStage.PROFILE_BUNDLE_CONSTRUCTION,
+            cause_family=OnePageExportCauseFamily.VALUE_ERROR,
+        )
+        error.__context__ = ValueError(marker)
+        raise error
+
+    monkeypatch.setattr(cli, "_run", fail)
+
+    assert cli.main(_argv()) == cli.EXIT_EXPORT_CONFIGURATION
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert payload == {
+        "status": "failed",
+        "category": "export_configuration",
+        "stage": "profile_bundle_construction",
+        "cause_family": "value_error",
+    }
+    assert marker not in captured.err
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
 
 
 def test_post_publication_source_mutation_maps_to_export_acceptance_19(
