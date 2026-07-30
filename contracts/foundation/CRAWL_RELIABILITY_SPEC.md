@@ -1,21 +1,30 @@
 # Crawl Reliability Specification (M7-A1)
 
-Status: active focused contract draft for M7 crawl reliability and scale.
+Status: owner-approved M7-A1 focused contract for crawl reliability and scale.
 
 ```text
 M7 owner decisions: LOCKED
-M7 contract gate: PENDING INDEPENDENT REVIEW
+M7-A1: OWNER-APPROVED
+M7-A1 independent review: WAIVED BY OWNER
+M7-A2: COMPLETE AND APPROVED
+M7-A3a: COMPLETE AND APPROVED
+M7-A3b: COMPLETE AND APPROVED
+M7-A3c: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
 Precedence: `contracts/foundation/schemas/` wins every field-level dispute.
 This specification sits with the other active focused specifications
 (`CHUNKING_SPEC.md`, `JIRA_RELATION_SPEC.md`, `ACL_MATERIALIZATION_SPEC.md`,
-`ONE_PAGE_EXPORT_SPEC.md`) above the historical decision logs. It is a
+`ONE_PAGE_EXPORT_SPEC.md`, `RETRY_POLICY_SPEC.md`,
+`CHECKPOINT_RESUME_SPEC.md`, `RAW_GENERATION_SPEC.md`, and
+`CRAWL_ACCEPTANCE_SPEC.md` with `crawl_reliability_profile.yaml`) above the
+historical decision logs. It is a
 contract for future crawl-reliability work; it authorizes no production
 implementation. The owner decisions this specification narrows are recorded
 in `decision_logs/M7_OWNER_DECISIONS.md`, which remains the authoritative
-record of the locked numeric profile inputs.
+owner record of the locked numeric profile inputs.
 
 ## 1. Purpose and non-goals
 
@@ -35,10 +44,12 @@ Non-goals:
 - M7-A1 does not define SQLite tables/columns, Python interfaces, retry loop
   code, file-lock library selection, raw-envelope JSON serialization, full
   fingerprint canonicalization, CLI flags, or production package/class names.
-  Those belong to M7-A2 and M7-A3.
-- Production implementation of any M7 behavior remains blocked until this
-  contract, and the later M7-A2/M7-A3 contracts, receive independent review
-  and explicit authorization.
+  M7-A2 defines retry semantics only; M7-A3 owns the remaining contract
+  mechanics, while retry loop code and other runtime components remain later
+  production tasks.
+- Production implementation of any M7 behavior remains blocked until the
+  complete M7-A1/A2/A3 contract gate is accepted and production work receives
+  explicit authorization.
 
 ## 2. Preserved M5/M6 semantics
 
@@ -237,14 +248,16 @@ fingerprint or identity. Detailed acceptance behavior is deferred to M7-A3c.
 
 ## 17. Raw, request, and storage boundedness
 
-The owner-locked numeric profile (`decision_logs/M7_OWNER_DECISIONS.md`
-§2.L) bounds a future crawl run's request volume, inventory scope, raw
+The owner-locked numeric profile
+(`crawl_reliability_profile.yaml`, matching
+`decision_logs/M7_OWNER_DECISIONS.md` §2.L) bounds a future crawl run's
+request volume, inventory scope, raw
 evidence volume, and storage footprint, including per-run request ceilings,
 per-root and per-run inventory-window ceilings, restriction/attachment
-window ceilings, and raw byte/artifact/free-disk-reserve ceilings. M7-A1
-records these values as locked inputs only; it implements no enforcement,
-no runtime reading of the values, and no YAML profile file. That belongs to
-M7-A2.
+window ceilings, and raw byte/artifact/free-disk-reserve ceilings. M7-A2
+materializes the profile as a contract artifact and defines its request/retry
+semantics. Enforcement and runtime loading remain later reviewed production
+work.
 
 ## 18. Security and sanitized durable-evidence rules
 
@@ -266,31 +279,36 @@ M7 is decomposed directionally:
 
 - **M7-A1 (this document):** owner decisions and this focused reliability
   contract, plus navigation/status synchronization only.
-- **M7-A2:** the actual `m7-crawl-reliability-v1` profile file, retry/backoff
-  policy implementation, and rate limiting, built against the numeric inputs
+- **M7-A2:** contract-only failure taxonomy, retry/backoff/rate-limit
+  semantics, deterministic acceptance matrix, and the
+  `m7-crawl-reliability-v1` profile file, built against the numeric inputs
   locked in `decision_logs/M7_OWNER_DECISIONS.md` §2.L.
 - **M7-A3 (a/b/c):** overlapping-root deduplication mechanics (M7-A3a),
   restriction-evidence envelope serialization (M7-A3b), and controlled-stop
   acceptance behavior plus fingerprint canonicalization (M7-A3c).
 
-Later stages depend on the contract fixed here; this document does not
-authorize starting M7-A2 or M7-A3 work, and it does not authorize any
-production implementation.
+Later stages depend on the contract fixed here. The owner accepted M7-A1,
+explicitly waived its independent-review gate, and subsequently approved the
+complete M7-A2/A3 contract stack. The approved contract gate opens production
+planning, but does not itself authorize production code changes.
 
-## 20. M7-A1 independent-review gate
+## 20. M7-A1 owner-acceptance gate
 
-M7-A1 is complete only for the contract draft recorded in this document and
-in `decision_logs/M7_OWNER_DECISIONS.md`. The exact gate is:
+The owner accepted the M7-A1 contract and explicitly waived its independent
+review because the designated reviewer was unavailable. This waiver applies
+only to M7-A1 and does not extend to M7-A2, M7-A3, or production work.
 
 ```text
-M7-A1 contract draft: COMPLETE
-M7-A1 independent review: PENDING
-M7 contract gate: PENDING INDEPENDENT REVIEW
+M7-A1: OWNER-APPROVED
+M7-A1 independent review: WAIVED BY OWNER
+M7-A2: COMPLETE AND APPROVED
+M7-A3a: COMPLETE AND APPROVED
+M7-A3b: COMPLETE AND APPROVED
+M7-A3c: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
-M7-A1 must not be marked approved by the author of this document. Approval
-is recorded only by an independent reviewer, following the same
-independent-review convention already used for M5/M6 gates. Until that
-approval is recorded, M7-A2, M7-A3, and all M7 production implementation
-remain blocked.
+The complete A1/A2/A3 contract gate is accepted. The next task is production
+implementation planning; implementation remains unauthorized until that plan
+is reviewed and the owner separately authorizes the work.

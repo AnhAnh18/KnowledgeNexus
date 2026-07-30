@@ -90,18 +90,18 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | next; unblocked; planned | M6 one-page vertical slice complete and approved | Retry, rate limit, checkpoint, resume without changing approved semantics. |
+| M7 - Crawl reliability and scale | contract gate complete; production planning next | M7-A1/A2/A3 contracts complete and owner-approved | Plan the first production stage; implementation remains separately gated. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
 
-Current area: M6A through M6G-D are complete and approved. The one-page slice
-has real raw provenance, deterministic normalized content and chunks, Jira
-relations, deny-safe ACL materialization, and one published full snapshot
-through the approved M3 path. M7 crawl reliability and scale is the next
-unblocked planning task.
+Current area: M6A through M6G-D are complete and approved. The complete
+M7-A1/A2/A3 contract stack is owner-approved, including retry policy/profile,
+checkpoint/resume, raw-generation, fingerprint, controlled-stop, and
+acceptance contracts. Production implementation planning is next; code changes
+remain separately gated.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -859,6 +859,24 @@ Responsibilities:
 - Incremental inventory comparison.
 - Error isolation and reporting.
 - No secrets in logs.
+
+Contract decomposition:
+- M7-A1: owner-approved scope, invariants, pagination compatibility, run/session
+  distinction, raw-generation isolation, and owner decisions. Independent
+  review was explicitly waived by the owner for A1 only.
+- M7-A2: failure taxonomy, exact retry allowlists, attempt/delay/request-budget
+  semantics, sanitized observability, deterministic acceptance matrix, and
+  `m7-crawl-reliability-v1` profile. Complete and approved.
+- M7-A3a: checkpoint/run/session mechanics, transaction ordering,
+  overlapping-root occurrence deduplication, and canonical-path selection.
+  Complete and approved.
+- M7-A3b: immutable raw generations, restriction status-and-body envelopes,
+  no-clobber publication, orphan recovery, retention pins, locks, and raw
+  budgets. Complete and approved.
+- M7-A3c: fingerprint canonicalization, controlled-stop semantics, and
+  offline/scale/fault/live acceptance gates. Complete and approved.
+- M7-B1/B2/B3 and later production tasks require a reviewed implementation
+  plan and separate owner authorization.
 
 Completion gate:
 - Interrupted crawl resumes correctly.

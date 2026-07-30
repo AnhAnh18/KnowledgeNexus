@@ -1200,9 +1200,35 @@ Review artifact:
   rerun. Aggregate evidence is registered in
   `.local_ai/review/m6f-c2-real-offline-acceptance-summary.md`.
 
+## M7-A1/A2/A3 Crawl-Reliability Contract State
+
+- M7-A1 is owner-approved. Its independent review was explicitly waived by
+  the owner because the designated reviewer was unavailable; that waiver does
+  not extend to M7-A2, M7-A3, or production work.
+- M7-A2 materializes the owner-locked
+  `m7-crawl-reliability-v1` profile and defines the complete failure taxonomy,
+  exact retryable HTTP/transport allowlists, attempt accounting, deterministic
+  exponential backoff, Retry-After handling, rate-limit interaction, bounded
+  delay/request budgets, interruption behavior, sanitized observability, and
+  future acceptance matrix.
+- M7-A2 is contract-only. No transport, retry executor, rate limiter,
+  checkpoint store, raw-generation store, network request, or production
+  behavior was added.
+- M7-A3a defines checkpoint/resume, transaction, occurrence, overlapping-root,
+  and canonical-path rules in `CHECKPOINT_RESUME_SPEC.md`.
+- M7-A3b defines immutable raw generations, the versioned restriction
+  status-and-body envelope, no-clobber publication, orphan recovery, retention
+  pins, writer locks, and raw budgets in `RAW_GENERATION_SPEC.md`.
+- M7-A3c defines canonical fingerprints, controlled-stop behavior, and
+  offline/scale/fault/live acceptance gates in `CRAWL_ACCEPTANCE_SPEC.md`.
+- The owner approved M7-A2 and M7-A3a/A3b/A3c and accepted the aggregate
+  M7 contract gate.
+- `M7-CONTRACT-GATE` is approved. This opens production implementation
+  planning only; production code remains unauthorized until its plan is
+  reviewed and separately approved.
+
 ## Next Planned Task
 
-Plan M7 crawl reliability and scale against the completed M6 one-page vertical
-slice. M7 may add retry, rate-limit, checkpoint, and resume behavior without
-changing the approved record, scope, ACL, chunking, relation, or export
-semantics.
+Plan the first M7 production implementation stage against the approved
+M7-A1/A2/A3 contract stack. Production implementation remains unauthorized
+until that plan is reviewed and the owner separately authorizes the work.

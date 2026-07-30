@@ -4,7 +4,13 @@ Status block:
 
 ```text
 M7 owner decisions: LOCKED
-M7 contract gate: PENDING INDEPENDENT REVIEW
+M7-A1: OWNER-APPROVED
+M7-A1 independent review: WAIVED BY OWNER
+M7-A2: COMPLETE AND APPROVED
+M7-A3a: COMPLETE AND APPROVED
+M7-A3b: COMPLETE AND APPROVED
+M7-A3c: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
@@ -16,9 +22,11 @@ decision record, not a design or implementation specification; the companion
 
 Precedence: `contracts/foundation/schemas/` and the active focused specs
 (`CHUNKING_SPEC.md`, `JIRA_RELATION_SPEC.md`, `ACL_MATERIALIZATION_SPEC.md`,
-`ONE_PAGE_EXPORT_SPEC.md`) remain unchanged and continue to win every
-field-level dispute. Nothing in this document overrides approved M5/M6
-semantics; §3 records only additive M7 reliability decisions.
+`ONE_PAGE_EXPORT_SPEC.md`, `CRAWL_RELIABILITY_SPEC.md`, and
+`RETRY_POLICY_SPEC.md` with `crawl_reliability_profile.yaml`) remain unchanged
+and continue to win every field-level dispute. Nothing in this document
+overrides approved M5/M6 semantics; §3 records only additive M7 reliability
+decisions.
 
 ## 1. Approved prior facts
 
@@ -26,9 +34,12 @@ semantics; §3 records only additive M7 reliability decisions.
   vertical slice has real raw provenance, deterministic normalization and
   chunking, Jira relations, deny-safe ACL materialization, and one published
   full-snapshot export through the approved M3 path.
-- M7 crawl reliability and scale planning is next and unblocked.
+- M7-A1 is owner-approved, with its independent review explicitly waived by
+  the owner. The owner subsequently approved the complete M7-A2 and M7-A3
+  contract stack and the aggregate M7 contract gate.
 - M7 production implementation is **not authorized** by this document or by
-  any document it references. Only a contract draft is in scope for M7-A1.
+  any document it references. M7-A1 through M7-A3 authorize contract
+  artifacts only.
 - Durable cross-repository state uses milestone IDs and gate outcomes, not
   shared commit SHAs, per the existing repository transfer policy. This
   document introduces no commit SHA and no machine-local path.
@@ -182,11 +193,11 @@ max_raw_artifacts_per_run: 250000
 minimum_free_disk_reserve_bytes: 8589934592
 ```
 
-These values will be materialized into the actual M7-A2 profile file (a
-future `contracts`/config artifact owned by M7-A2, not created here). They
-may change only through a new `profile_version` and, because the fingerprint
-is derived from effective configuration (§2.K), a new crawl fingerprint. No
-runtime code in M7-A1 reads, validates, or otherwise implements these values.
+These values are materialized by M7-A2 in
+`contracts/foundation/crawl_reliability_profile.yaml`. The profile remains a
+contract artifact and authorizes no runtime behavior. Values may change only
+through a new `profile_version` and, because the fingerprint is derived from
+effective configuration (§2.K), a new crawl fingerprint.
 
 ## 3. Deferred implementation choices
 
@@ -195,14 +206,16 @@ by a later task as indicated:
 
 - SQLite DDL, table/column shapes, and transaction boundaries beyond "one
   transaction covers a full window's rows and cursor state" — owned by a
-  future M7-A2/M7-A3 persistence task.
+  future M7-A3 persistence task.
 - Overlapping-include-root deduplication mechanics beyond the ordered
   `(ancestor_page_id, ancestor_title)` compatibility rule — owned by M7-A3a.
 - The exact restriction-evidence envelope serialization — owned by M7-A3b.
 - Controlled-stop acceptance behavior and fingerprint canonicalization —
   owned by M7-A3c.
-- Retry backoff/jitter/budget implementation, rate limiting, and the actual
-  `m7-crawl-reliability-v1` profile file — owned by M7-A2.
+- Retry/backoff/budget semantics and the
+  `m7-crawl-reliability-v1` profile file — owned by contract-only M7-A2.
+  Structured HTTP metadata, pure retry-policy implementation, and the
+  rate-limited executor remain future M7-B1/B2/B3 production tasks.
 - File-lock library selection, raw-envelope JSON serialization, CLI flags,
   and production package/class names — owned by later reviewed
   implementation tasks, not by any contract-only task.
@@ -217,7 +230,8 @@ by a later task as indicated:
 - The interaction between controlled stop (§2.J) and an operator-initiated
   resume across process sessions remains open pending M7-A3c.
 - Disk-space and quota enforcement behavior when approaching
-  `minimum_free_disk_reserve_bytes` (§2.L) remains open pending M7-A2.
+  `minimum_free_disk_reserve_bytes` (§2.L) remains open pending M7-A3 and
+  later production implementation.
 
 ## 5. Provenance and scope note
 
