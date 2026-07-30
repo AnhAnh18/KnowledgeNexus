@@ -2,20 +2,18 @@
 
 ## Current Milestone
 
-M6 - the deterministic one-page path is complete through deny-safe ACL
-materialization. M6A-M6C established the live raw-page, observation, and
-normalization boundaries. M6D-A through M6D-D established the exact offline
-BGE-M3 tokenizer, structural parsing, and schema-valid chunking. M6E is
-independently approved and links deterministic Jira `RelationRecord`s to the
-canonical document and all chunks. M6F-A and M6F-B are complete and approved:
-the contract and trusted-input boundaries are locked, one deny-safe `ACLRecord`
-is materialized, and its ACL tags are propagated to the trusted chunks. M6F-A
-through M6F-D are complete and approved, including the separately authorized
-C1 controlled live read-only capture and C2 real captured-sidecar offline
-acceptance. M6G planning is the next unblocked task, but M6G implementation has
-not started. M6 overall remains incomplete until downstream ACL persistence and
-the one-page export through M3 are complete. No raw production artifact exists
-in this repository.
+M6 - the deterministic one-page vertical slice is complete and approved.
+M6A-M6C established the live raw-page, observation, and normalization
+boundaries. M6D-A through M6D-D established the exact offline BGE-M3 tokenizer,
+structural parsing, and schema-valid chunking. M6E linked deterministic Jira
+`RelationRecord`s to the canonical document and chunks. M6F materialized one
+deny-safe `ACLRecord`, propagated ACL tags, captured the normalized restriction
+sidecar, and passed real offline composition acceptance. M6G projected and
+published the complete one-page snapshot through the approved M3 path. The
+single authorized M6G-D-R3 exporter invocation exited zero and its recovered
+post-run acceptance passed without invoking the exporter again. M7 crawl
+reliability and scale planning is now unblocked. No raw production artifact or
+published snapshot exists in this repository.
 
 ## Done
 
@@ -1120,16 +1118,27 @@ Review artifact:
   commits. It provides the reusable M6A–M6F composition boundary, trusted
   one-page projection, deterministic profile/config derivation, and contract
   consistency coverage. No staging or publication is performed by M6G-B.
-- M6G-C is now the next implementation task. M6G-D and M7 remain blocked by
-  their preceding approval gates.
 - M6G-C is complete and independently approved at production head
   `5f62bdb`. It composes the trusted one-page projection through the existing
   M3 writer, extended completer, publisher, and offline synthetic acceptance.
   The legacy M3 report/golden path remains compatible; no real raw page,
   sidecar, or production export was used.
-- M6G-D is the next task: one controlled real offline export and sanitized
-  evidence closeout. M7 remains blocked until the one-page vertical slice is
-  complete.
+- M6G-D-O1 sanitized configuration-failure observability is complete and
+  independently approved. Working-repository source head `48a7abb` and
+  main-machine execution head `68f3927` are separate provenance references;
+  neither SHA is interchangeable across repositories.
+- M6G-D-R3 completed exactly one authorized offline exporter invocation at
+  main-machine execution head `68f3927`. The exporter exited zero. The initial
+  post-run validator encountered an operator-script-only empty-stderr handling
+  defect after publication; recovery validation invoked the exporter zero
+  additional times.
+- R3 recovery acceptance passed the approved-head, clean-worktree, sanitized
+  success payload, exact published file set, `LATEST` pointer, independent
+  manifest row-count, no-staging-residue, and leak gates. The production CLI
+  success payload also confirmed schema/projection acceptance, determinism,
+  and raw-page/sidecar immutability.
+- M6G-D and the M6 one-page vertical slice are complete and approved. External
+  snapshot/evidence artifacts remain outside Git. M7 planning is unblocked.
 - M6F-C1 offline implementation is complete and independently approved at
   source-review head `bf6b79a`, over sidecar foundation commit `855789d`.
   These foreign-source references are provenance only. Independent review
@@ -1188,6 +1197,7 @@ Review artifact:
 
 ## Next Planned Task
 
-Plan M6G-D against approved M6G-C production head `5f62bdb`. M6G-D owns one
-controlled real offline export, independent sanitized-evidence review, and
-documentation closeout. It must not add new production export behavior.
+Plan M7 crawl reliability and scale against the completed M6 one-page vertical
+slice. M7 may add retry, rate-limit, checkpoint, and resume behavior without
+changing the approved record, scope, ACL, chunking, relation, or export
+semantics.

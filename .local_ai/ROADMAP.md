@@ -85,19 +85,19 @@ Sync-state clarification:
 | M6G-A - One-page export focused contract | complete; independently approved | Approved source-review head `dbe5c2f`; no P0-P2 | Contract/docs only; two P3 items are assigned to M6G-B and M6G-C. |
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
-| M6G-D - Real offline export acceptance and closeout | next; unblocked; not started | Requires approved M6G-C and transferred-tree equivalence | One controlled offline snapshot, independent evidence review, docs closeout. |
-| M7 - Crawl reliability and scale | blocked; planned | M6G one-page vertical-slice gate incomplete | Retry, rate limit, checkpoint, resume. |
+| M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation at `68f3927` exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
+| M7 - Crawl reliability and scale | next; unblocked; planned | M6 one-page vertical slice complete and approved | Retry, rate limit, checkpoint, resume without changing approved semantics. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
 
-Current area: M6F-A through M6F-D are complete and approved. M6F includes the
-approved C1 controlled live capture and C2 real captured-sidecar offline
-acceptance. M6G-A and M6G-B are complete and independently approved; M6G-C is
-the next unblocked implementation task. M6 overall remains in progress until
-the one-page export through M3 is complete.
+Current area: M6A through M6G-D are complete and approved. The one-page slice
+has real raw provenance, deterministic normalized content and chunks, Jira
+relations, deny-safe ACL materialization, and one published full snapshot
+through the approved M3 path. M7 crawl reliability and scale is the next
+unblocked planning task.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -803,8 +803,9 @@ Status:
   no production implementation existed at that head.
 - M6G-B: complete and independently approved at production head `5ee5126`.
 - M6G-C: complete and independently approved at production head `5f62bdb`.
-- M6G-D: next and unblocked; M7 remains blocked by the one-page vertical-slice
-  gate.
+- M6G-D: complete and approved after exactly one authorized exporter invocation
+  exited zero and recovery-only acceptance passed without a second invocation.
+- M7: next and unblocked.
 
 Tasks:
 - M6-0 confirm live page/restriction/attachment request shapes (done).
@@ -827,7 +828,8 @@ Tasks:
   (done and independently approved at `5ee5126`).
 - M6G-C compose the approved M3 export path and synthetic acceptance (done and
   independently approved at `5f62bdb`).
-- M6G-D run/review the real offline export and close documentation (next).
+- M6G-D run/review the real offline export and close documentation (done and
+  approved).
 
 Completion gate:
 - One real page has raw provenance.
