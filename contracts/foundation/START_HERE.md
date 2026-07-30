@@ -1,10 +1,10 @@
-# START HERE — AI Knowledge Platform context pack (as of 2026-07-27)
+# START HERE — AI Knowledge Platform context pack (as of 2026-07-30)
 
 This bundle is the complete authoritative state of the **AI Knowledge Platform — Part 1 (Knowledge Foundation)** project, ready to load into a new conversation. Read this file first, then the contracts in the order below.
 
 ## What this project is
 
-Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6F deny-safe ACL composition, including read-only capture and offline real-artifact acceptance. M6G-A, M6G-B, and M6G-C are complete and approved for the one-page Foundation export path. M6G-D remains for the controlled real offline export and evidence closeout; no real one-page snapshot has been produced yet.
+Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)** and **Git (`spen-sdk`)** into validated JSONL export snapshots for a downstream RAG system. Part 1 owns: connectors, raw store, normalization, chunking, ACL, relations, symbols, media, export. **Part 1 does NOT do embedding / Qdrant / retrieval / chat** — Part 2/3 are implemented as **sibling bounded contexts inside the same KnowledgeNexus product repository**: Indexing, Retrieval, Chat, and Presentation, which consume Part 1's export snapshot. Contracts and the controlled one-page implementation are complete and approved through M6G, including the controlled real offline one-page export and evidence closeout. M7-A1 now activates the crawl-reliability scope and owner-locked invariants; M7-A2 failure/retry contract work is next. M7 production implementation has not started.
 
 ## Read order (priority)
 
@@ -13,14 +13,15 @@ Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)*
 3. `JIRA_RELATION_SPEC.md` + `jira_relation_profile.yaml` — the active M6E regex-only Jira relation and allowlist contract.
 4. `ACL_MATERIALIZATION_SPEC.md` — the active M6F deny-safe ACL materialization contract: audit-vs-enforcement policy, `userKey`/group-name principal projection, and the strict M6E/M6B provenance boundaries validated in M6F-A.
 5. `ONE_PAGE_EXPORT_SPEC.md` — the active M6G one-page full-snapshot projection, configuration, M3 reuse, quality, publication, and acceptance contract.
-6. `decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` — architecture, policies, scope (the normative base).
-7. `decision_logs/AI_Knowledge_Platform_v7_2_Update.md` — export layout, storage roles, verbatim embedding, ACL repo tag (D1–D7).
-8. `decision_logs/AI_Knowledge_Platform_v7_3_Update.md` — bge-m3 direction, benchmark plan (D8–D13).
-9. `decision_logs/AI_Knowledge_Platform_v7_4_Update.md` — POC source binding, dataset, Jira, bge-m3 lock, scope classifier, media policy, D22 consumer pointer (D14–D22).
-10. `decision_logs/AI_Knowledge_Platform_v7_5_Update.md` — single-repo modular-monolith layout + Clean Architecture bounded-context dependency rules (D23–D35).
-11. `Task2_Task3_Integration_Contract.md` — the consumer contract KnowledgeNexus implements against (10 hard constraints + mapping + roadmap).
+6. `CRAWL_RELIABILITY_SPEC.md` + `decision_logs/M7_OWNER_DECISIONS.md` — the active M7 crawl-reliability scope, invariant, run/session, pagination, raw-generation, retry-profile, and checkpoint ownership decisions.
+7. `decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` — architecture, policies, scope (the normative base).
+8. `decision_logs/AI_Knowledge_Platform_v7_2_Update.md` — export layout, storage roles, verbatim embedding, ACL repo tag (D1–D7).
+9. `decision_logs/AI_Knowledge_Platform_v7_3_Update.md` — bge-m3 direction, benchmark plan (D8–D13).
+10. `decision_logs/AI_Knowledge_Platform_v7_4_Update.md` — POC source binding, dataset, Jira, bge-m3 lock, scope classifier, media policy, D22 consumer pointer (D14–D22).
+11. `decision_logs/AI_Knowledge_Platform_v7_5_Update.md` — single-repo modular-monolith layout + Clean Architecture bounded-context dependency rules (D23–D35).
+12. `Task2_Task3_Integration_Contract.md` — the consumer contract KnowledgeNexus implements against (10 hard constraints + mapping + roadmap).
 
-Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKING_SPEC`, `JIRA_RELATION_SPEC`, `ACL_MATERIALIZATION_SPEC`, `ONE_PAGE_EXPORT_SPEC`) → v7.1 → v7.2 → v7.3 → v7.4 → v7.5 → integration contract. `AI_Knowledge_Platform_Master_Spec_v7.md` is a **historical baseline** (audit/diff only). `reference/` holds the other team's KnowledgeNexus plan and the project README — context, not normative.
+Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKING_SPEC`, `JIRA_RELATION_SPEC`, `ACL_MATERIALIZATION_SPEC`, `ONE_PAGE_EXPORT_SPEC`, `CRAWL_RELIABILITY_SPEC` with its owner-decision record) → v7.1 → v7.2 → v7.3 → v7.4 → v7.5 → integration contract. `AI_Knowledge_Platform_Master_Spec_v7.md` is a **historical baseline** (audit/diff only). `reference/` holds the other team's KnowledgeNexus plan and the project README — context, not normative.
 
 ## Locked decisions (quick reference)
 
@@ -46,7 +47,7 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 
 ## Suggested next steps
 
-1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6F and M6G-A through M6G-C as complete and approved.
-2. Run M6G-D only from a clean transferred execution head, using the approved one-page CLI and external raw/sidecar artifacts.
-3. Keep the real export outside Git history and register only sanitized aggregate evidence plus documentation closeout.
+1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6, including M6G-D real one-page export acceptance, as complete and approved.
+2. Use `CRAWL_RELIABILITY_SPEC.md` and `decision_logs/M7_OWNER_DECISIONS.md` as the M7-A1 gate, then complete independent M7-A2 failure/retry contract review before production implementation.
+3. Keep raw crawl generations, checkpoint databases, operational evidence, and real exports outside Git history; register only sanitized aggregate evidence and milestone status.
 4. Complete the later retrieval benchmark only after representative corpus anchors exist, then record any accepted configuration migration explicitly.
