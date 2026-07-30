@@ -21,6 +21,9 @@ from knowledgenexus.foundation.application.use_cases.project_one_page_export imp
 )
 from knowledgenexus.foundation.domain.models.one_page_export import (
     ONE_PAGE_DATASET_NAME,
+    OnePageExportCauseFamily,
+    OnePageExportConfigurationError,
+    OnePageExportStage,
 )
 from knowledgenexus.foundation.domain.models.one_page_export_snapshot import (
     OnePageExportAcceptanceResult,
@@ -47,7 +50,6 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
 
 _EXPORT_ERROR_CATEGORIES = frozenset(
     {
-        "export_configuration",
         "export_projection",
         "export_staging",
         "export_completion",
@@ -169,26 +171,59 @@ class OnePageFullSnapshotExporter:
         export_root: Path,
         validator: FoundationSchemaValidator,
     ) -> OnePageFullSnapshotExportResult:
-        # Step 1: configuration validation.
+        # Step 1: stage-mapped configuration validation.
+        # Stage: export_input_validation
+        if not isinstance(projection, OnePageExportProjection):
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.EXPORT_INPUT_VALIDATION,
+                cause_family=OnePageExportCauseFamily.TYPE_ERROR,
+            )
+
+        # Stage: generated_at_validation
+        if not isinstance(generated_at, str):
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.GENERATED_AT_VALIDATION,
+                cause_family=OnePageExportCauseFamily.TYPE_ERROR,
+            )
+        if not _is_rfc3339_timestamp(generated_at):
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.GENERATED_AT_VALIDATION,
+                cause_family=OnePageExportCauseFamily.VALUE_ERROR,
+            )
         try:
-            if not isinstance(projection, OnePageExportProjection):
-                raise TypeError("projection expects OnePageExportProjection")
-            if not _is_rfc3339_timestamp(generated_at):
-                raise ValueError("generated_at must be a strict RFC3339 timestamp")
             parsed_generated_at = datetime.fromisoformat(
                 generated_at.replace("Z", "+00:00")
             )
-            if not isinstance(export_root, Path):
-                raise TypeError("export_root expects Path")
-            dataset_root = export_root / ONE_PAGE_DATASET_NAME
+        except ValueError:
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.GENERATED_AT_VALIDATION,
+                cause_family=OnePageExportCauseFamily.VALUE_ERROR,
+            ) from None
+
+        # Stage: dataset_root_validation
+        if not isinstance(export_root, Path):
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.DATASET_ROOT_VALIDATION,
+                cause_family=OnePageExportCauseFamily.TYPE_ERROR,
+            )
+        dataset_root = export_root / ONE_PAGE_DATASET_NAME
+        try:
             if dataset_root.is_symlink():
                 raise ValueError("Dataset root must not be a symlink")
             if not dataset_root.exists():
                 raise FileNotFoundError(f"Dataset root does not exist: {dataset_root}")
             if not dataset_root.is_dir():
                 raise NotADirectoryError(f"Dataset root is not a directory: {dataset_root}")
-        except Exception:
-            raise OnePageFullSnapshotExportError("export_configuration") from None
+        except ValueError:
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.DATASET_ROOT_VALIDATION,
+                cause_family=OnePageExportCauseFamily.VALUE_ERROR,
+            ) from None
+        except OSError:
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.DATASET_ROOT_VALIDATION,
+                cause_family=OnePageExportCauseFamily.IO_ERROR,
+            ) from None
 
         # Step 2: entry snapshot (R8). Every stream handed to the writer is a
         # fresh deep copy -- never a direct reference into the caller's
@@ -232,12 +267,31 @@ class OnePageFullSnapshotExporter:
 
         # Step 4: dataset_version. Deterministic given generated_at; never
         # reads the system clock.
+        # Stage: dataset_version_generation
         try:
             dataset_version = DatasetVersionGenerator.generate(
                 instant=parsed_generated_at
             )
+        except TypeError:
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.DATASET_VERSION_GENERATION,
+                cause_family=OnePageExportCauseFamily.TYPE_ERROR,
+            ) from None
+        except ValueError:
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.DATASET_VERSION_GENERATION,
+                cause_family=OnePageExportCauseFamily.VALUE_ERROR,
+            ) from None
+        except OSError:
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.DATASET_VERSION_GENERATION,
+                cause_family=OnePageExportCauseFamily.IO_ERROR,
+            ) from None
         except Exception:
-            raise OnePageFullSnapshotExportError("export_configuration") from None
+            raise OnePageExportConfigurationError(
+                stage=OnePageExportStage.DATASET_VERSION_GENERATION,
+                cause_family=OnePageExportCauseFamily.UNEXPECTED_ERROR,
+            ) from None
 
         # Step 5: staging_path. No caller-supplied path; no pre-create.
         staging_path = dataset_root / f".staging-{dataset_version}"

@@ -4,9 +4,22 @@ from pathlib import Path
 
 import pytest
 
+from knowledgenexus.foundation.domain.models.one_page_export import (
+    OnePageExportCauseFamily,
+    OnePageExportStage,
+)
+from knowledgenexus.foundation.infrastructure.config import (
+    one_page_export_profile_loader as loader_module,
+)
 from knowledgenexus.foundation.infrastructure.config import (
     OnePageExportConfigurationError,
     load_one_page_export_profile_bundle,
+)
+from knowledgenexus.foundation.infrastructure.config.chunking_profile_loader import (
+    ChunkingProfileLoadError,
+)
+from knowledgenexus.foundation.infrastructure.config.jira_relation_profile_loader import (
+    JiraRelationProfileLoadError,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
@@ -102,7 +115,30 @@ def test_invalid_utf8_bundle_input_yields_export_configuration(
             jira_relation_profile_path=invalid_path,
         )
     assert str(exc_info.value) == "export_configuration"
+    assert exc_info.value.stage == OnePageExportStage.JIRA_PROFILE_DECODE
+    assert (
+        exc_info.value.cause_family
+        == OnePageExportCauseFamily.TEXT_DECODE_ERROR
+    )
     assert str(invalid_path) not in str(exc_info.value)
+
+
+def test_invalid_utf8_embedding_profile_has_decode_stage(tmp_path: Path) -> None:
+    invalid_path = tmp_path / "SENSITIVE-embedding.yaml"
+    invalid_path.write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(OnePageExportConfigurationError) as exc_info:
+        load_one_page_export_profile_bundle(
+            embedding_profile_path=invalid_path,
+            jira_relation_profile_path=JIRA_PROFILE_PATH,
+        )
+
+    assert exc_info.value.stage == OnePageExportStage.EMBEDDING_PROFILE_DECODE
+    assert (
+        exc_info.value.cause_family
+        == OnePageExportCauseFamily.TEXT_DECODE_ERROR
+    )
+    assert "SENSITIVE" not in str(exc_info.value)
 
 
 def test_missing_profile_yields_export_configuration(tmp_path: Path) -> None:
@@ -113,6 +149,8 @@ def test_missing_profile_yields_export_configuration(tmp_path: Path) -> None:
             embedding_profile_path=missing,
             jira_relation_profile_path=JIRA_PROFILE_PATH,
         )
+    assert exc_info.value.stage == OnePageExportStage.EMBEDDING_PROFILE_READ
+    assert exc_info.value.cause_family == OnePageExportCauseFamily.IO_ERROR
     assert "SENSITIVE" not in str(exc_info.value)
 
 
@@ -120,21 +158,148 @@ def test_malformed_profile_yields_export_configuration(tmp_path: Path) -> None:
     malformed_path = tmp_path / "malformed.yaml"
     malformed_path.write_text("not: a, valid: [profile", encoding="utf-8")
 
-    with pytest.raises(OnePageExportConfigurationError):
+    with pytest.raises(OnePageExportConfigurationError) as exc_info:
         load_one_page_export_profile_bundle(
             embedding_profile_path=EMBEDDING_PROFILE_PATH,
             jira_relation_profile_path=malformed_path,
         )
+    assert exc_info.value.stage == OnePageExportStage.JIRA_PROFILE_PARSE
+    assert (
+        exc_info.value.cause_family
+        == OnePageExportCauseFamily.PROFILE_VALIDATION_ERROR
+    )
 
 
 def test_wrong_typed_paths_raise_typeerror() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(OnePageExportConfigurationError) as exc_info:
         load_one_page_export_profile_bundle(
             embedding_profile_path="not-a-path",  # type: ignore[arg-type]
             jira_relation_profile_path=JIRA_PROFILE_PATH,
         )
-    with pytest.raises(TypeError):
+    assert exc_info.value.stage == OnePageExportStage.EXPORT_INPUT_VALIDATION
+    assert exc_info.value.cause_family == OnePageExportCauseFamily.TYPE_ERROR
+    with pytest.raises(OnePageExportConfigurationError) as exc_info:
         load_one_page_export_profile_bundle(
             embedding_profile_path=EMBEDDING_PROFILE_PATH,
             jira_relation_profile_path="not-a-path",  # type: ignore[arg-type]
         )
+    assert exc_info.value.stage == OnePageExportStage.EXPORT_INPUT_VALIDATION
+    assert exc_info.value.cause_family == OnePageExportCauseFamily.TYPE_ERROR
+
+
+def _raise(error: Exception) -> None:
+    raise error
+
+
+@pytest.mark.parametrize(
+    ("parser_name", "failure", "expected_stage", "expected_cause"),
+    [
+        (
+            "parse_chunking_profile_text",
+            ChunkingProfileLoadError("SENSITIVE profile fragment"),
+            OnePageExportStage.EMBEDDING_PROFILE_PARSE,
+            OnePageExportCauseFamily.PROFILE_VALIDATION_ERROR,
+        ),
+        (
+            "parse_chunking_profile_text",
+            TypeError("SENSITIVE type"),
+            OnePageExportStage.EMBEDDING_PROFILE_PARSE,
+            OnePageExportCauseFamily.TYPE_ERROR,
+        ),
+        (
+            "parse_chunking_profile_text",
+            ValueError("SENSITIVE value"),
+            OnePageExportStage.EMBEDDING_PROFILE_PARSE,
+            OnePageExportCauseFamily.VALUE_ERROR,
+        ),
+        (
+            "parse_jira_relation_profile_text",
+            JiraRelationProfileLoadError("SENSITIVE profile fragment"),
+            OnePageExportStage.JIRA_PROFILE_PARSE,
+            OnePageExportCauseFamily.PROFILE_VALIDATION_ERROR,
+        ),
+        (
+            "parse_jira_relation_profile_text",
+            TypeError("SENSITIVE type"),
+            OnePageExportStage.JIRA_PROFILE_PARSE,
+            OnePageExportCauseFamily.TYPE_ERROR,
+        ),
+        (
+            "parse_jira_relation_profile_text",
+            ValueError("SENSITIVE value"),
+            OnePageExportStage.JIRA_PROFILE_PARSE,
+            OnePageExportCauseFamily.VALUE_ERROR,
+        ),
+    ],
+)
+def test_parser_failures_map_to_exact_sanitized_metadata(
+    parser_name: str,
+    failure: Exception,
+    expected_stage: OnePageExportStage,
+    expected_cause: OnePageExportCauseFamily,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        loader_module,
+        parser_name,
+        lambda raw_text: _raise(failure),
+    )
+
+    with pytest.raises(OnePageExportConfigurationError) as exc_info:
+        load_one_page_export_profile_bundle(
+            embedding_profile_path=EMBEDDING_PROFILE_PATH,
+            jira_relation_profile_path=JIRA_PROFILE_PATH,
+        )
+
+    assert exc_info.value.stage == expected_stage
+    assert exc_info.value.cause_family == expected_cause
+    assert "SENSITIVE" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_cause"),
+    [
+        (TypeError("SENSITIVE type"), OnePageExportCauseFamily.TYPE_ERROR),
+        (ValueError("SENSITIVE value"), OnePageExportCauseFamily.VALUE_ERROR),
+    ],
+)
+def test_bundle_construction_failures_are_sanitized(
+    failure: Exception,
+    expected_cause: OnePageExportCauseFamily,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        loader_module,
+        "OnePageExportProfileBundle",
+        lambda **kwargs: _raise(failure),
+    )
+
+    with pytest.raises(OnePageExportConfigurationError) as exc_info:
+        load_one_page_export_profile_bundle(
+            embedding_profile_path=EMBEDDING_PROFILE_PATH,
+            jira_relation_profile_path=JIRA_PROFILE_PATH,
+        )
+
+    assert exc_info.value.stage == OnePageExportStage.PROFILE_BUNDLE_CONSTRUCTION
+    assert exc_info.value.cause_family == expected_cause
+    assert "SENSITIVE" not in str(exc_info.value)
+
+
+def test_each_profile_is_read_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_read_bytes = Path.read_bytes
+    calls: dict[Path, int] = {}
+
+    def count_read(path: Path) -> bytes:
+        calls[path] = calls.get(path, 0) + 1
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", count_read)
+
+    load_one_page_export_profile_bundle(
+        embedding_profile_path=EMBEDDING_PROFILE_PATH,
+        jira_relation_profile_path=JIRA_PROFILE_PATH,
+    )
+
+    assert calls == {EMBEDDING_PROFILE_PATH: 1, JIRA_PROFILE_PATH: 1}

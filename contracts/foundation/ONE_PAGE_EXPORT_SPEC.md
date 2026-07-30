@@ -276,6 +276,65 @@ Output is deterministic and sanitized. Arbitrary exception text, record values,
 identities, paths, URLs, principals, ACL tags, content, and hashes are forbidden
 from stdout and stderr.
 
+### 10.1. Configuration failure observability (M6G-D-O1)
+
+Exit code 14 (`export_configuration`) carries structured `stage` and `cause_family`
+metadata. The vocabularies below are locked; no additional values are permitted.
+
+**Stage vocabulary (11 values):**
+
+```text
+embedding_profile_read
+embedding_profile_decode
+embedding_profile_parse
+jira_profile_read
+jira_profile_decode
+jira_profile_parse
+profile_bundle_construction
+export_input_validation
+generated_at_validation
+dataset_root_validation
+dataset_version_generation
+```
+
+**Cause family vocabulary (6 values):**
+
+```text
+io_error
+text_decode_error
+profile_validation_error
+type_error
+value_error
+unexpected_error
+```
+
+**CLI projection for exit 14:** When the CLI exits with code 14, it writes to
+stderr a single JSON object with exactly these keys:
+
+```json
+{
+  "status": "failed",
+  "category": "export_configuration",
+  "stage": "<one of 11 stage values>",
+  "cause_family": "<one of 6 cause_family values>"
+}
+```
+
+No other fields, paths, identities, or exception text are permitted in the
+output. This structured metadata enables automated diagnosis without leaking
+secrets or internal state.
+
+`stage` and `cause_family` are closed, allowlisted semantic values drawn only
+from the two vocabularies above. They are never derived from, and never
+contain, raw exception text, exception type names, tracebacks, or any runtime
+value (paths, identifiers, profile fragments, environment values). `status`
+and `category` remain exactly as defined in §10 and stay wire-compatible with
+existing M6G-C consumers that only read those two fields. Successful CLI
+output and all non-configuration failure categories (exit codes other than 14)
+are unchanged by this section. This section introduces no change to any
+Foundation JSON Schema (`schemas/*.json`); `stage` and `cause_family` are CLI
+stderr-projection fields only.
+
 ## 11. Acceptance gates
 
 The gates are separate:
