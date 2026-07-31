@@ -1247,9 +1247,32 @@ Review artifact:
   observation, and `ConfluenceHttpError.metadata` is read-only by interface.
 - No open P0, P1, or P2 remains.
 
+## M7-B2 Pure Bounded Retry-Policy State
+
+- M7-B2 is complete and independently approved.
+- The approved `m7-crawl-reliability-v1` mapping is bound exactly, including
+  all 23 fields and decoded types; changing any value requires a new reviewed
+  profile version.
+- Pure domain evaluators classify B1 HTTP/transport/payload facts, preserve
+  Confluence restriction semantic statuses, perform request-budget preflight,
+  and apply the approved attempt, request, Retry-After, single-delay, and
+  accumulated-delay precedence.
+- Decisions are immutable, value-comparable, value-hiding, and constrained by
+  exact outcome/stable-kind combinations.
+- M7-B2 performs no HTTP call, clock read, sleep, pacing calculation, counter
+  mutation, filesystem/YAML loading, logging, checkpointing, raw publication,
+  or live execution.
+- Focused B2/B1 verification passed 416 tests. The broader offline non-asset
+  Foundation/Shared/Architecture matrix passed 2,072 tests with two
+  platform-inapplicable skips.
+- Independent adversarial review fixed the duplicate pytest-module name,
+  overflow from extremely large Retry-After/rate-limit values, and exact-int
+  request-budget validation. No open P0, P1, or P2 remains.
+
 ## Next Planned Task
 
-Plan M7-B2, the pure bounded retry-policy evaluator, against the approved
-M7-A2 taxonomy/profile and the structured facts emitted by M7-B1. M7-B2 must
-not perform network I/O, sleep, rate limiting, checkpointing, or raw
-publication. M7-B3 remains blocked until B2 is reviewed and approved.
+Plan M7-B3, the retrying and rate-limited executor, against the approved B1
+structured facts and B2 pure decisions. B3 owns the injected monotonic clock,
+sleeper, pacing calculation, attempt loop, and counter updates; it must not
+start checkpoint/raw-generation/fingerprint work or perform live requests
+during implementation and offline review.

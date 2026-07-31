@@ -90,7 +90,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | B1 complete and independently approved; B2 planning next | M7-A contracts approved; structured HTTP outcome boundary implemented and verified | Plan the pure bounded retry-policy evaluator; B3 remains blocked. |
+| M7 - Crawl reliability and scale | B1/B2 complete and independently approved; B3 planning next | Structured HTTP facts and pure bounded retry decisions implemented and verified | Plan the injected-clock retrying/rate-limited executor; later persistence work remains blocked. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
@@ -99,9 +99,9 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 
 Current area: M6A through M6G-D are complete and approved. The complete
 M7-A1/A2/A3 contract stack is owner-approved. M7-B1 structured HTTP outcomes
-are implemented and independently approved with existing M5B/M6B behavior
-preserved. M7-B2 pure bounded retry-policy planning is next; M7-B3 remains
-blocked.
+and M7-B2 pure bounded retry policy are implemented and independently
+approved. M7-B3 retrying/rate-limited executor planning is next; checkpoint,
+raw-generation, and later reliability implementation remain blocked.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -878,8 +878,11 @@ Contract decomposition:
 - M7-B1: structured HTTP outcome metadata, strict Retry-After parsing, typed
   transport classification, and M5B/M6B-compatible transport integration.
   Complete and independently approved; no open P0/P1/P2.
-- M7-B2: pure bounded retry-policy evaluator. Planning next; no I/O or sleep.
-- M7-B3: rate-limited retry executor. Blocked by B2 review and approval.
+- M7-B2: exact profile-v1 binding, request-budget preflight, classification,
+  and bounded retry decisions. Complete and independently approved; no open
+  P0/P1/P2.
+- M7-B3: rate-limited retry executor with injected clock/sleeper. Planning
+  next; implementation requires separate review and owner authorization.
 - Later production tasks require a reviewed implementation plan and separate
   owner authorization.
 
