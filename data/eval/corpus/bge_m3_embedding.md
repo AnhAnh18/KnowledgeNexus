@@ -6,13 +6,12 @@ KnowledgeNexus uses **BAAI/bge-m3** for embeddings.
 
 - Vector dimension: **1024**
 - Distance metric: **Cosine**
-- Query prefix for dense retrieval:
-  `Represent this sentence for searching relevant passages:`
+- No query instruction prefix — BGE-M3 is trained without a prefix, so both documents and queries are embedded verbatim.
 
 The dense path is the default retrieval mode today (`return_sparse=False` in the embedder).
 
-## Future modes
+## Hybrid mode (dense + sparse)
 
-BGE-M3 can also emit **sparse** lexical weights and ColBERT multi-vectors. Hybrid retrieval
-(dense + sparse) is planned for improving exact entity queries without changing Cosine dense
-geometry.
+BGE-M3 also emits **sparse** lexical weights (`lexical_weights`) for hybrid retrieval
+(dense + sparse). This improves exact-entity queries (e.g. error codes, identifiers)
+without changing the Cosine dense geometry. ColBERT multi-vectors are also supported by the model but not currently used.

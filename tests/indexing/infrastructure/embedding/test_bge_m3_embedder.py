@@ -122,7 +122,7 @@ class TestEmbed:
 
 
 # ---------------------------------------------------------------------------
-# embed_query() tests (query embedding — with prefix)
+# embed_query() tests (query embedding — verbatim, no prefix)
 # ---------------------------------------------------------------------------
 
 class TestEmbedQuery:
@@ -139,8 +139,13 @@ class TestEmbedQuery:
         assert result.dimension == 1024
 
     @pytest.mark.asyncio
-    async def test_embed_query_adds_prefix(self, embedder, mock_flag_model):
-        """embed_query must add the bge-m3 query instruction prefix."""
+    async def test_embed_query_no_prefix(self, embedder, mock_flag_model):
+        """BGE-M3 does not use an instruction prefix — query must be embedded verbatim.
+
+        Adding a BGE v1.5 English prefix would inject junk tokens into the sparse
+        (lexical_weights) vector, diluting the weight mass of real query terms
+        and wrecking exact-entity matching.
+        """
         mock_flag_model.encode.return_value = _make_encode_output([[0.0] * 1024])
 
         await embedder.embed_query("what is objectmanager")
@@ -148,8 +153,9 @@ class TestEmbedQuery:
         call_args = mock_flag_model.encode.call_args
         texts_passed = call_args[0][0]
         assert len(texts_passed) == 1
-        assert texts_passed[0].startswith("Represent this sentence for searching relevant passages: ")
-        assert "what is objectmanager" in texts_passed[0]
+        # Query must be passed verbatim — no instruction prefix
+        assert texts_passed[0] == "what is objectmanager"
+        assert not texts_passed[0].startswith("Represent this sentence")
 
     @pytest.mark.asyncio
     async def test_embed_query_empty_raises(self, embedder):

@@ -10,7 +10,6 @@ from knowledgenexus.indexing.domain.value_objects.embedding_vector import Embedd
 logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "BAAI/bge-m3"
-_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 _DEFAULT_DEVICE = "cpu"
 _DEFAULT_BATCH_SIZE = 32
 _VECTOR_DIMENSION = 1024
@@ -109,10 +108,13 @@ class BgeM3Embedder(EmbedderPort):
         if not query or not query.strip():
             raise ValueError("Query must not be empty or whitespace-only")
 
-        prefixed_query = f"{_QUERY_PREFIX}{query}"
-        logger.debug("Embedding query (len=%d chars, with prefix)", len(query))
+        # BGE-M3 does not use an instruction prefix — embed query verbatim.
+        # Using a BGE v1.5 English prefix here would inject ~10 junk tokens
+        # into every sparse (lexical_weights) vector, diluting the weight mass
+        # of the real query terms and wrecking exact-entity matching.
+        logger.debug("Embedding query (len=%d chars, verbatim)", len(query))
 
-        dense_vectors, sparse_vectors = await self._encode_batch([prefixed_query], is_query=True)
+        dense_vectors, sparse_vectors = await self._encode_batch([query], is_query=True)
 
         sparse = sparse_vectors[0] if sparse_vectors else None
         return EmbeddingVector(
