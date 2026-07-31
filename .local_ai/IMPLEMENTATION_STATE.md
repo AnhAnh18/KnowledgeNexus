@@ -1292,6 +1292,8 @@ Review artifact:
 
 ## Next Planned Task
 
-Plan M7-C durable checkpoint and run-state implementation against the approved
-M7-A contracts and completed M7-B HTTP reliability layer. M7-C implementation
-remains separately gated and is not yet authorized.
+The M7-C durability decision package is owner-approved in
+`contracts/foundation/decision_logs/M7_C_OWNER_DECISIONS.md`. Plan one focused
+M7-C production stage at a time against the approved M7-A contracts and
+completed M7-B HTTP reliability layer. M7-C implementation remains separately
+gated and is not yet authorized.

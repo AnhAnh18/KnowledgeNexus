@@ -123,6 +123,28 @@ acl_contract_version
 Digest fields are lowercase SHA-256 hex strings. Version/profile fields are
 non-empty strings. `space_key` follows the approved source-config contract.
 
+M7-C version 1 uses this closed registry:
+
+```text
+fingerprint_contract_version: m7-crawl-fingerprint-v1
+deployment_api_family: confluence-data-center-rest-v1
+request_profile_version: m7-confluence-request-profile-v1
+scope_policy_version: m5-scope-policy-v1
+query_shape_profile_version: m7-confluence-inventory-query-v1
+expand_shape_profile_version: m7-confluence-inventory-expand-v1
+mapper_contract_version: m5b-confluence-inventory-mapper-v1
+raw_layout_contract_version: m7-raw-generation-layout-v1
+foundation_schema_version: 1.0
+chunking_contract_version: 1.2.0
+jira_relation_contract_version: m6e-jira-relations-v1
+acl_contract_version: m6f-acl-materialization-v1
+```
+
+The remaining `reliability_profile_id` and `reliability_profile_version` fields
+come exactly from the approved profile. An implementation must not substitute,
+accept caller overrides for, or infer a registry value from an unrelated M5
+configuration field.
+
 ### Canonically sorted string-array fields
 
 ```text
@@ -206,6 +228,43 @@ supply this digest directly.
 
 Changing include roots, exclusions, scope policy/config, or their version
 changes the crawl fingerprint.
+
+For M7-C version 1, the complete remaining scope configuration is exactly the
+include-root labels keyed by page ID, excluded-subtree reasons keyed by page ID,
+and include/exclude keyword collections. The canonical digest input sorts keyed
+entries by page ID and keyword collections by canonical string order, removes
+duplicate keywords, and represents an absent label/reason as explicit `null`.
+The page-ID collections themselves remain direct fingerprint fields. Raw input
+values and this digest preimage remain excluded from durable state and evidence.
+
+The exact scope-digest object is:
+
+```json
+{
+  "exclude_keywords": ["<string>", "..."],
+  "excluded_subtree_reasons": [
+    {"page_id":"<string>","reason":"<string-or-null>"}
+  ],
+  "include_keywords": ["<string>", "..."],
+  "include_root_labels": [
+    {"name":"<string-or-null>","page_id":"<string>"}
+  ]
+}
+```
+
+Its keys are sorted; it uses UTF-8 JSON with compact separators, `ensure_ascii`
+false, `allow_nan` false, no BOM, and no trailing newline; then
+`scope_config_digest` is lowercase SHA-256 hex of those bytes. Strings must be
+valid validated config strings, entries use only the shown keys, and arrays are
+sorted/deduplicated before serialization. This object has no optional keys.
+
+### M7-C effective-input binding
+
+Before fingerprinting, the M7-C trusted validator MUST construct every
+fingerprint field from one validated effective configuration. In particular, the
+effective inventory page size MUST equal the active reliability-profile value;
+an arbitrary positive M5 source-config page size is not sufficient for M7-C.
+This requirement is additive and does not change M5 behavior.
 
 ## 7. Excluded fingerprint inputs
 
@@ -321,6 +380,10 @@ Two executions with the same scripted inputs MUST produce identical
 decisions, requests, sleeps, checkpoints, raw tree, normalized page set, and
 sanitized counters.
 
+An M7-C inventory-only acceptance suite may establish only the durable
+inventory slice. It cannot establish the full M7 acceptance gate until the
+later raw-generation scope and its required acceptance cases are complete.
+
 ## 11. Scale methodology
 
 The future offline scale gate uses:
@@ -355,6 +418,7 @@ The future integrated suite injects failure at least:
 
 ```text
 before request
+after durable outbound-attempt reservation before request
 after response
 during raw temporary write
 after raw publication
@@ -454,6 +518,8 @@ foreign SHA as a portable completion requirement
 | `A3C-FP-10` | Session controls/log settings do not change digest |
 | `A3C-FP-11` | Resume mismatch fails before request/mutation |
 | `A3C-FP-12` | Caller-supplied digest override is rejected |
+| `A3C-FP-13` | M7 page-size mismatch fails before fingerprint, request, or mutation |
+| `A3C-FP-14` | Scope-digest labels/reasons/keywords have exact canonical bytes and digest |
 
 ## 17. Controlled-stop and integrated acceptance matrix
 

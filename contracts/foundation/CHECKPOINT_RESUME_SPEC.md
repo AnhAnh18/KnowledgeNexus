@@ -48,6 +48,15 @@ One crawl run MAY span multiple process sessions. Starting a new process
 session MUST NOT create a new crawl run when a resume operation was selected.
 Session identity and controls MUST NOT alter run identity.
 
+For M7-C version 1, a start-new operation receives a system-generated lowercase
+canonical UUIDv4 `run_id`, and `generation_id` equals that `run_id`. A caller
+may supply a validated existing `run_id` only as the selector for an explicit
+resume; it cannot create or replace a run/generation identity. After every root reaches
+`descendants_complete`, inventory is complete but the crawl run remains
+incomplete. A valid resume of that inventory-complete run returns the idempotent
+`inventory_complete` outcome without a network request, checkpoint mutation,
+or whole-run completion transition.
+
 ## 3. Mutually exclusive run operations
 
 Exactly one of these operations MUST be selected:
@@ -122,6 +131,26 @@ The future persistence implementation MUST NOT:
 
 All writes in the conceptual transaction become visible together or none
 becomes visible.
+
+When the committed terminal window completes the final non-complete root, that
+same transaction also records `inventory_phase=complete`. The final root rows,
+root/cursor state, checkpoint transition, and inventory-phase completion are
+never split across transactions.
+
+### M7-C durable budget binding
+
+For M7-C version 1, `max_pages_per_run` counts unique observed `page_id` values
+durably persisted in a crawl run, including occurrences later excluded from the
+final scope projection. Before mutating a descendants-window transaction, the
+store checks whether the complete window would exceed that unique-ID limit and
+fails the whole transaction when it would.
+
+Before every outbound HTTP attempt, including a retry, the current process
+session durably reserves one unit of `max_total_requests_per_run` immediately
+before I/O. A reservation is never refunded after a crash, even if the process
+cannot determine whether the remote server observed the attempt. The retry
+executor uses this through a reviewed application-facing seam; it does not own
+or access checkpoint storage.
 
 ## 6. Checkpoint monotonicity
 
@@ -295,6 +324,8 @@ inventory_metadata_conflict
 pagination_invalid
 checkpoint_failure
 state_conflict
+request_budget_exhausted
+inventory_page_budget_exhausted
 ```
 
 Names are contract-facing stable categories for future implementation review.
@@ -311,15 +342,19 @@ values in `str`, `repr`, logs, or durable evidence.
 | `A3A-RUN-04` | Multiple incomplete matches fail closed |
 | `A3A-RUN-05` | Start-new with same-fingerprint incomplete run fails |
 | `A3A-RUN-06` | Operation selection count other than one fails before mutation |
+| `A3A-RUN-07` | Inventory-complete resume is an idempotent no-op with no HTTP request |
 | `A3A-TXN-01` | Crash before transaction leaves rows/cursor unchanged |
 | `A3A-TXN-02` | Crash during row insertion rolls back all rows |
 | `A3A-TXN-03` | Crash after row staging but before cursor mutation rolls back |
 | `A3A-TXN-04` | Crash after commit before acknowledgement resumes next window |
 | `A3A-TXN-05` | Terminal-window commit persists rows and root completion together |
 | `A3A-TXN-06` | Rolled-back transaction does not increment transition count |
+| `A3A-TXN-07` | The final terminal window commits inventory completion atomically |
 | `A3A-PAGE-01` | Per-window totalSize drift remains accepted and recorded |
 | `A3A-PAGE-02` | Non-terminal zero-size window fails closed |
 | `A3A-PAGE-03` | Non-advancing cursor fails closed |
+| `A3A-BUDGET-01` | Excluded pages count once; cross-root duplicates do not consume a second unique-page unit |
+| `A3A-BUDGET-02` | A window exceeding the unique-page budget commits no partial rows, cursor, or transition |
 | `A3A-ROOT-01` | Two nested roots deduplicate compatibly |
 | `A3A-ROOT-02` | Three nested roots select the longest compatible path |
 | `A3A-ROOT-03` | Reversed input-root order produces identical state/output |

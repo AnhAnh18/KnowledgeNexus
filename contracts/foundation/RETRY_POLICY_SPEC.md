@@ -8,8 +8,8 @@ Status: M7-A2 contract complete and owner-approved.
 M7-A1: OWNER-APPROVED
 M7-A1 independent review: WAIVED BY OWNER
 M7-A2: COMPLETE AND APPROVED
-M7-A3 contract work: BLOCKED BY M7-A2 REVIEW/ACCEPTANCE
-M7-CONTRACT-GATE: PENDING
+M7-A3a/A3b/A3c: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
@@ -44,7 +44,7 @@ M7-A2 does not:
 - authorize retries for filesystem/database mutation, export, publication, or
   any non-idempotent HTTP operation;
 - add or change a Foundation JSON Schema;
-- authorize M7-A3 or production implementation.
+- authorize a separately gated M7-C or later production implementation.
 
 ## 3. Applicability
 
@@ -105,7 +105,7 @@ The stable failure/terminal kinds are:
 | `terminal_transport_failure` | `unclassified_os_error`, `permanent_dns_failure`, `tls_certificate_failure`, `invalid_url` |
 | `payload_failure` | `response_too_large`, `malformed_json`, `payload_validation_failure`, `identity_mismatch` |
 | `state_failure` | `state_conflict`, `checkpoint_failure`, `raw_store_failure` |
-| `budget_exhausted` | `attempts_exhausted`, `retry_after_exceeds_policy`, `retry_delay_budget_exhausted`, `request_budget_exhausted` |
+| `budget_exhausted` | `attempts_exhausted`, `retry_after_exceeds_policy`, `retry_delay_budget_exhausted`, `request_budget_exhausted`, `inventory_page_budget_exhausted` |
 
 `success` and `semantic_observation` carry no failure kind.
 `operator_interruption` documents the disposition of the three BaseException
@@ -215,6 +215,12 @@ attempt 4 = retry 3
 An attempt counts only when the outbound request actually starts. A blocked
 request that fails a budget check before outbound I/O is not an attempt.
 
+M7-C durable request-budget reservation is a separate, more conservative
+cross-session accounting unit. A committed reservation that is followed by a
+process crash before outbound I/O consumes one budget unit without becoming an
+actual outbound attempt. This exception applies only to durable run-budget
+accounting; it does not alter `max_attempts` accounting for one logical request.
+
 After attempt 4 fails, the result is
 `budget_exhausted/attempts_exhausted`. There is no retry sleep and no fifth
 request.
@@ -311,8 +317,13 @@ No sleep occurs after the final allowed attempt.
 
 ## 14. Total request-budget accounting
 
-Every actual outbound attempt, including retries, consumes one unit from
+Every actual outbound attempt, including retries, requires one unit from
 `max_total_requests_per_run`.
+
+For M7-C, the authoritative cross-session unit is reserved durably immediately
+before outbound I/O. Every actual outbound attempt follows one reservation, but
+a committed reservation may conservatively remain consumed after a crash before
+the request starts. Reservations are never refunded.
 
 The request budget MUST be checked immediately before an outbound attempt
 starts. When no unit remains:
@@ -325,6 +336,11 @@ starts. When no unit remains:
 This applies before the initial attempt and before every retry. A selected
 retry sleep MUST NOT occur when it is already known that no request-budget
 unit remains for the following attempt.
+
+The M7-C retry integration performs a non-mutating durable-capacity check before
+such a retry sleep, then invokes the durable reservation seam immediately before
+the B1 outbound-start boundary. B3 retains retry selection, pacing, and attempt
+loop ownership; it does not access checkpoint storage.
 
 ## 15. Operator interruption
 
@@ -383,6 +399,8 @@ sufficient request and delay budget unless the case states otherwise.
 | Restriction 408, 429, 500, 502, 503, or 504 | Retryable operational failure; never an ACL observation |
 | Retry ordinal 1, 2, 3 | Client backoff `1.0`, `2.0`, `4.0` |
 | Four failed attempts | Four requests, three sleeps, then `attempts_exhausted` |
+| M7-C crash after durable reservation before outbound I/O | One request-budget unit remains consumed; no actual attempt is claimed |
+| M7-C resumed request budget | Durable reservations bound the run across process sessions; no refund occurs |
 | Success on attempt 1 | One request, zero retry sleeps |
 | Success on attempt 2 | Two requests, one selected sleep |
 | Success on attempt 3 | Three requests, two selected sleeps |
@@ -405,6 +423,8 @@ sufficient request and delay budget unless the case states otherwise.
 | State conflict | `state_failure/state_conflict`; zero retry |
 | Raw-store failure | `state_failure/raw_store_failure`; zero retry |
 | Checkpoint failure | `state_failure/checkpoint_failure`; zero retry |
+| Durable reservation storage failure | `state_failure/checkpoint_failure`; zero retry |
+| Inventory page budget overflow | `budget_exhausted/inventory_page_budget_exhausted`; zero retry |
 | `KeyboardInterrupt` | Propagates unchanged; zero retry |
 | `SystemExit` | Propagates unchanged; zero retry |
 | `GeneratorExit` | Propagates unchanged; zero retry |
@@ -431,8 +451,8 @@ Until that verdict:
 
 ```text
 M7-A2: COMPLETE AND APPROVED
-M7-A3 contract work: BLOCKED
-M7-CONTRACT-GATE: PENDING
+M7-A3a/A3b/A3c: COMPLETE AND APPROVED
+M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
 
@@ -447,6 +467,6 @@ controlled-stop acceptance. M7-B1 through M7-B3 own future structured HTTP
 metadata, pure retry policy implementation, and the rate-limited retry
 executor respectively.
 
-M7-A3 and M7-B1 through M7-B3 remain blocked until this M7-A2 contract is
-independently approved. No production behavior is authorized by this
-specification or profile.
+M7-A3 and M7-B1 through M7-B3 are complete and approved. M7-C remains
+separately gated; no production behavior is authorized by this specification or
+profile alone.

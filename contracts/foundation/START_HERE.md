@@ -13,7 +13,7 @@ Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)*
 3. `JIRA_RELATION_SPEC.md` + `jira_relation_profile.yaml` — the active M6E regex-only Jira relation and allowlist contract.
 4. `ACL_MATERIALIZATION_SPEC.md` — the active M6F deny-safe ACL materialization contract: audit-vs-enforcement policy, `userKey`/group-name principal projection, and the strict M6E/M6B provenance boundaries validated in M6F-A.
 5. `ONE_PAGE_EXPORT_SPEC.md` — the active M6G one-page full-snapshot projection, configuration, M3 reuse, quality, publication, and acceptance contract.
-6. `CRAWL_RELIABILITY_SPEC.md` + `RETRY_POLICY_SPEC.md` + `CHECKPOINT_RESUME_SPEC.md` + `RAW_GENERATION_SPEC.md` + `CRAWL_ACCEPTANCE_SPEC.md` + `crawl_reliability_profile.yaml` + `decision_logs/M7_OWNER_DECISIONS.md` — the active M7 crawl-reliability scope, retry policy, checkpoint/resume, raw-generation, fingerprint, controlled-stop, acceptance, and owner decisions.
+6. `CRAWL_RELIABILITY_SPEC.md` + `RETRY_POLICY_SPEC.md` + `CHECKPOINT_RESUME_SPEC.md` + `CHECKPOINT_STORE_SPEC.md` + `RAW_GENERATION_SPEC.md` + `CRAWL_ACCEPTANCE_SPEC.md` + `crawl_reliability_profile.yaml` + `decision_logs/M7_OWNER_DECISIONS.md` + `decision_logs/M7_C_OWNER_DECISIONS.md` — the active M7 crawl-reliability scope, retry policy, checkpoint/resume, checkpoint-store, raw-generation, fingerprint, controlled-stop, acceptance, and owner decisions.
 7. `decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` — architecture, policies, scope (the normative base).
 8. `decision_logs/AI_Knowledge_Platform_v7_2_Update.md` — export layout, storage roles, verbatim embedding, ACL repo tag (D1–D7).
 9. `decision_logs/AI_Knowledge_Platform_v7_3_Update.md` — bge-m3 direction, benchmark plan (D8–D13).
@@ -21,7 +21,7 @@ Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)*
 11. `decision_logs/AI_Knowledge_Platform_v7_5_Update.md` — single-repo modular-monolith layout + Clean Architecture bounded-context dependency rules (D23–D35).
 12. `Task2_Task3_Integration_Contract.md` — the consumer contract KnowledgeNexus implements against (10 hard constraints + mapping + roadmap).
 
-Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKING_SPEC`, `JIRA_RELATION_SPEC`, `ACL_MATERIALIZATION_SPEC`, `ONE_PAGE_EXPORT_SPEC`, `CRAWL_RELIABILITY_SPEC`, `RETRY_POLICY_SPEC`, `CHECKPOINT_RESUME_SPEC`, `RAW_GENERATION_SPEC`, `CRAWL_ACCEPTANCE_SPEC`, and `crawl_reliability_profile.yaml` with the M7 owner-decision record) → v7.1 → v7.2 → v7.3 → v7.4 → v7.5 → integration contract. `AI_Knowledge_Platform_Master_Spec_v7.md` is a **historical baseline** (audit/diff only). `reference/` holds the other team's KnowledgeNexus plan and the project README — context, not normative.
+Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKING_SPEC`, `JIRA_RELATION_SPEC`, `ACL_MATERIALIZATION_SPEC`, `ONE_PAGE_EXPORT_SPEC`, `CRAWL_RELIABILITY_SPEC`, `RETRY_POLICY_SPEC`, `CHECKPOINT_RESUME_SPEC`, `CHECKPOINT_STORE_SPEC`, `RAW_GENERATION_SPEC`, `CRAWL_ACCEPTANCE_SPEC`, and `crawl_reliability_profile.yaml` with the M7 owner-decision records) → v7.1 → v7.2 → v7.3 → v7.4 → v7.5 → integration contract. `AI_Knowledge_Platform_Master_Spec_v7.md` is a **historical baseline** (audit/diff only). `reference/` holds the other team's KnowledgeNexus plan and the project README — context, not normative.
 
 ## Locked decisions (quick reference)
 
@@ -48,6 +48,6 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 ## Suggested next steps
 
 1. Read `.local_ai/IMPLEMENTATION_STATE.md` and `.local_ai/ROADMAP.md` for the current durable status; treat M6, including M6G-D real one-page export acceptance, as complete and approved.
-2. Treat the complete M7-A contract stack (`CRAWL_RELIABILITY_SPEC.md`, `RETRY_POLICY_SPEC.md`, `CHECKPOINT_RESUME_SPEC.md`, `RAW_GENERATION_SPEC.md`, `CRAWL_ACCEPTANCE_SPEC.md`, `crawl_reliability_profile.yaml`, and `decision_logs/M7_OWNER_DECISIONS.md`) as approved. Plan the first M7 production implementation stage without changing the approved M5/M6 semantics.
+2. Treat the complete M7-A contract stack and the owner-approved M7-C durability decision package as approved. Plan one focused, separately authorized M7-C production stage at a time without changing approved M5/M6 semantics.
 3. Keep raw crawl generations, checkpoint databases, operational evidence, and real exports outside Git history; register only sanitized aggregate evidence and milestone status.
 4. Complete the later retrieval benchmark only after representative corpus anchors exist, then record any accepted configuration migration explicitly.

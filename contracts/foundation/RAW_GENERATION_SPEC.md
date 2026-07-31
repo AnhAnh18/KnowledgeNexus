@@ -22,6 +22,10 @@ M7 production implementation: NOT AUTHORIZED
 
 ## 2. Generation ownership
 
+For M7-v1, when raw generation is later activated, the raw-generation identity
+equals the system-generated `run_id`; there is no independent caller-supplied
+generation ID.
+
 One crawl run owns exactly one immutable raw generation. The conceptual
 namespace is:
 
@@ -316,8 +320,9 @@ The future writer uses one exclusive process-lifetime OS file lock:
   previous session before resume.
 
 The lock scope and checkpoint scope MUST be identical. A lock implementation
-must reject symlink/reparse/path-redirection hazards under its future
-filesystem contract. M7-A3b selects no platform library.
+must reject symlink/reparse/path-redirection hazards under the focused M7-C
+checkpoint-store contract. Future raw-generation work reuses that lock boundary
+and must not select a competing platform library.
 
 ## 14. Raw-storage budgets
 

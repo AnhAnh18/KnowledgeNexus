@@ -223,6 +223,12 @@ rather than proceed against a run that may still be owned by another live
 process. This section states the ownership contract only; it defines no
 file-lock library or platform-specific mechanism.
 
+For M7-C, lock scope and mutable checkpoint-workspace scope are identical. The
+process acquires the exclusive lock before it opens, initializes, or mutates the
+checkpoint database, and closes the database before releasing the lock. The
+database and lock paths are derived together from one validated workspace
+directory; callers cannot compose them independently.
+
 ## 15. Fingerprint ownership (contract level)
 
 The crawl fingerprint is constructed by the system from the approved
