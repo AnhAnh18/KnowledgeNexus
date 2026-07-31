@@ -1269,10 +1269,29 @@ Review artifact:
   overflow from extremely large Retry-After/rate-limit values, and exact-int
   request-budget validation. No open P0, P1, or P2 remains.
 
+## M7-B3 Retrying and Rate-Limited Executor State
+
+- M7-B3 is complete and independently approved with no open P0, P1, or P2.
+- B1 retains ownership of request construction, urllib execution, redirects,
+  content-type checks, structured HTTP failures, and bounded response bodies.
+- B3 owns only request-budget enforcement, injected monotonic pacing, the
+  bounded attempt loop, one selected retry sleep, and run/request counters.
+- Caller input and the complete urllib request are prepared before any clock
+  read, sleep, counter mutation, or outbound-start callback. Unsafe control,
+  traversal, and unencodable inputs fail closed with zero attempts.
+- The status-aware seam preserves the final exact response together with its
+  terminal policy decision; M6B-compatible callers retain the existing
+  response-only projection.
+- Final independent verification passed 379 focused B1/B2/B3 tests and 615
+  broader Confluence/retry/M6B/architecture tests. One non-blocking P3 remains:
+  the public result model does not validate the exact stable-kind pairing for
+  manually constructed redirect/non-retryable responses; executor-produced
+  values are correct.
+- M7-B3 added no checkpoint, raw-generation, fingerprint, controlled-stop,
+  credential/configuration, or live-network behavior.
+
 ## Next Planned Task
 
-Plan M7-B3, the retrying and rate-limited executor, against the approved B1
-structured facts and B2 pure decisions. B3 owns the injected monotonic clock,
-sleeper, pacing calculation, attempt loop, and counter updates; it must not
-start checkpoint/raw-generation/fingerprint work or perform live requests
-during implementation and offline review.
+Plan M7-C durable checkpoint and run-state implementation against the approved
+M7-A contracts and completed M7-B HTTP reliability layer. M7-C implementation
+remains separately gated and is not yet authorized.
