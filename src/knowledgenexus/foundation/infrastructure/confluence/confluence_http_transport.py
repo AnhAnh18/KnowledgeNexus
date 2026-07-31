@@ -8,7 +8,20 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Protocol
+
+from knowledgenexus.foundation.domain.models.confluence_http_outcome import (
+    ConfluenceHttpFailureKind,
+    ConfluenceHttpFailureMetadata,
+    ConfluenceRetryAfterMetadata,
+    confluence_retry_after_absent,
+)
+from knowledgenexus.foundation.infrastructure.confluence.confluence_http_failure_mapper import (  # noqa: E501
+    _ConfluenceRetryAfterHeaderInterfaceError,
+    classify_confluence_transport_exception,
+    extract_confluence_retry_after,
+)
 
 
 DEFAULT_CONFLUENCE_TIMEOUT_SECONDS = 30.0
@@ -17,6 +30,25 @@ DEFAULT_CONFLUENCE_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 class ConfluenceHttpError(RuntimeError):
     """A safe, body-free failure from the focused Confluence JSON transport."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        metadata: ConfluenceHttpFailureMetadata | None = None,
+    ) -> None:
+        super().__init__(message)
+        if metadata is not None and not isinstance(
+            metadata, ConfluenceHttpFailureMetadata
+        ):
+            raise TypeError("metadata expects a ConfluenceHttpFailureMetadata")
+        self._metadata = metadata
+
+    @property
+    def metadata(self) -> ConfluenceHttpFailureMetadata | None:
+        """Return immutable-by-interface structured failure facts."""
+
+        return self._metadata
 
 
 class ConfluenceHttpResponseTooLargeError(ConfluenceHttpError):
@@ -33,11 +65,14 @@ class ConfluenceHttpResponse:
 
     status_code: int
     body: bytes
+    retry_after: ConfluenceRetryAfterMetadata = confluence_retry_after_absent()
 
     def __post_init__(self) -> None:
         _require_http_status(self.status_code)
         if not isinstance(self.body, bytes):
             raise TypeError("body expects bytes")
+        if not isinstance(self.retry_after, ConfluenceRetryAfterMetadata):
+            raise TypeError("retry_after expects a ConfluenceRetryAfterMetadata")
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"
@@ -101,11 +136,13 @@ class UrllibConfluenceHttpTransport:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise ConfluenceHttpError(
-                "Confluence GET returned malformed JSON"
+                "Confluence GET returned malformed JSON",
+                metadata=_failure_metadata(ConfluenceHttpFailureKind.MALFORMED_JSON),
             ) from None
         if not isinstance(payload, Mapping):
             raise ConfluenceHttpError(
-                "Confluence GET returned a non-object JSON payload"
+                "Confluence GET returned a non-object JSON payload",
+                metadata=_payload_validation_metadata(),
             )
         return payload
 
@@ -146,16 +183,21 @@ class UrllibConfluenceHttpTransport:
                 status = _require_http_status(getattr(response, "status", None))
                 if 300 <= status < 400:
                     raise ConfluenceHttpError(
-                        f"Confluence GET returned HTTP status {status}"
+                        f"Confluence GET returned HTTP status {status}",
+                        metadata=_redirect_metadata(status),
                     )
                 body = self._read_bounded_body(response)
+                retry_after = self._extract_retry_after(
+                    getattr(response, "headers", None)
+                )
         except urllib.error.HTTPError as exc:
             try:
                 status = _require_http_status(exc.code)
                 if 300 <= status < 400:
                     raise ConfluenceHttpError(
-                        f"Confluence GET returned HTTP status {status}"
-                    )
+                        f"Confluence GET returned HTTP status {status}",
+                        metadata=_redirect_metadata(status),
+                    ) from None
                 try:
                     body = (
                         self._read_bounded_body(exc) if exc.fp is not None else b""
@@ -169,10 +211,17 @@ class UrllibConfluenceHttpTransport:
                     TimeoutError,
                     OSError,
                     http.client.HTTPException,
-                    UnicodeError,
-                    ValueError,
-                ):
-                    raise ConfluenceHttpError("Confluence GET failed") from None
+                ) as read_exc:
+                    raise ConfluenceHttpError(
+                        "Confluence GET failed",
+                        metadata=_operational_metadata(read_exc),
+                    ) from None
+                except (UnicodeError, ValueError):
+                    raise ConfluenceHttpError(
+                        "Confluence GET failed",
+                        metadata=_payload_validation_metadata(),
+                    ) from None
+                retry_after = self._extract_retry_after(exc.headers)
             finally:
                 exc.close()
         except ConfluenceHttpError:
@@ -182,11 +231,21 @@ class UrllibConfluenceHttpTransport:
             TimeoutError,
             OSError,
             http.client.HTTPException,
-            UnicodeError,
-            ValueError,
-        ):
-            raise ConfluenceHttpError("Confluence GET failed") from None
-        return ConfluenceHttpResponse(status_code=status, body=body)
+        ) as exc:
+            raise ConfluenceHttpError(
+                "Confluence GET failed",
+                metadata=_operational_metadata(exc),
+            ) from None
+        except (UnicodeError, ValueError):
+            raise ConfluenceHttpError(
+                "Confluence GET failed",
+                metadata=_payload_validation_metadata(),
+            ) from None
+        return ConfluenceHttpResponse(
+            status_code=status,
+            body=body,
+            retry_after=retry_after,
+        )
 
     def _read_response_bytes(
         self,
@@ -202,25 +261,56 @@ class UrllibConfluenceHttpTransport:
                 timeout=self._timeout_seconds,
             ) as response:
                 status = _require_http_status(getattr(response, "status", None))
+                if 300 <= status < 400:
+                    raise ConfluenceHttpError(
+                        f"Confluence GET returned HTTP status {status}",
+                        metadata=_redirect_metadata(status),
+                    )
                 if status < 200 or status >= 300:
                     raise ConfluenceHttpError(
-                        f"Confluence GET returned HTTP status {status}"
+                        f"Confluence GET returned HTTP status {status}",
+                        metadata=ConfluenceHttpFailureMetadata(
+                            kind=ConfluenceHttpFailureKind.HTTP_STATUS,
+                            http_status=status,
+                            retry_after=self._extract_retry_after(
+                                getattr(response, "headers", None)
+                            ),
+                        ),
                     )
                 _require_json_content_type(response.headers)
                 body = self._read_bounded_body(response)
         except urllib.error.HTTPError as exc:
+            status = _require_http_status(exc.code)
+            if 300 <= status < 400:
+                raise ConfluenceHttpError(
+                    f"Confluence GET returned HTTP status {status}",
+                    metadata=_redirect_metadata(status),
+                ) from None
             raise ConfluenceHttpError(
-                f"Confluence GET returned HTTP status {exc.code}"
+                f"Confluence GET returned HTTP status {status}",
+                metadata=ConfluenceHttpFailureMetadata(
+                    kind=ConfluenceHttpFailureKind.HTTP_STATUS,
+                    http_status=status,
+                    retry_after=self._extract_retry_after(exc.headers),
+                ),
             ) from None
+        except ConfluenceHttpError:
+            raise
         except (
             urllib.error.URLError,
             TimeoutError,
             OSError,
             http.client.HTTPException,
-            UnicodeError,
-            ValueError,
-        ):
-            raise ConfluenceHttpError("Confluence GET failed") from None
+        ) as exc:
+            raise ConfluenceHttpError(
+                "Confluence GET failed",
+                metadata=_operational_metadata(exc),
+            ) from None
+        except (UnicodeError, ValueError):
+            raise ConfluenceHttpError(
+                "Confluence GET failed",
+                metadata=_payload_validation_metadata(),
+            ) from None
 
         return body
 
@@ -245,21 +335,38 @@ class UrllibConfluenceHttpTransport:
             )
         except (UnicodeError, ValueError):
             raise ConfluenceHttpError(
-                "Confluence GET request could not be constructed"
+                "Confluence GET request could not be constructed",
+                metadata=_failure_metadata(ConfluenceHttpFailureKind.INVALID_URL),
             ) from None
 
     def _read_bounded_body(self, response: object) -> bytes:
         read = getattr(response, "read", None)
         if not callable(read):
-            raise ConfluenceHttpError("Confluence GET returned an invalid body type")
+            raise ConfluenceHttpError(
+                "Confluence GET returned an invalid body type",
+                metadata=_payload_validation_metadata(),
+            )
         body = read(self._max_response_bytes + 1)
         if not isinstance(body, bytes):
-            raise ConfluenceHttpError("Confluence GET returned an invalid body type")
+            raise ConfluenceHttpError(
+                "Confluence GET returned an invalid body type",
+                metadata=_payload_validation_metadata(),
+            )
         if len(body) > self._max_response_bytes:
             raise ConfluenceHttpResponseTooLargeError(
-                "Confluence GET exceeded the response size limit"
+                "Confluence GET exceeded the response size limit",
+                metadata=_failure_metadata(ConfluenceHttpFailureKind.RESPONSE_TOO_LARGE),
             )
         return body
+
+    def _extract_retry_after(self, headers: object) -> ConfluenceRetryAfterMetadata:
+        try:
+            return extract_confluence_retry_after(headers, datetime.now(timezone.utc))
+        except _ConfluenceRetryAfterHeaderInterfaceError:
+            raise ConfluenceHttpError(
+                "Confluence GET returned invalid response headers",
+                metadata=_payload_validation_metadata(),
+            ) from None
 
 
 class _RefuseRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -330,9 +437,15 @@ def _require_max_response_bytes(value: object) -> int:
 
 def _require_http_status(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ConfluenceHttpError("Confluence GET returned an invalid HTTP status")
+        raise ConfluenceHttpError(
+            "Confluence GET returned an invalid HTTP status",
+            metadata=_failure_metadata(ConfluenceHttpFailureKind.INVALID_HTTP_STATUS),
+        )
     if value < 100 or value > 599:
-        raise ConfluenceHttpError("Confluence GET returned an invalid HTTP status")
+        raise ConfluenceHttpError(
+            "Confluence GET returned an invalid HTTP status",
+            metadata=_failure_metadata(ConfluenceHttpFailureKind.INVALID_HTTP_STATUS),
+        )
     return value
 
 
@@ -364,14 +477,49 @@ def _copy_query_pairs(value: object) -> tuple[tuple[str, str], ...]:
 def _require_json_content_type(headers: object) -> None:
     get_header = getattr(headers, "get", None)
     if not callable(get_header):
-        raise ConfluenceHttpError("Confluence GET returned invalid response headers")
+        raise ConfluenceHttpError(
+            "Confluence GET returned invalid response headers",
+            metadata=_payload_validation_metadata(),
+        )
     raw_content_type = get_header("Content-Type")
     if raw_content_type is None:
         return
     if not isinstance(raw_content_type, str):
-        raise ConfluenceHttpError("Confluence GET returned invalid response headers")
+        raise ConfluenceHttpError(
+            "Confluence GET returned invalid response headers",
+            metadata=_payload_validation_metadata(),
+        )
     media_type = raw_content_type.split(";", 1)[0].strip().lower()
     if media_type != "application/json" and not media_type.endswith("+json"):
         raise ConfluenceHttpError(
-            "Confluence GET returned a non-JSON content type"
+            "Confluence GET returned a non-JSON content type",
+            metadata=_payload_validation_metadata(),
         )
+
+
+def _failure_metadata(kind: ConfluenceHttpFailureKind) -> ConfluenceHttpFailureMetadata:
+    return ConfluenceHttpFailureMetadata(
+        kind=kind,
+        http_status=None,
+        retry_after=confluence_retry_after_absent(),
+    )
+
+
+def _payload_validation_metadata() -> ConfluenceHttpFailureMetadata:
+    return _failure_metadata(ConfluenceHttpFailureKind.PAYLOAD_VALIDATION_FAILURE)
+
+
+def _redirect_metadata(status: int) -> ConfluenceHttpFailureMetadata:
+    return ConfluenceHttpFailureMetadata(
+        kind=ConfluenceHttpFailureKind.REDIRECT_POLICY_FAILURE,
+        http_status=status,
+        retry_after=confluence_retry_after_absent(),
+    )
+
+
+def _operational_metadata(exc: BaseException) -> ConfluenceHttpFailureMetadata:
+    return ConfluenceHttpFailureMetadata(
+        kind=classify_confluence_transport_exception(exc),
+        http_status=None,
+        retry_after=confluence_retry_after_absent(),
+    )

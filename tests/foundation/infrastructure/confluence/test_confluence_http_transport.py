@@ -8,8 +8,13 @@ from typing import Any
 
 import pytest
 
+from knowledgenexus.foundation.domain.models.confluence_http_outcome import (
+    ConfluenceHttpFailureKind,
+    ConfluenceRetryAfterState,
+)
 from knowledgenexus.foundation.infrastructure.confluence import (
     ConfluenceHttpError,
+    ConfluenceHttpResponse,
     ConfluenceHttpResponseTooLargeError,
     UrllibConfluenceHttpTransport,
 )
@@ -63,6 +68,18 @@ class RecordingOpener:
         if isinstance(self.outcome, BaseException):
             raise self.outcome
         return self.outcome
+
+
+def test_error_metadata_is_read_only() -> None:
+    metadata = transport_module._failure_metadata(
+        ConfluenceHttpFailureKind.TRANSPORT_TIMEOUT
+    )
+    error = ConfluenceHttpError("Confluence GET failed", metadata=metadata)
+
+    with pytest.raises(AttributeError):
+        error.metadata = None  # type: ignore[misc]
+
+    assert error.metadata is metadata
 
 
 def test_https_get_preserves_context_path_and_sets_safe_headers(
@@ -261,6 +278,43 @@ def test_http_error_is_safe_and_contains_only_status(
     assert PAT not in message
     assert "fixture.invalid" not in message
     assert len(opener.calls) == 1
+
+
+@pytest.mark.parametrize("method_name", ("get_json", "get_response_bytes"))
+def test_oversized_decimal_retry_after_never_escapes_raw_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+) -> None:
+    headers = Message()
+    headers["Retry-After"] = "9" * 5000
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid",
+        503,
+        "Service Unavailable",
+        hdrs=headers,
+        fp=BytesIO(b"{}"),
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    if method_name == "get_response_bytes":
+        response = transport.get_response_bytes(
+            path="/rest/api/content/1000/restriction/byOperation/view",
+            query={},
+        )
+        assert response.status_code == 503
+        assert response.retry_after.state is ConfluenceRetryAfterState.IGNORED
+    else:
+        with pytest.raises(ConfluenceHttpError) as exc_info:
+            transport.get_json(path="/rest/api/content/1000", query={})
+        assert exc_info.value.metadata is not None
+        assert (
+            exc_info.value.metadata.kind
+            is ConfluenceHttpFailureKind.HTTP_STATUS
+        )
+        assert (
+            exc_info.value.metadata.retry_after.state
+            is ConfluenceRetryAfterState.IGNORED
+        )
 
 
 def test_network_error_does_not_disclose_reason_hostname_or_pat(
@@ -649,3 +703,312 @@ def _transport(
         max_response_bytes=max_response_bytes,
     )
     return transport, opener, captured_handlers
+
+
+# ---------------------------------------------------------------------------
+# M7-B1: structured HTTP outcome and failure metadata
+# ---------------------------------------------------------------------------
+
+
+def test_response_default_retry_after_is_absent() -> None:
+    response = ConfluenceHttpResponse(status_code=200, body=b"")
+    assert response.retry_after.state is ConfluenceRetryAfterState.ABSENT
+
+
+def test_get_json_429_carries_http_status_and_parsed_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/",
+        429,
+        "Too Many Requests",
+        hdrs=Message(),
+        fp=None,
+    )
+    failure.headers["Retry-After"] = "30"
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.HTTP_STATUS
+    assert metadata.http_status == 429
+    assert metadata.retry_after.state is ConfluenceRetryAfterState.VALID
+    assert metadata.retry_after.delay_seconds == 30
+
+
+def test_get_bytes_503_carries_http_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/", 503, "Unavailable", hdrs=None, fp=None
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_bytes(path="/rest/api/content/1000", query={})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.HTTP_STATUS
+    assert metadata.http_status == 503
+
+
+def test_terminal_400_carries_http_status_fact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/", 400, "Bad Request", hdrs=None, fp=None
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.HTTP_STATUS
+    assert metadata.http_status == 400
+
+
+def test_get_json_redirect_carries_redirect_policy_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(status=302)
+    transport, _, _ = _transport(monkeypatch, response=response)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.REDIRECT_POLICY_FAILURE
+    assert metadata.http_status == 302
+    assert metadata.retry_after.state is ConfluenceRetryAfterState.ABSENT
+
+
+def test_malformed_json_carries_malformed_json_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport, _, _ = _transport(
+        monkeypatch, response=FakeResponse(body=b"not-json")
+    )
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.MALFORMED_JSON
+
+
+def test_non_object_json_carries_payload_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport, _, _ = _transport(monkeypatch, response=FakeResponse(body=b"[]"))
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.PAYLOAD_VALIDATION_FAILURE
+
+
+def test_invalid_response_headers_carry_payload_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HeadersWithoutGet:
+        pass
+
+    response = FakeResponse()
+    response.headers = HeadersWithoutGet()  # type: ignore[assignment]
+    transport, _, _ = _transport(monkeypatch, response=response)
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.PAYLOAD_VALIDATION_FAILURE
+
+
+def test_too_large_error_carries_response_too_large_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(body=b"123456789")
+    transport, _, _ = _transport(
+        monkeypatch, response=response, max_response_bytes=8
+    )
+
+    with pytest.raises(ConfluenceHttpResponseTooLargeError) as exc_info:
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+
+    metadata = exc_info.value.metadata
+    assert metadata is not None
+    assert metadata.kind is ConfluenceHttpFailureKind.RESPONSE_TOO_LARGE
+
+
+def test_status_aware_404_preserves_body_and_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"<html>synthetic unavailable</html>\n"
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted",
+        404,
+        "Not Found",
+        hdrs=Message(),
+        fp=BytesIO(body),
+    )
+    failure.headers["Retry-After"] = "5"
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert response.status_code == 404
+    assert response.body == body
+    assert response.retry_after.state is ConfluenceRetryAfterState.VALID
+    assert response.retry_after.delay_seconds == 5
+
+
+def test_status_aware_500_preserves_body_and_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"secret"
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted",
+        500,
+        "Server Error",
+        hdrs=None,
+        fp=BytesIO(body),
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert response.status_code == 500
+    assert response.body == body
+    assert response.retry_after.state is ConfluenceRetryAfterState.ABSENT
+
+
+def test_status_aware_429_returns_observation_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted",
+        429,
+        "Too Many Requests",
+        hdrs=Message(),
+        fp=BytesIO(b"rate limited"),
+    )
+    failure.headers["Retry-After"] = "10"
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert response.status_code == 429
+    assert response.body == b"rate limited"
+    assert response.retry_after.state is ConfluenceRetryAfterState.VALID
+    assert response.retry_after.delay_seconds == 10
+
+
+def test_status_aware_http_error_hdrs_none_yields_absent_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/restricted", 403, "Forbidden", hdrs=None, fp=None
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+
+    response = transport.get_response_bytes(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert response.retry_after.state is ConfluenceRetryAfterState.ABSENT
+
+
+def test_error_repr_does_not_disclose_metadata_values() -> None:
+    from knowledgenexus.foundation.domain.models.confluence_http_outcome import (
+        ConfluenceHttpFailureMetadata,
+        confluence_retry_after_absent,
+    )
+
+    error = ConfluenceHttpError(
+        "Confluence GET returned HTTP status 429",
+        metadata=ConfluenceHttpFailureMetadata(
+            kind=ConfluenceHttpFailureKind.HTTP_STATUS,
+            http_status=429,
+            retry_after=confluence_retry_after_absent(),
+        ),
+    )
+    rendered = repr(error)
+    assert "HTTP_STATUS" not in rendered
+    assert "ConfluenceHttpFailureMetadata" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# Caller-validation regressions (must remain TypeError/ValueError, zero calls)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ("get_json", "get_bytes", "get_response_bytes"),
+)
+def test_invalid_path_stays_value_error_with_zero_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+) -> None:
+    transport, opener, _ = _transport(monkeypatch)
+    method = getattr(transport, method_name)
+
+    with pytest.raises(ValueError, match="absolute-path reference"):
+        method(path="rest/api/search", query={"start": "0"})
+
+    assert opener.calls == []
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ("get_json", "get_bytes", "get_response_bytes"),
+)
+def test_non_mapping_query_stays_type_error_with_zero_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+) -> None:
+    transport, opener, _ = _transport(monkeypatch)
+    method = getattr(transport, method_name)
+
+    with pytest.raises(TypeError, match="mapping of strings"):
+        method(path="/rest/api/search", query=["start", "0"])  # type: ignore[arg-type]
+
+    assert opener.calls == []
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ("get_json", "get_bytes", "get_response_bytes"),
+)
+def test_non_string_query_entry_stays_type_error_with_zero_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+) -> None:
+    transport, opener, _ = _transport(monkeypatch)
+    method = getattr(transport, method_name)
+
+    with pytest.raises(TypeError, match="string keys and values"):
+        method(path="/rest/api/search", query={"start": 0})  # type: ignore[dict-item]
+
+    assert opener.calls == []
