@@ -19,10 +19,15 @@ def get_retrieve_chunks_use_case() -> RetrieveChunksUseCase:
     search_adapter = IndexingSearchAdapter(container.vector_store)
     chunk_adapter = IndexingChunkAdapter(container.chunk_repo)
 
+    # Reranker is optional — only wired when reranker_enabled=True in settings
+    reranker = container.get_reranker()
+
     return RetrieveChunksUseCase(
         query_embedder=embedder_adapter,
         search_port=search_adapter,
         chunk_port=chunk_adapter,
+        reranker=reranker,
+        rerank_candidate_count=container.settings.rerank_candidate_count,
     )
 
 

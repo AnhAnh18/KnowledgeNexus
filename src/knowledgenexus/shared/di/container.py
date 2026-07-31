@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from knowledgenexus.indexing.application.use_cases.chunk_storage_service import ChunkStorageService
 from knowledgenexus.indexing.infrastructure.embedding.bge_m3_embedder import BgeM3Embedder
+from knowledgenexus.retrieval.domain.ports.reranker_port import RerankerPort
+from knowledgenexus.retrieval.infrastructure.reranking.bge_reranker import BgeReranker
 from knowledgenexus.shared.config.settings import Settings
 from knowledgenexus.indexing.infrastructure.database.engine import create_engine, create_session_factory, init_database
 from knowledgenexus.indexing.infrastructure.repositories.sqlite_chunk_repo import SqliteChunkRepository
@@ -23,15 +25,23 @@ class AppContainer:
     vector_store: QdrantVectorStore
     chunk_storage: ChunkStorageService
     embedder: BgeM3Embedder | None = field(default=None, repr=False, compare=False)
+    reranker: RerankerPort | None = field(default=None, repr=False, compare=False)
 
     def get_embedder(self) -> BgeM3Embedder:
         if self.embedder is None:
             self.embedder = BgeM3Embedder.from_settings(self.settings)
         return self.embedder
 
+    def get_reranker(self) -> RerankerPort | None:
+        if self.reranker is None and self.settings.reranker_enabled:
+            self.reranker = BgeReranker.from_settings(self.settings)
+        return self.reranker
+
     async def shutdown(self) -> None:
         if self.embedder is not None:
             self.embedder.close()
+        if self.reranker is not None:
+            self.reranker.close()
         await self.vector_store.close()
         await self.engine.dispose()
 

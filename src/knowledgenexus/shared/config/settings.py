@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     embedding_cache_dir: str = "./data/index/models"
     embedding_batch_size: int = 32
 
+    # Reranker (cross-encoder, post-retrieval stage)
+    reranker_enabled: bool = False
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_model_path: str | None = None
+    reranker_device: str = "cpu"
+    reranker_batch_size: int = 16
+    # Number of candidates to retrieve before reranking (over-fetch factor)
+    rerank_candidate_count: int = 50
+
     @property
     def project_root(self) -> Path:
         # src/knowledgenexus/shared/config/settings.py -> repo root
