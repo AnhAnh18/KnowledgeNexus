@@ -1227,8 +1227,29 @@ Review artifact:
   planning only; production code remains unauthorized until its plan is
   reviewed and separately approved.
 
+## M7-B1 Structured HTTP Outcome State
+
+- M7-B1 is complete and independently approved.
+- The Confluence transport now emits strict, body-free structured metadata for
+  HTTP status, redirects, typed transport failures, Retry-After observations,
+  payload failures, invalid status, and response-size failures.
+- Existing M5B/M6B behavior is preserved: status-aware restriction responses
+  retain exact status/body, redirects remain terminal, and caller input
+  validation still fails before outbound I/O.
+- M7-B1 adds no retry decision, retry loop, sleep, rate limiter, profile
+  loading, request-budget accounting, checkpoint, raw-generation, fingerprint,
+  controlled-stop, live request, or credential behavior.
+- Focused B1/M5B/M6B verification passed 217 tests. The broader offline
+  non-asset Foundation/Shared/Architecture matrix passed 1,821 tests with two
+  platform-inapplicable skips.
+- Independent adversarial review fixed and verified two P2 findings:
+  interpreter-limit Retry-After decimals now become a sanitized ignored
+  observation, and `ConfluenceHttpError.metadata` is read-only by interface.
+- No open P0, P1, or P2 remains.
+
 ## Next Planned Task
 
-Plan the first M7 production implementation stage against the approved
-M7-A1/A2/A3 contract stack. Production implementation remains unauthorized
-until that plan is reviewed and the owner separately authorizes the work.
+Plan M7-B2, the pure bounded retry-policy evaluator, against the approved
+M7-A2 taxonomy/profile and the structured facts emitted by M7-B1. M7-B2 must
+not perform network I/O, sleep, rate limiting, checkpointing, or raw
+publication. M7-B3 remains blocked until B2 is reviewed and approved.
