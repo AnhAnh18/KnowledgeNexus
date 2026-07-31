@@ -981,6 +981,28 @@ def test_invalid_path_stays_value_error_with_zero_calls(
 
 
 @pytest.mark.parametrize(
+    "unsafe_path",
+    (
+        "/rest/api/\r\nInjected: yes",
+        "/rest/api/\x00",
+        "/rest/api/../admin",
+        "/rest/api/%2e%2e/admin",
+        "/rest\\api\\admin",
+    ),
+)
+def test_unsafe_path_is_rejected_before_outbound_call(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_path: str,
+) -> None:
+    transport, opener, _ = _transport(monkeypatch)
+
+    with pytest.raises(ValueError, match="safe absolute-path"):
+        transport.get_json(path=unsafe_path, query={})
+
+    assert opener.calls == []
+
+
+@pytest.mark.parametrize(
     "method_name",
     ("get_json", "get_bytes", "get_response_bytes"),
 )

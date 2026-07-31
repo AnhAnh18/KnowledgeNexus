@@ -9,7 +9,7 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Callable, Protocol
 
 from knowledgenexus.foundation.domain.models.confluence_http_outcome import (
     ConfluenceHttpFailureKind,
@@ -76,6 +76,40 @@ class ConfluenceHttpResponse:
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"
+
+
+@dataclass(frozen=True, repr=False)
+class PreparedConfluenceGetInput:
+    """Validated, immutable input reused across retry attempts."""
+
+    path: str
+    query_pairs: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        _require_request_path(self.path)
+        if not isinstance(self.query_pairs, tuple):
+            raise TypeError("query_pairs expects a tuple")
+        for pair in self.query_pairs:
+            if (
+                not isinstance(pair, tuple)
+                or len(pair) != 2
+                or not all(isinstance(item, str) for item in pair)
+            ):
+                raise TypeError("query_pairs expects tuples of strings")
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
+
+def prepare_confluence_get_input(
+    *, path: object, query: object
+) -> PreparedConfluenceGetInput:
+    """Validate and snapshot caller input before pacing or accounting."""
+
+    return PreparedConfluenceGetInput(
+        path=_require_request_path(path),
+        query_pairs=_copy_query_pairs(query),
+    )
 
 
 class ConfluenceHttpTransport(Protocol):
@@ -174,7 +208,28 @@ class UrllibConfluenceHttpTransport:
         Content type is intentionally not constrained because an expected 404
         body may be empty, JSON, or HTML and must be preserved exactly.
         """
-        request = self._build_request(path=path, query=query)
+        prepared = prepare_confluence_get_input(path=path, query=query)
+        return self._get_response_bytes_prepared(prepared)
+
+    def _get_response_bytes_prepared(
+        self,
+        prepared: PreparedConfluenceGetInput,
+        *,
+        on_attempt_start: Callable[[], None] | None = None,
+    ) -> ConfluenceHttpResponse:
+        request = self._build_request_prepared(prepared)
+        return self._get_response_bytes_request(
+            request, on_attempt_start=on_attempt_start
+        )
+
+    def _get_response_bytes_request(
+        self,
+        request: urllib.request.Request,
+        *,
+        on_attempt_start: Callable[[], None] | None = None,
+    ) -> ConfluenceHttpResponse:
+        if on_attempt_start is not None:
+            on_attempt_start()
         try:
             with self._opener.open(
                 request,
@@ -253,7 +308,28 @@ class UrllibConfluenceHttpTransport:
         path: str,
         query: Mapping[str, str],
     ) -> bytes:
-        request = self._build_request(path=path, query=query)
+        prepared = prepare_confluence_get_input(path=path, query=query)
+        return self._read_response_bytes_prepared(prepared)
+
+    def _read_response_bytes_prepared(
+        self,
+        prepared: PreparedConfluenceGetInput,
+        *,
+        on_attempt_start: Callable[[], None] | None = None,
+    ) -> bytes:
+        request = self._build_request_prepared(prepared)
+        return self._read_response_bytes_request(
+            request, on_attempt_start=on_attempt_start
+        )
+
+    def _read_response_bytes_request(
+        self,
+        request: urllib.request.Request,
+        *,
+        on_attempt_start: Callable[[], None] | None = None,
+    ) -> bytes:
+        if on_attempt_start is not None:
+            on_attempt_start()
 
         try:
             with self._opener.open(
@@ -320,11 +396,17 @@ class UrllibConfluenceHttpTransport:
         path: str,
         query: Mapping[str, str],
     ) -> urllib.request.Request:
-        request_path = _require_request_path(path)
-        query_pairs = _copy_query_pairs(query)
-        encoded_query = urllib.parse.urlencode(query_pairs)
-        url = f"{self._base_url}/{request_path.lstrip('/')}?{encoded_query}"
+        prepared = prepare_confluence_get_input(path=path, query=query)
+        return self._build_request_prepared(prepared)
+
+    def _build_request_prepared(
+        self, prepared: PreparedConfluenceGetInput
+    ) -> urllib.request.Request:
+        request_path = prepared.path
+        query_pairs = prepared.query_pairs
         try:
+            encoded_query = urllib.parse.urlencode(query_pairs)
+            url = f"{self._base_url}/{request_path.lstrip('/')}?{encoded_query}"
             return urllib.request.Request(
                 url,
                 headers={
@@ -453,6 +535,11 @@ def _require_request_path(value: object) -> str:
     if not isinstance(value, str):
         raise TypeError("path expects a string")
     parsed = urllib.parse.urlsplit(value)
+    try:
+        decoded_path = urllib.parse.unquote(value, errors="strict")
+    except UnicodeDecodeError:
+        raise ValueError("path contains invalid percent-encoding") from None
+    segments = decoded_path.split("/")
     if (
         value == ""
         or not value.startswith("/")
@@ -460,8 +547,11 @@ def _require_request_path(value: object) -> str:
         or parsed.netloc != ""
         or parsed.query != ""
         or parsed.fragment != ""
+        or "\\" in decoded_path
+        or any(character.isspace() or ord(character) < 32 for character in decoded_path)
+        or any(segment in {".", ".."} for segment in segments)
     ):
-        raise ValueError("path must be an absolute-path reference without a query")
+        raise ValueError("path must be a safe absolute-path reference without a query")
     return value
 
 
