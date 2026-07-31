@@ -50,3 +50,4 @@ Tool_TRreport.7z
 
 # Local agent worktrees / machine-local Claude Code state
 .claude/
+/.codex-workflow/
