@@ -211,6 +211,31 @@ Do not create an API-only commit merely to reduce line count when the API has no
 reviewable behaviour without its implementation. Keep the smallest meaningful
 implementation and its proof together.
 
+## Architecture-first implementation gate
+
+Before implementing a decorator, retry layer, cache, persistence wrapper, or
+other cross-cutting component:
+
+- Read the wrapped component and identify which layer already owns request
+  construction, credentials, I/O, parsing, error mapping, and publication.
+- Reuse or add the smallest explicit seam at that ownership boundary. Do not
+  copy the wrapped implementation or reach through several private fields to
+  reproduce its work.
+- Write and run a narrow architectural spike before the full implementation.
+  The spike must cover at least:
+  1. one normal success;
+  2. one realistic failure from the underlying runtime/library;
+  3. one invalid-input or security-boundary case.
+- Confirm the seam preserves existing behavior and failure taxonomy before
+  building the full orchestration loop.
+- If the spike disproves the plan, stop and revise the plan. Do not complete a
+  large implementation and rely on later review to replace it.
+- Prefer incremental vertical slices: seam plus regression tests first, then
+  orchestration plus focused tests, then integration and documentation.
+- A wrapper must not duplicate transport, filesystem, credential, parser, or
+  serializer logic already owned by the wrapped component unless an approved
+  contract explicitly transfers that ownership.
+
 ## Review Artifacts
 
 - Do not create `.local_ai/review/*.patch` files by default. They cost tokens to
