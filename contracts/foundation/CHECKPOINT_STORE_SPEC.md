@@ -86,15 +86,23 @@ the cross-session authority.
 ## 5. Durable inventory budget and completion
 
 `max_pages_per_run` counts unique observed `page_id` values persisted in a run,
-including pages later excluded from final projection. A full descendants-window
-transaction computes its projected unique-ID total before any mutation; a window
-that would exceed the limit fails as
+including root occurrences and pages later excluded from final projection. A
+root or full descendants-window transaction computes its projected unique-ID
+total before any mutation; an operation that would exceed the limit fails as
 `budget_exhausted/inventory_page_budget_exhausted` with no partial rows, cursor
-movement, or transition.
+movement, root state, or transition.
 
 Cross-root occurrences of an already observed page ID do not consume another
 unique-page unit. Per-root occurrence facts remain durable for overlap
 compatibility.
+
+The M7 effective-input validator rejects more than `max_include_roots` before
+fingerprinting, request, or durable mutation with
+`budget_exhausted/include_root_limit_exhausted`. Before starting a descendants
+request, durable counters check both `max_inventory_windows_per_root` and
+`max_inventory_windows_per_run`. Reaching either cap yields
+`budget_exhausted/inventory_window_limit_exhausted`; no next request or retry
+sleep starts. These checks do not replace the atomic window/root budget checks.
 
 After every root reaches `descendants_complete`, the durable inventory phase is
 complete while the crawl run remains incomplete. A valid resume then returns
@@ -114,6 +122,8 @@ The offline M7-C store/inventory slice must prove at least:
 - a crash after reservation before I/O cannot bypass the total request budget;
 - page-budget overflow, cross-root duplicates, excluded pages, and transaction
   crash points preserve the committed-state invariants;
+- root, include-root, per-root-window, and per-run-window limits stop at their
+  exact cap and fail closed at cap plus one;
 - inventory-complete resume is an idempotent no-op.
 
 This is an inventory-only M7-C contract. It cannot close raw-generation,

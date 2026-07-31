@@ -5,7 +5,7 @@
 ```text
 M7-C decision package: OWNER-APPROVED
 M7-C production implementation: NOT AUTHORIZED
-M7-C full acceptance: NOT AVAILABLE
+Full M7 acceptance: NOT AVAILABLE
 M7-D raw-generation integration: BLOCKED
 M7 scale RSS threshold: PENDING REPRODUCIBLE BASELINE
 ```
@@ -51,7 +51,7 @@ query_shape_profile_version: m7-confluence-inventory-query-v1
 expand_shape_profile_version: m7-confluence-inventory-expand-v1
 mapper_contract_version: m5b-confluence-inventory-mapper-v1
 raw_layout_contract_version: m7-raw-generation-layout-v1
-foundation_schema_version: 1.0
+foundation_schema_version: "1.0"
 chunking_contract_version: 1.2.0
 jira_relation_contract_version: m6e-jira-relations-v1
 acl_contract_version: m6f-acl-materialization-v1
@@ -131,10 +131,13 @@ behavior remain prohibited.
 
 `max_pages_per_run` counts unique observed `page_id` values durably persisted
 in the run, including pages later excluded from final scope projection. A
-descendants-window transaction checks its projected unique-ID total before
-mutation; it fails closed as a budget outcome when the complete window would
-exceed the limit. Per-root occurrence rows remain independently bounded by the
-existing include-root and window limits.
+root occurrence or complete descendants-window transaction checks its projected
+unique-ID total before mutation; it fails closed as a budget outcome when the
+complete transaction would exceed the limit. No partial root/window rows,
+cursor, root state, or transition may commit on that outcome. A cross-root
+occurrence of an already observed ID consumes no new unique-page unit. Per-root
+occurrence rows remain independently bounded by the existing include-root and
+window limits.
 
 ### OD-C9. Inventory completion and resume
 
@@ -172,6 +175,20 @@ reproducible baseline exists. It must be owner-locked before approval of the
 M7 scale gate; no implementation or closeout may invent a threshold after
 measuring a candidate. This is not a precondition for M7-C's early focused
 stages and is intentionally not represented as an already-locked numeric value.
+
+### OD-C13. Offline scale acceptance profile
+
+The 100,000-page extended offline corpus uses the versioned,
+acceptance-only `m7-crawl-scale-acceptance-v2` / `"2"` profile. Its distinct
+numeric version is required because it raises `max_pages_per_run=100000` and
+`max_inventory_windows_per_root=2000`; its distinct profile identity produces a
+distinct crawl fingerprint. It is not a production or live-crawl profile.
+
+This is an inventory-cap profile, not an alternate B2 retry-policy profile.
+Both the functional and extended gates construct B2 policy only from the exact
+approved `m7-crawl-reliability-v1` / `"1"` mapping. The scale profile preserves
+that mapping's numeric/boolean retry parameters and MUST NOT be passed to the
+B2 policy constructor.
 
 ## 3. Required closure boundaries
 

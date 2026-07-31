@@ -26,6 +26,15 @@ L. A mismatch is a contract defect; neither source silently overrides the
 other. Changing a locked value requires a new `profile_version`, a new crawl
 fingerprint, and explicit owner approval.
 
+`crawl_reliability_scale_profile.yaml` is not an alternate B2 retry-policy
+input. It is a separately versioned (`"2"`) offline-only inventory-cap profile
+for the 100,000-page acceptance gate. Even in that gate,
+`ConfluenceRetryPolicyProfile` MUST be constructed from the complete approved
+`crawl_reliability_profile.yaml` v1 mapping; passing the scale mapping to the
+constructor is a contract violation. Apart from its own identity/version and
+the two inventory caps, the scale profile has the same numeric/boolean retry
+parameters as v1, so it cannot redefine B2 behavior.
+
 This document defines future behavior only. It authorizes no production code,
 network request, live execution, or credential use.
 
@@ -105,7 +114,7 @@ The stable failure/terminal kinds are:
 | `terminal_transport_failure` | `unclassified_os_error`, `permanent_dns_failure`, `tls_certificate_failure`, `invalid_url` |
 | `payload_failure` | `response_too_large`, `malformed_json`, `payload_validation_failure`, `identity_mismatch` |
 | `state_failure` | `state_conflict`, `checkpoint_failure`, `raw_store_failure` |
-| `budget_exhausted` | `attempts_exhausted`, `retry_after_exceeds_policy`, `retry_delay_budget_exhausted`, `request_budget_exhausted`, `inventory_page_budget_exhausted` |
+| `budget_exhausted` | `attempts_exhausted`, `retry_after_exceeds_policy`, `retry_delay_budget_exhausted`, `request_budget_exhausted`, `inventory_page_budget_exhausted`, `include_root_limit_exhausted`, `inventory_window_limit_exhausted` |
 
 `success` and `semantic_observation` carry no failure kind.
 `operator_interruption` documents the disposition of the three BaseException
@@ -425,6 +434,8 @@ sufficient request and delay budget unless the case states otherwise.
 | Checkpoint failure | `state_failure/checkpoint_failure`; zero retry |
 | Durable reservation storage failure | `state_failure/checkpoint_failure`; zero retry |
 | Inventory page budget overflow | `budget_exhausted/inventory_page_budget_exhausted`; zero retry |
+| Include-root limit overflow | `budget_exhausted/include_root_limit_exhausted`; zero retry |
+| Inventory window limit reached | `budget_exhausted/inventory_window_limit_exhausted`; zero retry |
 | `KeyboardInterrupt` | Propagates unchanged; zero retry |
 | `SystemExit` | Propagates unchanged; zero retry |
 | `GeneratorExit` | Propagates unchanged; zero retry |
@@ -447,7 +458,7 @@ M7-A2 may be accepted only when an independent reviewer verifies:
   occurred;
 - no unresolved P0, P1, or P2 finding remains.
 
-Until that verdict:
+Recorded independent-review state:
 
 ```text
 M7-A2: COMPLETE AND APPROVED
@@ -461,10 +472,10 @@ M7 production implementation: NOT AUTHORIZED
 M7-A2 depends on the owner-accepted M7-A1 scope and decisions. M7-A2 defines
 request/retry semantics and materializes the numeric profile only.
 
-M7-A3 owns checkpoint/run mechanics, overlapping-root deduplication,
+M7-A3 defines checkpoint/run mechanics, overlapping-root deduplication,
 generation-scoped restriction evidence, fingerprint canonicalization, and
-controlled-stop acceptance. M7-B1 through M7-B3 own future structured HTTP
-metadata, pure retry policy implementation, and the rate-limited retry
+controlled-stop acceptance. M7-B1 through M7-B3 own the completed structured
+HTTP metadata, pure retry-policy implementation, and rate-limited retry
 executor respectively.
 
 M7-A3 and M7-B1 through M7-B3 are complete and approved. M7-C remains

@@ -9,7 +9,8 @@ M7-A1: OWNER-APPROVED
 M7-A1 independent review: WAIVED BY OWNER
 M7-A2: COMPLETE AND APPROVED
 M7-A3a: COMPLETE AND APPROVED
-M7-A3b/A3c contract candidates: NOT YET RECORDED BY THIS DOCUMENT
+M7-A3b: COMPLETE AND APPROVED (separate focused spec)
+M7-A3c: COMPLETE AND APPROVED (separate focused spec)
 M7-CONTRACT-GATE: APPROVED
 M7 production implementation: NOT AUTHORIZED
 ```
@@ -92,8 +93,10 @@ page_id
 ```
 
 `include_root_ordinal` is assigned after canonical sorting of validated
-include-root page IDs. It MUST NOT depend on operator input order. Duplicate
-include-root IDs are rejected before any request or checkpoint mutation.
+include-root page IDs. Canonical string order is Unicode scalar-value order with
+no locale collation or Unicode normalization. It MUST NOT depend on operator
+input order. Duplicate include-root IDs are rejected before any request or
+checkpoint mutation.
 
 `window_start` is the numeric start requested for the committed response
 window. `item_ordinal` is the zero-based position of the item in that
@@ -140,10 +143,10 @@ never split across transactions.
 ### M7-C durable budget binding
 
 For M7-C version 1, `max_pages_per_run` counts unique observed `page_id` values
-durably persisted in a crawl run, including occurrences later excluded from the
-final scope projection. Before mutating a descendants-window transaction, the
-store checks whether the complete window would exceed that unique-ID limit and
-fails the whole transaction when it would.
+durably persisted in a crawl run, including root occurrences and occurrences
+later excluded from the final scope projection. Before mutating a root or
+descendants-window transaction, the store checks whether the complete operation
+would exceed that unique-ID limit and fails the whole transaction when it would.
 
 Before every outbound HTTP attempt, including a retry, the current process
 session durably reserves one unit of `max_total_requests_per_run` immediately
@@ -326,6 +329,8 @@ checkpoint_failure
 state_conflict
 request_budget_exhausted
 inventory_page_budget_exhausted
+include_root_limit_exhausted
+inventory_window_limit_exhausted
 ```
 
 Names are contract-facing stable categories for future implementation review.
@@ -343,6 +348,7 @@ values in `str`, `repr`, logs, or durable evidence.
 | `A3A-RUN-05` | Start-new with same-fingerprint incomplete run fails |
 | `A3A-RUN-06` | Operation selection count other than one fails before mutation |
 | `A3A-RUN-07` | Inventory-complete resume is an idempotent no-op with no HTTP request |
+| `A3A-RUN-08` | Include-root count at the active profile cap succeeds; cap plus one fails before fingerprint, request, or mutation |
 | `A3A-TXN-01` | Crash before transaction leaves rows/cursor unchanged |
 | `A3A-TXN-02` | Crash during row insertion rolls back all rows |
 | `A3A-TXN-03` | Crash after row staging but before cursor mutation rolls back |
@@ -350,11 +356,13 @@ values in `str`, `repr`, logs, or durable evidence.
 | `A3A-TXN-05` | Terminal-window commit persists rows and root completion together |
 | `A3A-TXN-06` | Rolled-back transaction does not increment transition count |
 | `A3A-TXN-07` | The final terminal window commits inventory completion atomically |
+| `A3A-TXN-08` | A root commit at the unique-page cap succeeds; cap plus one commits no root state |
 | `A3A-PAGE-01` | Per-window totalSize drift remains accepted and recorded |
 | `A3A-PAGE-02` | Non-terminal zero-size window fails closed |
 | `A3A-PAGE-03` | Non-advancing cursor fails closed |
 | `A3A-BUDGET-01` | Excluded pages count once; cross-root duplicates do not consume a second unique-page unit |
 | `A3A-BUDGET-02` | A window exceeding the unique-page budget commits no partial rows, cursor, or transition |
+| `A3A-BUDGET-03` | Per-root and per-run window caps stop work before the next request |
 | `A3A-ROOT-01` | Two nested roots deduplicate compatibly |
 | `A3A-ROOT-02` | Three nested roots select the longest compatible path |
 | `A3A-ROOT-03` | Reversed input-root order produces identical state/output |
@@ -379,7 +387,7 @@ An independent reviewer must confirm:
 - no DDL, persistence implementation, source/test/schema change, network
   request, or production authorization exists.
 
-Until integrated review accepts A1/A2/A3:
+Recorded integrated review state:
 
 ```text
 M7-CONTRACT-GATE: APPROVED

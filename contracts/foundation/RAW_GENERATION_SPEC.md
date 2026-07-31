@@ -54,7 +54,9 @@ Rules:
 
 ## 3. Logical artifact identity
 
-Each artifact family has a complete logical identity:
+Each artifact family has an immutable storage key. The observed body/status is
+evidence bound to that key, not a second key that allows conflicting evidence to
+coexist within one run:
 
 ### Raw page
 
@@ -72,9 +74,10 @@ run identity
 selected page identity
 target page identity
 request-profile version
-observed HTTP status
-exact body bytes
 ```
+
+The observed HTTP status and exact body bytes are evidence fields for this
+storage key. A different status or body under the same key is a `state_conflict`.
 
 ### Attachment-metadata window
 
@@ -84,16 +87,18 @@ page identity
 requested start
 requested limit
 request-profile version
-exact body bytes
 ```
 
-An artifact path or checkpoint reference MUST bind to its logical identity.
-Path/envelope disagreement is a state conflict, not a reason to repair or
-rename evidence automatically.
+Exact body bytes are evidence for this storage key. Different evidence under the
+same key is a `state_conflict`.
+
+An artifact path or checkpoint reference MUST bind to its storage key and
+evidence. Path/envelope disagreement is a state conflict, not a reason to
+repair or rename evidence automatically.
 
 ## 4. Same-run replay
 
-For one logical artifact identity:
+For one storage key:
 
 | Existing state | Required action |
 | --- | --- |
@@ -317,7 +322,10 @@ The future writer uses one exclusive process-lifetime OS file lock:
 - process termination releases the live lock handle;
 - a leftover lock file does not prove an active writer;
 - after acquiring the lock, an unfinished run is recorded as an interrupted
-  previous session before resume.
+  previous session before resuming an active raw-generation phase.
+
+An M7-C inventory-complete no-op resume does not activate a raw-generation phase
+and creates no interrupted-session record or checkpoint mutation.
 
 The lock scope and checkpoint scope MUST be identical. A lock implementation
 must reject symlink/reparse/path-redirection hazards under the focused M7-C
@@ -359,12 +367,12 @@ remain separately reviewed operational work.
 
 ## 15. Failure and security boundary
 
-Stable failure categories include:
+Raw-store diagnostic failure categories include:
 
 ```text
 raw_artifact_invalid
 raw_identity_mismatch
-raw_replay_conflict
+raw_replay_conflict (diagnostic alias for state_conflict)
 raw_storage_budget_exhausted
 raw_publication_failure
 writer_active
@@ -372,6 +380,12 @@ writer_lock_failure
 ```
 
 They MUST NOT disclose raw exception messages or sensitive values.
+
+`raw_replay_conflict` is a raw-store diagnostic label only. Any result crossing
+the M7 retry/outcome boundary MUST normalize every raw identity, evidence,
+path, or replay conflict to `state_failure/state_conflict` with zero retry as
+defined by `RETRY_POLICY_SPEC.md`. It MUST NOT emit `raw_replay_conflict` as a
+second stable outcome kind.
 
 Logs, Git evidence, `str`, and `repr` MUST NOT include:
 
@@ -437,7 +451,7 @@ An independent reviewer must confirm:
 - no raw-store/lock implementation, source/test/schema change, network
   request, or production authorization exists.
 
-Until integrated review:
+Recorded integrated review state:
 
 ```text
 M7-CONTRACT-GATE: APPROVED
