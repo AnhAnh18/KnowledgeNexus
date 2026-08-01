@@ -226,21 +226,34 @@ Two occurrences of the same `page_id` are compatible only when:
 
 1. one complete pair path is an exact suffix of the other;
 2. both ID and title match for every pair in the suffix;
-3. every non-path metadata field agrees under the current mapper/domain
-   contract.
+3. every stable metadata field agrees under the current mapper/domain contract.
 
-Non-path metadata includes at least:
+The ancestor path is root-relative occurrence context. An empty path is a
+valid exact suffix of every path. Before comparing occurrences, the domain
+boundary MUST validate that ancestor ID/title sequences have equal lengths and
+that the contextual parent is internally consistent: `parent_page_id` is
+`None` exactly when the path is empty; otherwise it equals the final ancestor
+ID. A malformed path or parent relationship fails closed, even when the
+occurrence has no duplicate.
+
+Stable metadata includes at least:
 
 ```text
 page_id
 title
 space_key
-parent_page_id
 updated_at
 source_version
 labels
 attachment_count
 ```
+
+`parent_page_id` is deliberately not a stable cross-occurrence field. It is
+derived from the selected root-relative path. After compatibility succeeds,
+the longest compatible path is canonical and its final path ID supplies the
+canonical contextual parent. This permits a selected include root with an
+empty path and a nested occurrence with a non-empty path to deduplicate
+without weakening stable metadata conflict checks.
 
 The compatible occurrence with the longest pair path becomes canonical.
 That longest path is required for deny-safe scope/exclusion evaluation.
@@ -250,7 +263,8 @@ Conflicts include:
 - equal ancestor IDs with different ancestor titles;
 - neither path being a suffix of the other;
 - two longest paths of equal length that differ;
-- any non-path metadata disagreement.
+- any stable metadata disagreement;
+- an occurrence whose contextual parent does not match its own path.
 
 Conflicts fail closed. There is no last-write-wins rule.
 
@@ -368,8 +382,10 @@ values in `str`, `repr`, logs, or durable evidence.
 | `A3A-ROOT-03` | Reversed input-root order produces identical state/output |
 | `A3A-ROOT-04` | ID/title suffix-compatible paths are accepted |
 | `A3A-ROOT-05` | Same suffix IDs with different title fails closed |
-| `A3A-ROOT-06` | Non-path metadata disagreement fails closed |
+| `A3A-ROOT-06` | Stable metadata disagreement fails closed |
 | `A3A-ROOT-07` | Excluded ancestor visible only in longest path still excludes |
+| `A3A-ROOT-08` | Empty-path root and nested occurrence with contextual parents deduplicate by longest path and retain that path's final ID as canonical parent |
+| `A3A-ROOT-09` | Malformed ancestor alignment or parent/path context fails closed |
 
 Future fault-injection tests MUST compare resumed state and final normalized
 inventory with an uninterrupted run.
