@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
+import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -158,6 +160,474 @@ def test_fresh_and_reopen(tmp_path) -> None:
             "WHERE status = 'active'"
         )
     assert module._preflight(tmp_path / module.DB_NAME).absent is False
+
+
+def _assert_sanitized(error: CheckpointStateError) -> None:
+    assert (str(error), repr(error), error.args) == (
+        "checkpoint_failure",
+        "CheckpointStateError('checkpoint_failure')",
+        ("checkpoint_failure",),
+    )
+    assert error.__cause__ is None and error.__context__ is None
+
+
+def test_locked_workspace_initializes_reopens_and_preserves_lock_bytes(tmp_path) -> None:
+    lock = tmp_path / module.LOCK_NAME
+    lock.write_bytes(b"opaque pre-existing lock bytes")
+
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert type(workspace) is module._LockedCheckpointWorkspace
+        assert not hasattr(workspace, "connection")
+        assert workspace._mutate(lambda transaction: transaction._fetchone("SELECT 1")) == (1,)
+
+    assert lock.read_bytes() == b"opaque pre-existing lock bytes"
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+    with sqlite3.connect(tmp_path / module.DB_NAME) as conn:
+        module._initialize_or_validate_connection(conn, initialize=False)
+        _assert_durability_pragmas(conn)
+
+
+def test_locked_workspace_orders_lock_before_connect_and_uses_strict_open_modes(
+    tmp_path, monkeypatch
+) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+
+    events = []
+    real_lock = module.portalocker.lock
+    real_connect = module.sqlite3.connect
+    real_open = module.os.open
+
+    def track_lock(handle, flags, *args, **kwargs):
+        events.append(("lock", flags))
+        return real_lock(handle, flags, *args, **kwargs)
+
+    def track_connect(database, *args, **kwargs):
+        events.append(("connect", database, kwargs.get("timeout")))
+        return real_connect(database, *args, **kwargs)
+
+    def track_open(path, flags, *args, **kwargs):
+        events.append(("os.open", str(path), flags))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.portalocker, "lock", track_lock)
+    monkeypatch.setattr(module.sqlite3, "connect", track_connect)
+    monkeypatch.setattr(module.os, "open", track_open)
+
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+    fresh_workspace = tmp_path / "fresh-workspace"
+    fresh_workspace.mkdir()
+    with module._open_locked_checkpoint_workspace(fresh_workspace):
+        pass
+
+    first_connect = next(index for index, event in enumerate(events) if event[0] == "connect")
+    lock_event = next(index for index, event in enumerate(events) if event[0] == "lock")
+    assert lock_event < first_connect
+    assert events[lock_event][1] == module.portalocker.LOCK_EX | module.portalocker.LOCK_NB
+    connects = [event for event in events if event[0] == "connect"]
+    assert all(event[2] == 0 for event in connects)
+    assert any("mode=ro" in event[1] for event in connects)
+    assert any("mode=rw" in event[1] for event in connects)
+    db_claims = [
+        event for event in events
+        if event[0] == "os.open" and event[1].endswith(module.DB_NAME)
+    ]
+    assert db_claims and any(event[2] & module.os.O_EXCL for event in db_claims)
+
+
+def test_locked_workspace_contends_nonblockingly_and_releases(tmp_path) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        with pytest.raises(CheckpointStateError) as caught:
+            with module._open_locked_checkpoint_workspace(tmp_path):
+                pass
+        _assert_sanitized(caught.value)
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+
+
+def test_locked_workspace_invalidates_retained_private_seams(tmp_path) -> None:
+    retained = {}
+
+    def retain(transaction):
+        retained["transaction"] = transaction
+        transaction._execute("SELECT 1")
+
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        retained["workspace"] = workspace
+        retained["connection"] = workspace._connection
+        workspace._mutate(retain)
+
+    for callback in (
+        lambda: retained["workspace"]._mutate(lambda transaction: None),
+        lambda: retained["transaction"]._fetchone("SELECT 1"),
+    ):
+        with pytest.raises(CheckpointStateError) as caught:
+            callback()
+        _assert_sanitized(caught.value)
+    with pytest.raises(sqlite3.ProgrammingError):
+        retained["connection"].execute("SELECT 1")
+
+
+def test_locked_workspace_rejects_lock_identity_replacement_and_rolls_back(
+    tmp_path, monkeypatch
+) -> None:
+    armed = False
+    original_observe = module._observe_regular_entry
+    lock = tmp_path / module.LOCK_NAME
+
+    def observe(path):
+        result = original_observe(path)
+        if armed and path == lock and not result.absent:
+            return module._EntryObservation(False, (result.identity[0], result.identity[1] + 1))
+        return result
+
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        connection = workspace._connection
+        monkeypatch.setattr(module, "_observe_regular_entry", observe)
+
+        def operation(transaction):
+            nonlocal armed
+            transaction._execute("CREATE TABLE should_rollback(value INTEGER)")
+            armed = True
+
+        with pytest.raises(CheckpointStateError) as caught:
+            workspace._mutate(operation)
+        _assert_sanitized(caught.value)
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+    monkeypatch.undo()
+    with module._open_locked_checkpoint_workspace(tmp_path) as reopened:
+        assert reopened._connection.execute(
+            "SELECT count(*) FROM sqlite_master WHERE name='should_rollback'"
+        ).fetchone() == (0,)
+
+
+def test_locked_workspace_sanitizes_callback_failure_and_releases_resources(tmp_path) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        with pytest.raises(CheckpointStateError) as caught:
+            workspace._mutate(
+                lambda _transaction: (_ for _ in ()).throw(
+                    RuntimeError("secret callback failure")
+                )
+            )
+        _assert_sanitized(caught.value)
+        with pytest.raises(CheckpointStateError) as stale:
+            workspace._mutate(lambda _transaction: None)
+        _assert_sanitized(stale.value)
+
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+
+
+def test_locked_workspace_rejects_database_identity_replacement_before_mutation(
+    tmp_path, monkeypatch
+) -> None:
+    database = tmp_path / module.DB_NAME
+    original_observe = module._observe_database
+    armed = False
+
+    def observe(path):
+        result = original_observe(path)
+        if armed and path == database and not result.absent:
+            return module._DatabaseObservation(
+                False,
+                (result.identity[0], result.identity[1] + 1, *result.identity[2:]),
+            )
+        return result
+
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        connection = workspace._connection
+        monkeypatch.setattr(module, "_observe_database", observe)
+        armed = True
+        with pytest.raises(CheckpointStateError) as caught:
+            workspace._mutate(lambda _transaction: pytest.fail("must not execute"))
+        _assert_sanitized(caught.value)
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+    monkeypatch.undo()
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+
+
+def test_locked_workspace_rejects_database_replacement_after_initialization(
+    tmp_path, monkeypatch
+) -> None:
+    database = tmp_path / module.DB_NAME
+    original_initialize = module._initialize_or_validate_connection
+    original_observe = module._observe_database
+    initialized = False
+
+    def initialize(*args, **kwargs):
+        nonlocal initialized
+        result = original_initialize(*args, **kwargs)
+        initialized = True
+        return result
+
+    def observe(path):
+        result = original_observe(path)
+        if initialized and path == database and not result.absent:
+            return module._DatabaseObservation(
+                False,
+                (result.identity[0], result.identity[1] + 1, *result.identity[2:]),
+            )
+        return result
+
+    monkeypatch.setattr(module, "_initialize_or_validate_connection", initialize)
+    monkeypatch.setattr(module, "_observe_database", observe)
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    _assert_sanitized(caught.value)
+
+
+@pytest.mark.parametrize("stage", ["open", "initialize"])
+def test_locked_workspace_rejects_same_inode_database_change_after_preflight(
+    tmp_path, monkeypatch, stage: str
+) -> None:
+    database = tmp_path / module.DB_NAME
+    _valid_database(database)
+    original_open = module._open_writable_connection
+    original_initialize = module._initialize_or_validate_connection
+
+    def alter_observation() -> None:
+        info = database.stat()
+        os.utime(database, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000))
+
+    def open_connection(path):
+        connection = original_open(path)
+        if stage == "open":
+            alter_observation()
+        return connection
+
+    def initialize(*args, **kwargs):
+        result = original_initialize(*args, **kwargs)
+        if stage == "initialize":
+            alter_observation()
+        return result
+
+    monkeypatch.setattr(module, "_open_writable_connection", open_connection)
+    monkeypatch.setattr(module, "_initialize_or_validate_connection", initialize)
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    _assert_sanitized(caught.value)
+
+
+def test_locked_workspace_lock_failure_on_fresh_workspace_creates_no_database(
+    tmp_path, monkeypatch
+) -> None:
+    initialized = []
+
+    def fail_lock(*args, **kwargs):
+        raise RuntimeError("lock failure")
+
+    monkeypatch.setattr(module.portalocker, "lock", fail_lock)
+    monkeypatch.setattr(
+        module,
+        "_initialize_or_validate_connection",
+        lambda *args, **kwargs: initialized.append((args, kwargs)),
+    )
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    _assert_sanitized(caught.value)
+    assert initialized == []
+    assert not (tmp_path / module.DB_NAME).exists()
+
+
+@pytest.mark.parametrize("failure", ["preflight", "open", "initialize", "unlock"])
+def test_locked_workspace_post_lock_failures_release_for_reacquisition(
+    tmp_path, monkeypatch, failure: str
+) -> None:
+    if failure in {"open", "initialize"}:
+        _valid_database(tmp_path / module.DB_NAME)
+    if failure == "preflight":
+        def fail(_path):
+            raise module._fail()
+        monkeypatch.setattr(module, "_preflight", fail)
+    elif failure == "open":
+        def fail(_path):
+            raise module._fail()
+        monkeypatch.setattr(module, "_open_writable_connection", fail)
+    elif failure == "initialize":
+        def fail(*args, **kwargs):
+            raise module._fail()
+        monkeypatch.setattr(module, "_initialize_or_validate_connection", fail)
+    else:
+        real_unlock = module.portalocker.unlock
+        monkeypatch.setattr(module.portalocker, "unlock", lambda _handle: (_ for _ in ()).throw(RuntimeError("unlock")))
+
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    _assert_sanitized(caught.value)
+    monkeypatch.undo()
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+
+
+def test_locked_workspace_close_precedes_unlock(tmp_path, monkeypatch) -> None:
+    _valid_database(tmp_path / module.DB_NAME)
+    events = []
+    real_connect = module.sqlite3.connect
+    real_unlock = module.portalocker.unlock
+
+    class TrackingConnection(sqlite3.Connection):
+        def close(self):
+            events.append("close")
+            return super().close()
+
+    def connect(*args, **kwargs):
+        kwargs["factory"] = TrackingConnection
+        return real_connect(*args, **kwargs)
+
+    def unlock(handle):
+        events.append("unlock")
+        return real_unlock(handle)
+
+    monkeypatch.setattr(module.sqlite3, "connect", connect)
+    monkeypatch.setattr(module, "_initialize_or_validate_connection", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(module.portalocker, "unlock", unlock)
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+    assert events[-2:] == ["close", "unlock"]
+
+
+def test_locked_workspace_connection_close_failure_is_sanitized_and_reacquirable(
+    tmp_path, monkeypatch
+) -> None:
+    _valid_database(tmp_path / module.DB_NAME)
+    real_connect = module.sqlite3.connect
+
+    class BrokenClose(sqlite3.Connection):
+        def close(self):
+            super().close()
+            raise RuntimeError("secret close failure")
+
+    def connect(*args, **kwargs):
+        kwargs["factory"] = BrokenClose
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(module.sqlite3, "connect", connect)
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    _assert_sanitized(caught.value)
+    monkeypatch.undo()
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+
+
+def test_locked_workspace_failed_fresh_initialization_preserves_unknown_database(
+    tmp_path, monkeypatch
+) -> None:
+    def fail(*args, **kwargs):
+        raise module._fail()
+
+    monkeypatch.setattr(module, "_initialize_or_validate_connection", fail)
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    _assert_sanitized(caught.value)
+    db = tmp_path / module.DB_NAME
+    assert db.exists() and db.read_bytes() == b""
+    assert (tmp_path / module.LOCK_NAME).exists()
+    monkeypatch.undo()
+    with pytest.raises(CheckpointStateError):
+        module._preflight(db)
+
+
+def test_locked_workspace_rejects_unknown_database_without_writing(tmp_path) -> None:
+    db = tmp_path / module.DB_NAME
+    db.write_bytes(b"not sqlite")
+    before = db.read_bytes()
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    _assert_sanitized(caught.value)
+    assert db.read_bytes() == before
+    assert (tmp_path / module.LOCK_NAME).exists()
+
+
+def test_locked_workspace_process_contention_and_abrupt_release(tmp_path) -> None:
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    lock = tmp_path / module.LOCK_NAME
+    lock_bytes = b"opaque child lock bytes"
+    lock.write_bytes(lock_bytes)
+    lock_identity = (lock.lstat().st_dev, lock.lstat().st_ino)
+    child = """
+import os
+import sys
+import time
+from pathlib import Path
+from knowledgenexus.foundation.infrastructure.checkpoint import sqlite_checkpoint_workspace as module
+workspace, ready, release, abrupt = map(Path, sys.argv[1:])
+with module._open_locked_checkpoint_workspace(workspace):
+    ready.write_text('ready', encoding='ascii')
+    if abrupt.name == 'abrupt':
+        os._exit(0)
+    while not release.exists():
+        time.sleep(0.01)
+"""
+
+    def start(abrupt: bool) -> subprocess.Popen:
+        env = dict(os.environ)
+        src = str(Path(__file__).resolve().parents[4] / "src")
+        env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+        marker = tmp_path / ("abrupt" if abrupt else "normal")
+        return subprocess.Popen(
+            [sys.executable, "-c", child, str(tmp_path), str(ready), str(release), str(marker)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+
+    process = start(abrupt=False)
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), process.communicate(timeout=5)
+        with pytest.raises(CheckpointStateError):
+            with module._open_locked_checkpoint_workspace(tmp_path):
+                pass
+        release.touch()
+        assert process.wait(timeout=5) == 0
+        assert lock.read_bytes() == lock_bytes
+        assert (lock.lstat().st_dev, lock.lstat().st_ino) == lock_identity
+    finally:
+        if process.poll() is None:
+            release.touch()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+    ready.unlink()
+    release.unlink()
+    process = start(abrupt=True)
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), process.communicate(timeout=5)
+        assert process.wait(timeout=5) == 0
+        assert lock.read_bytes() == lock_bytes
+        assert (lock.lstat().st_dev, lock.lstat().st_ino) == lock_identity
+        with module._open_locked_checkpoint_workspace(tmp_path):
+            pass
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def test_existing_empty_database_fails_without_write(tmp_path) -> None:

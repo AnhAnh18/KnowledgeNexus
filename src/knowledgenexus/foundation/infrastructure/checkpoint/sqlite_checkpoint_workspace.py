@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+import os
 import sqlite3
 import stat
-from urllib.parse import quote
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
+from typing import Callable, Iterator, TypeVar
+from urllib.parse import quote
+
+import portalocker
 
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointStateError,
@@ -16,6 +21,7 @@ SCHEMA_IDENTITY = "knowledgenexus.m7.checkpoint.v1"
 DB_NAME = "crawl_state.sqlite3"
 LOCK_NAME = "crawl_writer.lock"
 _SIDECARS = (DB_NAME + "-journal", DB_NAME + "-wal", DB_NAME + "-shm")
+_T = TypeVar("_T")
 
 # C3-A owns the portalocker lease and workspace-opening sequence. C2-A keeps
 # only these private path, read-only validation, and connection-init seams.
@@ -106,8 +112,31 @@ class _DatabaseObservation:
     identity: tuple[int, int, int, int] | None
 
 
+@dataclass(frozen=True)
+class _EntryObservation:
+    absent: bool
+    identity: tuple[int, int] | None
+
+
+class _ActiveCheckpointToken:
+    __slots__ = ("active",)
+
+    def __init__(self) -> None:
+        self.active = True
+
+
 def _fail() -> CheckpointStateError:
     return CheckpointStateError()
+
+
+def _raise_sanitized_failure() -> None:
+    """Raise a fresh failure without retaining a context-manager body error."""
+    try:
+        raise _fail() from None
+    except CheckpointStateError as error:
+        error.__cause__ = None
+        error.__context__ = None
+        raise
 
 
 def _reject_reparse(path: Path) -> None:
@@ -182,6 +211,99 @@ def _guard_workspace(value: Path) -> tuple[Path, Path]:
     return result
 
 
+def _entry_identity(info: os.stat_result) -> tuple[int, int]:
+    return (info.st_dev, info.st_ino)
+
+
+def _observe_regular_entry(path: Path) -> _EntryObservation:
+    """Read a derived entry without following a replacement link."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return _EntryObservation(True, None)
+    except Exception:
+        raise _fail() from None
+    attrs = getattr(info, "st_file_attributes", 0)
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    ):
+        raise _fail()
+    return _EntryObservation(False, _entry_identity(info))
+
+
+def _workspace_identity(workspace: Path) -> tuple[tuple[int, int], ...]:
+    try:
+        chain = list(workspace.parents)[::-1] + [workspace]
+        return tuple(_entry_identity(ancestor.lstat()) for ancestor in chain)
+    except Exception:
+        raise _fail() from None
+
+
+def _verify_workspace_identity(
+    workspace: Path, expected: tuple[tuple[int, int], ...]
+) -> None:
+    if _workspace_identity(workspace) != expected:
+        raise _fail()
+
+
+def _open_lock_handle(path: Path):
+    """Open the validated lock entry without ever modifying its contents."""
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = None
+    handle = None
+    success = False
+    try:
+        descriptor = os.open(os.fspath(path), flags, 0o600)
+        handle = os.fdopen(descriptor, "r+b")
+        descriptor = None
+        info = os.fstat(handle.fileno())
+        attrs = getattr(info, "st_file_attributes", 0)
+        if not stat.S_ISREG(info.st_mode) or attrs & getattr(
+            stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
+        ):
+            raise _fail()
+        success = True
+        return handle, _entry_identity(info)
+    except CheckpointStateError:
+        raise
+    except Exception:
+        raise _fail() from None
+    finally:
+        if handle is not None and not success:
+            try:
+                handle.close()
+            except Exception:
+                pass
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except Exception:
+                pass
+
+
+def _verify_locked_entry(
+    workspace: Path,
+    lock: Path,
+    handle_identity: tuple[int, int],
+    prior_lock: _EntryObservation,
+    expected_workspace: tuple[tuple[int, int], ...],
+) -> tuple[Path, Path]:
+    db, guarded_lock = _guard_workspace(workspace)
+    if guarded_lock != lock:
+        raise _fail()
+    _verify_workspace_identity(workspace, expected_workspace)
+    current_lock = _observe_regular_entry(lock)
+    if current_lock.absent or current_lock.identity != handle_identity:
+        raise _fail()
+    if not prior_lock.absent and prior_lock.identity != current_lock.identity:
+        raise _fail()
+    return db, guarded_lock
+
+
 def _normalized_sql(sql: str | None) -> str:
     return " ".join((sql or "").replace("\n", " ").split())
 
@@ -197,6 +319,55 @@ def _observe_database(path: Path) -> _DatabaseObservation:
         failed = True
     if failed:
         raise _fail()
+
+
+def _verify_database_identity(path: Path, expected: tuple[int, int]) -> None:
+    """Reject a database path that no longer names the opened database file."""
+    current = _observe_database(path)
+    if current.absent or current.identity[:2] != expected:
+        raise _fail()
+
+
+def _verify_database_observation(path: Path, expected: _DatabaseObservation) -> None:
+    """Reject an existing database changed after its read-only preflight."""
+    if _observe_database(path) != expected:
+        raise _fail()
+
+
+def _claim_absent_database(path: Path) -> tuple[int, int]:
+    """Atomically reserve the one permitted fresh database creation."""
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = None
+    try:
+        descriptor = os.open(os.fspath(path), flags, 0o600)
+        info = os.fstat(descriptor)
+        attrs = getattr(info, "st_file_attributes", 0)
+        if not stat.S_ISREG(info.st_mode) or attrs & getattr(
+            stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
+        ):
+            raise _fail()
+        return _entry_identity(info)
+    except CheckpointStateError:
+        raise
+    except Exception:
+        raise _fail() from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except Exception:
+                pass
+
+
+def _open_writable_connection(path: Path) -> sqlite3.Connection:
+    """Open an already-observed database without allowing SQLite to create one."""
+    uri = "file:" + quote(path.as_posix(), safe="/:\\") + "?mode=rw"
+    try:
+        return sqlite3.connect(uri, uri=True, timeout=0)
+    except Exception:
+        raise _fail() from None
 
 
 def _validate_database_catalog(conn: sqlite3.Connection) -> None:
@@ -279,7 +450,9 @@ def _preflight(path: Path) -> _DatabaseObservation:
     failed = False
     result = None
     try:
-        conn = sqlite3.connect(uri, uri=True)
+        # Read-only validation must fail immediately if another process holds
+        # SQLite's own lock; the writable initializer cannot configure this yet.
+        conn = sqlite3.connect(uri, uri=True, timeout=0)
         _validate_database_catalog(conn)
         result = observation
     except CheckpointStateError:
@@ -356,6 +529,275 @@ def _initialize_or_validate_connection(conn: sqlite3.Connection, *, initialize: 
     if failed:
         raise _fail()
     return SCHEMA_VERSION
+
+
+class _PrivateCheckpointTransaction:
+    """Narrow C2-B transaction seam; the SQLite connection never escapes it."""
+
+    __slots__ = ("_connection", "_token", "_verify_writer_lock")
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        token: _ActiveCheckpointToken,
+        verify_writer_lock: Callable[[], None],
+    ) -> None:
+        self._connection = connection
+        self._token = token
+        self._verify_writer_lock = verify_writer_lock
+
+    def _require_active(self) -> None:
+        if not self._token.active:
+            raise _fail()
+        self._verify_writer_lock()
+
+    def _invalidate(self) -> None:
+        self._token = _ActiveCheckpointToken()
+        self._token.active = False
+
+    def _begin_immediate(self) -> None:
+        self._require_active()
+        self._connection.execute("BEGIN IMMEDIATE")
+
+    def _execute(self, sql: str, parameters: tuple[object, ...] = ()) -> None:
+        self._require_active()
+        self._connection.execute(sql, parameters)
+
+    def _fetchone(self, sql: str, parameters: tuple[object, ...] = ()) -> tuple | None:
+        self._require_active()
+        return self._connection.execute(sql, parameters).fetchone()
+
+    def _fetchall(self, sql: str, parameters: tuple[object, ...] = ()) -> list[tuple]:
+        self._require_active()
+        return self._connection.execute(sql, parameters).fetchall()
+
+
+class _LockedCheckpointWorkspace:
+    """Process-lock-scoped capability used only by the following C2-B stage."""
+
+    __slots__ = (
+        "_connection",
+        "_lock_handle",
+        "_workspace",
+        "_lock",
+        "_database",
+        "_database_identity",
+        "_lock_identity",
+        "_prior_lock",
+        "_workspace_identity",
+        "_token",
+        "_transaction",
+    )
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        lock_handle,
+        workspace: Path,
+        lock: Path,
+        database: Path,
+        database_identity: tuple[int, int],
+        lock_identity: tuple[int, int],
+        prior_lock: _EntryObservation,
+        workspace_identity: tuple[tuple[int, int], ...],
+        token: _ActiveCheckpointToken,
+    ) -> None:
+        self._connection = connection
+        self._lock_handle = lock_handle
+        self._workspace = workspace
+        self._lock = lock
+        self._database = database
+        self._database_identity = database_identity
+        self._lock_identity = lock_identity
+        self._prior_lock = prior_lock
+        self._workspace_identity = workspace_identity
+        self._token = token
+        self._transaction: _PrivateCheckpointTransaction | None = None
+
+    def _require_active(self) -> None:
+        if not self._token.active:
+            raise _fail()
+
+    def _invalidate(self) -> None:
+        self._token.active = False
+        if self._transaction is not None:
+            self._transaction._invalidate()
+            self._transaction = None
+
+    def _abort_resources(self) -> None:
+        """Close and release resources after a mutation callback failure."""
+        self._invalidate()
+        connection = self._connection
+        self._connection = None
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+        lock_handle = self._lock_handle
+        self._lock_handle = None
+        if lock_handle is not None:
+            try:
+                portalocker.unlock(lock_handle)
+            except Exception:
+                pass
+            try:
+                lock_handle.close()
+            except Exception:
+                pass
+
+    def _verify_writer_lock(self) -> None:
+        if not self._token.active:
+            raise _fail()
+        _verify_locked_entry(
+            self._workspace,
+            self._lock,
+            self._lock_identity,
+            self._prior_lock,
+            self._workspace_identity,
+        )
+        _verify_database_identity(self._database, self._database_identity)
+
+    def _mutate(
+        self, operation: Callable[[_PrivateCheckpointTransaction], _T]
+    ) -> _T:
+        self._require_active()
+        transaction = None
+        try:
+            if not callable(operation):
+                raise _fail()
+            self._verify_writer_lock()
+            transaction = _PrivateCheckpointTransaction(
+                self._connection, self._token, self._verify_writer_lock
+            )
+            self._transaction = transaction
+            transaction._begin_immediate()
+            result = operation(transaction)
+            transaction._require_active()
+            self._connection.commit()
+            return result
+        except Exception:
+            try:
+                if self._connection is not None:
+                    self._connection.rollback()
+            except Exception:
+                pass
+            self._abort_resources()
+            _raise_sanitized_failure()
+        finally:
+            # A callback can retain this object only until its unit completes.
+            if transaction is not None:
+                transaction._invalidate()
+            if self._transaction is transaction:
+                self._transaction = None
+
+
+@contextmanager
+def _open_locked_checkpoint_workspace(
+    workspace: Path,
+) -> Iterator[_LockedCheckpointWorkspace]:
+    """Own one nonblocking writer lock and its private writable SQLite handle."""
+    connection = None
+    lock_handle = None
+    locked = False
+    capability = None
+    failed = False
+    try:
+        db, lock = _guard_workspace(workspace)
+        guarded_workspace = _workspace_identity(workspace)
+        prior_lock = _observe_regular_entry(lock)
+        lock_handle, handle_identity = _open_lock_handle(lock)
+        portalocker.lock(lock_handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        locked = True
+
+        db, _ = _verify_locked_entry(
+            workspace, lock, handle_identity, prior_lock, guarded_workspace
+        )
+        observation = _preflight(db)
+        db, _ = _verify_locked_entry(
+            workspace, lock, handle_identity, prior_lock, guarded_workspace
+        )
+        if _observe_database(db) != observation:
+            raise _fail()
+
+        claimed_database_identity = None
+        if observation.absent:
+            # O_EXCL distinguishes our one allowed fresh create from an
+            # unvalidated database inserted after the read-only preflight.
+            claimed_database_identity = _claim_absent_database(db)
+        db, _ = _verify_locked_entry(
+            workspace, lock, handle_identity, prior_lock, guarded_workspace
+        )
+        current_database = _observe_database(db)
+        if observation.absent:
+            if (
+                current_database.absent
+                or current_database.identity[:2] != claimed_database_identity
+                or current_database.identity[2] != 0
+            ):
+                raise _fail()
+        elif current_database != observation:
+            raise _fail()
+        database_identity = current_database.identity[:2]
+
+        connection = _open_writable_connection(db)
+        if observation.absent:
+            _verify_database_identity(db, database_identity)
+        else:
+            _verify_database_observation(db, observation)
+        _verify_locked_entry(
+            workspace, lock, handle_identity, prior_lock, guarded_workspace
+        )
+        _initialize_or_validate_connection(connection, initialize=observation.absent)
+        if observation.absent:
+            _verify_database_identity(db, database_identity)
+        else:
+            _verify_database_observation(db, observation)
+        _verify_locked_entry(
+            workspace, lock, handle_identity, prior_lock, guarded_workspace
+        )
+
+        token = _ActiveCheckpointToken()
+        capability = _LockedCheckpointWorkspace(
+            connection,
+            lock_handle,
+            workspace,
+            lock,
+            db,
+            database_identity,
+            handle_identity,
+            prior_lock,
+            guarded_workspace,
+            token,
+        )
+        yield capability
+    except Exception:
+        failed = True
+    finally:
+        if capability is not None:
+            try:
+                capability._invalidate()
+            except Exception:
+                failed = True
+        if connection is not None:
+            if capability is None or capability._connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    failed = True
+        if lock_handle is not None:
+            if locked and (capability is None or capability._lock_handle is not None):
+                try:
+                    portalocker.unlock(lock_handle)
+                except Exception:
+                    failed = True
+            if capability is None or capability._lock_handle is not None:
+                try:
+                    lock_handle.close()
+                except Exception:
+                    failed = True
+    if failed:
+        _raise_sanitized_failure()
 
 
 __all__ = []
