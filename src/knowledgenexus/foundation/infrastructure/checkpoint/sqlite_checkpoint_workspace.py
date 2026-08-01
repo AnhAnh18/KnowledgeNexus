@@ -22,6 +22,9 @@ _SIDECARS = (DB_NAME + "-journal", DB_NAME + "-wal", DB_NAME + "-shm")
 _DDL = (
     "CREATE TABLE checkpoint_metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema_identity TEXT NOT NULL CHECK (schema_identity = 'knowledgenexus.m7.checkpoint.v1'), schema_version INTEGER NOT NULL CHECK (schema_version = 1))",
     "CREATE TABLE crawl_runs (run_id TEXT PRIMARY KEY, generation_id TEXT NOT NULL UNIQUE, fingerprint_digest TEXT NOT NULL CHECK (length(fingerprint_digest) > 0), status TEXT NOT NULL CHECK (status IN ('incomplete','complete')), inventory_phase TEXT NOT NULL CHECK (inventory_phase IN ('pending','complete')), created_at TEXT NOT NULL)",
+    "CREATE TABLE crawl_sessions (session_id TEXT PRIMARY KEY NOT NULL CHECK (length(session_id) > 0), run_id TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('active','completed','interrupted','paused')), started_at TEXT NOT NULL CHECK (length(started_at) = 24 AND COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at, 0)), ended_at TEXT CHECK (ended_at IS NULL OR (length(ended_at) = 24 AND COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', ended_at) = ended_at, 0))), outcome_status TEXT, outcome_reason TEXT, CHECK (COALESCE((status = 'active' AND ended_at IS NULL AND outcome_status IS NULL AND outcome_reason IS NULL) OR (status = 'completed' AND ended_at IS NOT NULL AND outcome_status = 'completed' AND outcome_reason = 'completed') OR (status = 'interrupted' AND ended_at IS NOT NULL AND outcome_status = 'interrupted' AND outcome_reason = 'process_interrupted') OR (status = 'paused' AND ended_at IS NOT NULL AND outcome_status = 'paused' AND outcome_reason = 'controlled_checkpoint_stop'), 0)), FOREIGN KEY (run_id) REFERENCES crawl_runs(run_id))",
+    "CREATE INDEX idx_crawl_sessions_run_started ON crawl_sessions(run_id, started_at)",
+    "CREATE UNIQUE INDEX idx_crawl_sessions_one_active ON crawl_sessions(run_id) WHERE status = 'active'",
     "CREATE TABLE include_roots (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL CHECK (include_root_ordinal >= 0), include_root_page_id TEXT NOT NULL CHECK (length(include_root_page_id) > 0), PRIMARY KEY (run_id, include_root_ordinal), UNIQUE (run_id, include_root_page_id), FOREIGN KEY (run_id) REFERENCES crawl_runs(run_id))",
     "CREATE TABLE root_occurrences (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL, page_id TEXT NOT NULL CHECK (length(page_id) > 0), title TEXT NOT NULL CHECK (length(title) > 0), space_key TEXT NOT NULL CHECK (length(space_key) > 0), parent_page_id TEXT, updated_at TEXT, source_version TEXT, ancestor_page_ids_json TEXT NOT NULL, ancestor_titles_json TEXT NOT NULL, labels_json TEXT NOT NULL, attachment_count INTEGER CHECK (attachment_count IS NULL OR attachment_count >= 0), PRIMARY KEY (run_id, include_root_ordinal), FOREIGN KEY (run_id, include_root_ordinal) REFERENCES include_roots(run_id, include_root_ordinal))",
     "CREATE TABLE root_progress (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL, progress TEXT NOT NULL CHECK (progress IN ('root_pending','root_committed','descendants_pending','descendants_complete')), next_start INTEGER CHECK (next_start IS NULL OR next_start >= 0), descendants_complete INTEGER NOT NULL CHECK (descendants_complete IN (0,1)), PRIMARY KEY (run_id, include_root_ordinal), FOREIGN KEY (run_id, include_root_ordinal) REFERENCES include_roots(run_id, include_root_ordinal))",
@@ -33,13 +36,14 @@ _DDL = (
     "CREATE INDEX idx_inventory_windows_run_root ON inventory_windows(run_id, include_root_ordinal, requested_start)",
     "CREATE INDEX idx_root_progress_incomplete ON root_progress(run_id, descendants_complete, include_root_ordinal)",
 )
-_OBJECTS = {"checkpoint_metadata", "crawl_runs", "include_roots", "root_occurrences", "root_progress", "inventory_windows", "inventory_occurrences", "checkpoint_transitions", "request_budget_reservations", "idx_inventory_occurrences_run_page", "idx_inventory_windows_run_root", "idx_root_progress_incomplete"}
+_OBJECTS = {"checkpoint_metadata", "crawl_runs", "crawl_sessions", "include_roots", "root_occurrences", "root_progress", "inventory_windows", "inventory_occurrences", "checkpoint_transitions", "request_budget_reservations", "idx_crawl_sessions_run_started", "idx_crawl_sessions_one_active", "idx_inventory_occurrences_run_page", "idx_inventory_windows_run_root", "idx_root_progress_incomplete"}
 
 # These PRAGMA tuples deliberately include properties that SQLite's DDL text
 # alone cannot prove after a catalog-text tamper.
 _TABLE_LAYOUTS = {
     "checkpoint_metadata": (("singleton", "INTEGER", 0, 1), ("schema_identity", "TEXT", 1, 0), ("schema_version", "INTEGER", 1, 0)),
     "crawl_runs": (("run_id", "TEXT", 0, 1), ("generation_id", "TEXT", 1, 0), ("fingerprint_digest", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("inventory_phase", "TEXT", 1, 0), ("created_at", "TEXT", 1, 0)),
+    "crawl_sessions": (("session_id", "TEXT", 1, 1), ("run_id", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("started_at", "TEXT", 1, 0), ("ended_at", "TEXT", 0, 0), ("outcome_status", "TEXT", 0, 0), ("outcome_reason", "TEXT", 0, 0)),
     "include_roots": (("run_id", "TEXT", 1, 1), ("include_root_ordinal", "INTEGER", 1, 2), ("include_root_page_id", "TEXT", 1, 0)),
     "root_occurrences": (("run_id", "TEXT", 1, 1), ("include_root_ordinal", "INTEGER", 1, 2), ("page_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("space_key", "TEXT", 1, 0), ("parent_page_id", "TEXT", 0, 0), ("updated_at", "TEXT", 0, 0), ("source_version", "TEXT", 0, 0), ("ancestor_page_ids_json", "TEXT", 1, 0), ("ancestor_titles_json", "TEXT", 1, 0), ("labels_json", "TEXT", 1, 0), ("attachment_count", "INTEGER", 0, 0)),
     "root_progress": (("run_id", "TEXT", 1, 1), ("include_root_ordinal", "INTEGER", 1, 2), ("progress", "TEXT", 1, 0), ("next_start", "INTEGER", 0, 0), ("descendants_complete", "INTEGER", 1, 0)),
@@ -56,6 +60,7 @@ _FOREIGN_KEY_LAYOUTS = {
     "inventory_occurrences": ((0, 0, "inventory_windows", "run_id", "run_id", "NO ACTION", "NO ACTION", "NONE"), (0, 1, "inventory_windows", "include_root_ordinal", "include_root_ordinal", "NO ACTION", "NO ACTION", "NONE"), (0, 2, "inventory_windows", "window_start", "requested_start", "NO ACTION", "NO ACTION", "NONE")),
     "checkpoint_transitions": ((0, 0, "include_roots", "run_id", "run_id", "NO ACTION", "NO ACTION", "NONE"), (0, 1, "include_roots", "include_root_ordinal", "include_root_ordinal", "NO ACTION", "NO ACTION", "NONE")),
     "request_budget_reservations": ((0, 0, "crawl_runs", "run_id", "run_id", "NO ACTION", "NO ACTION", "NONE"),),
+    "crawl_sessions": ((0, 0, "crawl_runs", "run_id", "run_id", "NO ACTION", "NO ACTION", "NONE"),),
 }
 _EXPLICIT_INDEX_LAYOUTS = {
     "inventory_occurrences": ("idx_inventory_occurrences_run_page", ((0, 0, "run_id", 0, "BINARY", 1), (1, 4, "page_id", 0, "BINARY", 1), (2, -1, None, 0, "BINARY", 0))),
@@ -87,6 +92,11 @@ _INDEX_LAYOUTS = {
     ),
     "checkpoint_transitions": ((0, "sqlite_autoindex_checkpoint_transitions_1", 1, "pk", 0, ((0, 0, "run_id", 0, "BINARY", 1), (1, 1, "sequence", 0, "BINARY", 1), (2, -1, None, 0, "BINARY", 0))),),
     "request_budget_reservations": ((0, "sqlite_autoindex_request_budget_reservations_1", 1, "pk", 0, ((0, 0, "run_id", 0, "BINARY", 1), (1, 1, "reservation_sequence", 0, "BINARY", 1), (2, -1, None, 0, "BINARY", 0))),),
+    "crawl_sessions": (
+        (0, "idx_crawl_sessions_one_active", 1, "c", 1, ((0, 1, "run_id", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0))),
+        (1, "idx_crawl_sessions_run_started", 0, "c", 0, ((0, 1, "run_id", 0, "BINARY", 1), (1, 3, "started_at", 0, "BINARY", 1), (2, -1, None, 0, "BINARY", 0))),
+        (2, "sqlite_autoindex_crawl_sessions_1", 1, "pk", 0, ((0, 0, "session_id", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0))),
+    ),
 }
 
 
@@ -207,7 +217,8 @@ def _validate_database_catalog(conn: sqlite3.Connection) -> None:
     ):
         raise _fail()
     for ddl in _DDL:
-        name = ddl.split(" ", 3)[2]
+        tokens = ddl.split()
+        name = tokens[3] if tokens[1] == "UNIQUE" else tokens[2]
         if _normalized_sql(objects[name][1]) != _normalized_sql(ddl):
             raise _fail()
     for table, layout in _TABLE_LAYOUTS.items():
@@ -240,6 +251,11 @@ def _validate_database_catalog(conn: sqlite3.Connection) -> None:
             )
             if actual_xinfo != expected_index[5]:
                 raise _fail()
+    if _normalized_sql(objects["idx_crawl_sessions_one_active"][1]) != (
+        "CREATE UNIQUE INDEX idx_crawl_sessions_one_active ON crawl_sessions(run_id) "
+        "WHERE status = 'active'"
+    ):
+        raise _fail()
     row = conn.execute(
         "SELECT singleton,schema_identity,schema_version FROM checkpoint_metadata"
     ).fetchall()

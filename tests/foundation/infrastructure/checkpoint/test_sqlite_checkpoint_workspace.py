@@ -3,12 +3,105 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
 
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlSessionId
 from knowledgenexus.foundation.infrastructure.checkpoint import sqlite_checkpoint_workspace as module
 from knowledgenexus.foundation.ports import CheckpointStateError
+
+
+# Keep the v1 session catalog expectation independent from implementation
+# constants so a coordinated implementation/validator drift is observable.
+_CRAWL_SESSIONS_DDL = (
+    "CREATE TABLE crawl_sessions (session_id TEXT PRIMARY KEY NOT NULL CHECK (length(session_id) > 0), "
+    "run_id TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN "
+    "('active','completed','interrupted','paused')), started_at TEXT NOT NULL CHECK "
+    "(length(started_at) = 24 AND COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', "
+    "started_at) = started_at, 0)), ended_at TEXT CHECK (ended_at IS NULL OR "
+    "(length(ended_at) = 24 AND COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', "
+    "ended_at) = ended_at, 0))), outcome_status TEXT, outcome_reason TEXT, CHECK "
+    "(COALESCE((status = 'active' AND ended_at IS NULL AND outcome_status IS NULL "
+    "AND outcome_reason IS NULL) OR (status = 'completed' AND ended_at IS NOT NULL "
+    "AND outcome_status = 'completed' AND outcome_reason = 'completed') OR (status "
+    "= 'interrupted' AND ended_at IS NOT NULL AND outcome_status = 'interrupted' "
+    "AND outcome_reason = 'process_interrupted') OR (status = 'paused' AND ended_at "
+    "IS NOT NULL AND outcome_status = 'paused' AND outcome_reason = "
+    "'controlled_checkpoint_stop'), 0)), FOREIGN KEY (run_id) REFERENCES "
+    "crawl_runs(run_id))"
+)
+_CRAWL_SESSIONS_RUN_STARTED_INDEX_DDL = (
+    "CREATE INDEX idx_crawl_sessions_run_started ON crawl_sessions(run_id, started_at)"
+)
+_CRAWL_SESSIONS_ONE_ACTIVE_INDEX_DDL = (
+    "CREATE UNIQUE INDEX idx_crawl_sessions_one_active ON crawl_sessions(run_id) "
+    "WHERE status = 'active'"
+)
+_CRAWL_SESSIONS_TABLE_LAYOUT = (
+    ("session_id", "TEXT", 1, 1),
+    ("run_id", "TEXT", 1, 0),
+    ("status", "TEXT", 1, 0),
+    ("started_at", "TEXT", 1, 0),
+    ("ended_at", "TEXT", 0, 0),
+    ("outcome_status", "TEXT", 0, 0),
+    ("outcome_reason", "TEXT", 0, 0),
+)
+_CRAWL_SESSIONS_FOREIGN_KEY_LAYOUT = (
+    (0, 0, "crawl_runs", "run_id", "run_id", "NO ACTION", "NO ACTION", "NONE"),
+)
+_CRAWL_SESSIONS_INDEX_LAYOUT = (
+    (0, "idx_crawl_sessions_one_active", 1, "c", 1),
+    (1, "idx_crawl_sessions_run_started", 0, "c", 0),
+    (2, "sqlite_autoindex_crawl_sessions_1", 1, "pk", 0),
+)
+_CRAWL_SESSIONS_INDEX_XINFO = {
+    "idx_crawl_sessions_one_active": (
+        (0, 1, "run_id", 0, "BINARY", 1),
+        (1, -1, None, 0, "BINARY", 0),
+    ),
+    "idx_crawl_sessions_run_started": (
+        (0, 1, "run_id", 0, "BINARY", 1),
+        (1, 3, "started_at", 0, "BINARY", 1),
+        (2, -1, None, 0, "BINARY", 0),
+    ),
+    "sqlite_autoindex_crawl_sessions_1": (
+        (0, 0, "session_id", 0, "BINARY", 1),
+        (1, -1, None, 0, "BINARY", 0),
+    ),
+}
+_EXPECTED_CATALOG_OBJECTS = {
+    ("checkpoint_metadata", "table"),
+    ("crawl_runs", "table"),
+    ("crawl_sessions", "table"),
+    ("include_roots", "table"),
+    ("root_occurrences", "table"),
+    ("root_progress", "table"),
+    ("inventory_windows", "table"),
+    ("inventory_occurrences", "table"),
+    ("checkpoint_transitions", "table"),
+    ("request_budget_reservations", "table"),
+    ("idx_crawl_sessions_run_started", "index"),
+    ("idx_crawl_sessions_one_active", "index"),
+    ("idx_inventory_occurrences_run_page", "index"),
+    ("idx_inventory_windows_run_root", "index"),
+    ("idx_root_progress_incomplete", "index"),
+}
+_PRE_CORRECTION_V1_DDL = (
+    "CREATE TABLE checkpoint_metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema_identity TEXT NOT NULL CHECK (schema_identity = 'knowledgenexus.m7.checkpoint.v1'), schema_version INTEGER NOT NULL CHECK (schema_version = 1))",
+    "CREATE TABLE crawl_runs (run_id TEXT PRIMARY KEY, generation_id TEXT NOT NULL UNIQUE, fingerprint_digest TEXT NOT NULL CHECK (length(fingerprint_digest) > 0), status TEXT NOT NULL CHECK (status IN ('incomplete','complete')), inventory_phase TEXT NOT NULL CHECK (inventory_phase IN ('pending','complete')), created_at TEXT NOT NULL)",
+    "CREATE TABLE include_roots (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL CHECK (include_root_ordinal >= 0), include_root_page_id TEXT NOT NULL CHECK (length(include_root_page_id) > 0), PRIMARY KEY (run_id, include_root_ordinal), UNIQUE (run_id, include_root_page_id), FOREIGN KEY (run_id) REFERENCES crawl_runs(run_id))",
+    "CREATE TABLE root_occurrences (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL, page_id TEXT NOT NULL CHECK (length(page_id) > 0), title TEXT NOT NULL CHECK (length(title) > 0), space_key TEXT NOT NULL CHECK (length(space_key) > 0), parent_page_id TEXT, updated_at TEXT, source_version TEXT, ancestor_page_ids_json TEXT NOT NULL, ancestor_titles_json TEXT NOT NULL, labels_json TEXT NOT NULL, attachment_count INTEGER CHECK (attachment_count IS NULL OR attachment_count >= 0), PRIMARY KEY (run_id, include_root_ordinal), FOREIGN KEY (run_id, include_root_ordinal) REFERENCES include_roots(run_id, include_root_ordinal))",
+    "CREATE TABLE root_progress (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL, progress TEXT NOT NULL CHECK (progress IN ('root_pending','root_committed','descendants_pending','descendants_complete')), next_start INTEGER CHECK (next_start IS NULL OR next_start >= 0), descendants_complete INTEGER NOT NULL CHECK (descendants_complete IN (0,1)), PRIMARY KEY (run_id, include_root_ordinal), FOREIGN KEY (run_id, include_root_ordinal) REFERENCES include_roots(run_id, include_root_ordinal))",
+    "CREATE TABLE inventory_windows (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL, requested_start INTEGER NOT NULL CHECK (requested_start >= 0), observed_start INTEGER NOT NULL CHECK (observed_start >= 0), response_size INTEGER NOT NULL CHECK (response_size >= 0), total_size INTEGER NOT NULL CHECK (total_size >= 0), next_start INTEGER NOT NULL CHECK (next_start >= 0), terminal INTEGER NOT NULL CHECK (terminal IN (0,1)), PRIMARY KEY (run_id, include_root_ordinal, requested_start), FOREIGN KEY (run_id, include_root_ordinal) REFERENCES include_roots(run_id, include_root_ordinal))",
+    "CREATE TABLE inventory_occurrences (run_id TEXT NOT NULL, include_root_ordinal INTEGER NOT NULL, window_start INTEGER NOT NULL CHECK (window_start >= 0), item_ordinal INTEGER NOT NULL CHECK (item_ordinal >= 0), page_id TEXT NOT NULL CHECK (length(page_id) > 0), title TEXT NOT NULL CHECK (length(title) > 0), space_key TEXT NOT NULL CHECK (length(space_key) > 0), parent_page_id TEXT, updated_at TEXT, source_version TEXT, ancestor_page_ids_json TEXT NOT NULL, ancestor_titles_json TEXT NOT NULL, labels_json TEXT NOT NULL, attachment_count INTEGER CHECK (attachment_count IS NULL OR attachment_count >= 0), PRIMARY KEY (run_id, include_root_ordinal, window_start, item_ordinal), FOREIGN KEY (run_id, include_root_ordinal, window_start) REFERENCES inventory_windows(run_id, include_root_ordinal, requested_start))",
+    "CREATE TABLE checkpoint_transitions (run_id TEXT NOT NULL, sequence INTEGER NOT NULL CHECK (sequence >= 0), include_root_ordinal INTEGER NOT NULL, from_progress TEXT NOT NULL CHECK (from_progress IN ('root_pending','root_committed','descendants_pending','descendants_complete')), to_progress TEXT NOT NULL CHECK (to_progress IN ('root_pending','root_committed','descendants_pending','descendants_complete')), PRIMARY KEY (run_id, sequence), FOREIGN KEY (run_id, include_root_ordinal) REFERENCES include_roots(run_id, include_root_ordinal))",
+    "CREATE TABLE request_budget_reservations (run_id TEXT NOT NULL, reservation_sequence INTEGER NOT NULL CHECK (reservation_sequence >= 0), reserved_at TEXT NOT NULL, PRIMARY KEY (run_id, reservation_sequence), FOREIGN KEY (run_id) REFERENCES crawl_runs(run_id))",
+    "CREATE INDEX idx_inventory_occurrences_run_page ON inventory_occurrences(run_id, page_id)",
+    "CREATE INDEX idx_inventory_windows_run_root ON inventory_windows(run_id, include_root_ordinal, requested_start)",
+    "CREATE INDEX idx_root_progress_incomplete ON root_progress(run_id, descendants_complete, include_root_ordinal)",
+)
 
 
 def _assert_durability_pragmas(conn: sqlite3.Connection) -> None:
@@ -28,7 +121,42 @@ def test_fresh_and_reopen(tmp_path) -> None:
     with sqlite3.connect(tmp_path / module.DB_NAME) as conn:
         assert conn.execute("PRAGMA application_id").fetchone()[0] == module.APPLICATION_ID
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
-        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0] == 9
+        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0] == 10
+        assert set(
+            conn.execute(
+                "SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+            )
+        ) == _EXPECTED_CATALOG_OBJECTS
+        catalog_sql = dict(
+            conn.execute(
+                "SELECT name, sql FROM sqlite_master WHERE name IN "
+                "('crawl_sessions', 'idx_crawl_sessions_run_started', "
+                "'idx_crawl_sessions_one_active')"
+            )
+        )
+        assert catalog_sql == {
+            "crawl_sessions": _CRAWL_SESSIONS_DDL,
+            "idx_crawl_sessions_run_started": _CRAWL_SESSIONS_RUN_STARTED_INDEX_DDL,
+            "idx_crawl_sessions_one_active": _CRAWL_SESSIONS_ONE_ACTIVE_INDEX_DDL,
+        }
+        assert tuple(
+            (row[1], row[2].upper(), row[3], row[5])
+            for row in conn.execute("PRAGMA table_info(crawl_sessions)")
+        ) == _CRAWL_SESSIONS_TABLE_LAYOUT
+        assert tuple(
+            tuple(row[:8]) for row in conn.execute("PRAGMA foreign_key_list(crawl_sessions)")
+        ) == _CRAWL_SESSIONS_FOREIGN_KEY_LAYOUT
+        assert tuple(
+            tuple(row[:5]) for row in conn.execute("PRAGMA index_list(crawl_sessions)")
+        ) == _CRAWL_SESSIONS_INDEX_LAYOUT
+        for name, expected_layout in _CRAWL_SESSIONS_INDEX_XINFO.items():
+            assert tuple(
+                tuple(row[:6]) for row in conn.execute(f"PRAGMA index_xinfo({name})")
+            ) == expected_layout
+        assert module._normalized_sql(catalog_sql["idx_crawl_sessions_one_active"]) == (
+            "CREATE UNIQUE INDEX idx_crawl_sessions_one_active ON crawl_sessions(run_id) "
+            "WHERE status = 'active'"
+        )
     assert module._preflight(tmp_path / module.DB_NAME).absent is False
 
 
@@ -240,6 +368,179 @@ def test_secret_failure_does_not_retain_exception_context(tmp_path, monkeypatch)
 def _valid_database(path) -> None:
     with sqlite3.connect(path) as conn:
         module._initialize_or_validate_connection(conn, initialize=True)
+
+
+def _new_session_id() -> str:
+    session_id = str(uuid.uuid4())
+    assert CrawlSessionId(session_id).value == session_id
+    return session_id
+
+
+def _insert_run(conn: sqlite3.Connection, run_id: str = "run") -> str:
+    conn.execute(
+        "INSERT INTO crawl_runs VALUES (?, ?, ?, 'incomplete', 'pending', ?)",
+        (run_id, f"generation-{run_id}", "digest", "2026-08-01T00:00:00.000Z"),
+    )
+    return run_id
+
+
+def _insert_session(
+    conn: sqlite3.Connection,
+    session_id: str | None,
+    run_id: str,
+    status: str,
+    started_at: str | None = "2026-08-01T00:00:00.000Z",
+    ended_at: str | None = None,
+    outcome_status: str | None = None,
+    outcome_reason: str | None = None,
+) -> None:
+    conn.execute(
+        "INSERT INTO crawl_sessions VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (session_id, run_id, status, started_at, ended_at, outcome_status, outcome_reason),
+    )
+
+
+def test_crawl_sessions_preserve_historical_terminal_sessions(tmp_path) -> None:
+    db = tmp_path / module.DB_NAME
+    _valid_database(db)
+    with sqlite3.connect(db) as conn:
+        _insert_run(conn)
+        _insert_session(
+            conn, _new_session_id(), "run", "completed",
+            ended_at="2026-08-01T00:00:01.000Z",
+            outcome_status="completed", outcome_reason="completed",
+        )
+        _insert_session(
+            conn, _new_session_id(), "run", "interrupted",
+            ended_at="2026-08-01T00:00:02.000Z",
+            outcome_status="interrupted", outcome_reason="process_interrupted",
+        )
+        _insert_session(
+            conn, _new_session_id(), "run", "paused",
+            ended_at="2026-08-01T00:00:03.000Z",
+            outcome_status="paused", outcome_reason="controlled_checkpoint_stop",
+        )
+        assert conn.execute(
+            "SELECT status FROM crawl_sessions WHERE run_id=? ORDER BY started_at", ("run",)
+        ).fetchall() == [("completed",), ("interrupted",), ("paused",)]
+
+
+def test_crawl_sessions_reject_unknown_run_without_partial_row(tmp_path) -> None:
+    db = tmp_path / module.DB_NAME
+    _valid_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_session(conn, _new_session_id(), "missing", "active")
+        assert conn.execute("SELECT count(*) FROM crawl_sessions").fetchone() == (0,)
+
+
+def test_crawl_sessions_reject_null_session_id_without_partial_row(tmp_path) -> None:
+    db = tmp_path / module.DB_NAME
+    _valid_database(db)
+    with sqlite3.connect(db) as conn:
+        _insert_run(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_session(conn, None, "run", "active")
+        assert conn.execute("SELECT count(*) FROM crawl_sessions").fetchone() == (0,)
+
+
+def test_crawl_sessions_allow_only_one_active_session_per_run(tmp_path) -> None:
+    db = tmp_path / module.DB_NAME
+    _valid_database(db)
+    with sqlite3.connect(db) as conn:
+        _insert_run(conn)
+        _insert_session(conn, _new_session_id(), "run", "active")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_session(conn, _new_session_id(), "run", "active")
+        conn.commit()
+        assert conn.execute(
+            "SELECT count(*) FROM crawl_sessions WHERE run_id=? AND status='active'", ("run",)
+        ).fetchone() == (1,)
+
+
+@pytest.mark.parametrize(
+    ("status", "started_at", "ended_at", "outcome_status", "outcome_reason"),
+    [
+        ("unknown", "2026-08-01T00:00:00.000Z", None, None, None),
+        ("active", None, None, None, None),
+        ("active", "2026-08-01T00:00:00.00Z", None, None, None),
+        ("active", "2026-08-01T00:00:00.000", None, None, None),
+        ("active", "2026-13-01T00:00:00.000Z", None, None, None),
+        ("completed", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:01.000+00:00", "completed", "completed"),
+        ("completed", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:01.000", "completed", "completed"),
+        ("active", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:01.000Z", None, None),
+        ("active", "2026-08-01T00:00:00.000Z", None, "completed", None),
+        ("completed", "2026-08-01T00:00:00.000Z", None, "completed", "completed"),
+        ("completed", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:01.000Z", None, None),
+        ("completed", "2026-08-01T00:00:00.000Z", "2026-13-01T00:00:01.000Z", "completed", "completed"),
+        ("completed", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:01.000Z", "interrupted", "process_interrupted"),
+        ("paused", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:01.000Z", "arbitrary", "runtime data"),
+    ],
+)
+def test_crawl_sessions_reject_invalid_lifecycle_rows(
+    tmp_path, status, started_at, ended_at, outcome_status, outcome_reason
+) -> None:
+    db = tmp_path / module.DB_NAME
+    _valid_database(db)
+    with sqlite3.connect(db) as conn:
+        _insert_run(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_session(
+                conn, _new_session_id(), "run", status, started_at, ended_at,
+                outcome_status, outcome_reason,
+            )
+        assert conn.execute("SELECT count(*) FROM crawl_sessions").fetchone() == (0,)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["missing_table", "missing_run_started_index", "missing_active_index", "foreign_key", "ddl", "predicate", "extra_object"],
+)
+def test_preflight_rejects_tampered_session_catalog_without_write(tmp_path, kind: str) -> None:
+    db = tmp_path / module.DB_NAME
+    _valid_database(db)
+    with sqlite3.connect(db) as conn:
+        if kind == "missing_table":
+            conn.execute("DROP TABLE crawl_sessions")
+        elif kind == "missing_run_started_index":
+            conn.execute("DROP INDEX idx_crawl_sessions_run_started")
+        elif kind == "missing_active_index":
+            conn.execute("DROP INDEX idx_crawl_sessions_one_active")
+        elif kind == "extra_object":
+            conn.execute("CREATE INDEX idx_crawl_sessions_unexpected ON crawl_sessions(status)")
+        else:
+            name = "crawl_sessions" if kind in {"foreign_key", "ddl"} else "idx_crawl_sessions_one_active"
+            original = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name=?", (name,)
+            ).fetchone()[0]
+            if kind == "foreign_key":
+                tampered = original.replace("REFERENCES crawl_runs(run_id)", "REFERENCES crawl_runs(generation_id)")
+            elif kind == "ddl":
+                tampered = original.replace("'paused'", "'stopped'", 1)
+            else:
+                tampered = original.replace("WHERE status = 'active'", "WHERE status = 'completed'")
+            conn.execute("PRAGMA writable_schema=ON")
+            conn.execute("UPDATE sqlite_master SET sql=? WHERE name=?", (tampered, name))
+            conn.execute("PRAGMA writable_schema=OFF")
+    before = db.read_bytes()
+    with pytest.raises(CheckpointStateError):
+        module._preflight(db)
+    assert db.read_bytes() == before
+
+
+def test_preflight_rejects_pre_correction_v1_catalog_without_migration(tmp_path) -> None:
+    db = tmp_path / module.DB_NAME
+    with sqlite3.connect(db) as conn:
+        conn.execute(f"PRAGMA application_id={module.APPLICATION_ID}")
+        conn.execute(f"PRAGMA user_version={module.SCHEMA_VERSION}")
+        for ddl in _PRE_CORRECTION_V1_DDL:
+            conn.execute(ddl)
+        conn.execute("INSERT INTO checkpoint_metadata VALUES (1, ?, 1)", (module.SCHEMA_IDENTITY,))
+    before = db.read_bytes()
+    with pytest.raises(CheckpointStateError):
+        module._preflight(db)
+    assert db.read_bytes() == before
 
 
 @pytest.mark.parametrize(
