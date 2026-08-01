@@ -24,4 +24,10 @@ __all__ = [
     "TombstoneIdGenerator",
     "WikiStructureParseError",
     "WikiStructureParser",
+    "OccurrenceResolutionConflict",
+    "resolve_inventory_occurrences",
+    "resolve",
 ]
+from knowledgenexus.foundation.domain.rules.confluence_inventory_occurrence_resolver import (
+    OccurrenceResolutionConflict, resolve_inventory_occurrences, resolve,
+)
