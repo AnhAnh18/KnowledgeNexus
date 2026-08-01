@@ -7,6 +7,9 @@ from collections.abc import Iterable, Iterator, Mapping
 from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
     ConfluencePageMetadata,
 )
+from knowledgenexus.foundation.domain.models.confluence_inventory_window import (
+    ConfluenceInventoryWindow,
+)
 from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_metadata_mapper import (  # noqa: E501
     ConfluenceDataCenterPageMetadataMapper,
     ConfluenceDataCenterPayloadError,
@@ -69,6 +72,70 @@ class ConfluenceDataCenterInventoryAdapter:
             page_size=checked_page_size,
         )
 
+    def fetch_root_metadata(
+        self,
+        *,
+        space_key: str,
+        root_page_id: str,
+    ) -> ConfluencePageMetadata:
+        checked_space_key = _require_space_key(space_key)
+        checked_root_page_id = _require_root_page_id(root_page_id)
+        root_payload = self._get_root_payload(root_page_id=checked_root_page_id)
+        _require_matching_root_space(
+            payload=root_payload,
+            expected_space_key=checked_space_key,
+        )
+        return ConfluenceDataCenterPageMetadataMapper.map_root(
+            payload=root_payload,
+            expected_root_page_id=checked_root_page_id,
+            expected_space_key=checked_space_key,
+        )
+
+    def fetch_descendants_window(
+        self,
+        *,
+        space_key: str,
+        root_page_id: str,
+        start: int,
+        page_size: int,
+    ) -> ConfluenceInventoryWindow:
+        checked_space_key = _require_space_key(space_key)
+        checked_root_page_id = _require_root_page_id(root_page_id)
+        checked_start = _require_start(start)
+        checked_page_size = _require_page_size(page_size)
+        cql = (
+            f'space="{checked_space_key}" and ancestor={checked_root_page_id} and type=page'
+        )
+        try:
+            payload = self._transport.get_json(
+                path=_SEARCH_PATH,
+                query={
+                    "cql": cql,
+                    "expand": _SEARCH_EXPAND,
+                    "limit": str(checked_page_size),
+                    "start": str(checked_start),
+                },
+            )
+        except ConfluenceHttpError as exc:
+            raise ConfluenceDataCenterRequestError(
+                f"search window failed at start {checked_start}: {exc}"
+            ) from exc
+
+        page = ConfluenceDataCenterPageMetadataMapper.parse_search_page(
+            payload=payload,
+            expected_start=checked_start,
+            expected_limit=checked_page_size,
+            selected_root_page_id=checked_root_page_id,
+            expected_space_key=checked_space_key,
+        )
+        return ConfluenceInventoryWindow(
+            items=page.items,
+            start=page.start,
+            limit=page.limit,
+            size=page.size,
+            total_size=page.total_size,
+        )
+
     def _iter_page_metadata(
         self,
         *,
@@ -76,15 +143,9 @@ class ConfluenceDataCenterInventoryAdapter:
         root_page_id: str,
         page_size: int,
     ) -> Iterator[ConfluencePageMetadata]:
-        root_payload = self._get_root_payload(root_page_id=root_page_id)
-        _require_matching_root_space(
-            payload=root_payload,
-            expected_space_key=space_key,
-        )
-        yield ConfluenceDataCenterPageMetadataMapper.map_root(
-            payload=root_payload,
-            expected_root_page_id=root_page_id,
-            expected_space_key=space_key,
+        yield self.fetch_root_metadata(
+            space_key=space_key,
+            root_page_id=root_page_id,
         )
         yield from self._iter_descendants(
             space_key=space_key,
@@ -117,40 +178,21 @@ class ConfluenceDataCenterInventoryAdapter:
         root_page_id: str,
         page_size: int,
     ) -> Iterator[ConfluencePageMetadata]:
-        cql = (
-            f'space="{space_key}" and ancestor={root_page_id} and type=page'
-        )
         start = 0
 
         for _ in range(self._max_search_pages):
-            try:
-                payload = self._transport.get_json(
-                    path=_SEARCH_PATH,
-                    query={
-                        "cql": cql,
-                        "expand": _SEARCH_EXPAND,
-                        "limit": str(page_size),
-                        "start": str(start),
-                    },
-                )
-            except ConfluenceHttpError as exc:
-                raise ConfluenceDataCenterRequestError(
-                    f"search window failed at start {start}: {exc}"
-                ) from exc
-
-            page = ConfluenceDataCenterPageMetadataMapper.parse_search_page(
-                payload=payload,
-                expected_start=start,
-                expected_limit=page_size,
-                selected_root_page_id=root_page_id,
-                expected_space_key=space_key,
+            window = self.fetch_descendants_window(
+                space_key=space_key,
+                root_page_id=root_page_id,
+                start=start,
+                page_size=page_size,
             )
-            yield from page.items
-            if page.is_terminal:
+            yield from window.items
+            if window.is_terminal:
                 return
 
-            next_start = page.start + page.size
-            if next_start <= page.start:
+            next_start = window.next_start
+            if next_start is None or next_start <= start:
                 raise ConfluenceDataCenterPayloadError(
                     "search page response did not advance pagination"
                 )
@@ -182,6 +224,14 @@ def _require_page_size(value: object) -> int:
         raise TypeError("page_size expects an integer")
     if value <= 0:
         raise ValueError("page_size must be positive")
+    return value
+
+
+def _require_start(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("start expects an integer")
+    if value < 0:
+        raise ValueError("start must be non-negative")
     return value
 
 

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import copy
 import json
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Mapping
+from email.message import Message
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +19,19 @@ from knowledgenexus.foundation.domain.models.confluence_source_config import (
     ConfluenceIncludeRoot,
     ConfluenceSourceConfig,
 )
+from knowledgenexus.foundation.domain.models.confluence_inventory_window import (
+    ConfluenceInventoryWindow,
+)
 from knowledgenexus.foundation.infrastructure.confluence import (
     ConfluenceDataCenterInventoryAdapter,
     ConfluenceDataCenterPaginationError,
     ConfluenceDataCenterPayloadError,
     ConfluenceDataCenterRequestError,
     ConfluenceHttpError,
+    UrllibConfluenceHttpTransport,
+)
+from knowledgenexus.foundation.infrastructure.confluence import (
+    confluence_http_transport as transport_module,
 )
 from knowledgenexus.foundation.infrastructure.exporters.confluence_inventory_report_writer import (
     ConfluenceInventoryReportWriter,
@@ -72,6 +82,21 @@ class RecordingTransport:
         copied_query = dict(query)
         self.requests.append({"path": path, "query": copied_query})
         return self._handler(path, copied_query)
+
+
+class _HttpErrorOpener:
+    def __init__(self, error: urllib.error.HTTPError) -> None:
+        self.calls: list[tuple[urllib.request.Request, float]] = []
+        self._error = error
+
+    def open(
+        self,
+        request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> object:
+        self.calls.append((request, timeout))
+        raise self._error
 
 
 def test_iteration_is_lazy_and_yields_root_before_descendants() -> None:
@@ -150,6 +175,161 @@ def test_root_is_strictly_verified_and_normalized() -> None:
     assert root.ancestor_titles == ()
     assert root.labels == ()
     assert root.attachment_count is None
+
+
+def test_direct_window_seams_make_one_request_and_normalize_metadata() -> None:
+    transport = _fixture_transport()
+    adapter = _adapter(transport)
+
+    root = adapter.fetch_root_metadata(
+        space_key=SPACE_KEY,
+        root_page_id=ROOT_PAGE_ID,
+    )
+    first = adapter.fetch_descendants_window(
+        space_key=SPACE_KEY,
+        root_page_id=ROOT_PAGE_ID,
+        start=0,
+        page_size=PAGE_SIZE,
+    )
+    terminal = adapter.fetch_descendants_window(
+        space_key=SPACE_KEY,
+        root_page_id=ROOT_PAGE_ID,
+        start=2,
+        page_size=PAGE_SIZE,
+    )
+
+    assert root.page_id == ROOT_PAGE_ID
+    assert isinstance(first, ConfluenceInventoryWindow)
+    assert [item.page_id for item in first.items] == [DIRECT_CHILD_ID, NESTED_CHILD_ID]
+    assert first.next_start == 2
+    assert first.is_terminal is False
+    assert [item.page_id for item in terminal.items] == [TERMINAL_CHILD_ID]
+    assert terminal.next_start is None
+    assert terminal.is_terminal is True
+    assert len(transport.requests) == 3
+    assert transport.requests[1]["query"]["start"] == "0"
+    assert transport.requests[2]["query"]["start"] == "2"
+
+
+@pytest.mark.parametrize("start", [-1, True, 1.0, "1"])
+def test_direct_window_rejects_invalid_start_before_transport(start: object) -> None:
+    transport = _fixture_transport()
+    with pytest.raises((TypeError, ValueError)):
+        _adapter(transport).fetch_descendants_window(
+            space_key=SPACE_KEY,
+            root_page_id=ROOT_PAGE_ID,
+            start=start,  # type: ignore[arg-type]
+            page_size=PAGE_SIZE,
+        )
+    assert transport.requests == []
+
+
+@pytest.mark.parametrize(
+    "operation,space_key,root_page_id,start,page_size",
+    (
+        ("root", 'SPACE"', ROOT_PAGE_ID, None, None),
+        ("root", SPACE_KEY, "not-a-page-id", None, None),
+        ("window", 'SPACE"', ROOT_PAGE_ID, 0, PAGE_SIZE),
+        ("window", SPACE_KEY, "not-a-page-id", 0, PAGE_SIZE),
+        ("window", SPACE_KEY, ROOT_PAGE_ID, 0, True),
+        ("window", SPACE_KEY, ROOT_PAGE_ID, 0, 0),
+    ),
+)
+def test_direct_seams_reject_invalid_inputs_before_transport(
+    operation: str,
+    space_key: str,
+    root_page_id: str,
+    start: int | None,
+    page_size: object,
+) -> None:
+    transport = _fixture_transport()
+    adapter = _adapter(transport)
+
+    with pytest.raises((TypeError, ValueError)):
+        if operation == "root":
+            adapter.fetch_root_metadata(
+                space_key=space_key,
+                root_page_id=root_page_id,
+            )
+        else:
+            adapter.fetch_descendants_window(
+                space_key=space_key,
+                root_page_id=root_page_id,
+                start=start if start is not None else 0,
+                page_size=page_size,  # type: ignore[arg-type]
+            )
+
+    assert transport.requests == []
+
+
+def test_direct_seams_preserve_operation_scoped_http_errors() -> None:
+    def handler(path: str, query: dict[str, str]) -> Mapping[str, object]:
+        raise ConfluenceHttpError("Confluence GET failed")
+
+    root_transport = RecordingTransport(handler)
+    with pytest.raises(ConfluenceDataCenterRequestError, match="root fetch failed"):
+        _adapter(root_transport).fetch_root_metadata(
+            space_key=SPACE_KEY,
+            root_page_id=ROOT_PAGE_ID,
+        )
+
+    window_transport = RecordingTransport(handler)
+    with pytest.raises(
+        ConfluenceDataCenterRequestError,
+        match="search window failed at start 0",
+    ):
+        _adapter(window_transport).fetch_descendants_window(
+            space_key=SPACE_KEY,
+            root_page_id=ROOT_PAGE_ID,
+            start=0,
+            page_size=PAGE_SIZE,
+        )
+
+
+@pytest.mark.parametrize("operation", ("root", "window"))
+def test_direct_seams_wrap_real_urllib_http_errors_without_leaking_identifiers(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    secret = "adapter-test-secret"
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/confluence/1000?token=adapter-test-secret",
+        503,
+        "Service Unavailable",
+        hdrs=Message(),
+        fp=None,
+    )
+    opener = _HttpErrorOpener(failure)
+
+    def build_opener(*handlers: object) -> _HttpErrorOpener:
+        return opener
+
+    monkeypatch.setattr(transport_module.urllib.request, "build_opener", build_opener)
+    transport = UrllibConfluenceHttpTransport(
+        base_url="https://fixture.invalid/confluence",
+        personal_access_token=secret,
+    )
+    adapter = _adapter(transport)  # type: ignore[arg-type]
+
+    with pytest.raises(ConfluenceDataCenterRequestError) as exc_info:
+        if operation == "root":
+            adapter.fetch_root_metadata(
+                space_key=SPACE_KEY,
+                root_page_id=ROOT_PAGE_ID,
+            )
+        else:
+            adapter.fetch_descendants_window(
+                space_key=SPACE_KEY,
+                root_page_id=ROOT_PAGE_ID,
+                start=0,
+                page_size=PAGE_SIZE,
+            )
+
+    message = str(exc_info.value)
+    assert "503" in message
+    assert secret not in message
+    assert ROOT_PAGE_ID not in message
+    assert len(opener.calls) == 1
 
 
 @pytest.mark.parametrize(

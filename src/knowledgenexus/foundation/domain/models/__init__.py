@@ -75,6 +75,9 @@ from knowledgenexus.foundation.domain.models.confluence_crawl_fingerprint import
     ConfluenceCrawlFingerprintBuilder,
     build_confluence_crawl_fingerprint,
 )
+from knowledgenexus.foundation.domain.models.confluence_inventory_window import (
+    ConfluenceInventoryWindow,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -122,4 +125,5 @@ __all__ = [
     "ConfluenceCrawlFingerprint",
     "ConfluenceCrawlFingerprintBuilder",
     "build_confluence_crawl_fingerprint",
+    "ConfluenceInventoryWindow",
 ]

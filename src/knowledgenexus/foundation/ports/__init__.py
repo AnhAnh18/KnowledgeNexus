@@ -1,6 +1,9 @@
 from knowledgenexus.foundation.ports.confluence_inventory_port import (
     ConfluenceInventoryPort,
 )
+from knowledgenexus.foundation.ports.confluence_inventory_window_port import (
+    ConfluenceInventoryWindowPort,
+)
 from knowledgenexus.foundation.ports.confluence_page_fetch_port import (
     ConfluencePageFetchError,
     ConfluencePageFetchPort,
@@ -36,6 +39,7 @@ from knowledgenexus.foundation.ports.tokenizer_port import (
 
 __all__ = [
     "ConfluenceInventoryPort",
+    "ConfluenceInventoryWindowPort",
     "ConfluencePageFetchError",
     "ConfluencePageFetchPort",
     "ConfluencePageTooLargeError",
