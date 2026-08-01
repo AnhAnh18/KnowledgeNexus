@@ -70,6 +70,11 @@ from knowledgenexus.foundation.domain.models.confluence_acl_composition import (
     ConfluenceAclCompositionResult,
     ConfluenceAclRestrictionAncestryError,
 )
+from knowledgenexus.foundation.domain.models.confluence_crawl_fingerprint import (
+    ConfluenceCrawlFingerprint,
+    ConfluenceCrawlFingerprintBuilder,
+    build_confluence_crawl_fingerprint,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -114,4 +119,7 @@ __all__ = [
     "ConfluenceAclCompositionAcceptanceError",
     "ConfluenceAclCompositionResult",
     "ConfluenceAclRestrictionAncestryError",
+    "ConfluenceCrawlFingerprint",
+    "ConfluenceCrawlFingerprintBuilder",
+    "build_confluence_crawl_fingerprint",
 ]
