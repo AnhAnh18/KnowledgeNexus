@@ -19,6 +19,12 @@ from knowledgenexus.foundation.application.use_cases.normalize_confluence_page i
 from knowledgenexus.foundation.application.use_cases.materialize_confluence_acl import (
     MaterializeConfluenceAcl,
 )
+from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_inventory import (
+    DurableInventoryRunResult,
+    DurableInventoryTransport,
+    DurableInventoryTransportFactory,
+    ExecuteDurableConfluenceInventory,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -30,4 +36,8 @@ __all__ = [
     "ConfluencePageNormalizationError",
     "NormalizeConfluencePage",
     "MaterializeConfluenceAcl",
+    "DurableInventoryRunResult",
+    "DurableInventoryTransport",
+    "DurableInventoryTransportFactory",
+    "ExecuteDurableConfluenceInventory",
 ]
