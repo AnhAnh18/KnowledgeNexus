@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, Protocol
@@ -173,4 +173,6 @@ class ConfluenceCheckpointStatePort(Protocol):
 
     def stream_inventory_occurrences(
         self,
-    ) -> Iterable[InventoryRootCommit | InventoryOccurrence]: ...
+        *,
+        batch_size: int = 256,
+    ) -> Iterator[InventoryRootCommit | InventoryOccurrence]: ...

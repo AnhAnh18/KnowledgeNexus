@@ -49,6 +49,7 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     InventoryWorkItem,
 )
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
+    InventoryOccurrence,
     InventoryWindowCommit,
 )
 
@@ -103,8 +104,10 @@ class _RunActivated:
     ) -> CheckpointCommitResult | CheckpointOperationFailure:
         return self._state.commit_inventory_window(command)
 
-    def stream_inventory_occurrences(self):
-        return self._state.stream_inventory_occurrences()
+    def stream_inventory_occurrences(
+        self, *, batch_size: int = 256
+    ) -> Iterator[InventoryRootCommit | InventoryOccurrence]:
+        return self._state.stream_inventory_occurrences(batch_size=batch_size)
 
     def _invalidate(self) -> None:
         self._state._invalidate()

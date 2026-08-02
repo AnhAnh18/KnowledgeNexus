@@ -19,6 +19,44 @@ def test_nested_roots_are_order_independent_and_select_longest_contextual_parent
     second = resolve_inventory_occurrences((long, short), include_root_ids=ROOTS.root_ids)
     assert first == second and first[0].parent_page_id == "nested"
 
+
+def test_three_nested_roots_and_reversed_root_configuration_are_equivalent():
+    roots = CanonicalIncludeRoots(("outer", "middle", "inner"))
+
+    def occurrence(root_id, path, titles):
+        metadata = _meta(path, titles)
+        ordinal = roots.ordinal_for(root_id)
+        return InventoryOccurrence(
+            RUN,
+            ordinal,
+            root_id,
+            0,
+            ordinal,
+            metadata.page_id,
+            metadata,
+            roots,
+        )
+
+    outer = occurrence(
+        "outer",
+        ("outer", "middle", "inner"),
+        ("Outer", "Middle", "Inner"),
+    )
+    middle = occurrence("middle", ("middle", "inner"), ("Middle", "Inner"))
+    inner = occurrence("inner", ("inner",), ("Inner",))
+
+    forward = resolve_inventory_occurrences(
+        (outer, middle, inner),
+        include_root_ids=("outer", "middle", "inner"),
+    )
+    reversed_inputs = resolve_inventory_occurrences(
+        (inner, outer, middle),
+        include_root_ids=("inner", "outer", "middle"),
+    )
+    assert forward == reversed_inputs
+    assert forward[0].ancestor_page_ids == ("outer", "middle", "inner")
+    assert forward[0].parent_page_id == "inner"
+
 def test_empty_path_root_and_nested_path_are_compatible_and_longest_scope_wins():
     root = InventoryRootCommit(RUN, 0, "nested", ConfluencePageMetadata("nested", "Page", "S", updated_at="t", source_version="v", labels=("a",), attachment_count=1), ROOTS)
     nested_meta = _meta(("root", "nested"), ("Root", "Nested"), page_id="nested")

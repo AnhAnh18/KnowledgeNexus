@@ -8,6 +8,7 @@ import pytest
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     InventoryRootCommit,
+    ResumeExplicitRunId,
     StartNewRun,
 )
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
@@ -182,6 +183,42 @@ def test_root_and_terminal_window_replay_is_idempotent_and_ordered(tmp_path) -> 
         ]
 
 
+def test_inventory_readback_is_bounded_and_root_before_window_ordered(tmp_path) -> None:
+    with _start(tmp_path, roots=("b", "a")) as activation:
+        for root_id in activation.snapshot.include_roots.root_ids:
+            activation.load_next_inventory_work()
+            activation.commit_root_occurrence(_root_commit(activation, root_id))
+            activation.load_next_inventory_work()
+            activation.commit_inventory_window(
+                _window_commit(activation, 0, (f"{root_id}-1",), 2, root_id)
+            )
+            activation.load_next_inventory_work()
+            activation.commit_inventory_window(
+                _window_commit(activation, 1, (f"{root_id}-2",), 2, root_id)
+            )
+
+        facts = tuple(activation.stream_inventory_occurrences(batch_size=1))
+
+    assert [fact.metadata.page_id for fact in facts] == [
+        "a",
+        "a-1",
+        "a-2",
+        "b",
+        "b-1",
+        "b-2",
+    ]
+
+
+def test_inventory_readback_rejects_invalid_batch_and_stale_iterator(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        with pytest.raises(CheckpointStateError):
+            activation.stream_inventory_occurrences(batch_size=0)
+        stream = activation.stream_inventory_occurrences(batch_size=1)
+
+    with pytest.raises(CheckpointStateError):
+        next(stream)
+
+
 def test_nonterminal_cursor_and_multi_root_progress_are_durable(tmp_path) -> None:
     with _start(tmp_path, roots=("b", "a")) as activation:
         for root_index, root_id in enumerate(activation.snapshot.include_roots.root_ids):
@@ -272,6 +309,42 @@ def test_malformed_terminal_cursor_is_rejected_on_resume(tmp_path) -> None:
         with _register_checkpoint_run(
             _request(tmp_path),
             uuid4=_ids("223e4567-e89b-42d3-a456-426614174000"),
+            utc_now=_clock,
+        ):
+            pass
+
+
+@pytest.mark.parametrize(
+    "tamper_sql",
+    (
+        "UPDATE inventory_occurrences SET ancestor_page_ids_json='not-json'",
+        "UPDATE inventory_occurrences SET item_ordinal=3",
+        "DELETE FROM inventory_occurrences",
+        "DELETE FROM root_occurrences",
+        "UPDATE checkpoint_transitions SET to_progress='descendants_pending'",
+        "UPDATE crawl_runs SET inventory_phase='pending'",
+    ),
+)
+def test_resume_rejects_tampered_durable_inventory_facts(tmp_path, tamper_sql) -> None:
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(_window_commit(activation, 0, ("child",), 1))
+        run_id = activation.snapshot.run_id
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        workspace._mutate(
+            lambda transaction: transaction._execute(tamper_sql)
+        )
+
+    request = replace(
+        _request(tmp_path), operation=ResumeExplicitRunId(run_id)
+    )
+    with pytest.raises(CheckpointStateError):
+        with _register_checkpoint_run(
+            request,
+            uuid4=_ids("223e4567-e89b-42d3-a456-426614174001"),
             utc_now=_clock,
         ):
             pass

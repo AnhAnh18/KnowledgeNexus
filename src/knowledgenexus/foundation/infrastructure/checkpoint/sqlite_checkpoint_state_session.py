@@ -82,18 +82,33 @@ def _metadata_from_values(row: tuple[object, ...]) -> ConfluencePageMetadata:
     if len(row) != 10:
         raise ValueError("invalid durable metadata")
     page_id, title, space_key, parent, updated, source, ancestor_ids, ancestor_titles, labels, attachments = row
-    return ConfluencePageMetadata(
+    decoded_ancestor_ids = _decode_string_tuple(ancestor_ids)
+    decoded_ancestor_titles = _decode_string_tuple(ancestor_titles)
+    decoded_labels = _decode_string_tuple(labels)
+    if len(decoded_ancestor_ids) != len(decoded_ancestor_titles):
+        raise ValueError("invalid durable metadata")
+    if decoded_ancestor_ids and parent != decoded_ancestor_ids[-1]:
+        raise ValueError("invalid durable metadata")
+    if not decoded_ancestor_ids and parent is not None:
+        raise ValueError("invalid durable metadata")
+    metadata = ConfluencePageMetadata(
         page_id,
         title,
         space_key,
         parent,
-        _decode_string_tuple(ancestor_ids),
-        _decode_string_tuple(ancestor_titles),
+        decoded_ancestor_ids,
+        decoded_ancestor_titles,
         updated,
         source,
-        _decode_string_tuple(labels),
+        decoded_labels,
         attachments,
     )
+    # Stored arrays must already be canonical; readback never repairs data.
+    if metadata.ancestor_page_ids != decoded_ancestor_ids or metadata.ancestor_titles != decoded_ancestor_titles:
+        raise ValueError("invalid durable metadata")
+    if metadata.labels != decoded_labels:
+        raise ValueError("invalid durable metadata")
+    return metadata
 
 
 def _transition(
@@ -222,12 +237,17 @@ def _read_window_commit(
         or type(terminal) is not int
         or stored_requested != requested_start
         or observed_start != requested_start
+        or requested_start < 0
+        or observed_start < 0
         or response_size < 0
         or response_size > page_size
+        or total_size < 0
+        or next_start < 0
         or total_size < observed_start + response_size
         or next_start != observed_start + response_size
         or terminal not in (0, 1)
         or (terminal == 1) != (next_start >= total_size)
+        or (response_size == 0 and terminal == 0)
     ):
         raise ValueError("invalid durable window")
     rows = transaction._fetchall(
@@ -365,8 +385,19 @@ class _CheckpointStateSession:
             or total_window_row[0] > self._limits.max_windows_per_run
         ):
             raise ValueError("inventory window budget exceeded")
-        page_ids = _existing_page_ids(transaction, self._run_id)
-        if len(page_ids) > self._limits.max_pages_per_run:
+        page_count = transaction._fetchone(
+            "SELECT COUNT(*) FROM ("
+            "SELECT page_id FROM root_occurrences WHERE run_id=? "
+            "UNION SELECT page_id FROM inventory_occurrences WHERE run_id=?"
+            ")",
+            (self._run_id.value, self._run_id.value),
+        )
+        if (
+            type(page_count) is not tuple
+            or len(page_count) != 1
+            or type(page_count[0]) is not int
+            or page_count[0] > self._limits.max_pages_per_run
+        ):
             raise ValueError("inventory page budget exceeded")
         orphan_rows = transaction._fetchone(
             "SELECT COUNT(*) FROM inventory_occurrences o "
@@ -387,6 +418,15 @@ class _CheckpointStateSession:
         )
         if orphan_root_rows != (0,):
             raise ValueError("orphan durable roots")
+        orphan_window_rows = transaction._fetchone(
+            "SELECT COUNT(*) FROM inventory_windows w "
+            "LEFT JOIN include_roots i ON i.run_id=w.run_id "
+            "AND i.include_root_ordinal=w.include_root_ordinal "
+            "WHERE w.run_id=? AND i.run_id IS NULL",
+            (self._run_id.value,),
+        )
+        if orphan_window_rows != (0,):
+            raise ValueError("orphan durable windows")
 
         transition_rows = transaction._fetchall(
             "SELECT sequence,include_root_ordinal,from_progress,to_progress "
@@ -400,11 +440,18 @@ class _CheckpointStateSession:
             if type(ordinal) is not int or ordinal < 0 or ordinal >= len(progress):
                 raise ValueError("invalid durable transition")
             try:
-                transitions.append(
-                    (sequence, ordinal, IncludeRootProgress(from_progress), IncludeRootProgress(to_progress))
-                )
+                from_value = IncludeRootProgress(from_progress)
+                to_value = IncludeRootProgress(to_progress)
             except ValueError:
                 raise ValueError("invalid durable transition") from None
+            if (from_value, to_value) not in {
+                (IncludeRootProgress.ROOT_PENDING, IncludeRootProgress.ROOT_COMMITTED),
+                (IncludeRootProgress.ROOT_COMMITTED, IncludeRootProgress.DESCENDANTS_PENDING),
+                (IncludeRootProgress.DESCENDANTS_PENDING, IncludeRootProgress.DESCENDANTS_PENDING),
+                (IncludeRootProgress.DESCENDANTS_PENDING, IncludeRootProgress.DESCENDANTS_COMPLETE),
+            }:
+                raise ValueError("invalid durable transition")
+            transitions.append((sequence, ordinal, from_value, to_value))
 
         for ordinal, root_id in self._include_roots.ordinals:
             root = _read_root_commit(
@@ -875,30 +922,59 @@ class _CheckpointStateSession:
 
         return self._workspace._mutate(operation)
 
-    def stream_inventory_occurrences(self) -> Iterator[InventoryRootCommit | InventoryOccurrence]:
+    def stream_inventory_occurrences(
+        self, *, batch_size: int = 256
+    ) -> Iterator[InventoryRootCommit | InventoryOccurrence]:
         self._require_active()
+        if type(batch_size) is not int or batch_size <= 0:
+            raise CheckpointStateError() from None
+        # Validate the complete durable view before exposing the iterator.
+        self._workspace._mutate(self._validate_inventory)
 
-        def operation(transaction: object):
-            self._validate_inventory(transaction)
-            result: list[InventoryRootCommit | InventoryOccurrence] = []
-            for ordinal, root_id in self._include_roots.ordinals:
-                root = _read_root_commit(
+        def read_root(ordinal: int, root_id: str) -> InventoryRootCommit | None:
+            return self._workspace._mutate(
+                lambda transaction: _read_root_commit(
                     transaction,
                     self._run_id,
                     ordinal,
                     root_id,
                     self._include_roots,
                 )
-                if root is not None:
-                    result.append(root)
-                rows = transaction._fetchall(
-                    "SELECT window_start,item_ordinal,page_id,title,space_key,parent_page_id,"
-                    "updated_at,source_version,ancestor_page_ids_json,ancestor_titles_json,"
-                    "labels_json,attachment_count FROM inventory_occurrences "
-                    "WHERE run_id=? AND include_root_ordinal=? "
-                    "ORDER BY window_start,item_ordinal",
-                    (self._run_id.value, ordinal),
-                )
+            )
+
+        def read_batch(
+            ordinal: int,
+            root_id: str,
+            continuation: tuple[int, int] | None,
+        ) -> list[InventoryOccurrence]:
+            def operation(transaction: object) -> list[InventoryOccurrence]:
+                if continuation is None:
+                    rows = transaction._fetchall(
+                        "SELECT window_start,item_ordinal,page_id,title,space_key,parent_page_id,"
+                        "updated_at,source_version,ancestor_page_ids_json,ancestor_titles_json,"
+                        "labels_json,attachment_count FROM inventory_occurrences "
+                        "WHERE run_id=? AND include_root_ordinal=? "
+                        "ORDER BY window_start,item_ordinal LIMIT ?",
+                        (self._run_id.value, ordinal, batch_size),
+                    )
+                else:
+                    rows = transaction._fetchall(
+                        "SELECT window_start,item_ordinal,page_id,title,space_key,parent_page_id,"
+                        "updated_at,source_version,ancestor_page_ids_json,ancestor_titles_json,"
+                        "labels_json,attachment_count FROM inventory_occurrences "
+                        "WHERE run_id=? AND include_root_ordinal=? "
+                        "AND (window_start>? OR (window_start=? AND item_ordinal>?)) "
+                        "ORDER BY window_start,item_ordinal LIMIT ?",
+                        (
+                            self._run_id.value,
+                            ordinal,
+                            continuation[0],
+                            continuation[0],
+                            continuation[1],
+                            batch_size,
+                        ),
+                    )
+                result: list[InventoryOccurrence] = []
                 for row in rows:
                     if type(row) is not tuple or len(row) != 12:
                         raise ValueError("invalid durable occurrence")
@@ -916,9 +992,43 @@ class _CheckpointStateSession:
                             self._include_roots,
                         )
                     )
-            return tuple(result)
+                return result
 
-        return iter(self._workspace._mutate(operation))
+            return self._workspace._mutate(operation)
+
+        def iterator() -> Iterator[InventoryRootCommit | InventoryOccurrence]:
+            self._require_active()
+            root_index = 0
+            root_emitted = False
+            continuation: tuple[int, int] | None = None
+            batch: list[InventoryOccurrence] = []
+            batch_index = 0
+            while root_index < len(self._include_roots.root_ids):
+                self._require_active()
+                ordinal, root_id = self._include_roots.ordinals[root_index]
+                if not root_emitted:
+                    root_emitted = True
+                    root = read_root(ordinal, root_id)
+                    if root is not None:
+                        self._require_active()
+                        yield root
+                        continue
+                if batch_index >= len(batch):
+                    batch = read_batch(ordinal, root_id, continuation)
+                    batch_index = 0
+                    if not batch:
+                        root_index += 1
+                        root_emitted = False
+                        continuation = None
+                        batch = []
+                        continue
+                occurrence = batch[batch_index]
+                batch_index += 1
+                continuation = (occurrence.window_start, occurrence.item_ordinal)
+                self._require_active()
+                yield occurrence
+
+        return iterator()
 
 
 def _root_transition_for_replay(
