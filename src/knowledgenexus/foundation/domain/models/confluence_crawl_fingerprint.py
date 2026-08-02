@@ -172,6 +172,7 @@ class _EffectiveCrawlInput:
     max_include_roots: int
     inventory_page_size: int
     max_pages_per_run: int
+    max_total_requests_per_run: int
     max_inventory_windows_per_root: int
     max_inventory_windows_per_run: int
 
@@ -455,6 +456,7 @@ def _build_effective_crawl_input(
         max_include_roots=int(profile["max_include_roots"]),
         inventory_page_size=int(profile["inventory_page_size"]),
         max_pages_per_run=int(profile["max_pages_per_run"]),
+        max_total_requests_per_run=int(profile["max_total_requests_per_run"]),
         max_inventory_windows_per_root=int(
             profile["max_inventory_windows_per_root"]
         ),

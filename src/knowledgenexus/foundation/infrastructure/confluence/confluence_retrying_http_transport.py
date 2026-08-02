@@ -23,6 +23,7 @@ from knowledgenexus.foundation.domain.models.confluence_retry_policy import (
     ConfluenceRetryPolicyAction,
     ConfluenceRetryPolicyDecision,
     ConfluenceRetryPolicyProfile,
+    confluence_request_budget_terminate,
 )
 from knowledgenexus.foundation.domain.rules.confluence_retry_policy import (
     evaluate_confluence_http_failure,
@@ -34,6 +35,13 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transpo
     ConfluenceHttpResponse,
     UrllibConfluenceHttpTransport,
     prepare_confluence_get_input,
+)
+from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
+    CheckpointOperationFailure,
+    CheckpointOperationFailureCategory,
+    CheckpointReservationResult,
+    CheckpointStateError,
+    ConfluenceCheckpointStatePort,
 )
 
 
@@ -152,6 +160,7 @@ class RetryingConfluenceHttpTransport:
         monotonic_clock: _Clock,
         sleeper: _Sleeper,
         initial_requests_started_for_run: int = 0,
+        attempt_reserver: ConfluenceCheckpointStatePort | None = None,
     ) -> None:
         if not isinstance(inner, UrllibConfluenceHttpTransport):
             raise TypeError("inner expects a UrllibConfluenceHttpTransport")
@@ -165,6 +174,14 @@ class RetryingConfluenceHttpTransport:
             raise ValueError("initial_requests_started_for_run must be non-negative")
         if initial_requests_started_for_run > profile.retry_policy.max_total_requests_per_run:
             raise ValueError("initial_requests_started_for_run must not exceed the profile request limit")
+        if attempt_reserver is not None and not callable(
+            getattr(attempt_reserver, "reserve_outbound_attempt", None)
+        ):
+            raise TypeError("attempt_reserver must expose reserve_outbound_attempt")
+        if attempt_reserver is not None and not callable(
+            getattr(attempt_reserver, "check_outbound_attempt", None)
+        ):
+            raise TypeError("attempt_reserver must expose check_outbound_attempt")
         self._inner = inner
         self._profile = profile
         self._clock = monotonic_clock
@@ -172,6 +189,8 @@ class RetryingConfluenceHttpTransport:
         self._requests = initial_requests_started_for_run
         self._last_start: int | float | None = None
         self._last_clock: int | float | None = None
+        self._attempt_reserver = attempt_reserver
+        self._reservation_pending = False
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"
@@ -209,12 +228,45 @@ class RetryingConfluenceHttpTransport:
         )
 
     def _attempt_start(self) -> None:
+        if self._attempt_reserver is not None:
+            if not self._reservation_pending:
+                raise CheckpointStateError() from None
+            self._reservation_pending = False
         decision = self._budget()
         if decision.action is ConfluenceRequestBudgetAction.TERMINATE:
             raise ConfluenceRetryExecutionError("Request budget exhausted", decision=decision)
         start = self._observe_clock()
         self._requests += 1
         self._last_start = start
+
+    def _reserve_attempt(self) -> None:
+        if self._attempt_reserver is None:
+            return
+        result = self._attempt_reserver.reserve_outbound_attempt()
+        if isinstance(result, CheckpointOperationFailure):
+            if result.category is CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED:
+                raise ConfluenceRetryExecutionError(
+                    "Request budget exhausted",
+                    decision=confluence_request_budget_terminate(),
+                )
+            raise CheckpointStateError() from None
+        if not isinstance(result, CheckpointReservationResult):
+            raise CheckpointStateError() from None
+        self._reservation_pending = True
+
+    def _preflight_attempt(self) -> None:
+        if self._attempt_reserver is None:
+            return
+        result = self._attempt_reserver.check_outbound_attempt()
+        if isinstance(result, CheckpointOperationFailure):
+            if result.category is CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED:
+                raise ConfluenceRetryExecutionError(
+                    "Request budget exhausted",
+                    decision=confluence_request_budget_terminate(),
+                )
+            raise CheckpointStateError() from None
+        if result is not None:
+            raise CheckpointStateError() from None
 
     def _initial_pacing(self) -> None:
         decision = self._budget()
@@ -336,7 +388,9 @@ class RetryingConfluenceHttpTransport:
 
     def get_json(self, *, path: str, query: Mapping[str, str]) -> Mapping[str, object]:
         request = self._prepare_request(path=path, query=query)
+        self._preflight_attempt()
         self._initial_pacing()
+        self._reserve_attempt()
         attempt, retry_sleep = 1, 0.0
         while True:
             try:
@@ -348,12 +402,16 @@ class RetryingConfluenceHttpTransport:
                 decision = self._retry_after_failure(error=error, attempt=attempt, retry_sleep=retry_sleep)
                 if decision.action is ConfluenceRetryPolicyAction.TERMINATE and decision.outcome_class is not ConfluenceRetryOutcomeClass.BUDGET_EXHAUSTED:
                     raise
+                self._preflight_attempt()
                 retry_sleep = self._sleep_or_raise(decision, metadata=error.metadata, retry_sleep=retry_sleep)
+                self._reserve_attempt()
                 attempt = decision.next_attempt_number or attempt
 
     def get_bytes(self, *, path: str, query: Mapping[str, str]) -> bytes:
         request = self._prepare_request(path=path, query=query)
+        self._preflight_attempt()
         self._initial_pacing()
+        self._reserve_attempt()
         attempt, retry_sleep = 1, 0.0
         while True:
             try:
@@ -364,7 +422,9 @@ class RetryingConfluenceHttpTransport:
                 decision = self._retry_after_failure(error=error, attempt=attempt, retry_sleep=retry_sleep)
                 if decision.action is ConfluenceRetryPolicyAction.TERMINATE and decision.outcome_class is not ConfluenceRetryOutcomeClass.BUDGET_EXHAUSTED:
                     raise
+                self._preflight_attempt()
                 retry_sleep = self._sleep_or_raise(decision, metadata=error.metadata, retry_sleep=retry_sleep)
+                self._reserve_attempt()
                 attempt = decision.next_attempt_number or attempt
 
     def get_response_bytes(self, *, path: str, query: Mapping[str, str]) -> ConfluenceHttpResponse:
@@ -372,7 +432,9 @@ class RetryingConfluenceHttpTransport:
 
     def get_response_bytes_result(self, *, path: str, query: Mapping[str, str]) -> ConfluenceStatusAwareExecutionResult:
         request = self._prepare_request(path=path, query=query)
+        self._preflight_attempt()
         self._initial_pacing()
+        self._reserve_attempt()
         attempt, retry_sleep = 1, 0.0
         while True:
             try:
@@ -385,7 +447,9 @@ class RetryingConfluenceHttpTransport:
                 decision = self._retry_after_failure(error=error, attempt=attempt, retry_sleep=retry_sleep)
                 if decision.action is ConfluenceRetryPolicyAction.TERMINATE and decision.outcome_class is not ConfluenceRetryOutcomeClass.BUDGET_EXHAUSTED:
                     raise
+                self._preflight_attempt()
                 retry_sleep = self._sleep_or_raise(decision, metadata=error.metadata, retry_sleep=retry_sleep)
+                self._reserve_attempt()
                 attempt = decision.next_attempt_number or attempt
                 continue
 
@@ -399,7 +463,9 @@ class RetryingConfluenceHttpTransport:
                 http_status=response.status_code,
                 retry_after=response.retry_after,
             )
+            self._preflight_attempt()
             retry_sleep = self._sleep_or_raise(decision, metadata=metadata, retry_sleep=retry_sleep)
+            self._reserve_attempt()
             attempt = decision.next_attempt_number or attempt
 
 

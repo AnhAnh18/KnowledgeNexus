@@ -632,6 +632,8 @@ def test_activation_scope_retains_lock_and_exposes_only_metadata_and_invalidatio
             "session_id",
             "snapshot",
             "read_schema_state",
+            "check_outbound_attempt",
+            "reserve_outbound_attempt",
             "load_next_inventory_work",
             "commit_root_occurrence",
             "commit_inventory_window",

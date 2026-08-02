@@ -37,6 +37,11 @@ from knowledgenexus.foundation.infrastructure.confluence import (
 from knowledgenexus.foundation.infrastructure.confluence import (
     confluence_retrying_http_transport as retrying_transport_module,
 )
+from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
+    CheckpointOperationFailure,
+    CheckpointOperationFailureCategory,
+    CheckpointReservationResult,
+)
 
 
 BASE_URL = "https://fixture.invalid/confluence"
@@ -93,6 +98,32 @@ class RecordingSleeper:
         self.sleeps.append(duration)
 
 
+class RecordingAttemptReserver:
+    def __init__(self, *, deny: bool = False, deny_after: int | None = None) -> None:
+        self.calls = 0
+        self.deny = deny
+        self.deny_after = deny_after
+
+    def reserve_outbound_attempt(self):
+        self.calls += 1
+        if self.deny or (
+            self.deny_after is not None and self.calls > self.deny_after
+        ):
+            return CheckpointOperationFailure(
+                CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED
+            )
+        return CheckpointReservationResult(self.calls - 1)
+
+    def check_outbound_attempt(self):
+        if self.deny or (
+            self.deny_after is not None and self.calls >= self.deny_after
+        ):
+            return CheckpointOperationFailure(
+                CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED
+            )
+        return None
+
+
 def _make_full_profile_mapping(
     *,
     max_total_requests_per_run: int = 50000,
@@ -133,6 +164,7 @@ def _transport(
     max_response_bytes: int = 1024,
     initial_requests_started: int = 0,
     max_total_requests_per_run: int = 50000,
+    attempt_reserver: object | None = None,
 ) -> tuple[RetryingConfluenceHttpTransport, RecordingOpener, RecordingSleeper, list[int | float]]:
     """Create a retrying transport with injected clock and sleeper."""
     selected_outcome = outcome if outcome is not None else response or FakeResponse()
@@ -174,6 +206,7 @@ def _transport(
             monotonic_clock=monotonic_clock,
             sleeper=sleeper,
             initial_requests_started_for_run=initial_requests_started,
+            attempt_reserver=attempt_reserver,
         )
 
         return transport, opener, sleeper, clock_times
@@ -703,6 +736,41 @@ def test_budget_exhausted_before_first_request() -> None:
 
     assert exc_info.value.decision.action is ConfluenceRequestBudgetAction.TERMINATE
     assert len(opener.calls) == 0
+
+
+def test_checkpoint_reservation_precedes_each_http_attempt() -> None:
+    reserver = RecordingAttemptReserver()
+    transport, opener, sleeper, _ = _transport(
+        response=FakeResponse(status=503), attempt_reserver=reserver
+    )
+
+    result = transport.get_response_bytes_result(
+        path="/rest/api/search", query={"start": "0"}
+    )
+
+    assert result.terminal_decision is not None
+    assert reserver.calls == len(opener.calls) == 4
+    assert len(sleeper.sleeps) == 3
+
+
+def test_checkpoint_reservation_denial_prevents_http_and_retry_sleep() -> None:
+    initial_denial = RecordingAttemptReserver(deny=True)
+    transport, opener, sleeper, _ = _transport(attempt_reserver=initial_denial)
+    with pytest.raises(ConfluenceRetryExecutionError):
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+    assert initial_denial.calls == 0
+    assert opener.calls == []
+    assert sleeper.sleeps == []
+
+    retry_denial = RecordingAttemptReserver(deny_after=1)
+    transport, opener, sleeper, _ = _transport(
+        response=FakeResponse(status=503), attempt_reserver=retry_denial
+    )
+    with pytest.raises(ConfluenceRetryExecutionError):
+        transport.get_json(path="/rest/api/search", query={"start": "0"})
+    assert retry_denial.calls == 1
+    assert len(opener.calls) == 1
+    assert sleeper.sleeps == []
 
 
 # =============================================================================
