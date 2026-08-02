@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
+
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    CommittedCheckpointTransition,
+    CrawlRunId,
+    InventoryRootCommit,
+    _validated_run_id,
+)
+from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
+    InventoryOccurrence,
+    InventoryWindowCommit,
+)
 
 
 class CheckpointFailureCategory(StrEnum):
@@ -30,11 +42,135 @@ class CheckpointSchemaState:
             raise CheckpointStateError() from None
 
 
+class CheckpointOperationFailureCategory(StrEnum):
+    """Stable categories returned by typed checkpoint mutations."""
+
+    STATE_CONFLICT = "state_conflict"
+    INVENTORY_IDENTITY_CONFLICT = "inventory_identity_conflict"
+    INVENTORY_METADATA_CONFLICT = "inventory_metadata_conflict"
+    PAGINATION_INVALID = "pagination_invalid"
+    INVENTORY_PAGE_BUDGET_EXHAUSTED = "inventory_page_budget_exhausted"
+    INVENTORY_WINDOW_LIMIT_EXHAUSTED = "inventory_window_limit_exhausted"
+
+    # Short aliases keep callers from having to duplicate the inventory scope
+    # when a higher-level operation already supplies it.
+    PAGE_BUDGET_EXHAUSTED = INVENTORY_PAGE_BUDGET_EXHAUSTED
+    WINDOW_LIMIT_EXHAUSTED = INVENTORY_WINDOW_LIMIT_EXHAUSTED
+
+
+class CheckpointOperationFailure(Exception):
+    """Sanitized, typed failure for an operation-specific state mutation."""
+
+    __slots__ = ("category",)
+
+    def __init__(self, category: CheckpointOperationFailureCategory) -> None:
+        if not isinstance(category, CheckpointOperationFailureCategory):
+            raise TypeError("category expects CheckpointOperationFailureCategory")
+        self.category = category
+        super().__init__(category.value)
+
+    def __repr__(self) -> str:
+        return f"CheckpointOperationFailure('{self.category.value}')"
+
+
+@dataclass(frozen=True, repr=False)
+class InventoryWorkItem:
+    """The next typed inventory action selected by a checkpoint session."""
+
+    run_id: CrawlRunId
+    include_root_ordinal: int
+    include_root_page_id: str
+    kind: Literal["root", "window"]
+    next_start: int | None
+    page_size: int
+
+    def __post_init__(self) -> None:
+        try:
+            run_id = _validated_run_id(self.run_id)
+        except TypeError:
+            raise TypeError("invalid inventory work") from None
+        except ValueError:
+            raise ValueError("invalid inventory work") from None
+        if type(self.include_root_ordinal) is not int or self.include_root_ordinal < 0:
+            raise ValueError("invalid inventory work")
+        if (
+            type(self.include_root_page_id) is not str
+            or not self.include_root_page_id
+        ):
+            raise ValueError("invalid inventory work")
+        if type(self.kind) is not str or self.kind not in ("root", "window"):
+            raise ValueError("invalid inventory work")
+        if self.kind == "root":
+            if self.next_start is not None:
+                raise ValueError("invalid inventory work")
+        elif type(self.next_start) is not int or self.next_start < 0:
+            raise ValueError("invalid inventory work")
+        if type(self.page_size) is not int or self.page_size <= 0:
+            raise ValueError("invalid inventory work")
+        object.__setattr__(self, "run_id", run_id)
+
+    def __repr__(self) -> str:
+        # Do not echo run/root identities in generic operator output.
+        return (
+            "InventoryWorkItem("
+            f"kind={self.kind!r}, next_start={self.next_start!r}, "
+            f"page_size={self.page_size!r})"
+        )
+
+
+@dataclass(frozen=True, repr=False)
+class CheckpointCommitResult:
+    """The transition committed by a typed mutation and replay status."""
+
+    transition: CommittedCheckpointTransition
+    replayed: bool
+
+    def __post_init__(self) -> None:
+        if type(self.transition) is not CommittedCheckpointTransition:
+            raise TypeError("transition expects CommittedCheckpointTransition")
+        try:
+            transition = CommittedCheckpointTransition(
+                self.transition.run_id,
+                self.transition.include_root_ordinal,
+                self.transition.include_root_page_id,
+                self.transition.from_progress,
+                self.transition.to_progress,
+                self.transition.sequence,
+                self.transition.include_roots,
+            )
+        except Exception:
+            raise ValueError("invalid checkpoint result") from None
+        if type(self.replayed) is not bool:
+            raise TypeError("replayed expects bool")
+        object.__setattr__(self, "transition", transition)
+
+    def __repr__(self) -> str:
+        # The transition contains caller-controlled identities; keep repr safe.
+        return f"CheckpointCommitResult(replayed={self.replayed!r})"
+
+
 class ConfluenceCheckpointStatePort(Protocol):
     """Safe schema seam; later stages use C1-B facts, never untyped dicts.
 
-    Future operations accept and return `CrawlRunId`, `CrawlRunSnapshot`,
-    `InventoryRootCommit`, and `InventoryWindowCommit` directly.
+    Future operations accept and return typed commands/results directly. The
+    protocol intentionally exposes operation-specific methods, never a generic
+    transaction or mutation callback.
     """
 
     def read_schema_state(self) -> CheckpointSchemaState: ...
+
+    def load_next_inventory_work(
+        self,
+    ) -> InventoryWorkItem | CheckpointOperationFailure | None: ...
+
+    def commit_root_occurrence(
+        self, command: InventoryRootCommit
+    ) -> CheckpointCommitResult | CheckpointOperationFailure: ...
+
+    def commit_inventory_window(
+        self, command: InventoryWindowCommit
+    ) -> CheckpointCommitResult | CheckpointOperationFailure: ...
+
+    def stream_inventory_occurrences(
+        self,
+    ) -> Iterable[InventoryRootCommit | InventoryOccurrence]: ...

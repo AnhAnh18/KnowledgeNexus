@@ -11,9 +11,19 @@ import uuid
 import pytest
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    InventoryRootCommit,
     ResumeExplicitRunId,
     ResumeUniqueIncompleteRun,
     StartNewRun,
+)
+from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
+    InventoryWindowCommit,
+)
+from knowledgenexus.foundation.domain.models.confluence_inventory_window import (
+    ConfluenceInventoryWindow,
+)
+from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
+    ConfluencePageMetadata,
 )
 from knowledgenexus.foundation.domain.models.confluence_source_config import (
     ConfluenceIncludeRoot,
@@ -246,49 +256,46 @@ def test_resume_rejects_a_non_uuid_durable_session_id_without_repair(tmp_path) -
 
 
 def test_inventory_complete_resume_does_not_create_a_session(tmp_path) -> None:
-    started = _register_checkpoint_run(
+    with _register_checkpoint_run_context(
         _request(tmp_path, StartNewRun()),
         uuid4=_ids(
             "123e4567-e89b-42d3-a456-426614174000",
             "123e4567-e89b-42d3-a456-426614174001",
         ),
         utc_now=_clock,
-    )
-    assert isinstance(started, _RunActivated)
-
-    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
-        def complete(transaction):
-            transitions = (
-                (0, 0, "root_pending", "root_committed"),
-                (1, 0, "root_committed", "descendants_pending"),
-                (2, 0, "descendants_pending", "descendants_complete"),
-                (3, 1, "root_pending", "root_committed"),
-                (4, 1, "root_committed", "descendants_pending"),
-                (5, 1, "descendants_pending", "descendants_complete"),
+    ) as started:
+        assert isinstance(started, _RunActivated)
+        roots = started.snapshot.include_roots
+        for work in iter(started.load_next_inventory_work, None):
+            assert work is not None and work.kind == "root"
+            root_metadata = ConfluencePageMetadata(
+                work.include_root_page_id,
+                work.include_root_page_id,
+                "SPACE",
             )
-            for sequence, ordinal, from_progress, to_progress in transitions:
-                transaction._execute(
-                    "INSERT INTO checkpoint_transitions "
-                    "(run_id,sequence,include_root_ordinal,from_progress,to_progress) "
-                    "VALUES (?,?,?,?,?)",
-                    (
-                        started.snapshot.run_id.value,
-                        sequence,
-                        ordinal,
-                        from_progress,
-                        to_progress,
-                    ),
+            started.commit_root_occurrence(
+                InventoryRootCommit(
+                    started.snapshot.run_id,
+                    work.include_root_ordinal,
+                    work.include_root_page_id,
+                    root_metadata,
+                    roots,
                 )
-            transaction._execute(
-                "UPDATE root_progress SET progress='descendants_complete',"
-                "descendants_complete=1 WHERE run_id=?",
-                (started.snapshot.run_id.value,),
             )
-            transaction._execute(
-                "UPDATE crawl_runs SET inventory_phase='complete' WHERE run_id=?",
-                (started.snapshot.run_id.value,),
+            window_work = started.load_next_inventory_work()
+            assert window_work is not None and window_work.kind == "window"
+            window = ConfluenceInventoryWindow((), window_work.next_start, 50, 0, 0)
+            started.commit_inventory_window(
+                InventoryWindowCommit(
+                    started.snapshot.run_id,
+                    window_work.include_root_ordinal,
+                    window_work.include_root_page_id,
+                    window_work.next_start,
+                    window,
+                    (),
+                    roots,
+                )
             )
-        workspace._mutate(complete)
 
     with _register_checkpoint_run_context(
         _request(tmp_path, ResumeUniqueIncompleteRun()),
@@ -621,7 +628,15 @@ def test_activation_scope_retains_lock_and_exposes_only_metadata_and_invalidatio
         )
         assert {
             name for name in dir(activation) if not name.startswith("_")
-        } <= {"session_id", "snapshot"}
+        } <= {
+            "session_id",
+            "snapshot",
+            "read_schema_state",
+            "load_next_inventory_work",
+            "commit_root_occurrence",
+            "commit_inventory_window",
+            "stream_inventory_occurrences",
+        }
         with pytest.raises(CheckpointStateError) as caught:
             with workspace_module._open_locked_checkpoint_workspace(tmp_path):
                 pass

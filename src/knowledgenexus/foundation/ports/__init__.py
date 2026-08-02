@@ -38,9 +38,13 @@ from knowledgenexus.foundation.ports.tokenizer_port import (
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointFailureCategory,
+    CheckpointCommitResult,
+    CheckpointOperationFailure,
+    CheckpointOperationFailureCategory,
     CheckpointSchemaState,
     CheckpointStateError,
     ConfluenceCheckpointStatePort,
+    InventoryWorkItem,
 )
 
 __all__ = [
@@ -67,7 +71,11 @@ __all__ = [
     "TokenizerFailureCategory",
     "TokenizerPort",
     "CheckpointFailureCategory",
+    "CheckpointCommitResult",
+    "CheckpointOperationFailure",
+    "CheckpointOperationFailureCategory",
     "CheckpointSchemaState",
     "CheckpointStateError",
     "ConfluenceCheckpointStatePort",
+    "InventoryWorkItem",
 ]

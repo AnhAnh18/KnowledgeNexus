@@ -170,6 +170,10 @@ class _EffectiveCrawlInput:
     fingerprint: ConfluenceCrawlFingerprint
     canonical_include_root_ids: tuple[str, ...]
     max_include_roots: int
+    inventory_page_size: int
+    max_pages_per_run: int
+    max_inventory_windows_per_root: int
+    max_inventory_windows_per_run: int
 
     def __repr__(self) -> str:
         return "_EffectiveCrawlInput()"
@@ -449,6 +453,14 @@ def _build_effective_crawl_input(
         ),
         canonical_include_root_ids=canonical_root_ids,
         max_include_roots=int(profile["max_include_roots"]),
+        inventory_page_size=int(profile["inventory_page_size"]),
+        max_pages_per_run=int(profile["max_pages_per_run"]),
+        max_inventory_windows_per_root=int(
+            profile["max_inventory_windows_per_root"]
+        ),
+        max_inventory_windows_per_run=int(
+            profile["max_inventory_windows_per_run"]
+        ),
     )
 
 

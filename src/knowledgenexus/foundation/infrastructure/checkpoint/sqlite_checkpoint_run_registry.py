@@ -6,7 +6,7 @@ import re
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -24,6 +24,7 @@ from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CrawlRunStatus,
     CrawlSessionId,
     IncludeRootProgress,
+    InventoryRootCommit,
     InventoryPhaseStatus,
     ResumeExplicitRunId,
     ResumeUniqueIncompleteRun,
@@ -35,8 +36,20 @@ from knowledgenexus.foundation.domain.models.confluence_source_config import (
 from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_workspace import (
     _open_locked_checkpoint_workspace,
 )
+from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_state_session import (
+    _CheckpointStateSession,
+    _SessionLimits,
+    _validate_durable_inventory_state,
+)
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
+    CheckpointCommitResult,
+    CheckpointOperationFailure,
+    CheckpointSchemaState,
     CheckpointStateError,
+    InventoryWorkItem,
+)
+from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
+    InventoryWindowCommit,
 )
 
 
@@ -67,14 +80,34 @@ class _RunRegistryRequest:
 class _RunActivated:
     snapshot: CrawlRunSnapshot
     session_id: CrawlSessionId
+    _state: _CheckpointStateSession = field(repr=False, compare=False)
 
     def __repr__(self) -> str:
         return "_RunActivated()"
 
+    def load_next_inventory_work(
+        self,
+    ) -> InventoryWorkItem | CheckpointOperationFailure | None:
+        return self._state.load_next_inventory_work()
+
+    def read_schema_state(self) -> CheckpointSchemaState:
+        return self._state.read_schema_state()
+
+    def commit_root_occurrence(
+        self, command: InventoryRootCommit
+    ) -> CheckpointCommitResult | CheckpointOperationFailure:
+        return self._state.commit_root_occurrence(command)
+
+    def commit_inventory_window(
+        self, command: InventoryWindowCommit
+    ) -> CheckpointCommitResult | CheckpointOperationFailure:
+        return self._state.commit_inventory_window(command)
+
+    def stream_inventory_occurrences(self):
+        return self._state.stream_inventory_occurrences()
+
     def _invalidate(self) -> None:
-        # Kept as an inert private lifecycle hook until an operation-specific
-        # handoff is defined. The registry owns all workspace mutations.
-        return None
+        self._state._invalidate()
 
 
 @dataclass(frozen=True, repr=False)
@@ -104,6 +137,7 @@ _RunRegistryOutcome = _RunActivated | _InventoryComplete | _RunRegistryFailure
 class _PendingActivation:
     snapshot: CrawlRunSnapshot
     session_id: CrawlSessionId
+    limits: _SessionLimits
 
 
 @dataclass(frozen=True, repr=False)
@@ -237,7 +271,13 @@ def _read_sessions(transaction: object, run_id: str) -> str | None:
     return active[0] if active else None
 
 
-def _read_stored_run(transaction: object, row: tuple) -> _StoredRun:
+def _read_stored_run(
+    transaction: object,
+    row: tuple,
+    *,
+    page_size: int | None = None,
+    limits: _SessionLimits | None = None,
+) -> _StoredRun:
     if type(row) is not tuple or len(row) != 6:
         raise ValueError("invalid durable run")
     run_value, generation_value, digest, status, phase, created_at = row
@@ -288,6 +328,8 @@ def _read_stored_run(transaction: object, row: tuple) -> _StoredRun:
             raise ValueError("invalid durable progress")
         if item is IncludeRootProgress.DESCENDANTS_PENDING and next_start is None:
             raise ValueError("invalid durable progress")
+        if item is IncludeRootProgress.DESCENDANTS_COMPLETE and next_start is not None:
+            raise ValueError("invalid durable progress")
         progress.append(item)
 
     transition_rows = transaction._fetchall(
@@ -326,6 +368,9 @@ def _read_stored_run(transaction: object, row: tuple) -> _StoredRun:
         root_progress=tuple(progress),
         transitions=tuple(transitions),
     )
+    _validate_durable_inventory_state(
+        transaction, run_id, roots, page_size=page_size, limits=limits
+    )
     return _StoredRun(
         snapshot=snapshot,
         fingerprint_digest=digest,
@@ -339,6 +384,7 @@ def _activate_existing(
     stored: _StoredRun,
     uuid4: Callable[[], uuid.UUID],
     utc_now: Callable[[], datetime],
+    limits: _SessionLimits,
 ) -> _PendingActivation:
     session_value = _new_uuid4(uuid4)
     started_at = _timestamp_from(utc_now())
@@ -358,7 +404,7 @@ def _activate_existing(
         "VALUES (?,?,'active',?,NULL,NULL,NULL)",
         (session_value, stored.snapshot.run_id.value, started_at),
     )
-    return _PendingActivation(stored.snapshot, CrawlSessionId(session_value))
+    return _PendingActivation(stored.snapshot, CrawlSessionId(session_value), limits)
 
 
 def _start_new(
@@ -366,13 +412,14 @@ def _start_new(
     effective: object,
     uuid4: Callable[[], uuid.UUID],
     utc_now: Callable[[], datetime],
+    limits: _SessionLimits,
 ) -> _RunRegistryOutcome | _PendingActivation:
     rows = transaction._fetchall(
         "SELECT run_id,generation_id,fingerprint_digest,status,inventory_phase,created_at "
         "FROM crawl_runs WHERE status='incomplete' ORDER BY run_id"
     )
     for row in rows:
-        stored = _read_stored_run(transaction, row)
+        stored = _read_stored_run(transaction, row, limits=limits)
         if stored.fingerprint_digest == effective.fingerprint.value:
             return _RunRegistryFailure(
                 _RunRegistryFailureCategory.INCOMPLETE_RUN_CONFLICT
@@ -416,7 +463,7 @@ def _start_new(
         "VALUES (?,?,'active',?,NULL,NULL,NULL)",
         (session_value, run_value, created_at),
     )
-    return _PendingActivation(snapshot, CrawlSessionId(session_value))
+    return _PendingActivation(snapshot, CrawlSessionId(session_value), limits)
 
 
 @contextmanager
@@ -438,11 +485,17 @@ def _register_checkpoint_run(
         request.endpoint_url, request.source_config, request.reliability_profile
     )
     roots = CanonicalIncludeRoots(effective.canonical_include_root_ids)
+    limits = _SessionLimits(
+        effective.inventory_page_size,
+        effective.max_pages_per_run,
+        effective.max_inventory_windows_per_root,
+        effective.max_inventory_windows_per_run,
+    )
     operation, selected_run_id = selection
 
     def mutate(transaction: object) -> _RunRegistryOutcome | _PendingActivation:
         if operation == "start":
-            return _start_new(transaction, effective, uuid4, utc_now)
+            return _start_new(transaction, effective, uuid4, utc_now, limits)
 
         rows = transaction._fetchall(
             "SELECT run_id,generation_id,fingerprint_digest,status,inventory_phase,created_at "
@@ -454,7 +507,9 @@ def _register_checkpoint_run(
         if operation == "explicit":
             if not rows:
                 return _RunRegistryFailure(_RunRegistryFailureCategory.RUN_NOT_FOUND)
-            stored = _read_stored_run(transaction, rows[0])
+            stored = _read_stored_run(
+                transaction, rows[0], limits=limits
+            )
             if (
                 stored.status != "incomplete"
                 or stored.fingerprint_digest != effective.fingerprint.value
@@ -463,11 +518,13 @@ def _register_checkpoint_run(
                 return _RunRegistryFailure(_RunRegistryFailureCategory.RUN_NOT_RESUMABLE)
             if stored.snapshot.inventory_phase is InventoryPhaseStatus.COMPLETE:
                 return _InventoryComplete(stored.snapshot)
-            return _activate_existing(transaction, stored, uuid4, utc_now)
+            return _activate_existing(transaction, stored, uuid4, utc_now, limits)
 
         matches: list[_StoredRun] = []
         for row in rows:
-            stored = _read_stored_run(transaction, row)
+            stored = _read_stored_run(
+                transaction, row, limits=limits
+            )
             if (
                 stored.fingerprint_digest == effective.fingerprint.value
                 and stored.snapshot.include_roots == roots
@@ -480,7 +537,7 @@ def _register_checkpoint_run(
         stored = matches[0]
         if stored.snapshot.inventory_phase is InventoryPhaseStatus.COMPLETE:
             return _InventoryComplete(stored.snapshot)
-        return _activate_existing(transaction, stored, uuid4, utc_now)
+        return _activate_existing(transaction, stored, uuid4, utc_now, limits)
 
     owner = ExitStack()
     try:
@@ -507,6 +564,13 @@ def _register_checkpoint_run(
         activation = _RunActivated(
             outcome.snapshot,
             outcome.session_id,
+            _CheckpointStateSession(
+                workspace,
+                outcome.snapshot.run_id,
+                outcome.session_id,
+                outcome.snapshot.include_roots,
+                outcome.limits,
+            ),
         )
         body_failed = False
         try:
