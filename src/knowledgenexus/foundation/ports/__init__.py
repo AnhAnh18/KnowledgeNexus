@@ -46,6 +46,10 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     ConfluenceCheckpointStatePort,
     InventoryWorkItem,
 )
+from knowledgenexus.foundation.ports.confluence_crawl_writer_lock_port import (
+    ConfluenceCrawlWriterLockLease,
+    ConfluenceCrawlWriterLockPort,
+)
 
 __all__ = [
     "ConfluenceInventoryPort",
@@ -78,4 +82,6 @@ __all__ = [
     "CheckpointStateError",
     "ConfluenceCheckpointStatePort",
     "InventoryWorkItem",
+    "ConfluenceCrawlWriterLockLease",
+    "ConfluenceCrawlWriterLockPort",
 ]
