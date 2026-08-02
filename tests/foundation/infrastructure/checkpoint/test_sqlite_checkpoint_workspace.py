@@ -1221,6 +1221,73 @@ def test_pragma_failure_is_sanitized_and_connection_rollback(monkeypatch, tmp_pa
     assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
+def test_require_initialized_rejects_absent_database_without_schema(tmp_path) -> None:
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(
+            tmp_path, require_initialized=True
+        ):
+            raise AssertionError("missing database must not yield a capability")
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+    assert not (tmp_path / module.DB_NAME).exists()
+    assert (tmp_path / module.LOCK_NAME).exists()
+
+
+def test_require_initialized_cleanup_failure_precedes_missing_database_marker(
+    tmp_path, monkeypatch
+) -> None:
+    def fail_unlock(_lock_handle):
+        raise RuntimeError("secret unlock failure")
+
+    monkeypatch.setattr(module.portalocker, "unlock", fail_unlock)
+    with pytest.raises(CheckpointStateError) as caught:
+        with module._open_locked_checkpoint_workspace(
+            tmp_path, require_initialized=True
+        ):
+            raise AssertionError("missing database must not yield a capability")
+    _assert_sanitized(caught.value)
+    assert not getattr(caught.value, "_missing_initial_database", False)
+
+
+def test_require_initialized_opens_existing_catalog(tmp_path) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+    with module._open_locked_checkpoint_workspace(
+        tmp_path, require_initialized=True
+    ) as workspace:
+        assert workspace._mutate(lambda transaction: transaction._fetchone("SELECT 1")) == (1,)
+
+
+def test_require_initialized_acquires_writer_lock_before_preflight_open(
+    tmp_path, monkeypatch
+) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path):
+        pass
+
+    events = []
+    real_lock = module.portalocker.lock
+    real_connect = module.sqlite3.connect
+
+    def track_lock(handle, flags, *args, **kwargs):
+        events.append("lock")
+        return real_lock(handle, flags, *args, **kwargs)
+
+    def track_connect(database, *args, **kwargs):
+        events.append(("connect", database))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(module.portalocker, "lock", track_lock)
+    monkeypatch.setattr(module.sqlite3, "connect", track_connect)
+
+    with module._open_locked_checkpoint_workspace(
+        tmp_path, require_initialized=True
+    ):
+        pass
+
+    assert events.index("lock") < next(
+        index for index, event in enumerate(events) if event[0] == "connect"
+    )
+
+
 def test_initializer_fails_closed_when_pragma_readback_is_denied(tmp_path) -> None:
     conn = sqlite3.connect(tmp_path / module.DB_NAME)
 

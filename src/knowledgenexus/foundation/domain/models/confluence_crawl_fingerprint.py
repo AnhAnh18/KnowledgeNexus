@@ -163,6 +163,18 @@ class _ValidatedSourceConfig:
     exclude_keywords: tuple[str, ...]
 
 
+@dataclass(frozen=True, repr=False)
+class _EffectiveCrawlInput:
+    """One immutable effective-input snapshot for private coordination code."""
+
+    fingerprint: ConfluenceCrawlFingerprint
+    canonical_include_root_ids: tuple[str, ...]
+    max_include_roots: int
+
+    def __repr__(self) -> str:
+        return "_EffectiveCrawlInput()"
+
+
 def _type_error() -> TypeError:
     return TypeError("invalid confluence crawl fingerprint input")
 
@@ -387,39 +399,57 @@ class ConfluenceCrawlFingerprintBuilder:
         source_config: ConfluenceSourceConfig,
         reliability_profile: Mapping[str, object],
     ) -> ConfluenceCrawlFingerprint:
-        config = _validate_source_config(source_config)
-        profile = _validate_profile(reliability_profile)
-        if config.page_size != profile["inventory_page_size"]:
-            raise _value_error()
-        if len(config.include_roots) > profile["max_include_roots"]:
-            raise _value_error()
-        endpoint_digest = _endpoint_identity_digest(endpoint_url)
-        scope_digest = _scope_digest(config)
+        return _build_effective_crawl_input(
+            endpoint_url, source_config, reliability_profile
+        ).fingerprint
 
-        canonical: dict[str, object] = dict(_REGISTRY_CONSTANTS)
-        canonical.update(
-            {
-                "endpoint_identity_sha256": endpoint_digest,
-                "space_key": config.space_key,
-                "scope_config_digest": scope_digest,
-                "reliability_profile_id": profile["profile_id"],
-                "reliability_profile_version": profile["profile_version"],
-                "include_root_page_ids": sorted(root.page_id for root in config.include_roots),
-                "excluded_subtree_page_ids": sorted(subtree.page_id for subtree in config.exclude_subtrees),
-            }
-        )
-        canonical.update({key: profile[key] for key in _FINAL_PROFILE_INT_KEYS})
-        try:
-            encoded = json.dumps(
-                canonical,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-        except (UnicodeError, ValueError, TypeError):
-            raise _value_error() from None
-        return ConfluenceCrawlFingerprint._from_digest(hashlib.sha256(encoded).hexdigest())
+
+def _build_effective_crawl_input(
+    endpoint_url: str,
+    source_config: ConfluenceSourceConfig,
+    reliability_profile: Mapping[str, object],
+) -> _EffectiveCrawlInput:
+    """Capture and validate every fingerprint input exactly once."""
+    config = _validate_source_config(source_config)
+    profile = _validate_profile(reliability_profile)
+    if config.page_size != profile["inventory_page_size"]:
+        raise _value_error()
+    if len(config.include_roots) > profile["max_include_roots"]:
+        raise _value_error()
+    canonical_root_ids = tuple(sorted(root.page_id for root in config.include_roots))
+    endpoint_digest = _endpoint_identity_digest(endpoint_url)
+    scope_digest = _scope_digest(config)
+
+    canonical: dict[str, object] = dict(_REGISTRY_CONSTANTS)
+    canonical.update(
+        {
+            "endpoint_identity_sha256": endpoint_digest,
+            "space_key": config.space_key,
+            "scope_config_digest": scope_digest,
+            "reliability_profile_id": profile["profile_id"],
+            "reliability_profile_version": profile["profile_version"],
+            "include_root_page_ids": list(canonical_root_ids),
+            "excluded_subtree_page_ids": sorted(subtree.page_id for subtree in config.exclude_subtrees),
+        }
+    )
+    canonical.update({key: profile[key] for key in _FINAL_PROFILE_INT_KEYS})
+    try:
+        encoded = json.dumps(
+            canonical,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (UnicodeError, ValueError, TypeError):
+        raise _value_error() from None
+    return _EffectiveCrawlInput(
+        fingerprint=ConfluenceCrawlFingerprint._from_digest(
+            hashlib.sha256(encoded).hexdigest()
+        ),
+        canonical_include_root_ids=canonical_root_ids,
+        max_include_roots=int(profile["max_include_roots"]),
+    )
 
 
 def build_confluence_crawl_fingerprint(

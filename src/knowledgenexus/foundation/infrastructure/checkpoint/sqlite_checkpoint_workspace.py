@@ -695,6 +695,8 @@ class _LockedCheckpointWorkspace:
 @contextmanager
 def _open_locked_checkpoint_workspace(
     workspace: Path,
+    *,
+    require_initialized: bool = False,
 ) -> Iterator[_LockedCheckpointWorkspace]:
     """Own one nonblocking writer lock and its private writable SQLite handle."""
     connection = None
@@ -702,6 +704,7 @@ def _open_locked_checkpoint_workspace(
     locked = False
     capability = None
     failed = False
+    missing_initial_database = False
     try:
         db, lock = _guard_workspace(workspace)
         guarded_workspace = _workspace_identity(workspace)
@@ -713,7 +716,17 @@ def _open_locked_checkpoint_workspace(
         db, _ = _verify_locked_entry(
             workspace, lock, handle_identity, prior_lock, guarded_workspace
         )
+        initial_observation = None
+        if require_initialized:
+            # Classify an absent resume database only after winning the writer
+            # lease, so contention takes precedence without opening SQLite.
+            initial_observation = _observe_database(db)
+            if initial_observation.absent:
+                missing_initial_database = True
+                raise _fail()
         observation = _preflight(db)
+        if require_initialized and observation != initial_observation:
+            raise _fail()
         db, _ = _verify_locked_entry(
             workspace, lock, handle_identity, prior_lock, guarded_workspace
         )
@@ -772,7 +785,10 @@ def _open_locked_checkpoint_workspace(
         )
         yield capability
     except Exception:
-        failed = True
+        # The missing-database marker is intentional; cleanup failures must
+        # still take precedence over that classification below.
+        if not missing_initial_database:
+            failed = True
     finally:
         if capability is not None:
             try:
@@ -798,6 +814,10 @@ def _open_locked_checkpoint_workspace(
                     failed = True
     if failed:
         _raise_sanitized_failure()
+    if missing_initial_database:
+        error = _fail()
+        setattr(error, "_missing_initial_database", True)
+        raise error from None
 
 
 __all__ = []

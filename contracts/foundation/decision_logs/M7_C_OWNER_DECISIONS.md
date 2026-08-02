@@ -208,6 +208,36 @@ M7-C1-A root-relative mapper behavior while allowing nested roots to
 deduplicate without weakening fail-closed checks for malformed paths or stable
 metadata conflicts.
 
+### OD-C15. Operation-specific session API and deferred hardening
+
+M7-C uses named, typed operations at the application/session boundary rather
+than a caller-provided generic mutation callback. C2-B retains its private
+registry until a reviewed state/session port is introduced. C2-C/C2-D must
+introduce a method-oriented state API covering run selection
+(`start_new_run`, `resume_explicit_run`, `resume_unique_incomplete_run`) and
+the subsequently-defined operations `reserve_outbound_attempt`,
+`load_next_inventory_work`, `commit_root_occurrence`,
+`commit_inventory_window`, and `stream_inventory_occurrences`. No placeholder
+method may be added before its command/result value objects and durable
+semantics are implemented.
+
+The existing trusted-input, workspace-path, lock-lifetime, SQLite durability,
+and sanitized-failure requirements remain active contract invariants. Broader
+API-security hardening is intentionally deferred until the final M7 readiness
+review. That review must close this checklist before any production/live
+authorization:
+
+- audit session and return-object graphs for retained mutable connection,
+  transaction, workspace, path, or lock references;
+- restrict every public operation to typed commands and typed outcomes, with
+  no generic execute/mutate/callback escape hatch;
+- add adversarial lifecycle tests for stale sessions, exceptions, and retained
+  objects after context exit;
+- review workspace ownership/OS permissions and validate the supported
+  Windows, Linux, and macOS boundary behavior; and
+- complete a threat model covering caller-controlled configuration and durable
+  checkpoint data, then add the resulting focused regression tests.
+
 ## 3. Required closure boundaries
 
 An inventory-only M7-C acceptance suite may close only M7-C after independent
