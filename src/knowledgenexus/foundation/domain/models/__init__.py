@@ -14,6 +14,16 @@ from knowledgenexus.foundation.domain.models.confluence_page_observation import 
     ParsedAttachmentMetadataWindow,
     RawHttpObservation,
 )
+from knowledgenexus.foundation.domain.models.confluence_restriction_evidence import (
+    ConfluenceRestrictionEvidenceEnvelope,
+    ConfluenceRestrictionEvidenceError,
+    ConfluenceRestrictionEvidenceFailureCategory,
+    M7_RESTRICTION_BODY_ENCODING,
+    M7_RESTRICTION_EVIDENCE_KIND,
+    M7_RESTRICTION_FORMAT_VERSION,
+    M7_RESTRICTION_REQUEST_KIND,
+    M7_RESTRICTION_REQUEST_PROFILE_VERSION,
+)
 from knowledgenexus.foundation.domain.models.raw_observation_artifact import (
     RawObservationArtifact,
 )
@@ -98,6 +108,14 @@ __all__ = [
     "AttachmentMetadataRequest",
     "ParsedAttachmentMetadataWindow",
     "RawHttpObservation",
+    "ConfluenceRestrictionEvidenceEnvelope",
+    "ConfluenceRestrictionEvidenceError",
+    "ConfluenceRestrictionEvidenceFailureCategory",
+    "M7_RESTRICTION_BODY_ENCODING",
+    "M7_RESTRICTION_EVIDENCE_KIND",
+    "M7_RESTRICTION_FORMAT_VERSION",
+    "M7_RESTRICTION_REQUEST_KIND",
+    "M7_RESTRICTION_REQUEST_PROFILE_VERSION",
     "RawObservationArtifact",
     "ConfluencePageNormalizationResult",
     "ConfluencePageSource",
