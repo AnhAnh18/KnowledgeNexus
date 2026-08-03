@@ -10,6 +10,9 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_page_observat
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_restriction_store import (
     ConfluenceRawRestrictionEvidenceStore,
 )
+from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_generation_store import (
+    ConfluenceRawPageGenerationStore,
+)
 
 __all__ = [
     "ConfluenceRawPageStore",
@@ -18,4 +21,5 @@ __all__ = [
     "ConfluenceRawObservationStoreError",
     "ConfluenceRawPageReadError",
     "ConfluenceRawRestrictionEvidenceStore",
+    "ConfluenceRawPageGenerationStore",
 ]

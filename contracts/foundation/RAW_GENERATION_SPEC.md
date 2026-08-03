@@ -2,22 +2,26 @@
 
 ## 1. Status, authority, and scope
 
-Status: contract-only M7-A3b contract complete and owner-approved.
+Status: M7-A3b contract complete and owner-approved. The bounded M7-D3
+raw-page store stage is authorized; the remaining raw-generation integration
+stays separately gated.
 
 This specification narrows `CRAWL_RELIABILITY_SPEC.md` owner decisions C, D,
 and H. It is authoritative for future M7 raw-generation isolation,
 restriction-evidence serialization, replay/orphan recovery, writer ownership,
 and raw-storage budgets.
 
-It does not implement a raw store, lock, checkpoint, request, retry, or
-filesystem operation. It does not migrate or reinterpret M6 raw artifacts.
+The broader specification does not authorize a live crawl, lock, checkpoint,
+request, retry, budget, or attachment operation. The D3 implementation may add
+only the focused offline raw-page store described in section 11. It does not
+migrate or reinterpret M6 raw artifacts.
 
 ```text
 M7-A2: COMPLETE AND APPROVED
 M7-A3a: COMPLETE AND APPROVED
 M7-A3b: COMPLETE AND APPROVED
 M7-CONTRACT-GATE: APPROVED
-M7 production implementation: NOT AUTHORIZED
+M7 production implementation: D3 RAW-PAGE STORE ONLY
 ```
 
 ## 2. Generation ownership
@@ -289,8 +293,62 @@ For attachment-metadata windows:
 - page and request-profile identity are bound;
 - pagination parsing occurs before checkpoint advancement.
 
-Their exact envelope/filename formats require later focused review before
-implementation.
+### 11.1 Raw-page envelope version 1
+
+The D3 raw-page envelope contains exactly these fields:
+
+```text
+format_version
+evidence_kind
+request_kind
+request_profile_version
+run_id
+generation_id
+page_id
+source_version
+http_status
+body_encoding
+body_base64
+body_byte_count
+body_sha256
+```
+
+Fixed values are:
+
+```text
+format_version = "1"
+evidence_kind = "confluence_raw_page"
+request_kind = "page_body"
+request_profile_version = "m7-confluence-request-profile-v1"
+body_encoding = "base64"
+```
+
+`run_id` and `generation_id` are canonical lowercase UUIDv4 strings and MUST
+be equal for M7-v1. `page_id` uses the strict ASCII decimal page-ID grammar.
+`source_version` is either JSON `null` or a non-empty string of at most 256
+characters without control characters. A missing source version never proves
+unchanged content or permits cross-run reuse. `http_status` is an integer from
+100 through 599; booleans and values outside that range are invalid.
+
+The canonical serialization is UTF-8 JSON with sorted object keys, compact
+separators, `ensure_ascii=false`, `allow_nan=false`, no BOM, and no trailing
+newline. Base64 decoding is strict. `body_byte_count` and `body_sha256` are
+computed over the exact decoded response bytes; empty bodies are valid. Any
+noncanonical, duplicate-key, missing-field, extra-field, identity, count, hash,
+or path mismatch fails closed and is never rewritten in place.
+
+The D3 path is:
+
+```text
+raw/confluence/generations/<run_id>/pages/<page_id>.json
+```
+
+The logical key is `(run_id, page_id, request_profile_version, source_version)`
+with the path binding the run and page components. Identical canonical bytes
+under the same path are reusable. Any differing body, status, profile, or
+source version is a same-run replay conflict. A different run always uses a
+different generation path. D3 does not implement cross-run reuse, retention,
+checkpoint advancement, budgets, or orphan recovery.
 
 ## 12. Cross-run reuse
 
@@ -416,6 +474,16 @@ failure category.
 | `A3B-ENV-07` | Same body with different status conflicts |
 | `A3B-ENV-08` | Noncanonical JSON is rejected without rewrite |
 | `A3B-ENV-09` | Extra/missing/duplicate field is rejected |
+| `A3B-PAGE-ENV-01` | Raw-page envelope preserves empty and arbitrary body bytes |
+| `A3B-PAGE-ENV-02` | Run/generation/page/profile/source identity mismatch fails closed |
+| `A3B-PAGE-ENV-03` | Invalid status, source version, count, or hash is rejected |
+| `A3B-PAGE-ENV-04` | Raw-page canonical serialization round-trips exactly |
+| `A3B-PAGE-RAW-01` | Absent raw-page artifact publishes atomically |
+| `A3B-PAGE-RAW-02` | Identical same-run raw-page replay reuses evidence |
+| `A3B-PAGE-RAW-03` | Differing same-run raw-page evidence conflicts |
+| `A3B-PAGE-RAW-04` | Distinct generation publishes to a distinct path |
+| `A3B-PAGE-RAW-05` | Malformed, partial, non-regular, or redirected target fails closed |
+| `A3B-PAGE-RAW-06` | Concurrent identical/different creators cannot overwrite |
 | `A3B-RAW-01` | Absent artifact publishes atomically |
 | `A3B-RAW-02` | Identical same-run replay reuses evidence |
 | `A3B-RAW-03` | Differing same-run replay fails closed |
@@ -448,12 +516,13 @@ An independent reviewer must confirm:
 - retryable operational statuses never become ACL observations;
 - lock ownership has no TTL takeover;
 - storage failures occur before publication/checkpoint advancement;
-- no raw-store/lock implementation, source/test/schema change, network
-  request, or production authorization exists.
+- the D3 raw-page store remains offline-only and does not add checkpoint,
+  budget, lock, attachment, CLI, retention, migration, or network behavior.
 
 Recorded integrated review state:
 
 ```text
 M7-CONTRACT-GATE: APPROVED
-M7 production implementation: NOT AUTHORIZED
+M7-D3 raw-page store: AUTHORIZED AND SCOPED
+M7-D integration beyond D3: BLOCKED
 ```

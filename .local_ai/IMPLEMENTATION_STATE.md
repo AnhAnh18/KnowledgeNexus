@@ -6,9 +6,10 @@ M6 is complete and approved. M7-C durable crawl implementation is complete
 through C4-B and has an integrated correctness path. M7-C5 remains the active
 closeout state: the 10k correctness baseline and C5-B1 validation fast path are
 approved, while the 100k scale gate is incomplete and performance optimization
-is deferred. M7-D raw-generation D1/D2 is separately complete and reviewed;
-further live integration remains a later scoped stage. No raw production
-artifact or published snapshot exists in this repository.
+is deferred. M7-D3 is complete and independently reviewed as an offline,
+generation-scoped raw-page store; live integration remains a later scoped
+stage. No raw production artifact or published snapshot exists in this
+repository.
 
 ## Durable State Convention
 
@@ -1316,12 +1317,25 @@ are recorded without using repository-local commit SHAs as status.
 - The owner explicitly deferred 100,000-page performance optimization. Any
   future lock/sidecar, validation-cadence, schema/index, or memory-threshold
   change needs a separate owner-authorized and independently reviewed stage.
-- M7-D raw-generation D1/D2 is complete and independently reviewed. This does
-  not authorize live crawl integration, checkpoint advancement, budgets, or
-  network behavior.
+- M7-D3 raw-page store is complete and independently reviewed with
+  `VERDICT: PASS`. It remains offline-only and does not authorize live crawl
+  integration, checkpoint advancement, budgets, locks, attachments, CLI,
+  retention, migration, or network behavior.
+
+## M7-D Raw-Generation State
+
+- M7-D1/D2 contract and restriction evidence stages are complete and
+  independently reviewed.
+- M7-D3 generation-scoped immutable raw-page envelope/store is complete;
+  focused and regression tests pass and the independent review verdict is
+  `PASS`.
+- M7-D beyond D3 remains blocked pending a separately reviewed plan and owner
+  authorization. The 100k scale gate remains incomplete and is not implied by
+  this stage.
 
 ## Current Execution Boundary
 
 The M7-C5 durability-first baseline remains the active closeout state. The
-100k performance gate is incomplete and deferred. Any further M7-D integration
-or performance work requires its own reviewed plan and owner authorization.
+100k performance gate is incomplete and deferred. M7-D3 is complete within its
+offline boundary; any further M7-D integration or performance work requires
+its own reviewed plan and owner authorization.

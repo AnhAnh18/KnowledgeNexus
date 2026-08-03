@@ -56,6 +56,10 @@ from knowledgenexus.foundation.ports.confluence_raw_restriction_store_port impor
     ConfluenceRawRestrictionStoreFailureCategory,
     ConfluenceRawRestrictionStorePort,
 )
+from knowledgenexus.foundation.ports.confluence_raw_page_store_port import (
+    ConfluenceRawPageStoreError,
+    ConfluenceRawPageStorePort,
+)
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     CheckpointRunActivation,
     CheckpointRunInventoryComplete,
@@ -105,6 +109,8 @@ __all__ = [
     "ConfluenceRawRestrictionStoreError",
     "ConfluenceRawRestrictionStoreFailureCategory",
     "ConfluenceRawRestrictionStorePort",
+    "ConfluenceRawPageStoreError",
+    "ConfluenceRawPageStorePort",
     "CheckpointRunActivation",
     "CheckpointRunInventoryComplete",
     "CheckpointRunOutcome",

@@ -4,17 +4,19 @@
 
 ```text
 M7-C decision package: OWNER-APPROVED
-M7-C production implementation: NOT AUTHORIZED
+M7-C production implementation: AUTHORIZED FOR M7-D3 ONLY
 Full M7 acceptance: NOT AVAILABLE
-M7-D raw-generation integration: BLOCKED
+M7-D raw-generation integration: D3 AUTHORIZED; REMAINDER BLOCKED
 M7 scale RSS threshold: PENDING REPRODUCIBLE BASELINE
 ```
 
 This record locks the owner choices needed to plan the durable-inventory M7-C
-slice. It does not authorize production code, a live crawl, raw-generation
-work, a checkpoint migration, or a full M7 acceptance claim. A focused plan
-and a separate implementation authorization remain required for every M7-C
-production stage.
+slice. The current owner authorization permits only the bounded M7-D3
+generation-scoped immutable raw-page store stage recorded below. It does not
+authorize a live crawl, checkpoint migration or advancement, orphan recovery,
+budgets, writer-lock integration, attachment metadata, CLI, retention, M6
+migration, or a full M7 acceptance claim. A focused plan and separate
+authorization remain required for every later production stage.
 
 Precedence: `contracts/foundation/schemas/` and the focused M7 specs remain
 authoritative. The clarifications mirrored into `CHECKPOINT_RESUME_SPEC.md`,
@@ -252,14 +254,24 @@ threat-model assumptions, invalidation rules, schema or index changes, and any
 RSS/working-set threshold. This decision changes no production behavior,
 profile values, or acceptance result.
 
-## 3. Required closure boundaries
+## 3. M7-D3 authorization registration
+
+The owner authorized M7-D3 in the current Codex turn. The authorized
+deliverable is an offline generation-scoped immutable raw-page envelope and
+store with typed resolve/publish/read operations. Its contract, implementation,
+tests, and review must remain within the bounded stage plan; this registration
+does not authorize the excluded live, checkpoint, budget, lock, attachment,
+CLI, retention, migration, or scale behavior.
+
+## 4. Required closure boundaries
 
 An inventory-only M7-C acceptance suite may close only M7-C after independent
 approval. It cannot claim full M7 completion because raw-generation evidence,
 its acceptance cases, and the full M7 scale gate remain later work. M7-D
-raw-generation integration stays blocked until its own focused plan is approved.
+raw-generation integration beyond the authorized M7-D3 stage stays blocked
+until its own focused plan and owner authorization are approved.
 
-## 4. Durable recording and provenance
+## 5. Durable recording and provenance
 
 This committed record and its focused-spec clarifications are the durable source
 for these decisions. `.codex-workflow/`, checkpoint databases, raw artifacts,

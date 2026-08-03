@@ -28,6 +28,19 @@ from knowledgenexus.foundation.domain.models.confluence_raw_restriction_artifact
     ConfluenceRawRestrictionArtifact,
     ConfluenceRawRestrictionPublicationOutcome,
 )
+from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
+    ConfluenceRawPageArtifact,
+    ConfluenceRawPageEvidenceError,
+    ConfluenceRawPageEvidenceFailureCategory,
+    ConfluenceRawPageEnvelope,
+    ConfluenceRawPagePublicationOutcome,
+    ConfluenceRawPageStoreFailureCategory,
+    M7_RAW_PAGE_BODY_ENCODING,
+    M7_RAW_PAGE_EVIDENCE_KIND,
+    M7_RAW_PAGE_FORMAT_VERSION,
+    M7_RAW_PAGE_REQUEST_KIND,
+    M7_RAW_PAGE_REQUEST_PROFILE_VERSION,
+)
 from knowledgenexus.foundation.domain.models.raw_observation_artifact import (
     RawObservationArtifact,
 )
@@ -122,6 +135,17 @@ __all__ = [
     "M7_RESTRICTION_REQUEST_PROFILE_VERSION",
     "ConfluenceRawRestrictionArtifact",
     "ConfluenceRawRestrictionPublicationOutcome",
+    "ConfluenceRawPageArtifact",
+    "ConfluenceRawPageEvidenceError",
+    "ConfluenceRawPageEvidenceFailureCategory",
+    "ConfluenceRawPageEnvelope",
+    "ConfluenceRawPagePublicationOutcome",
+    "ConfluenceRawPageStoreFailureCategory",
+    "M7_RAW_PAGE_BODY_ENCODING",
+    "M7_RAW_PAGE_EVIDENCE_KIND",
+    "M7_RAW_PAGE_FORMAT_VERSION",
+    "M7_RAW_PAGE_REQUEST_KIND",
+    "M7_RAW_PAGE_REQUEST_PROFILE_VERSION",
     "RawObservationArtifact",
     "ConfluencePageNormalizationResult",
     "ConfluencePageSource",
