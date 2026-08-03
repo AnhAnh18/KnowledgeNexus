@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+import sqlite3
 import uuid
 
 import pytest
@@ -372,6 +373,67 @@ def test_page_budget_cache_is_discarded_on_invalidation(tmp_path) -> None:
         assert state._observed_page_ids == {"root"}
     assert state._active is False
     assert state._observed_page_ids is None
+
+
+def test_validation_fast_path_uses_local_checks_between_full_scans(tmp_path, monkeypatch) -> None:
+    calls = 0
+    original = state_module._CheckpointStateSession._validate_inventory
+
+    def counted(state, transaction):
+        nonlocal calls
+        calls += 1
+        return original(state, transaction)
+
+    monkeypatch.setattr(
+        state_module._CheckpointStateSession, "_validate_inventory", counted
+    )
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(_window_commit(activation, 0, ("child",), 1))
+        assert calls == 1
+        list(activation.stream_inventory_occurrences())
+        assert calls == 2
+
+
+def test_validation_fast_path_runs_full_scan_at_bounded_commit_cadence(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        state_module._CheckpointStateSession, "_FULL_VALIDATION_INTERVAL", 2
+    )
+    calls = 0
+    original = state_module._CheckpointStateSession._validate_inventory
+
+    def counted(state, transaction):
+        nonlocal calls
+        calls += 1
+        return original(state, transaction)
+
+    monkeypatch.setattr(
+        state_module._CheckpointStateSession, "_validate_inventory", counted
+    )
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        activation.load_next_inventory_work()
+        assert calls == 1
+        activation.load_next_inventory_work()
+        assert calls == 2
+
+
+def test_external_database_change_forces_full_validation_and_invalidates_session(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        database = tmp_path / "crawl_state.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "UPDATE crawl_runs SET inventory_phase='complete' WHERE run_id=?",
+                (activation.snapshot.run_id.value,),
+            )
+            connection.commit()
+        with pytest.raises(CheckpointStateError):
+            activation.load_next_inventory_work()
+        assert activation._state._active is False
 
 
 def test_window_row_fault_rolls_back_all_window_state(tmp_path, monkeypatch) -> None:

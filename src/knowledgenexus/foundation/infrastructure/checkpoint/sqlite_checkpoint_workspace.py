@@ -366,11 +366,24 @@ def _observe_database(path: Path) -> _DatabaseObservation:
 
 
 def _verify_database_identity(
-    path: Path, expected: tuple[int, int, int, int, int, int, int]
+    path: Path,
+    expected: tuple[int, int, int, int, int, int, int],
+    *,
+    allow_transaction_metadata: bool = False,
 ) -> None:
     """Reject replacement or metadata tampering of the active database."""
     current = _observe_database(path)
-    if current.absent or current.identity != expected:
+    if current.absent or current.identity is None:
+        raise _fail()
+    if allow_transaction_metadata:
+        same_entry = (
+            current.identity[:2] == expected[:2]
+            and current.identity[4] == expected[4]
+            and current.identity[6] == expected[6]
+        )
+    else:
+        same_entry = current.identity == expected
+    if not same_entry:
         raise _fail()
 
 
@@ -606,6 +619,9 @@ class _PrivateCheckpointTransaction:
     def _begin_immediate(self) -> None:
         self._require_active()
         self._connection.execute("BEGIN IMMEDIATE")
+        # BEGIN IMMEDIATE may create the rollback journal before the first
+        # statement callback verifies the writer lease.
+        self._refresh_sidecars()
 
     def _execute(self, sql: str, parameters: tuple[object, ...] = ()) -> None:
         self._require_active()
@@ -695,19 +711,39 @@ class _LockedCheckpointWorkspace:
                 pass
         self._lock_handle = None
 
-    def _verify_writer_lock(self) -> None:
+    def _verify_writer_lock(self, *, allow_transaction_lifecycle: bool = False) -> None:
         if not self._token.active:
             raise _fail()
         if self._writer_lease is not None:
-            self._writer_lease._verify()
-        _verify_locked_entry(
-            self._workspace,
-            self._lock,
-            self._lock_identity,
-            self._prior_lock,
-            self._workspace_identity,
+            self._writer_lease._verify(
+                allow_sidecar_lifecycle=allow_transaction_lifecycle
+            )
+        if allow_transaction_lifecycle:
+            _, guarded_lock = _guard_workspace(self._workspace)
+            current_lock = _observe_regular_entry(guarded_lock)
+            if (
+                guarded_lock != self._lock
+                or current_lock.absent
+                or current_lock.identity != self._lock_identity
+                or (
+                    not self._prior_lock.absent
+                    and current_lock.identity != self._prior_lock.identity
+                )
+            ):
+                raise _fail()
+        else:
+            _verify_locked_entry(
+                self._workspace,
+                self._lock,
+                self._lock_identity,
+                self._prior_lock,
+                self._workspace_identity,
+            )
+        _verify_database_identity(
+            self._database,
+            self._database_identity,
+            allow_transaction_metadata=allow_transaction_lifecycle,
         )
-        _verify_database_identity(self._database, self._database_identity)
 
     def _refresh_database_identity(self) -> None:
         current = _observe_database(self._database)
@@ -738,7 +774,7 @@ class _LockedCheckpointWorkspace:
             transaction = _PrivateCheckpointTransaction(
                 self._connection,
                 self._token,
-                self._verify_writer_lock,
+                lambda: self._verify_writer_lock(allow_transaction_lifecycle=True),
                 self._refresh_sidecar_observations,
             )
             self._transaction = transaction
