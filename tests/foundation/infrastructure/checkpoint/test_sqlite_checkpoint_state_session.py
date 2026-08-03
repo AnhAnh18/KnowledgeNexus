@@ -28,6 +28,7 @@ from knowledgenexus.foundation.domain.models.confluence_source_config import (
 )
 from knowledgenexus.foundation.infrastructure.checkpoint import (
     sqlite_checkpoint_workspace as workspace_module,
+    sqlite_checkpoint_state_session as state_module,
 )
 from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_run_registry import (
     _RunActivated,
@@ -303,6 +304,74 @@ def test_page_budget_failure_rolls_back_window_rows_and_cursor(tmp_path) -> None
         work = activation.load_next_inventory_work()
         assert work is not None and work.next_start == 0
         assert tuple(activation.stream_inventory_occurrences())[-1].metadata.page_id == "root"
+
+
+def test_page_budget_cache_rebuilds_once_and_updates_after_commits(tmp_path, monkeypatch) -> None:
+    calls = 0
+    original = state_module._existing_page_ids
+
+    def counted(transaction, run_id):
+        nonlocal calls
+        calls += 1
+        return original(transaction, run_id)
+
+    monkeypatch.setattr(state_module, "_existing_page_ids", counted)
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        assert activation._state._observed_page_ids == {"root"}
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(_window_commit(activation, 0, ("child",), 1))
+        assert activation._state._observed_page_ids == {"root", "child"}
+    assert calls == 1
+
+
+def test_page_budget_cache_does_not_advance_on_replay_or_denial(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        activation._state._limits = replace(activation._state._limits, max_pages_per_run=1)
+        activation.load_next_inventory_work()
+        root_command = _root_commit(activation)
+        activation.commit_root_occurrence(root_command)
+        assert activation._state._observed_page_ids == {"root"}
+        activation.load_next_inventory_work()
+        denied = activation.commit_inventory_window(_window_commit(activation, 0, ("child",), 1))
+        assert denied.category is CheckpointOperationFailureCategory.INVENTORY_PAGE_BUDGET_EXHAUSTED
+        assert activation._state._observed_page_ids == {"root"}
+        assert activation.commit_root_occurrence(root_command).replayed is True
+        assert activation._state._observed_page_ids == {"root"}
+
+
+def test_page_budget_cache_rebuilds_for_a_fresh_activation(tmp_path, monkeypatch) -> None:
+    calls = 0
+    original = state_module._existing_page_ids
+
+    def counted(transaction, run_id):
+        nonlocal calls
+        calls += 1
+        return original(transaction, run_id)
+
+    monkeypatch.setattr(state_module, "_existing_page_ids", counted)
+    with _start(tmp_path) as activation:
+        run_id = activation.snapshot.run_id
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+    resume_request = replace(_request(tmp_path), operation=ResumeExplicitRunId(run_id))
+    with _register_checkpoint_run(resume_request) as resumed:
+        assert resumed._state._observed_page_ids is None
+        resumed.load_next_inventory_work()
+        resumed.commit_inventory_window(_window_commit(resumed, 0, ("child",), 1))
+        assert resumed._state._observed_page_ids == {"root", "child"}
+    assert calls == 2
+
+
+def test_page_budget_cache_is_discarded_on_invalidation(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        state = activation._state
+        assert state._observed_page_ids == {"root"}
+    assert state._active is False
+    assert state._observed_page_ids is None
 
 
 def test_window_row_fault_rolls_back_all_window_state(tmp_path, monkeypatch) -> None:

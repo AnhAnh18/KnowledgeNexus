@@ -352,6 +352,7 @@ class _CheckpointStateSession:
         "_limits",
         "_utc_now",
         "_active",
+        "_observed_page_ids",
     )
 
     def __init__(
@@ -370,6 +371,7 @@ class _CheckpointStateSession:
         self._limits = limits
         self._utc_now = utc_now
         self._active = True
+        self._observed_page_ids: set[str] | None = None
 
     def _require_active(self) -> None:
         if not self._active:
@@ -385,6 +387,21 @@ class _CheckpointStateSession:
 
     def _invalidate(self) -> None:
         self._active = False
+        self._observed_page_ids = None
+
+    def _page_ids(self, transaction: object) -> set[str]:
+        """Rebuild once per activation under the process-lifetime writer lock."""
+        if self._observed_page_ids is None:
+            self._observed_page_ids = _existing_page_ids(transaction, self._run_id)
+        return self._observed_page_ids
+
+    def _page_ids_after_commit(self, page_ids: object) -> None:
+        if self._observed_page_ids is None:
+            raise ValueError("page budget cache was not initialized")
+        for page_id in page_ids:
+            if type(page_id) is not str or not page_id:
+                raise ValueError("invalid committed page identity")
+            self._observed_page_ids.add(page_id)
 
     def _validate_request_reservations(self, transaction: object) -> int:
         rows = transaction._fetchall(
@@ -872,7 +889,7 @@ class _CheckpointStateSession:
                 return _failure(_OperationCategory.STATE_CONFLICT)
             if current is not None:
                 return _failure(_OperationCategory.STATE_CONFLICT)
-            existing = _existing_page_ids(transaction, self._run_id)
+            existing = self._page_ids(transaction)
             if command.metadata.page_id not in existing and len(existing) + 1 > self._limits.max_pages_per_run:
                 return _failure(_OperationCategory.INVENTORY_PAGE_BUDGET_EXHAUSTED)
             transaction._execute(
@@ -909,7 +926,10 @@ class _CheckpointStateSession:
                 raise ValueError("root progress changed")
             return CheckpointCommitResult(transition, False)
 
-        return self._workspace._mutate(operation)
+        result = self._workspace._mutate(operation)
+        if isinstance(result, CheckpointCommitResult) and not result.replayed:
+            self._page_ids_after_commit((command.metadata.page_id,))
+        return result
 
     def commit_inventory_window(
         self, command: InventoryWindowCommit
@@ -934,6 +954,7 @@ class _CheckpointStateSession:
         command = canonical_command
         if command.run_id != self._run_id or command.include_roots != self._include_roots:
             return _failure(_OperationCategory.INVENTORY_IDENTITY_CONFLICT)
+        committed_page_ids = tuple(occurrence.page_id for occurrence in command.occurrences)
         self._include_roots.validate(
             command.include_root_ordinal, command.include_root_page_id
         )
@@ -988,7 +1009,7 @@ class _CheckpointStateSession:
             )
             if root_count is None or run_count is None or root_count[0] >= self._limits.max_windows_per_root or run_count[0] >= self._limits.max_windows_per_run:
                 return _failure(_OperationCategory.INVENTORY_WINDOW_LIMIT_EXHAUSTED)
-            existing_ids = _existing_page_ids(transaction, self._run_id)
+            existing_ids = self._page_ids(transaction)
             projected_ids = {occ.page_id for occ in command.occurrences}
             projected_new = projected_ids - existing_ids
             if len(existing_ids) + len(projected_new) > self._limits.max_pages_per_run:
@@ -1068,7 +1089,10 @@ class _CheckpointStateSession:
                     )
             return CheckpointCommitResult(transition, False)
 
-        return self._workspace._mutate(operation)
+        result = self._workspace._mutate(operation)
+        if isinstance(result, CheckpointCommitResult) and not result.replayed:
+            self._page_ids_after_commit(committed_page_ids)
+        return result
 
     def stream_inventory_occurrences(
         self, *, batch_size: int = 256
