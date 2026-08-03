@@ -51,6 +51,11 @@ from knowledgenexus.foundation.ports.confluence_crawl_writer_lock_port import (
     ConfluenceCrawlWriterLockLease,
     ConfluenceCrawlWriterLockPort,
 )
+from knowledgenexus.foundation.ports.confluence_raw_restriction_store_port import (
+    ConfluenceRawRestrictionStoreError,
+    ConfluenceRawRestrictionStoreFailureCategory,
+    ConfluenceRawRestrictionStorePort,
+)
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     CheckpointRunActivation,
     CheckpointRunInventoryComplete,
@@ -97,6 +102,9 @@ __all__ = [
     "InventoryWorkItem",
     "ConfluenceCrawlWriterLockLease",
     "ConfluenceCrawlWriterLockPort",
+    "ConfluenceRawRestrictionStoreError",
+    "ConfluenceRawRestrictionStoreFailureCategory",
+    "ConfluenceRawRestrictionStorePort",
     "CheckpointRunActivation",
     "CheckpointRunInventoryComplete",
     "CheckpointRunOutcome",

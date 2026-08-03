@@ -24,6 +24,10 @@ from knowledgenexus.foundation.domain.models.confluence_restriction_evidence imp
     M7_RESTRICTION_REQUEST_KIND,
     M7_RESTRICTION_REQUEST_PROFILE_VERSION,
 )
+from knowledgenexus.foundation.domain.models.confluence_raw_restriction_artifact import (
+    ConfluenceRawRestrictionArtifact,
+    ConfluenceRawRestrictionPublicationOutcome,
+)
 from knowledgenexus.foundation.domain.models.raw_observation_artifact import (
     RawObservationArtifact,
 )
@@ -116,6 +120,8 @@ __all__ = [
     "M7_RESTRICTION_FORMAT_VERSION",
     "M7_RESTRICTION_REQUEST_KIND",
     "M7_RESTRICTION_REQUEST_PROFILE_VERSION",
+    "ConfluenceRawRestrictionArtifact",
+    "ConfluenceRawRestrictionPublicationOutcome",
     "RawObservationArtifact",
     "ConfluencePageNormalizationResult",
     "ConfluencePageSource",
