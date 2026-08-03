@@ -2,26 +2,27 @@
 
 ## 1. Status, authority, and scope
 
-Status: M7-A3b contract complete and owner-approved. The bounded M7-D3
-raw-page store stage is authorized; the remaining raw-generation integration
-stays separately gated.
+Status: M7-A3b contract complete and owner-approved. The full M7 roadmap is
+owner-authorized for bounded stage implementation; each raw-generation stage
+still requires its own reviewed plan, validation, and independent gate.
 
 This specification narrows `CRAWL_RELIABILITY_SPEC.md` owner decisions C, D,
 and H. It is authoritative for future M7 raw-generation isolation,
 restriction-evidence serialization, replay/orphan recovery, writer ownership,
 and raw-storage budgets.
 
-The broader specification does not authorize a live crawl, lock, checkpoint,
-request, retry, budget, or attachment operation. The D3 implementation may add
-only the focused offline raw-page store described in section 11. It does not
-migrate or reinterpret M6 raw artifacts.
+The broader specification remains contract authority and does not itself
+define stage completion. M7 implementation may add live crawl, lock,
+checkpoint, request, retry, budget, attachment, and replay behavior only within
+the separately reviewed roadmap stages. No stage may migrate or reinterpret M6
+raw artifacts without an explicit scoped contract decision.
 
 ```text
 M7-A2: COMPLETE AND APPROVED
 M7-A3a: COMPLETE AND APPROVED
 M7-A3b: COMPLETE AND APPROVED
 M7-CONTRACT-GATE: APPROVED
-M7 production implementation: D3 RAW-PAGE STORE ONLY
+M7 production implementation: OWNER-AUTHORIZED BY BOUNDED STAGES
 ```
 
 ## 2. Generation ownership
@@ -516,13 +517,14 @@ An independent reviewer must confirm:
 - retryable operational statuses never become ACL observations;
 - lock ownership has no TTL takeover;
 - storage failures occur before publication/checkpoint advancement;
-- the D3 raw-page store remains offline-only and does not add checkpoint,
-  budget, lock, attachment, CLI, retention, migration, or network behavior.
+- each stage remains within its reviewed boundary and does not claim later
+  checkpoint, budget, lock, attachment, retention, migration, or network gates
+  before those stages are independently approved.
 
 Recorded integrated review state:
 
 ```text
 M7-CONTRACT-GATE: APPROVED
-M7-D3 raw-page store: AUTHORIZED AND SCOPED
-M7-D integration beyond D3: BLOCKED
+M7-D3 raw-page store: COMPLETE AND INDEPENDENTLY REVIEWED
+M7-D later stages: OWNER-AUTHORIZED BY FOCUSED PLAN/GATE
 ```

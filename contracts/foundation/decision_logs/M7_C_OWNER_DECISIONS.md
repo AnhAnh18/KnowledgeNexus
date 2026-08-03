@@ -4,19 +4,18 @@
 
 ```text
 M7-C decision package: OWNER-APPROVED
-M7-C production implementation: AUTHORIZED FOR M7-D3 ONLY
+M7-C production implementation: AUTHORIZED FOR THE M7 ROADMAP
 Full M7 acceptance: NOT AVAILABLE
-M7-D raw-generation integration: D3 AUTHORIZED; REMAINDER BLOCKED
+M7-D raw-generation integration: AUTHORIZED BY FOCUSED STAGES
 M7 scale RSS threshold: PENDING REPRODUCIBLE BASELINE
 ```
 
 This record locks the owner choices needed to plan the durable-inventory M7-C
-slice. The current owner authorization permits only the bounded M7-D3
-generation-scoped immutable raw-page store stage recorded below. It does not
-authorize a live crawl, checkpoint migration or advancement, orphan recovery,
-budgets, writer-lock integration, attachment metadata, CLI, retention, M6
-migration, or a full M7 acceptance claim. A focused plan and separate
-authorization remain required for every later production stage.
+slice. The owner authorized implementation of the full M7 roadmap in the
+current Codex turn. That authorization does not close any acceptance gate,
+select an RSS threshold, or authorize work outside M7. Every M7 stage still
+requires a bounded plan, plan review/revision, focused validation, and a fresh
+independent review before its status is recorded as complete.
 
 Precedence: `contracts/foundation/schemas/` and the focused M7 specs remain
 authoritative. The clarifications mirrored into `CHECKPOINT_RESUME_SPEC.md`,
@@ -254,24 +253,35 @@ threat-model assumptions, invalidation rules, schema or index changes, and any
 RSS/working-set threshold. This decision changes no production behavior,
 profile values, or acceptance result.
 
-## 3. M7-D3 authorization registration
+## 3. Full M7 roadmap authorization
 
-The owner authorized M7-D3 in the current Codex turn. The authorized
-deliverable is an offline generation-scoped immutable raw-page envelope and
-store with typed resolve/publish/read operations. Its contract, implementation,
-tests, and review must remain within the bounded stage plan; this registration
-does not authorize the excluded live, checkpoint, budget, lock, attachment,
-CLI, retention, migration, or scale behavior.
+The owner authorized the complete M7 roadmap in the current Codex turn,
+including the remaining durable-inventory, raw-generation, live integration,
+and acceptance stages. This is implementation authorization only; it does not
+claim that any incomplete stage or gate has passed.
 
-## 4. Required closure boundaries
+The authorization is stage-bounded in execution: no stage may broaden its
+scope, change a contract or roadmap decision, or claim the 100k scale gate
+without the required focused plan, review, validation, and independent gate.
+The existing durability-first policy remains in force, and the RSS/working-set
+threshold remains pending a reproducible baseline.
+
+## 4. M7-D3 authorization registration
+
+M7-D3 was authorized and completed as an offline generation-scoped immutable
+raw-page envelope and store with typed resolve/publish/read operations. Its
+implementation remains bounded by its completed plan and review; later M7
+stages must not retroactively broaden it.
+
+## 5. Required closure boundaries
 
 An inventory-only M7-C acceptance suite may close only M7-C after independent
-approval. It cannot claim full M7 completion because raw-generation evidence,
-its acceptance cases, and the full M7 scale gate remain later work. M7-D
-raw-generation integration beyond the authorized M7-D3 stage stays blocked
-until its own focused plan and owner authorization are approved.
+approval. It cannot claim full M7 completion until all required M7 acceptance
+cases and the full M7 scale gate pass. M7-D raw-generation integration may
+proceed through separately reviewed stages under the full-roadmap
+authorization, without importing later-stage behavior into an earlier stage.
 
-## 5. Durable recording and provenance
+## 6. Durable recording and provenance
 
 This committed record and its focused-spec clarifications are the durable source
 for these decisions. `.codex-workflow/`, checkpoint databases, raw artifacts,
