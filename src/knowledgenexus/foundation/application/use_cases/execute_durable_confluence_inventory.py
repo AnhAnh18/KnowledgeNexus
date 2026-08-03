@@ -27,6 +27,10 @@ from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
 from knowledgenexus.foundation.domain.models.confluence_source_config import (
     ConfluenceSourceConfig,
 )
+from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop import (
+    ControlledStopController,
+    ControlledStopPolicy,
+)
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     CheckpointRunInventoryComplete,
     CheckpointRunOutcome,
@@ -86,11 +90,15 @@ class DurableInventoryRunResult:
         "inventory_complete",
         "selection_failed",
         "operation_failed",
+        "paused",
     ]
     committed: tuple[CheckpointCommitResult, ...] = ()
     selection_failure: CheckpointRunSelectionFailure | None = None
     operation_failure: CheckpointOperationFailure | None = None
     snapshot: CrawlRunSnapshot | None = None
+    reason: Literal["controlled_checkpoint_stop"] | None = None
+    controlled_stop_committed_count: int | None = None
+    controlled_stop_threshold: int | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -98,6 +106,7 @@ class DurableInventoryRunResult:
             "inventory_complete",
             "selection_failed",
             "operation_failed",
+            "paused",
         }:
             raise ValueError("invalid durable inventory result")
         try:
@@ -106,17 +115,52 @@ class DurableInventoryRunResult:
             raise TypeError("invalid durable inventory result") from None
         if any(type(item) is not CheckpointCommitResult for item in committed):
             raise TypeError("invalid durable inventory result")
-        if self.status == "selection_failed":
+        if self.status == "paused":
+            if self.reason != "controlled_checkpoint_stop":
+                raise ValueError("invalid durable inventory result")
+            if (
+                type(self.controlled_stop_committed_count) is not int
+                or self.controlled_stop_committed_count < 0
+                or type(self.controlled_stop_threshold) is not int
+                or self.controlled_stop_threshold <= 0
+                or (
+                    self.controlled_stop_committed_count < self.controlled_stop_threshold
+                )
+            ):
+                raise ValueError("invalid durable inventory result")
+            if (
+                type(self.snapshot) is not CrawlRunSnapshot
+                or self.selection_failure is not None
+                or self.operation_failure is not None
+            ):
+                raise ValueError("invalid durable inventory result")
+        elif self.status == "selection_failed":
             if type(self.selection_failure) is not CheckpointRunSelectionFailure:
                 raise ValueError("invalid durable inventory result")
-            if self.operation_failure is not None:
+            if (
+                self.operation_failure is not None
+                or self.reason is not None
+                or self.controlled_stop_committed_count is not None
+                or self.controlled_stop_threshold is not None
+            ):
                 raise ValueError("invalid durable inventory result")
         elif self.status == "operation_failed":
             if type(self.operation_failure) is not CheckpointOperationFailure:
                 raise ValueError("invalid durable inventory result")
-            if self.selection_failure is not None:
+            if (
+                self.selection_failure is not None
+                or self.reason is not None
+                or self.controlled_stop_committed_count is not None
+                or self.controlled_stop_threshold is not None
+            ):
                 raise ValueError("invalid durable inventory result")
-        elif self.selection_failure is not None or self.operation_failure is not None:
+        elif (
+            self.selection_failure is not None
+            or self.operation_failure is not None
+            or self.reason is not None
+            or self.controlled_stop_committed_count is not None
+            or self.controlled_stop_threshold is not None
+        ):
             raise ValueError("invalid durable inventory result")
         if self.snapshot is not None and type(self.snapshot) is not CrawlRunSnapshot:
             raise TypeError("invalid durable inventory result")
@@ -153,7 +197,12 @@ class ExecuteDurableConfluenceInventory:
         self,
         *,
         request: DurableInventoryRequest,
+        controlled_stop_policy: ControlledStopPolicy | None = None,
     ) -> DurableInventoryRunResult:
+        if controlled_stop_policy is None:
+            controlled_stop_policy = ControlledStopPolicy()
+        elif type(controlled_stop_policy) is not ControlledStopPolicy:
+            raise TypeError("controlled_stop_policy must be ControlledStopPolicy or None")
         try:
             build_confluence_crawl_fingerprint(
                 request.endpoint_url,
@@ -165,6 +214,7 @@ class ExecuteDurableConfluenceInventory:
         context = self._select_context(request)
         source_config = request.source_config
         committed: list[CheckpointCommitResult] = []
+        stop_controller = ControlledStopController(controlled_stop_policy)
 
         with context as outcome:
             if isinstance(outcome, CheckpointRunSelectionFailure):
@@ -223,6 +273,16 @@ class ExecuteDurableConfluenceInventory:
                 if type(result) is not CheckpointCommitResult:
                     raise CheckpointStateError() from None
                 committed.append(result)
+                decision = stop_controller.record(result)
+                if decision.status == "pause":
+                    return DurableInventoryRunResult(
+                        "paused",
+                        reason=decision.reason,
+                        controlled_stop_committed_count=decision.committed_count,
+                        controlled_stop_threshold=decision.threshold,
+                        committed=tuple(committed),
+                        snapshot=activation.snapshot,
+                    )
 
     def _select_context(
         self,

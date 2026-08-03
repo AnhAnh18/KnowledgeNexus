@@ -9,6 +9,9 @@ from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_
     DurableInventoryRunResult,
     ExecuteDurableConfluenceInventory,
 )
+from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop import (
+    ControlledStopPolicy,
+)
 from knowledgenexus.foundation.domain.models.confluence_crawl_fingerprint import (
     ConfluenceCrawlFingerprint,
 )
@@ -199,11 +202,15 @@ class FakeRunPort:
     def __init__(self, outcome):
         self.outcome = outcome
         self.calls = []
+        self.exits = []
 
     @contextmanager
     def _yield(self, name, request):
         self.calls.append(name)
-        yield self.outcome
+        try:
+            yield self.outcome
+        finally:
+            self.exits.append(name)
 
     def start_new_run(self, request):
         return self._yield("start", request)
@@ -263,6 +270,40 @@ def test_orchestrator_passes_activation_to_window_factory(tmp_path) -> None:
     use_case.execute(request=_request(tmp_path))
     assert transport_seen == [activation]
     assert window_seen == ["retry-transport"]
+
+
+def test_orchestrator_pauses_after_requested_new_window_commit(tmp_path) -> None:
+    activation = FakeActivation(_works())
+    window_port = FakeWindowPort(activation)
+    run_port = FakeRunPort(activation)
+    result = ExecuteDurableConfluenceInventory(
+        checkpoint_run_port=run_port,
+        inventory_transport_factory=lambda value: value,
+        inventory_window_port_factory=lambda value: window_port,
+    ).execute(
+        request=_request(tmp_path),
+        controlled_stop_policy=ControlledStopPolicy(1),
+    )
+
+    assert result.status == "paused"
+    assert result.reason == "controlled_checkpoint_stop"
+    assert result.controlled_stop_committed_count == 1
+    assert result.controlled_stop_threshold == 1
+    assert len(result.committed) == 2
+    assert [call[0] for call in window_port.calls] == ["root", "window"]
+    assert len(activation.works) == 2
+    assert run_port.exits == ["start"]
+
+
+def test_disabled_controlled_stop_preserves_completion(tmp_path) -> None:
+    activation = FakeActivation(_works())
+    result = ExecuteDurableConfluenceInventory(
+        checkpoint_run_port=FakeRunPort(activation),
+        inventory_transport_factory=lambda value: value,
+        inventory_window_port_factory=lambda value: FakeWindowPort(activation),
+    ).execute(request=_request(tmp_path), controlled_stop_policy=ControlledStopPolicy())
+    assert result.status == "completed"
+    assert result.reason is None
 
 
 def test_orchestrator_branches_selection_and_inventory_complete(tmp_path) -> None:

@@ -25,6 +25,12 @@ from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_
     DurableInventoryTransportFactory,
     ExecuteDurableConfluenceInventory,
 )
+from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop import (
+    ControlledStopController,
+    ControlledStopDecision,
+    ControlledStopPolicy,
+    is_inventory_window_commit,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -40,4 +46,8 @@ __all__ = [
     "DurableInventoryTransport",
     "DurableInventoryTransportFactory",
     "ExecuteDurableConfluenceInventory",
+    "ControlledStopController",
+    "ControlledStopDecision",
+    "ControlledStopPolicy",
+    "is_inventory_window_commit",
 ]
