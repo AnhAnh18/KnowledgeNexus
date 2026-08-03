@@ -90,7 +90,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | C0 through C4-B complete; C5 inventory durability slice complete; C5-B1 approved; C5-B2 measurement PASS only; D3, D4-A, D4-B, D5-A, and D5-B complete | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate remains incomplete and optimization is deferred | Full M7 roadmap owner-authorized by bounded stages; no full-M7 or 100k completion claim while the scale gate remains open. |
+| M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
@@ -102,12 +102,13 @@ M7-C4-B are implemented and covered by the durable checkpoint/run-state path.
 M7-C5 inventory durability acceptance is complete and independently reviewed
 `PASS`: the 10k correctness baseline and C5-B1 are approved, while C5-B2 is
 measurement-only and does not close the 100k scale gate. The owner deferred
-100k performance optimization. M7-D3 is
-complete and independently reviewed `PASS` as an offline raw-page store, and
-M7-D4-A raw-page orphan inspection is complete with independent review `PASS`.
+100k performance optimization and accepts the bounded M7 stages as complete.
+M7-D3 is complete and independently reviewed `PASS` as an offline raw-page
+store. M7-D4-A raw-page orphan inspection is complete with independent review
+`PASS`.
 M7-D4-B restriction-evidence orphan inspection is also complete with
-independent review `PASS`; the full M7 roadmap remains bounded-stage
-authorized and the 100k scale gate remains incomplete. M7-D5-A raw-page
+independent review `PASS`; the bounded M7 roadmap is owner-accepted and the
+100k scale gate remains deferred. M7-D5-A raw-page
 replay/checkpoint integration and M7-D5-B restriction replay are complete with
 independent review `PASS`; terminal sessions fail closed for both replay paths.
 
@@ -814,8 +815,9 @@ Status:
 - M6G-C: complete and independently approved at production head `5f62bdb`.
 - M6G-D: complete and approved after exactly one authorized exporter invocation
   exited zero and recovery-only acceptance passed without a second invocation.
-- M7: active; the M7-C5 inventory durability slice is complete, while scale
-  closeout remains bounded and incomplete (see the M7-C ledger below).
+- M7: bounded-stage roadmap complete through D5-B and owner-accepted; the
+  100k scale gate remains a separate deferred follow-up (see the M7-C ledger
+  below).
 
 Historical M6/M6G execution records are complete and retained for traceability;
 they are not an active execution queue.
@@ -896,7 +898,7 @@ Contract decomposition:
 | M7-C3-B outbound reservation | complete | Independent review `PASS`; durable reservation denial-before-request gate passes. |
 | M7-C4-A durable inventory orchestration | complete | Independent review `PASS`; coordinator/lock/retry/checkpoint integration gate passes. |
 | M7-C4-B controlled checkpoint stop | complete | Integrated C5 pause/resume acceptance `PASS`; no separate standalone review is claimed; controlled-stop gate is closed. |
-| M7-C5 current state | inventory durability slice complete; scale closeout in progress | Inventory-only acceptance consolidation independently reviewed `PASS`; 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. The 100k scale gate is incomplete, with no RSS threshold claim. |
+| M7-C5 current state | bounded durability stages complete; 100k scale gate deferred | Inventory-only acceptance consolidation independently reviewed `PASS`; 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. Owner accepts bounded M7 closure; the 100k scale gate and RSS threshold remain deferred. |
 
 ### M7-D Raw-Generation Milestone Ledger
 
@@ -909,8 +911,8 @@ Contract decomposition:
 | M7-D5-A raw-page replay/checkpoint integration | complete | Owner-authorized reviewed plan; focused checkpoint/raw/architecture validation `255 passed, 14 skipped`; terminal-session hardening regression included; independent review `PASS`. Exact-v1 fresh-workspace/no-migration and same-lock single-authority gates are closed. |
 | M7-D5-B restriction-evidence replay | complete | Owner-authorized bounded plan; focused replay `15 passed`; combined checkpoint/port/raw-restriction regression `257 passed, 15 skipped`; compileall/diff-check passed; independent review `PASS`. Exact-v1 fresh-workspace/no-migration, same-lock single-authority, inventory-linkage, idempotency, and terminal-session gates are closed. The 100k scale gate remains incomplete. |
 
-Completion gate (M7-C durability correctness only; the M7-C5 100k scale gate
-remains incomplete and optimization is deferred):
+Bounded completion gate (M7-C durability correctness and approved raw replay;
+the M7-C5 100k scale gate remains deferred):
 - Interrupted crawl resumes correctly.
 - Retries are bounded.
 - Rate limits are respected.
@@ -1036,8 +1038,8 @@ Acceptance categories:
 
 ## 13. Current Execution Boundary
 
-- Preserve the M7-C5 durability-first baseline; the 100k scale gate remains
-  incomplete and optimization is deferred.
+- Preserve the completed, owner-accepted bounded M7 durability/replay stages;
+  the 100k scale gate and optimization remain deferred.
 - Any new M7 implementation requires a bounded reviewed plan and the required
   owner authorization before code changes begin.
 - Keep each M7 stage bounded by its reviewed plan and independent gate; the

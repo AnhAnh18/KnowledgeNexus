@@ -7,9 +7,11 @@ through C4-B and has an integrated correctness path. The M7-C5 inventory
 durability slice is now complete and independently reviewed `PASS`; the
 10k correctness baseline and C5-B1 validation fast path remain approved,
 while the 100k scale gate is incomplete and performance optimization is
-deferred. M7-D3 is complete and independently reviewed as an offline,
-generation-scoped raw-page store. The owner has now authorized the full M7
-roadmap by bounded stages. M7-D4-A raw-page orphan inspection and M7-D4-B
+deferred. The owner now accepts the bounded M7 stages as complete, with the
+100k gate retained as a separate deferred follow-up. M7-D3 is complete and
+independently reviewed as an offline, generation-scoped raw-page store. The
+owner has authorized and accepted the bounded M7 roadmap stages. M7-D4-A
+raw-page orphan inspection and M7-D4-B
 restriction-evidence orphan inspection are complete, each independently
 reviewed `PASS`; M7-D5-A raw-page replay/checkpoint integration and M7-D5-B
 restriction-evidence replay are complete and independently reviewed `PASS`.
@@ -1309,7 +1311,7 @@ are recorded without using repository-local commit SHAs as status.
 | M7-C3-B outbound reservation | complete | Independent review `PASS`; durable reservation denial-before-request gate passes. |
 | M7-C4-A durable inventory orchestration | complete | Independent review `PASS`; coordinator/lock/retry/checkpoint integration gate passes. |
 | M7-C4-B controlled checkpoint stop | complete | Integrated C5 pause/resume acceptance `PASS`; no separate standalone review is claimed; controlled-stop gate is closed. |
-| M7-C5 current state | inventory durability slice complete; scale closeout in progress | Inventory-only acceptance consolidation independently reviewed `PASS`; 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. The 100k scale gate is incomplete, with no RSS threshold claim. |
+| M7-C5 current state | bounded durability stages complete; 100k scale gate deferred | Inventory-only acceptance consolidation independently reviewed `PASS`; 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. Owner accepts bounded M7 closure; the 100k scale gate and RSS threshold remain deferred. |
 
 ## M7-C5 Acceptance and Scale State
 
@@ -1319,8 +1321,9 @@ are recorded without using repository-local commit SHAs as status.
   controlled-stop, cap, duplicate, excluded-budget, and exact-ID evidence.
 - Sanitized aggregate evidence is recorded in
   `.local_ai/review/m7-c5-acceptance-consolidation-evidence.md`.
-- This closes only the durable inventory slice. It does not close raw
-  generation, full-M7, live, or 100k scale acceptance.
+- This subsection closes only the durable inventory slice. Raw-generation
+  closure is recorded in the M7-D state below; live and 100k scale acceptance
+  remain outside this bounded closeout.
 
 ## M7-C5 Scale and Performance State
 
@@ -1333,6 +1336,9 @@ are recorded without using repository-local commit SHAs as status.
 - The owner explicitly deferred 100,000-page performance optimization. Any
   future lock/sidecar, validation-cadence, schema/index, or memory-threshold
   change needs a separate owner-authorized and independently reviewed stage.
+- The owner accepts the bounded M7 stages as complete while retaining the
+  100,000-page scale gate as a separate deferred follow-up. This is a bounded
+  roadmap closeout, not a 100,000-page scale PASS.
 - M7-D3 raw-page store is complete and independently reviewed with
   `VERDICT: PASS`. It remains offline-only and does not authorize live crawl
   integration, checkpoint advancement, budgets, locks, attachments, CLI,
@@ -1366,8 +1372,7 @@ are recorded without using repository-local commit SHAs as status.
 
 ## Current Execution Boundary
 
-The M7-C5 durability-first inventory slice and M7-D5 raw-generation
-replay/checkpoint slices are complete with their bounded independent gates,
-while the 100k performance gate remains incomplete and deferred. The full M7
-roadmap is owner-authorized by bounded stages. No full-M7 or 100k completion
-claim is made while the scale gate remains open.
+The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
+replay/checkpoint stages are complete with their independent gates and are
+owner-accepted as the roadmap closeout. The 100k performance gate remains a
+separate deferred follow-up; no 100k scale PASS is claimed.
