@@ -3,10 +3,11 @@
 ## Current Milestone
 
 M6 is complete and approved. M7-C durable crawl implementation is complete
-through C4-B and has an integrated correctness path. M7-C5 remains the active
-closeout state: the 10k correctness baseline and C5-B1 validation fast path are
-approved, while the 100k scale gate is incomplete and performance optimization
-is deferred. M7-D3 is complete and independently reviewed as an offline,
+through C4-B and has an integrated correctness path. The M7-C5 inventory
+durability slice is now complete and independently reviewed `PASS`; the
+10k correctness baseline and C5-B1 validation fast path remain approved,
+while the 100k scale gate is incomplete and performance optimization is
+deferred. M7-D3 is complete and independently reviewed as an offline,
 generation-scoped raw-page store. The owner has now authorized the full M7
 roadmap by bounded stages. M7-D4-A raw-page orphan inspection and M7-D4-B
 restriction-evidence orphan inspection are complete, each independently
@@ -1307,7 +1308,18 @@ are recorded without using repository-local commit SHAs as status.
 | M7-C3-B outbound reservation | complete | Independent review `PASS`; durable reservation denial-before-request gate passes. |
 | M7-C4-A durable inventory orchestration | complete | Independent review `PASS`; coordinator/lock/retry/checkpoint integration gate passes. |
 | M7-C4-B controlled checkpoint stop | complete | Integrated C5 pause/resume acceptance `PASS`; no separate standalone review is claimed; controlled-stop gate is closed. |
-| M7-C5 current state | closeout in progress | 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. The 100k scale gate is incomplete, with no RSS threshold claim. |
+| M7-C5 current state | inventory durability slice complete; scale closeout in progress | Inventory-only acceptance consolidation independently reviewed `PASS`; 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. The 100k scale gate is incomplete, with no RSS threshold claim. |
+
+## M7-C5 Acceptance and Scale State
+
+- The inventory-only M7-C5 acceptance consolidation is complete with a fresh
+  independent review `PASS`. It composes the approved B1/B2 retry and pacing
+  seam with durable reservation, crash/replay, transaction rollback,
+  controlled-stop, cap, duplicate, excluded-budget, and exact-ID evidence.
+- Sanitized aggregate evidence is recorded in
+  `.local_ai/review/m7-c5-acceptance-consolidation-evidence.md`.
+- This closes only the durable inventory slice. It does not close raw
+  generation, full-M7, live, or 100k scale acceptance.
 
 ## M7-C5 Scale and Performance State
 
@@ -1342,8 +1354,8 @@ are recorded without using repository-local commit SHAs as status.
 
 ## Current Execution Boundary
 
-The M7-C5 durability-first baseline remains the active closeout state. The
-100k performance gate is incomplete and deferred. The full M7 roadmap is
+The M7-C5 durability-first inventory slice is complete, while the 100k
+performance gate remains incomplete and deferred. The full M7 roadmap is
 owner-authorized by bounded stages; M7-D4-B is complete with its reviewed
 plan, implementation validation, and independent gate closed. No full-M7 or
 100k completion claim is made.
