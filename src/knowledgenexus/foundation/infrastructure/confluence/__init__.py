@@ -19,7 +19,16 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transpo
     ConfluenceHttpResponse,
     ConfluenceHttpResponseTooLargeError,
     ConfluenceHttpTransport,
+    PreparedConfluenceGetInput,
     UrllibConfluenceHttpTransport,
+    prepare_confluence_get_input,
+)
+from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport import (  # noqa: E501
+    ConfluenceRetryExecutorProfile,
+    ConfluenceRetryExecutionError,
+    ConfluenceRetryExecutionSnapshot,
+    ConfluenceStatusAwareExecutionResult,
+    RetryingConfluenceHttpTransport,
 )
 
 __all__ = [
@@ -34,6 +43,13 @@ __all__ = [
     "ConfluenceHttpResponse",
     "ConfluenceHttpResponseTooLargeError",
     "ConfluenceHttpTransport",
+    "PreparedConfluenceGetInput",
+    "ConfluenceRetryExecutorProfile",
+    "ConfluenceRetryExecutionError",
+    "ConfluenceRetryExecutionSnapshot",
+    "ConfluenceStatusAwareExecutionResult",
     "ParsedConfluenceSearchPage",
+    "RetryingConfluenceHttpTransport",
+    "prepare_confluence_get_input",
     "UrllibConfluenceHttpTransport",
 ]
