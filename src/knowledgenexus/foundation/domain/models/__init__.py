@@ -41,6 +41,13 @@ from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import
     M7_RAW_PAGE_REQUEST_KIND,
     M7_RAW_PAGE_REQUEST_PROFILE_VERSION,
 )
+from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspection import (
+    ConfluenceRawPageOrphanInspectionDecision,
+    ConfluenceRawPageOrphanInspectionError,
+    ConfluenceRawPageOrphanInspectionFailureCategory,
+    ConfluenceRawPageOrphanInspectionRequest,
+    ConfluenceRawPageOrphanInspectionResult,
+)
 from knowledgenexus.foundation.domain.models.raw_observation_artifact import (
     RawObservationArtifact,
 )
@@ -146,6 +153,11 @@ __all__ = [
     "M7_RAW_PAGE_FORMAT_VERSION",
     "M7_RAW_PAGE_REQUEST_KIND",
     "M7_RAW_PAGE_REQUEST_PROFILE_VERSION",
+    "ConfluenceRawPageOrphanInspectionDecision",
+    "ConfluenceRawPageOrphanInspectionError",
+    "ConfluenceRawPageOrphanInspectionFailureCategory",
+    "ConfluenceRawPageOrphanInspectionRequest",
+    "ConfluenceRawPageOrphanInspectionResult",
     "RawObservationArtifact",
     "ConfluencePageNormalizationResult",
     "ConfluencePageSource",

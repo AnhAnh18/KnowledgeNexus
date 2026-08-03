@@ -157,6 +157,8 @@ def _posix_stat_entry(parent_descriptor: int, name: str) -> os.stat_result:
 
 def _posix_open_regular(parent_descriptor: int, name: str, *, writable: bool = False) -> int:
     flags = (os.O_RDWR if writable else os.O_RDONLY) | getattr(os, "O_NOFOLLOW", 0)
+    # Avoid blocking on a FIFO before the descriptor can be type-checked.
+    flags |= getattr(os, "O_NONBLOCK", 0)
     flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
     descriptor = os.open(name, flags, dir_fd=parent_descriptor)
     try:
@@ -201,7 +203,7 @@ def _open_bound_parent(path: Path, *, create: bool) -> Iterator[int]:
 
 def _bound_stat(parent_handle: int, name: str) -> os.stat_result:
     if os.name == "nt":
-        descriptor = _windows_open_regular_fd(parent_handle, name)
+        descriptor = _windows_open_regular_fd(parent_handle, name, metadata_only=True)
         try:
             return os.fstat(descriptor)
         finally:
@@ -209,7 +211,12 @@ def _bound_stat(parent_handle: int, name: str) -> os.stat_result:
     return _posix_stat_entry(parent_handle, name)
 
 
-def _bound_read(parent_handle: int, name: str) -> bytes:
+def _bound_read(
+    parent_handle: int,
+    name: str,
+    *,
+    expected_metadata: tuple[int, int, int, int, int, int] | None = None,
+) -> bytes:
     descriptor = (
         _windows_open_regular_fd(parent_handle, name)
         if os.name == "nt"
@@ -219,6 +226,8 @@ def _bound_read(parent_handle: int, name: str) -> bytes:
         before = os.fstat(descriptor)
         if _is_link_or_reparse(before) or not stat.S_ISREG(before.st_mode):
             raise OSError("non-regular entry")
+        if expected_metadata is not None and _metadata(before) != expected_metadata:
+            raise OSError("entry changed before read")
         if before.st_size > _MAX_STABLE_READ_BYTES:
             raise OverflowError("stable read bound exceeded")
         chunks: list[bytes] = []
@@ -426,6 +435,7 @@ def _windows_nt_relative_handle(
     directory: bool,
     create: bool = False,
     delete: bool = False,
+    read_data: bool = True,
 ) -> int:
     import ctypes
     from ctypes import wintypes
@@ -487,7 +497,7 @@ def _windows_nt_relative_handle(
     )
     nt_create.restype = wintypes.LONG
     access = 0x00000080 | 0x00100000  # FILE_READ_ATTRIBUTES | SYNCHRONIZE
-    if not directory:
+    if not directory and (read_data or create or delete):
         access |= 0x00000001  # FILE_READ_DATA
         if create or delete:
             access |= 0x00010000  # FILE_DELETE for owned temporary cleanup
@@ -571,10 +581,21 @@ def _open_windows_parent(path: Path, *, create: bool) -> Iterator[int]:
             pass
 
 
-def _windows_open_regular_fd(parent_handle: int, name: str, *, writable: bool = False) -> int:
+def _windows_open_regular_fd(
+    parent_handle: int,
+    name: str,
+    *,
+    writable: bool = False,
+    metadata_only: bool = False,
+) -> int:
     import msvcrt
 
-    handle = _windows_nt_relative_handle(parent_handle, name, directory=False)
+    handle = _windows_nt_relative_handle(
+        parent_handle,
+        name,
+        directory=False,
+        read_data=not metadata_only,
+    )
     try:
         attributes = _windows_file_attributes(handle)
         if attributes & _REPARSE_POINT or attributes & _FILE_ATTRIBUTE_DIRECTORY:

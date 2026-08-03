@@ -8,9 +8,9 @@ closeout state: the 10k correctness baseline and C5-B1 validation fast path are
 approved, while the 100k scale gate is incomplete and performance optimization
 is deferred. M7-D3 is complete and independently reviewed as an offline,
 generation-scoped raw-page store. The owner has now authorized the full M7
-roadmap by bounded stages; M7-D4-A is the next authorized stage and has not
-started. No raw production artifact or published snapshot exists in this
-repository.
+roadmap by bounded stages. M7-D4-A raw-page orphan inspection is complete and
+independently reviewed `PASS`; D4-B is the next stage and has not started. No
+raw production artifact or published snapshot exists in this repository.
 
 ## Durable State Convention
 
@@ -1331,13 +1331,15 @@ are recorded without using repository-local commit SHAs as status.
   focused and regression tests pass and the independent review verdict is
   `PASS`.
 - M7-D beyond D3 is now stage-gated under the owner's full-roadmap
-  authorization. D4-A remains the only next implementation stage currently
-  opened by its reviewed plan. The 100k scale gate remains incomplete and is
-  not implied by this authorization.
+  authorization. D4-A is complete and independently reviewed `PASS`; its
+  bound-read hardening also rejects FIFO/non-regular and replacement races.
+  D4-B restriction-evidence inspection is the next stage and is not started.
+  The 100k scale gate remains incomplete and is not implied by this
+  authorization.
 
 ## Current Execution Boundary
 
 The M7-C5 durability-first baseline remains the active closeout state. The
 100k performance gate is incomplete and deferred. The full M7 roadmap is
-owner-authorized by bounded stages; M7-D4-A is the next stage and must remain
-within its reviewed plan and independent gate.
+owner-authorized by bounded stages; M7-D4-B is the next stage and must receive
+its own reviewed plan, implementation validation, and independent gate.
