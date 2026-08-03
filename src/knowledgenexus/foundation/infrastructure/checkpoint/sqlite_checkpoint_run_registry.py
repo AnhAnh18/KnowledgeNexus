@@ -51,9 +51,15 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     RawPageReplayCommand,
     RawPageReplayFailure,
     RawPageReplayResult,
+    RawRestrictionReplayCommand,
+    RawRestrictionReplayFailure,
+    RawRestrictionReplayResult,
 )
 from knowledgenexus.foundation.ports.confluence_raw_page_orphan_inspection_port import (
     ConfluenceRawPageOrphanInspectionPort,
+)
+from knowledgenexus.foundation.ports.confluence_raw_restriction_orphan_inspection_port import (
+    ConfluenceRawRestrictionOrphanInspectionPort,
 )
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
     InventoryOccurrence,
@@ -131,6 +137,13 @@ class _RunActivated:
         inspector: ConfluenceRawPageOrphanInspectionPort,
     ) -> RawPageReplayResult | RawPageReplayFailure:
         return self._state.replay_raw_page(command, inspector)
+
+    def replay_raw_restriction(
+        self,
+        command: RawRestrictionReplayCommand,
+        inspector: ConfluenceRawRestrictionOrphanInspectionPort,
+    ) -> RawRestrictionReplayResult | RawRestrictionReplayFailure:
+        return self._state.replay_raw_restriction(command, inspector)
 
     def stream_inventory_occurrences(
         self, *, batch_size: int = 256

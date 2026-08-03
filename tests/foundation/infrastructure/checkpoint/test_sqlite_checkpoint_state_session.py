@@ -37,6 +37,15 @@ from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspecti
     ConfluenceRawPageOrphanInspectionResult,
     ConfluenceRawPageOrphanInspectionDecision,
 )
+from knowledgenexus.foundation.domain.models.confluence_restriction_evidence import (
+    ConfluenceRestrictionEvidenceEnvelope,
+    M7_RESTRICTION_REQUEST_PROFILE_VERSION,
+)
+from knowledgenexus.foundation.domain.models.confluence_raw_restriction_orphan_inspection import (
+    ConfluenceRawRestrictionOrphanInspectionDecision,
+    ConfluenceRawRestrictionOrphanInspectionRequest,
+    ConfluenceRawRestrictionOrphanInspectionResult,
+)
 from knowledgenexus.foundation.infrastructure.checkpoint import (
     sqlite_checkpoint_workspace as workspace_module,
     sqlite_checkpoint_state_session as state_module,
@@ -56,6 +65,11 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     RawPageReplayFailure,
     RawPageReplayFailureCategory,
     RawPageReplayResult,
+    RawRestrictionReplayCommand,
+    RawRestrictionReplayDecision,
+    RawRestrictionReplayFailure,
+    RawRestrictionReplayFailureCategory,
+    RawRestrictionReplayResult,
 )
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_generation_store import (
     ConfluenceRawPageGenerationStore,
@@ -63,8 +77,6 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_gene
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector import (
     ConfluenceRawPageOrphanInspector,
 )
-
-
 PROFILE = {
     "profile_id": "m7-crawl-reliability-v1",
     "profile_version": "1",
@@ -764,6 +776,23 @@ def test_raw_page_replay_sanitizes_forged_envelope(tmp_path) -> None:
         ) == []
 
 
+@pytest.mark.parametrize("terminal_method", ["pause_session", "complete_session"])
+def test_raw_page_replay_rejects_terminal_session_without_mutation(
+    tmp_path, terminal_method
+) -> None:
+    with _prepare_raw_replay(tmp_path) as (activation, inspector, command):
+        getattr(activation, terminal_method)()
+        with pytest.raises(CheckpointStateError):
+            activation.replay_raw_page(command, inspector)
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchall(
+                "SELECT * FROM raw_page_progress"
+            )
+        ) == []
+
+
 def test_raw_page_progress_schema_tamper_fails_closed_on_resume(tmp_path) -> None:
     with _prepare_raw_replay(tmp_path) as (activation, inspector, command):
         assert activation.replay_raw_page(command, inspector).decision is RawPageReplayDecision.COMMITTED
@@ -793,6 +822,192 @@ def test_raw_page_progress_source_binding_tamper_fails_closed_on_resume(tmp_path
             )
         )
     request = replace(_request(tmp_path), operation=ResumeExplicitRunId(run_id))
+    with pytest.raises(CheckpointStateError):
+        with _register_checkpoint_run(request):
+            pass
+
+
+def _raw_restriction_command(
+    run_id,
+    *,
+    selected_page_id: str = "1001",
+    target_page_id: str = "1000",
+) -> RawRestrictionReplayCommand:
+    return RawRestrictionReplayCommand(
+        ConfluenceRawRestrictionOrphanInspectionRequest.capture(
+            run_id=run_id,
+            selected_page_id=selected_page_id,
+            target_page_id=target_page_id,
+        )
+    )
+
+
+@contextmanager
+def _prepare_raw_restriction_replay(tmp_path):
+    with _start(tmp_path, roots=("1000",)) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation, "1000"))
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(
+            _window_commit(activation, 0, ("1001",), 1, "1000")
+        )
+        envelope = ConfluenceRestrictionEvidenceEnvelope.capture(
+            request_profile_version=M7_RESTRICTION_REQUEST_PROFILE_VERSION,
+            selected_page_id="1001",
+            target_page_id="1000",
+            http_status=404,
+            body_bytes=b"restriction-body",
+        )
+        command = _raw_restriction_command(activation.snapshot.run_id)
+        yield activation, command, envelope
+
+
+class _StaticRestrictionInspector:
+    def __init__(self, envelope) -> None:
+        self.envelope = envelope
+
+    def inspect_restriction(self, *, request):
+        return ConfluenceRawRestrictionOrphanInspectionResult(
+            ConfluenceRawRestrictionOrphanInspectionDecision.REPLAYABLE,
+            self.envelope,
+        )
+
+
+def test_raw_restriction_replay_commits_once_and_replays_idempotently(tmp_path) -> None:
+    with _prepare_raw_restriction_replay(tmp_path) as (activation, command, envelope):
+        inspector = _StaticRestrictionInspector(envelope)
+        first = activation.replay_raw_restriction(command, inspector)
+        second = activation.replay_raw_restriction(command, inspector)
+        assert isinstance(first, RawRestrictionReplayResult)
+        assert first.decision is RawRestrictionReplayDecision.COMMITTED
+        assert isinstance(second, RawRestrictionReplayResult)
+        assert second.decision is RawRestrictionReplayDecision.REPLAYED
+        assert second.replayed is True
+
+    serialized = envelope.to_bytes()
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchone(
+                "SELECT generation_id,selected_page_id,target_page_id,"
+                "request_profile_version,http_status,raw_sha256,byte_count,status "
+                "FROM raw_restriction_progress"
+            )
+        ) == (
+            command.request.run_id.value,
+            "1001",
+            "1000",
+            M7_RESTRICTION_REQUEST_PROFILE_VERSION,
+            404,
+            hashlib.sha256(serialized).hexdigest(),
+            len(serialized),
+            "committed",
+        )
+
+
+def test_raw_restriction_replay_conflict_and_linkage_denial_do_not_mutate(tmp_path) -> None:
+    with _prepare_raw_restriction_replay(tmp_path) as (activation, command, envelope):
+        inspector = _StaticRestrictionInspector(envelope)
+        assert activation.replay_raw_restriction(command, inspector).decision is RawRestrictionReplayDecision.COMMITTED
+        alternate = ConfluenceRestrictionEvidenceEnvelope.capture(
+            request_profile_version=M7_RESTRICTION_REQUEST_PROFILE_VERSION,
+            selected_page_id="1001",
+            target_page_id="1000",
+            http_status=200,
+            body_bytes=b"different",
+        )
+        conflict = activation.replay_raw_restriction(
+            command, _StaticRestrictionInspector(alternate)
+        )
+        assert isinstance(conflict, RawRestrictionReplayResult)
+        assert conflict.decision is RawRestrictionReplayDecision.CONFLICT
+
+        outside = ConfluenceRestrictionEvidenceEnvelope.capture(
+            request_profile_version=M7_RESTRICTION_REQUEST_PROFILE_VERSION,
+            selected_page_id="1001",
+            target_page_id="1002",
+            http_status=404,
+            body_bytes=b"outside",
+        )
+        denied = activation.replay_raw_restriction(
+            _raw_restriction_command(
+                activation.snapshot.run_id, target_page_id="1002"
+            ),
+            _StaticRestrictionInspector(outside),
+        )
+        assert isinstance(denied, RawRestrictionReplayResult)
+        assert denied.decision is RawRestrictionReplayDecision.UNSAFE_TARGET
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchone(
+                "SELECT COUNT(*) FROM raw_restriction_progress"
+            )
+        ) == (1,)
+
+
+def test_raw_restriction_replay_rejects_forged_envelope_without_mutation(tmp_path) -> None:
+    with _start(tmp_path, roots=("1000",)) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation, "1000"))
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(
+            _window_commit(activation, 0, ("1001",), 1, "1000")
+        )
+        forged = object.__new__(ConfluenceRestrictionEvidenceEnvelope)
+        result = activation.replay_raw_restriction(
+            _raw_restriction_command(activation.snapshot.run_id),
+            _StaticRestrictionInspector(forged),
+        )
+        assert isinstance(result, RawRestrictionReplayFailure)
+        assert result.category is RawRestrictionReplayFailureCategory.INSPECTION_FAILED
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchall(
+                "SELECT * FROM raw_restriction_progress"
+            )
+        ) == []
+
+
+@pytest.mark.parametrize("terminal_method", ["pause_session", "complete_session"])
+def test_raw_restriction_replay_rejects_terminal_session_without_mutation(
+    tmp_path, terminal_method
+) -> None:
+    with _prepare_raw_restriction_replay(tmp_path) as (activation, command, envelope):
+        getattr(activation, terminal_method)()
+        with pytest.raises(CheckpointStateError):
+            activation.replay_raw_restriction(
+                command, _StaticRestrictionInspector(envelope)
+            )
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchall(
+                "SELECT * FROM raw_restriction_progress"
+            )
+        ) == []
+
+
+def test_raw_restriction_progress_ancestry_tamper_fails_closed_on_resume(tmp_path) -> None:
+    with _prepare_raw_restriction_replay(tmp_path) as (activation, command, envelope):
+        assert (
+            activation.replay_raw_restriction(
+                command, _StaticRestrictionInspector(envelope)
+            ).decision
+            is RawRestrictionReplayDecision.COMMITTED
+        )
+        run_id = activation.snapshot.run_id
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        workspace._mutate(
+            lambda transaction: transaction._execute(
+                "UPDATE raw_restriction_progress SET target_page_id='1002' "
+                "WHERE run_id=?",
+                (run_id.value,),
+            )
+        )
+
+    request = replace(_request(tmp_path, roots=("1000",)), operation=ResumeExplicitRunId(run_id))
     with pytest.raises(CheckpointStateError):
         with _register_checkpoint_run(request):
             pass

@@ -37,8 +37,20 @@ from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspecti
     ConfluenceRawPageOrphanInspectionError,
     ConfluenceRawPageOrphanInspectionResult,
 )
+from knowledgenexus.foundation.domain.models.confluence_raw_restriction_orphan_inspection import (
+    ConfluenceRawRestrictionOrphanInspectionDecision,
+    ConfluenceRawRestrictionOrphanInspectionError,
+    ConfluenceRawRestrictionOrphanInspectionResult,
+)
+from knowledgenexus.foundation.domain.models.confluence_restriction_evidence import (
+    ConfluenceRestrictionEvidenceEnvelope,
+    M7_RESTRICTION_REQUEST_PROFILE_VERSION,
+)
 from knowledgenexus.foundation.ports.confluence_raw_page_orphan_inspection_port import (
     ConfluenceRawPageOrphanInspectionPort,
+)
+from knowledgenexus.foundation.ports.confluence_raw_restriction_orphan_inspection_port import (
+    ConfluenceRawRestrictionOrphanInspectionPort,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointCommitResult,
@@ -52,6 +64,11 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     RawPageReplayFailure,
     RawPageReplayFailureCategory,
     RawPageReplayResult,
+    RawRestrictionReplayCommand,
+    RawRestrictionReplayDecision,
+    RawRestrictionReplayFailure,
+    RawRestrictionReplayFailureCategory,
+    RawRestrictionReplayResult,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointStateError,
@@ -322,6 +339,98 @@ def _validate_raw_page_progress(transaction: object) -> None:
         _validate_reservation_timestamp(committed_at)
 
 
+def _restriction_inventory_linkage(
+    transaction: object,
+) -> dict[tuple[str, str], set[tuple[str, ...]]]:
+    """Return canonical ancestor facts for every durable selected page."""
+    rows = transaction._fetchall(
+        "SELECT run_id,page_id,ancestor_page_ids_json FROM root_occurrences "
+        "UNION ALL SELECT run_id,page_id,ancestor_page_ids_json FROM inventory_occurrences"
+    )
+    linkage: dict[tuple[str, str], set[tuple[str, ...]]] = {}
+    for row in rows:
+        if (
+            type(row) is not tuple
+            or len(row) != 3
+            or type(row[0]) is not str
+            or not row[0]
+            or type(row[1]) is not str
+            or not row[1]
+        ):
+            raise ValueError("invalid restriction inventory binding")
+        try:
+            selected = row[1]
+            ancestors = _decode_string_tuple(row[2])
+        except (TypeError, ValueError):
+            raise ValueError("invalid restriction inventory binding") from None
+        linkage.setdefault((row[0], selected), set()).add(ancestors)
+    return linkage
+
+
+def _validate_raw_restriction_progress(transaction: object) -> None:
+    """Validate exact-v1 restriction rows and their inventory ancestry graph."""
+    rows = transaction._fetchall(
+        "SELECT run_id,generation_id,selected_page_id,target_page_id,"
+        "request_profile_version,http_status,raw_sha256,byte_count,status,committed_at "
+        "FROM raw_restriction_progress ORDER BY run_id,selected_page_id,target_page_id"
+    )
+    if not rows:
+        return
+    known_runs = {
+        row[0]
+        for row in transaction._fetchall("SELECT run_id FROM crawl_runs")
+        if type(row) is tuple and len(row) == 1 and type(row[0]) is str and row[0]
+    }
+    linkage = _restriction_inventory_linkage(transaction)
+    for row in rows:
+        if type(row) is not tuple or len(row) != 10:
+            raise ValueError("invalid raw restriction progress")
+        (
+            run_value,
+            generation_value,
+            selected_page_id,
+            target_page_id,
+            profile,
+            http_status,
+            raw_sha256,
+            byte_count,
+            status,
+            committed_at,
+        ) = row
+        try:
+            run_id = CrawlRunId(run_value)
+            generation_id = CrawlRunId(generation_value)
+            selected = selected_page_id
+            target = target_page_id
+            if (
+                type(selected) is not str
+                or not selected
+                or type(target) is not str
+                or not target
+            ):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("invalid raw restriction progress") from None
+        ancestors = linkage.get((run_id.value, selected))
+        if (
+            run_id.value not in known_runs
+            or run_id != generation_id
+            or not ancestors
+            or not any(target == selected or target in values for values in ancestors)
+            or profile != M7_RESTRICTION_REQUEST_PROFILE_VERSION
+            or isinstance(http_status, bool)
+            or type(http_status) is not int
+            or http_status not in (200, 401, 403, 404)
+            or type(raw_sha256) is not str
+            or _RAW_SHA256.fullmatch(raw_sha256) is None
+            or type(byte_count) is not int
+            or byte_count < 0
+            or status != "committed"
+        ):
+            raise ValueError("invalid raw restriction progress")
+        _validate_reservation_timestamp(committed_at)
+
+
 def _read_root_commit(
     transaction: object,
     run_id: CrawlRunId,
@@ -571,6 +680,7 @@ class _CheckpointStateSession:
             (self._run_id.value,),
         )
         _validate_raw_page_progress(transaction)
+        _validate_raw_restriction_progress(transaction)
         if phase not in ((InventoryPhaseStatus.PENDING.value,), (InventoryPhaseStatus.COMPLETE.value,)):
             raise ValueError("invalid inventory phase")
         expected_phase = (
@@ -888,6 +998,7 @@ class _CheckpointStateSession:
             "SELECT inventory_phase FROM crawl_runs WHERE run_id=?", (self._run_id.value,)
         )
         _validate_raw_page_progress(transaction)
+        _validate_raw_restriction_progress(transaction)
         expected_phase = (
             InventoryPhaseStatus.COMPLETE.value
             if progress and all(item is IncludeRootProgress.DESCENDANTS_COMPLETE for item in progress)
@@ -1377,12 +1488,16 @@ class _CheckpointStateSession:
             return RawPageReplayResult(RawPageReplayDecision.IDENTITY_CONFLICT)
         try:
             self._mutate(
-                lambda transaction: self._prepare_inventory_validation(transaction)
+                lambda transaction: (
+                    self._validate_active_session(transaction),
+                    self._prepare_inventory_validation(transaction),
+                )
             )
         except CheckpointStateError:
             raise
         except Exception:
             return RawPageReplayFailure(RawPageReplayFailureCategory.SCHEMA_INCOMPATIBLE)
+
         try:
             inspected = inspector.inspect_raw_page(request=request)
         except ConfluenceRawPageOrphanInspectionError:
@@ -1417,8 +1532,6 @@ class _CheckpointStateSession:
             or envelope.source_version != request.source_version
         ):
             return RawPageReplayResult(RawPageReplayDecision.IDENTITY_CONFLICT)
-        # D3 artifact metadata covers the exact canonical envelope bytes, not
-        # only the embedded page body.
         expected_hash = hashlib.sha256(artifact_bytes).hexdigest()
         expected_values = (
             envelope.generation_id.value,
@@ -1432,6 +1545,7 @@ class _CheckpointStateSession:
         )
 
         def operation(transaction: object) -> RawPageReplayResult:
+            self._validate_active_session(transaction)
             self._prepare_inventory_validation(transaction)
             known_rows = transaction._fetchall(
                 "SELECT source_version FROM root_occurrences WHERE run_id=? AND page_id=? "
@@ -1479,6 +1593,162 @@ class _CheckpointStateSession:
             raise
         except Exception:
             return RawPageReplayFailure(RawPageReplayFailureCategory.SCHEMA_INCOMPATIBLE)
+
+    def replay_raw_restriction(
+        self,
+        command: RawRestrictionReplayCommand,
+        inspector: ConfluenceRawRestrictionOrphanInspectionPort,
+    ) -> RawRestrictionReplayResult | RawRestrictionReplayFailure:
+        """Replay one immutable restriction artifact into the locked checkpoint."""
+        self._require_active()
+        if type(command) is not RawRestrictionReplayCommand:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.INVALID_REQUEST
+            )
+        if not callable(getattr(inspector, "inspect_restriction", None)):
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.INVALID_REQUEST
+            )
+        request = command.request
+        if request.run_id != self._run_id:
+            return RawRestrictionReplayResult(RawRestrictionReplayDecision.IDENTITY_CONFLICT)
+        try:
+            self._mutate(
+                lambda transaction: (
+                    self._validate_active_session(transaction),
+                    self._prepare_inventory_validation(transaction),
+                )
+            )
+        except CheckpointStateError:
+            raise
+        except Exception:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.SCHEMA_INCOMPATIBLE
+            )
+        try:
+            inspected = inspector.inspect_restriction(request=request)
+        except ConfluenceRawRestrictionOrphanInspectionError:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.INSPECTION_FAILED
+            )
+        except Exception:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.INSPECTION_FAILED
+            )
+        if type(inspected) is not ConfluenceRawRestrictionOrphanInspectionResult:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.INSPECTION_FAILED
+            )
+        mapping = {
+            ConfluenceRawRestrictionOrphanInspectionDecision.MISSING: RawRestrictionReplayDecision.MISSING,
+            ConfluenceRawRestrictionOrphanInspectionDecision.INVALID: RawRestrictionReplayDecision.INVALID,
+            ConfluenceRawRestrictionOrphanInspectionDecision.IDENTITY_CONFLICT: RawRestrictionReplayDecision.IDENTITY_CONFLICT,
+            ConfluenceRawRestrictionOrphanInspectionDecision.UNSAFE_TARGET: RawRestrictionReplayDecision.UNSAFE_TARGET,
+        }
+        if inspected.decision in mapping:
+            return RawRestrictionReplayResult(mapping[inspected.decision])
+        if inspected.decision is not ConfluenceRawRestrictionOrphanInspectionDecision.REPLAYABLE:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.INSPECTION_FAILED
+            )
+        envelope = inspected.envelope
+        if envelope is None:
+            return RawRestrictionReplayResult(RawRestrictionReplayDecision.IDENTITY_CONFLICT)
+        try:
+            artifact_bytes = envelope.to_bytes()
+            reparsed = ConfluenceRestrictionEvidenceEnvelope.from_bytes(artifact_bytes)
+            if reparsed.to_bytes() != artifact_bytes:
+                raise ValueError("restriction envelope is not canonical")
+            envelope = reparsed
+        except Exception:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.INSPECTION_FAILED
+            )
+        if (
+            envelope.request_profile_version != request.request_profile_version
+            or envelope.request_profile_version != M7_RESTRICTION_REQUEST_PROFILE_VERSION
+            or envelope.selected_page_id != request.selected_page_id
+            or envelope.target_page_id != request.target_page_id
+        ):
+            return RawRestrictionReplayResult(RawRestrictionReplayDecision.IDENTITY_CONFLICT)
+        expected_hash = hashlib.sha256(artifact_bytes).hexdigest()
+        expected_values = (
+            self._run_id.value,
+            envelope.selected_page_id,
+            envelope.target_page_id,
+            envelope.request_profile_version,
+            envelope.http_status,
+            expected_hash,
+            len(artifact_bytes),
+            "committed",
+        )
+
+        def operation(transaction: object) -> RawRestrictionReplayResult:
+            self._validate_active_session(transaction)
+            self._prepare_inventory_validation(transaction)
+            linkage = _restriction_inventory_linkage(transaction)
+            selected_key = (self._run_id.value, envelope.selected_page_id)
+            ancestors = linkage.get(selected_key)
+            if not ancestors:
+                return RawRestrictionReplayResult(
+                    RawRestrictionReplayDecision.UNKNOWN_INVENTORY
+                )
+            if not any(
+                envelope.target_page_id == envelope.selected_page_id
+                or envelope.target_page_id in values
+                for values in ancestors
+            ):
+                return RawRestrictionReplayResult(
+                    RawRestrictionReplayDecision.UNSAFE_TARGET
+                )
+            existing = transaction._fetchone(
+                "SELECT generation_id,selected_page_id,target_page_id,"
+                "request_profile_version,http_status,raw_sha256,byte_count,status "
+                "FROM raw_restriction_progress WHERE run_id=? AND selected_page_id=? "
+                "AND target_page_id=?",
+                (
+                    self._run_id.value,
+                    envelope.selected_page_id,
+                    envelope.target_page_id,
+                ),
+            )
+            if existing is not None:
+                if existing == expected_values:
+                    return RawRestrictionReplayResult(
+                        RawRestrictionReplayDecision.REPLAYED, True
+                    )
+                return RawRestrictionReplayResult(RawRestrictionReplayDecision.CONFLICT)
+            committed_at = _reservation_timestamp(self._utc_now())
+            transaction._execute(
+                "INSERT INTO raw_restriction_progress "
+                "(run_id,generation_id,selected_page_id,target_page_id,"
+                "request_profile_version,http_status,raw_sha256,byte_count,status,committed_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (self._run_id.value, *expected_values, committed_at),
+            )
+            readback = transaction._fetchone(
+                "SELECT generation_id,selected_page_id,target_page_id,"
+                "request_profile_version,http_status,raw_sha256,byte_count,status "
+                "FROM raw_restriction_progress WHERE run_id=? AND selected_page_id=? "
+                "AND target_page_id=?",
+                (
+                    self._run_id.value,
+                    envelope.selected_page_id,
+                    envelope.target_page_id,
+                ),
+            )
+            if readback != expected_values:
+                raise ValueError("raw restriction progress acknowledgement mismatch")
+            return RawRestrictionReplayResult(RawRestrictionReplayDecision.COMMITTED)
+
+        try:
+            return self._mutate(operation)
+        except CheckpointStateError:
+            raise
+        except Exception:
+            return RawRestrictionReplayFailure(
+                RawRestrictionReplayFailureCategory.SCHEMA_INCOMPATIBLE
+            )
 
     def stream_inventory_occurrences(
         self, *, batch_size: int = 256

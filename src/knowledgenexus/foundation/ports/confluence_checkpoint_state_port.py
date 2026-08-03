@@ -18,6 +18,12 @@ from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence imp
 from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspection import (
     ConfluenceRawPageOrphanInspectionRequest,
 )
+from knowledgenexus.foundation.domain.models.confluence_raw_restriction_orphan_inspection import (
+    ConfluenceRawRestrictionOrphanInspectionRequest,
+)
+from knowledgenexus.foundation.ports.confluence_raw_restriction_orphan_inspection_port import (
+    ConfluenceRawRestrictionOrphanInspectionPort,
+)
 from knowledgenexus.foundation.ports.confluence_raw_page_orphan_inspection_port import (
     ConfluenceRawPageOrphanInspectionPort,
 )
@@ -154,6 +160,80 @@ class RawPageReplayResult:
         return f"RawPageReplayResult(decision={self.decision.value!r})"
 
 
+class RawRestrictionReplayDecision(StrEnum):
+    COMMITTED = "committed"
+    REPLAYED = "replayed"
+    CONFLICT = "conflict"
+    MISSING = "missing"
+    INVALID = "invalid"
+    IDENTITY_CONFLICT = "identity_conflict"
+    UNSAFE_TARGET = "unsafe_target"
+    UNKNOWN_INVENTORY = "unknown_inventory"
+
+
+class RawRestrictionReplayFailureCategory(StrEnum):
+    INVALID_REQUEST = "invalid_request"
+    INSPECTION_FAILED = "inspection_failed"
+    SCHEMA_INCOMPATIBLE = "schema_incompatible"
+
+
+class RawRestrictionReplayFailure(Exception):
+    """Sanitized failure for bounded raw-restriction replay."""
+
+    def __init__(self, category: RawRestrictionReplayFailureCategory) -> None:
+        if not isinstance(category, RawRestrictionReplayFailureCategory):
+            raise TypeError("category expects RawRestrictionReplayFailureCategory")
+        self.category = category
+        super().__init__(category.value)
+
+
+@dataclass(frozen=True, repr=False)
+class RawRestrictionReplayCommand:
+    request: ConfluenceRawRestrictionOrphanInspectionRequest
+
+    def __post_init__(self) -> None:
+        if type(self.request) is not ConfluenceRawRestrictionOrphanInspectionRequest:
+            raise TypeError(
+                "request expects ConfluenceRawRestrictionOrphanInspectionRequest"
+            )
+
+    @classmethod
+    def capture(
+        cls,
+        *,
+        run_id: CrawlRunId,
+        selected_page_id: str,
+        target_page_id: str,
+    ) -> Self:
+        return cls(
+            ConfluenceRawRestrictionOrphanInspectionRequest.capture(
+                run_id=run_id,
+                selected_page_id=selected_page_id,
+                target_page_id=target_page_id,
+            )
+        )
+
+    def __repr__(self) -> str:
+        return "RawRestrictionReplayCommand()"
+
+
+@dataclass(frozen=True, repr=False)
+class RawRestrictionReplayResult:
+    decision: RawRestrictionReplayDecision
+    replayed: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decision, RawRestrictionReplayDecision):
+            raise TypeError("decision is invalid")
+        if type(self.replayed) is not bool:
+            raise TypeError("replayed is invalid")
+        if self.replayed is not (self.decision is RawRestrictionReplayDecision.REPLAYED):
+            raise ValueError("replayed flag does not match decision")
+
+    def __repr__(self) -> str:
+        return f"RawRestrictionReplayResult(decision={self.decision.value!r})"
+
+
 # The long aliases keep the public boundary consistent with the other
 # Confluence-specific M7 ports while retaining concise internal names.
 ConfluenceRawPageReplayCommand = RawPageReplayCommand
@@ -161,6 +241,11 @@ ConfluenceRawPageReplayDecision = RawPageReplayDecision
 ConfluenceRawPageReplayFailure = RawPageReplayFailure
 ConfluenceRawPageReplayFailureCategory = RawPageReplayFailureCategory
 ConfluenceRawPageReplayResult = RawPageReplayResult
+ConfluenceRawRestrictionReplayCommand = RawRestrictionReplayCommand
+ConfluenceRawRestrictionReplayDecision = RawRestrictionReplayDecision
+ConfluenceRawRestrictionReplayFailure = RawRestrictionReplayFailure
+ConfluenceRawRestrictionReplayFailureCategory = RawRestrictionReplayFailureCategory
+ConfluenceRawRestrictionReplayResult = RawRestrictionReplayResult
 
 
 @dataclass(frozen=True, repr=False)
@@ -292,6 +377,12 @@ class ConfluenceCheckpointStatePort(Protocol):
         command: RawPageReplayCommand,
         inspector: ConfluenceRawPageOrphanInspectionPort,
     ) -> RawPageReplayResult | RawPageReplayFailure: ...
+
+    def replay_raw_restriction(
+        self,
+        command: RawRestrictionReplayCommand,
+        inspector: ConfluenceRawRestrictionOrphanInspectionPort,
+    ) -> RawRestrictionReplayResult | RawRestrictionReplayFailure: ...
 
     def stream_inventory_occurrences(
         self,
