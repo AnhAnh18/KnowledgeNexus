@@ -29,6 +29,7 @@ from knowledgenexus.foundation.domain.models.confluence_page_metadata import (
     ConfluencePageMetadata,
 )
 from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
+    ConfluenceRawPageEnvelope,
     M7_RAW_PAGE_REQUEST_PROFILE_VERSION,
 )
 from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspection import (
@@ -1403,6 +1404,11 @@ class _CheckpointStateSession:
         envelope = inspected.envelope
         if envelope is None:
             return RawPageReplayResult(RawPageReplayDecision.IDENTITY_CONFLICT)
+        try:
+            artifact_bytes = envelope.to_bytes()
+            envelope = ConfluenceRawPageEnvelope.from_bytes(artifact_bytes)
+        except Exception:
+            return RawPageReplayFailure(RawPageReplayFailureCategory.INSPECTION_FAILED)
         if (
             envelope.request_profile_version != request.request_profile_version
             or envelope.run_id != request.run_id
@@ -1413,7 +1419,6 @@ class _CheckpointStateSession:
             return RawPageReplayResult(RawPageReplayDecision.IDENTITY_CONFLICT)
         # D3 artifact metadata covers the exact canonical envelope bytes, not
         # only the embedded page body.
-        artifact_bytes = envelope.to_bytes()
         expected_hash = hashlib.sha256(artifact_bytes).hexdigest()
         expected_values = (
             envelope.generation_id.value,

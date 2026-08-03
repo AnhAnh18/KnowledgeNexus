@@ -53,6 +53,8 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointStateError,
     RawPageReplayCommand,
     RawPageReplayDecision,
+    RawPageReplayFailure,
+    RawPageReplayFailureCategory,
     RawPageReplayResult,
 )
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_generation_store import (
@@ -727,6 +729,34 @@ def test_raw_page_replay_rejects_envelope_for_different_known_page(tmp_path) -> 
         result = activation.replay_raw_page(command, MismatchedInspector())
         assert isinstance(result, RawPageReplayResult)
         assert result.decision is RawPageReplayDecision.IDENTITY_CONFLICT
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchall("SELECT * FROM raw_page_progress")
+        ) == []
+
+
+def test_raw_page_replay_sanitizes_forged_envelope(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(_window_commit(activation, 0, ("2",), 1))
+        forged = object.__new__(ConfluenceRawPageEnvelope)
+
+        class ForgedInspector:
+            def inspect_raw_page(self, *, request):
+                return ConfluenceRawPageOrphanInspectionResult(
+                    ConfluenceRawPageOrphanInspectionDecision.REPLAYABLE,
+                    forged,
+                )
+
+        result = activation.replay_raw_page(
+            _raw_replay_command(activation.snapshot.run_id),
+            ForgedInspector(),
+        )
+        assert isinstance(result, RawPageReplayFailure)
+        assert result.category is RawPageReplayFailureCategory.INSPECTION_FAILED
 
     with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
         assert workspace._mutate(
