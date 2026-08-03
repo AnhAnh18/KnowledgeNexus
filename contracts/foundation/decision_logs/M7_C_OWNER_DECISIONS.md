@@ -190,6 +190,24 @@ approved `m7-crawl-reliability-v1` / `"1"` mapping. The scale profile preserves
 that mapping's numeric/boolean retry parameters and MUST NOT be passed to the
 B2 policy constructor.
 
+### OD-C14. Root-relative parent context for occurrence compatibility
+
+`parent_page_id` in an inventory occurrence is root-relative context, not a
+stable cross-root metadata field. A selected include root may therefore have
+an empty ancestor path and `parent_page_id=None`, while the same page observed
+under an outer include root has a non-empty path and a contextual parent. Each
+occurrence must still fail closed unless its parent is internally consistent
+with its own path: null exactly for an empty path, otherwise the final ancestor
+ID.
+
+Cross-root compatibility compares the stable metadata fields and exact
+suffix-compatible `(ancestor_page_id, ancestor_title)` paths, but does not
+compare contextual parents across occurrences. The longest compatible path is
+canonical and supplies the canonical parent. This preserves existing M5 and
+M7-C1-A root-relative mapper behavior while allowing nested roots to
+deduplicate without weakening fail-closed checks for malformed paths or stable
+metadata conflicts.
+
 ## 3. Required closure boundaries
 
 An inventory-only M7-C acceptance suite may close only M7-C after independent

@@ -75,6 +75,19 @@ from knowledgenexus.foundation.domain.models.confluence_crawl_fingerprint import
     ConfluenceCrawlFingerprintBuilder,
     build_confluence_crawl_fingerprint,
 )
+from knowledgenexus.foundation.domain.models.confluence_inventory_window import (
+    ConfluenceInventoryWindow,
+)
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    CrawlRunId, CrawlSessionId, StartNewRun, ResumeExplicitRunId,
+    ResumeUniqueIncompleteRun, CanonicalIncludeRoots, CrawlRunStatus,
+    InventoryPhaseStatus, IncludeRootProgress, InventoryRootCommit,
+    CommittedCheckpointTransition, CrawlRunSnapshot, CrawlRunOperation,
+)
+from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
+    InventoryOccurrence, InventoryWindowCommit, InventoryReplayConflict,
+    replay_equivalent, InventoryFact,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -122,4 +135,11 @@ __all__ = [
     "ConfluenceCrawlFingerprint",
     "ConfluenceCrawlFingerprintBuilder",
     "build_confluence_crawl_fingerprint",
+    "ConfluenceInventoryWindow",
+    "CrawlRunId", "CrawlSessionId", "StartNewRun", "ResumeExplicitRunId",
+    "ResumeUniqueIncompleteRun", "CanonicalIncludeRoots", "CrawlRunStatus",
+    "InventoryPhaseStatus", "IncludeRootProgress", "InventoryRootCommit",
+    "CommittedCheckpointTransition", "CrawlRunSnapshot", "CrawlRunOperation",
+    "InventoryOccurrence", "InventoryWindowCommit", "InventoryReplayConflict",
+    "replay_equivalent", "InventoryFact",
 ]

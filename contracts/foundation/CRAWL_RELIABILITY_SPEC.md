@@ -185,8 +185,11 @@ include root, so root-relative ancestor paths for the same descendant page
 may legitimately differ across overlapping roots. Final compatibility
 between two inventory occurrences for what may be the same page is compared
 as ordered pairs of `(ancestor_page_id, ancestor_title)`, never by page ID
-alone. Detailed deduplication mechanics are deferred to M7-A3a and are not
-defined here.
+alone. The detailed M7-C parent/path validation, stable-metadata comparison,
+and longest-path canonicalization rule is authoritative in
+`CHECKPOINT_RESUME_SPEC.md` section 9; it preserves the root-relative M5
+mapping while treating `parent_page_id` as occurrence context. Detailed
+deduplication mechanics are deferred to M7-A3a and are not defined here.
 
 ## 12. Durable inventory atomicity (contract level)
 
