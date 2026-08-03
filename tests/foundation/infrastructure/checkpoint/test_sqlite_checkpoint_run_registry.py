@@ -637,8 +637,10 @@ def test_activation_scope_retains_lock_and_exposes_only_metadata_and_invalidatio
             "load_next_inventory_work",
             "commit_root_occurrence",
             "commit_inventory_window",
-            "stream_inventory_occurrences",
-        }
+                "stream_inventory_occurrences",
+                "complete_session",
+                "pause_session",
+            }
         with pytest.raises(CheckpointStateError) as caught:
             with workspace_module._open_locked_checkpoint_workspace(tmp_path):
                 pass

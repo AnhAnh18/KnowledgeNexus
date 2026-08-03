@@ -679,6 +679,40 @@ class _CheckpointStateSession:
 
         return self._workspace._mutate(operation)
 
+    def complete_session(self) -> None:
+        self._require_active()
+
+        def operation(transaction: object) -> None:
+            self._validate_active_session(transaction)
+            timestamp = _reservation_timestamp(self._utc_now())
+            transaction._execute(
+                "UPDATE crawl_sessions SET status='completed',ended_at=?,"
+                "outcome_status='completed',outcome_reason='completed' "
+                "WHERE session_id=? AND run_id=? AND status='active'",
+                (timestamp, self._session_id.value, self._run_id.value),
+            )
+            if transaction._fetchone("SELECT changes()") != (1,):
+                raise ValueError("active session changed")
+
+        self._workspace._mutate(operation)
+
+    def pause_session(self) -> None:
+        self._require_active()
+
+        def operation(transaction: object) -> None:
+            self._validate_active_session(transaction)
+            timestamp = _reservation_timestamp(self._utc_now())
+            transaction._execute(
+                "UPDATE crawl_sessions SET status='paused',ended_at=?,"
+                "outcome_status='paused',outcome_reason='controlled_checkpoint_stop' "
+                "WHERE session_id=? AND run_id=? AND status='active'",
+                (timestamp, self._session_id.value, self._run_id.value),
+            )
+            if transaction._fetchone("SELECT changes()") != (1,):
+                raise ValueError("active session changed")
+
+        self._workspace._mutate(operation)
+
     def load_next_inventory_work(self) -> InventoryWorkItem | CheckpointOperationFailure | None:
         self._require_active()
 

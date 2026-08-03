@@ -114,8 +114,10 @@ def test_public_run_port_has_method_oriented_shape_and_safe_reprs(tmp_path) -> N
             "reserve_outbound_attempt",
             "session_id",
             "snapshot",
-            "stream_inventory_occurrences",
-        }
+                "stream_inventory_occurrences",
+                "complete_session",
+                "pause_session",
+            }
         assert not hasattr(outcome, "_mutate")
         assert not hasattr(outcome, "_inner")
         assert not hasattr(outcome, "_workspace")
