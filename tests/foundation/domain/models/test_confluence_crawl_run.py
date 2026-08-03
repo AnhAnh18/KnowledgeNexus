@@ -97,3 +97,45 @@ def test_snapshot_validates_root_cardinality_and_transition_consistency():
     with pytest.raises(ValueError): CrawlRunSnapshot(RUN, RUN, FINGERPRINT, CrawlRunStatus.INCOMPLETE, InventoryPhaseStatus.PENDING, roots, (IncludeRootProgress.ROOT_COMMITTED,), (invalid_ordinal,))
     first = CommittedCheckpointTransition(RUN, 0, "root", IncludeRootProgress.ROOT_PENDING, IncludeRootProgress.ROOT_COMMITTED, 1, roots)
     with pytest.raises(ValueError): CrawlRunSnapshot(RUN, RUN, FINGERPRINT, CrawlRunStatus.INCOMPLETE, InventoryPhaseStatus.PENDING, roots, (IncludeRootProgress.ROOT_COMMITTED,), (first, first))
+
+
+def test_snapshot_allows_non_terminal_window_self_transition():
+    roots = CanonicalIncludeRoots(("root",))
+    first = CommittedCheckpointTransition(
+        RUN,
+        0,
+        "root",
+        IncludeRootProgress.ROOT_PENDING,
+        IncludeRootProgress.ROOT_COMMITTED,
+        0,
+        roots,
+    )
+    second = CommittedCheckpointTransition(
+        RUN,
+        0,
+        "root",
+        IncludeRootProgress.ROOT_COMMITTED,
+        IncludeRootProgress.DESCENDANTS_PENDING,
+        1,
+        roots,
+    )
+    third = CommittedCheckpointTransition(
+        RUN,
+        0,
+        "root",
+        IncludeRootProgress.DESCENDANTS_PENDING,
+        IncludeRootProgress.DESCENDANTS_PENDING,
+        2,
+        roots,
+    )
+    snapshot = CrawlRunSnapshot(
+        RUN,
+        RUN,
+        FINGERPRINT,
+        CrawlRunStatus.INCOMPLETE,
+        InventoryPhaseStatus.PENDING,
+        roots,
+        (IncludeRootProgress.DESCENDANTS_PENDING,),
+        (first, second, third),
+    )
+    assert snapshot.transitions[-1] == third

@@ -115,7 +115,7 @@ class CommittedCheckpointTransition:
         _i("ordinal", self.include_root_ordinal); _s("root id", self.include_root_page_id); _i("sequence", self.sequence)
         _validated_roots(self.include_roots).validate(self.include_root_ordinal, self.include_root_page_id)
         if not isinstance(self.from_progress, IncludeRootProgress) or not isinstance(self.to_progress, IncludeRootProgress): raise TypeError("invalid progress transition")
-        edges = {(IncludeRootProgress.ROOT_PENDING,IncludeRootProgress.ROOT_COMMITTED),(IncludeRootProgress.ROOT_COMMITTED,IncludeRootProgress.DESCENDANTS_PENDING),(IncludeRootProgress.DESCENDANTS_PENDING,IncludeRootProgress.DESCENDANTS_COMPLETE)}
+        edges = {(IncludeRootProgress.ROOT_PENDING,IncludeRootProgress.ROOT_COMMITTED),(IncludeRootProgress.ROOT_COMMITTED,IncludeRootProgress.DESCENDANTS_PENDING),(IncludeRootProgress.DESCENDANTS_PENDING,IncludeRootProgress.DESCENDANTS_PENDING),(IncludeRootProgress.DESCENDANTS_PENDING,IncludeRootProgress.DESCENDANTS_COMPLETE)}
         if (self.from_progress,self.to_progress) not in edges: raise ValueError("invalid progress transition")
 
 @dataclass(frozen=True)
