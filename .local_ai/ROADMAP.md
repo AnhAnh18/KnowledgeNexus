@@ -128,15 +128,12 @@ Evidence used:
 - `.local_ai/review/m2c4-acl-record-builder-review-summary.md`
 - `.local_ai/review/m2c5-builder-gate-review-summary.md`
 
-Current objective:
-- Run M5C with authentication resolved outside the non-secret M5A source
-  config.
-- Confirm the previously unobserved root `expand=space,version` shape on the
-  connected machine.
-- Begin with a conservative search `page_size` and observe the deployment's
-  actual cap; server-clamped limits already fail closed in M5B-2.
+Historical M5C objective (complete; reference only, not an active execution
+queue): the connected-machine root-shape observation and conservative
+page-size probe were superseded by the completed M5/M6 work and current M7-C5
+closeout state.
 
-Likely files for M3A:
+Historical M3A file references (reference only):
 - `src/knowledgenexus/foundation/infrastructure/exporters/jsonl_record_writer.py`
 - `tests/foundation/infrastructure/exporters/test_jsonl_record_writer.py`
 
@@ -811,31 +808,10 @@ Status:
 - M6G-C: complete and independently approved at production head `5f62bdb`.
 - M6G-D: complete and approved after exactly one authorized exporter invocation
   exited zero and recovery-only acceptance passed without a second invocation.
-- M7: next and unblocked.
+- M7: active; M7-C5 is the current closeout state (see the M7-C ledger below).
 
-Tasks:
-- M6-0 confirm live page/restriction/attachment request shapes (done).
-- M6A fetch and preserve one raw page (page request only).
-- M6B capture restrictions and attachment metadata.
-- M6C normalize one page and produce `CanonicalDocument`.
-- M6D chunk one normalized page and produce `ChunkRecord`s.
-- M6E extract one relation path and produce `RelationRecord`s.
-- M6F-A lock ACL materialization boundaries and validators (done and approved).
-- M6F-B materialize deny-safe ACL and propagate ACL tags to chunks (done and
-  approved; fully offline).
-- M6F-C1 add opt-in M6B normalized-observation sidecar capture (done; offline
-  code and controlled live capture approved).
-- M6F-C2 consume the real sidecar offline, bind M6A ancestry, and run full M6F
-  composition acceptance (done and independently approved).
-- M6F-D perform the final M6F documentation closeout (done).
-- M6G-A activate the one-page export focused contract (done and independently
-  approved).
-- M6G-B expose reusable composition and implement trusted export projection
-  (done and independently approved at `5ee5126`).
-- M6G-C compose the approved M3 export path and synthetic acceptance (done and
-  independently approved at `5f62bdb`).
-- M6G-D run/review the real offline export and close documentation (done and
-  approved).
+Historical M6/M6G execution records are complete and retained for traceability;
+they are not an active execution queue.
 
 Completion gate:
 - One real page has raw provenance.
@@ -902,16 +878,17 @@ Contract decomposition:
 | M7-C1-A normalized inventory window seam | complete | Independent review `PASS`; normalized single-window compatibility gate closed. |
 | M7-C1-B run/occurrence domain | complete | Technical and governance reviews `PASS`; pure domain boundary gate closed. |
 | M7-C2-A checkpoint schema | complete | Schema correction included; technical and governance reviews `PASS`; exact-v1/no-migration gate closed. |
-| M7-C3-A locked workspace dependency | complete | Lock-before-open, path-safety, and capability-lifetime gate is exercised by later checkpoint acceptance; hardening fixes are incorporated, but the standalone review outcome is not normalized here. |
-| M7-C2-B run/session registry | complete | Registry behavior is exercised by integrated C4/C5 acceptance; start/resume/session lifecycle gate passes, with no standalone review outcome normalized here. |
-| M7-C2-C atomic inventory checkpoint session | complete | Atomic root/window transaction and replay behavior are exercised by integrated C4/C5 acceptance; checkpoint mutation gate passes, with no standalone review outcome normalized here. |
-| M7-C2-D durable inventory readback | complete | Durable projection/readback is exercised by integrated C5 acceptance; canonical ordering/readback gate passes, with no standalone review outcome normalized here. |
+| M7-C2-B run/session registry | complete | Integrated C4/C5 acceptance `PASS`; no separate standalone review is claimed; start/resume/session lifecycle gate is closed. |
+| M7-C2-C atomic inventory checkpoint session | complete | Integrated C4/C5 acceptance `PASS`; no separate standalone review is claimed; atomic root/window transaction and replay gate is closed. |
+| M7-C2-D durable inventory readback | complete | Integrated C5 acceptance `PASS`; no separate standalone review is claimed; canonical ordering/readback gate is closed. |
+| M7-C3-A locked workspace dependency | complete | Independent review `PASS`; integrated checkpoint acceptance `PASS`; lock-before-open, path-safety, and capability-lifetime gates are closed. |
 | M7-C3-B outbound reservation | complete | Independent review `PASS`; durable reservation denial-before-request gate passes. |
 | M7-C4-A durable inventory orchestration | complete | Independent review `PASS`; coordinator/lock/retry/checkpoint integration gate passes. |
-| M7-C4-B controlled checkpoint stop | complete | Controlled-stop behavior is exercised by integrated C5 pause/resume acceptance; standalone review artifact should be normalized in a future documentation pass. |
+| M7-C4-B controlled checkpoint stop | complete | Integrated C5 pause/resume acceptance `PASS`; no separate standalone review is claimed; controlled-stop gate is closed. |
 | M7-C5 current state | closeout in progress | 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. The 100k scale gate is incomplete, with no RSS threshold claim. |
 
-Completion gate:
+Completion gate (M7-C durability correctness only; the M7-C5 100k scale gate
+remains incomplete and optimization is deferred):
 - Interrupted crawl resumes correctly.
 - Retries are bounded.
 - Rate limits are respected.
@@ -1035,15 +1012,14 @@ Acceptance categories:
 - Security: no PAT/token values in config, logs, reports, or exports.
 - Boundary: no embedding, no Qdrant, no retrieval, no chat, no Gauss.
 
-## 13. Immediate Execution Order
+## 13. Current Execution Boundary
 
-1. Freeze and independently approve the M6F-D documentation-only closeout
-   head.
-2. Inspect the current repository contracts and approved M3/M6F APIs before
-   planning M6G.
-3. Plan M6G as a separate task for downstream ACL persistence and one-page
-   export through the approved M3 path.
-4. Do not implement M6G as part of M6F-D.
+- Preserve the M7-C5 durability-first baseline; the 100k scale gate remains
+  incomplete and optimization is deferred.
+- Any new M7 implementation requires a bounded reviewed plan and the required
+  owner authorization before code changes begin.
+- Keep live M7-D integration and 100k performance work deferred until a
+  separate stage and gate authorize them.
 
 ### Completed task - M2C3 RelationRecordBuilder
 

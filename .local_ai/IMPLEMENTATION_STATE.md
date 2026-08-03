@@ -1218,9 +1218,9 @@ Review artifact:
   offline/scale/fault/live acceptance gates in `CRAWL_ACCEPTANCE_SPEC.md`.
 - The owner approved M7-A2 and M7-A3a/A3b/A3c and accepted the aggregate
   M7 contract gate.
-- `M7-CONTRACT-GATE` is approved. This opens production implementation
-  planning only; production code remains unauthorized until its plan is
-  reviewed and separately approved.
+- `M7-CONTRACT-GATE` is approved as the contract baseline. The M7-C production
+  stages were authorized and reviewed separately; their durable implementation
+  and review/gate outcomes are recorded in the milestone ledger below.
 
 ## M7-B1 Structured HTTP Outcome State
 
@@ -1296,13 +1296,13 @@ are recorded without using repository-local commit SHAs as status.
 | M7-C1-A normalized inventory window seam | complete | Independent review `PASS`; normalized single-window compatibility gate closed. |
 | M7-C1-B run/occurrence domain | complete | Technical and governance reviews `PASS`; pure domain boundary gate closed. |
 | M7-C2-A checkpoint schema | complete | Schema correction included; technical and governance reviews `PASS`; exact-v1/no-migration gate closed. |
-| M7-C3-A locked workspace dependency | complete | Lock-before-open, path-safety, and capability-lifetime gate is exercised by later checkpoint acceptance; hardening fixes are incorporated, but the standalone review outcome is not normalized here. |
-| M7-C2-B run/session registry | complete | Registry behavior is exercised by integrated C4/C5 acceptance; start/resume/session lifecycle gate passes, with no standalone review outcome normalized here. |
-| M7-C2-C atomic inventory checkpoint session | complete | Atomic root/window transaction and replay behavior are exercised by integrated C4/C5 acceptance; checkpoint mutation gate passes, with no standalone review outcome normalized here. |
-| M7-C2-D durable inventory readback | complete | Durable projection/readback is exercised by integrated C5 acceptance; canonical ordering/readback gate passes, with no standalone review outcome normalized here. |
+| M7-C2-B run/session registry | complete | Integrated C4/C5 acceptance `PASS`; no separate standalone review is claimed; start/resume/session lifecycle gate is closed. |
+| M7-C2-C atomic inventory checkpoint session | complete | Integrated C4/C5 acceptance `PASS`; no separate standalone review is claimed; atomic root/window transaction and replay gate is closed. |
+| M7-C2-D durable inventory readback | complete | Integrated C5 acceptance `PASS`; no separate standalone review is claimed; canonical ordering/readback gate is closed. |
+| M7-C3-A locked workspace dependency | complete | Independent review `PASS`; integrated checkpoint acceptance `PASS`; lock-before-open, path-safety, and capability-lifetime gates are closed. |
 | M7-C3-B outbound reservation | complete | Independent review `PASS`; durable reservation denial-before-request gate passes. |
 | M7-C4-A durable inventory orchestration | complete | Independent review `PASS`; coordinator/lock/retry/checkpoint integration gate passes. |
-| M7-C4-B controlled checkpoint stop | complete | Controlled-stop behavior is exercised by integrated C5 pause/resume acceptance; standalone review artifact should be normalized in a future documentation pass. |
+| M7-C4-B controlled checkpoint stop | complete | Integrated C5 pause/resume acceptance `PASS`; no separate standalone review is claimed; controlled-stop gate is closed. |
 | M7-C5 current state | closeout in progress | 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. The 100k scale gate is incomplete, with no RSS threshold claim. |
 
 ## M7-C5 Scale and Performance State
@@ -1316,15 +1316,12 @@ are recorded without using repository-local commit SHAs as status.
 - The owner explicitly deferred 100,000-page performance optimization. Any
   future lock/sidecar, validation-cadence, schema/index, or memory-threshold
   change needs a separate owner-authorized and independently reviewed stage.
-- The 100,000-page optimization remains deferred. A future performance stage
-  must be separately authorized and independently reviewed; this state does
-  not claim a 100k scale PASS.
 - M7-D raw-generation D1/D2 is complete and independently reviewed. This does
   not authorize live crawl integration, checkpoint advancement, budgets, or
   network behavior.
 
-## Next Planned Task
+## Current Execution Boundary
 
-Keep the M7-C5 durability-first baseline unchanged while deciding the next
-bounded stage. Any 100k performance work or further M7-D integration requires
-its own reviewed plan and owner authorization.
+The M7-C5 durability-first baseline remains the active closeout state. The
+100k performance gate is incomplete and deferred. Any further M7-D integration
+or performance work requires its own reviewed plan and owner authorization.
