@@ -16,6 +16,9 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_gene
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector import (
     ConfluenceRawPageOrphanInspector,
 )
+from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_restriction_orphan_inspector import (
+    ConfluenceRawRestrictionOrphanInspector,
+)
 
 __all__ = [
     "ConfluenceRawPageStore",
@@ -26,4 +29,5 @@ __all__ = [
     "ConfluenceRawRestrictionEvidenceStore",
     "ConfluenceRawPageGenerationStore",
     "ConfluenceRawPageOrphanInspector",
+    "ConfluenceRawRestrictionOrphanInspector",
 ]

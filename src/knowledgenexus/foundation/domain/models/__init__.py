@@ -48,6 +48,13 @@ from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspecti
     ConfluenceRawPageOrphanInspectionRequest,
     ConfluenceRawPageOrphanInspectionResult,
 )
+from knowledgenexus.foundation.domain.models.confluence_raw_restriction_orphan_inspection import (
+    ConfluenceRawRestrictionOrphanInspectionDecision,
+    ConfluenceRawRestrictionOrphanInspectionError,
+    ConfluenceRawRestrictionOrphanInspectionFailureCategory,
+    ConfluenceRawRestrictionOrphanInspectionRequest,
+    ConfluenceRawRestrictionOrphanInspectionResult,
+)
 from knowledgenexus.foundation.domain.models.raw_observation_artifact import (
     RawObservationArtifact,
 )
@@ -158,6 +165,11 @@ __all__ = [
     "ConfluenceRawPageOrphanInspectionFailureCategory",
     "ConfluenceRawPageOrphanInspectionRequest",
     "ConfluenceRawPageOrphanInspectionResult",
+    "ConfluenceRawRestrictionOrphanInspectionDecision",
+    "ConfluenceRawRestrictionOrphanInspectionError",
+    "ConfluenceRawRestrictionOrphanInspectionFailureCategory",
+    "ConfluenceRawRestrictionOrphanInspectionRequest",
+    "ConfluenceRawRestrictionOrphanInspectionResult",
     "RawObservationArtifact",
     "ConfluencePageNormalizationResult",
     "ConfluencePageSource",

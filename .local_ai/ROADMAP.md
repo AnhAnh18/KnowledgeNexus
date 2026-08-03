@@ -90,7 +90,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | C0 through C4-B complete; C5 closeout in progress; C5-B1 approved; C5-B2 measurement PASS only; D3 complete; D4-A complete; D4-B next | Durable checkpoint/run-state correctness is implemented and exercised; the 100k scale gate remains incomplete and optimization is deferred | Full M7 roadmap owner-authorized by bounded stages; D4-A independent review `PASS`; D4-B requires its own plan/review gate. |
+| M7 - Crawl reliability and scale | C0 through C4-B complete; C5 closeout in progress; C5-B1 approved; C5-B2 measurement PASS only; D3 complete; D4-A and D4-B complete | Durable checkpoint/run-state correctness is implemented and exercised; the 100k scale gate remains incomplete and optimization is deferred | Full M7 roadmap owner-authorized by bounded stages; D4-A and D4-B independent reviews `PASS`; no full-M7 or 100k completion claim. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
@@ -104,8 +104,9 @@ are approved, while C5-B2 is measurement-only and does not close the 100k
 scale gate. The owner deferred 100k performance optimization. M7-D3 is
 complete and independently reviewed `PASS` as an offline raw-page store, and
 M7-D4-A raw-page orphan inspection is complete with independent review `PASS`.
-The full M7 roadmap is owner-authorized by bounded stages; M7-D4-B is next and
-remains subject to its own implementation and independent-review gates.
+M7-D4-B restriction-evidence orphan inspection is also complete with
+independent review `PASS`; the full M7 roadmap remains bounded-stage
+authorized and the 100k scale gate remains incomplete.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -896,7 +897,7 @@ Contract decomposition:
 | M7-D1/D2 raw-generation contract and restriction evidence | complete | Independently reviewed; contract and evidence boundaries are closed. |
 | M7-D3 generation-scoped immutable raw-page store | complete | Independent review `PASS`; focused model/store/architecture and regression gates pass. Offline-only boundary remains closed. |
 | M7-D4-A raw-page orphan inspection | complete | Owner-authorized by the full M7 roadmap decision; revised plan `PASS`; focused/regression validation passed; independent code review `PASS`. |
-| M7-D4-B restriction-evidence orphan inspection | authorized; not started | Full M7 roadmap authorization covers the stage; focused plan/review and implementation are pending. |
+| M7-D4-B restriction-evidence orphan inspection | complete | Revised plan `PASS`; focused `34 passed, 3 skipped`; D2/D3/D4-A regression `123 passed, 3 skipped`; compileall/diff-check passed; fresh independent review `PASS`. Offline/read-only boundary remains closed. |
 
 Completion gate (M7-C durability correctness only; the M7-C5 100k scale gate
 remains incomplete and optimization is deferred):

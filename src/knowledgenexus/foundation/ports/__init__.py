@@ -63,6 +63,9 @@ from knowledgenexus.foundation.ports.confluence_raw_page_store_port import (
 from knowledgenexus.foundation.ports.confluence_raw_page_orphan_inspection_port import (
     ConfluenceRawPageOrphanInspectionPort,
 )
+from knowledgenexus.foundation.ports.confluence_raw_restriction_orphan_inspection_port import (
+    ConfluenceRawRestrictionOrphanInspectionPort,
+)
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     CheckpointRunActivation,
     CheckpointRunInventoryComplete,
@@ -115,6 +118,7 @@ __all__ = [
     "ConfluenceRawPageStoreError",
     "ConfluenceRawPageStorePort",
     "ConfluenceRawPageOrphanInspectionPort",
+    "ConfluenceRawRestrictionOrphanInspectionPort",
     "CheckpointRunActivation",
     "CheckpointRunInventoryComplete",
     "CheckpointRunOutcome",
