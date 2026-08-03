@@ -90,20 +90,20 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | B1/B2/B3 complete and independently approved; C5-B1 complete; C5-B2 measurement PASS only | Durable inventory correctness is implemented and reviewed; the 100k pilot remains incomplete/pending; performance optimization is explicitly deferred | No further M7-C performance implementation is authorized; M7-D raw-generation integration remains blocked. |
+| M7 - Crawl reliability and scale | C0 through C4-B complete; C5 closeout in progress; C5-B1 approved; C5-B2 measurement PASS only | Durable checkpoint/run-state correctness is implemented and exercised; the 100k scale gate remains incomplete and optimization is deferred | M7-D raw-generation D1/D2 is separately complete; further live integration needs a new scoped plan and gate. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
 
-Current area: M6A through M6G-D are complete and approved. The complete
-M7-A1/A2/A3 contract stack is owner-approved. M7-B1 structured HTTP outcomes,
-M7-B2 pure bounded retry policy, and M7-B3 retrying/rate-limited executor are
-implemented and independently approved. M7-C5-B1 is complete and independently
-approved; C5-B2 is measurement-only with a PASS for the measurement package,
-not the 100k scale gate. The owner deferred 100k performance optimization;
-M7-D raw-generation integration remains blocked.
+Current area: M6A through M6G-D are complete and approved. M7-C0 through
+M7-C4-B are implemented and covered by the durable checkpoint/run-state path.
+M7-C5 is the current closeout state: the 10k correctness baseline and C5-B1
+are approved, while C5-B2 is measurement-only and does not close the 100k
+scale gate. The owner deferred 100k performance optimization. M7-D raw-
+generation D1/D2 is separately complete and independently reviewed; further
+live integration remains out of scope for this state update.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -886,10 +886,30 @@ Contract decomposition:
 - M7-B3: rate-limited retry executor with injected clock/sleeper, exact
   outbound-start accounting, prepared caller input, and status-aware terminal
   decisions. Complete and independently approved; no open P0/P1/P2.
-- M7-C: durable checkpoint and run-state implementation. Planning next;
-  implementation requires separate review and owner authorization.
-- Later production tasks require a reviewed implementation plan and separate
-  owner authorization.
+- M7-C0 through M7-C4-B: implemented. See the milestone ledger below for the
+  exact review and integrated-gate outcomes.
+- M7-C5: current closeout state. The 10k correctness baseline and C5-B1 are
+  approved; C5-B2 is measurement-only and the 100k scale gate remains
+  incomplete.
+- M7-D raw-generation D1/D2: separately complete and independently reviewed;
+  live crawl integration is not implied by that status.
+
+### M7-C Durable Milestone Ledger
+
+| Milestone | Status | Review / gate outcome |
+|---|---|---|
+| M7-C0 trusted crawl fingerprint | complete | Independent review `PASS`; trusted canonical fingerprint gate closed. |
+| M7-C1-A normalized inventory window seam | complete | Independent review `PASS`; normalized single-window compatibility gate closed. |
+| M7-C1-B run/occurrence domain | complete | Technical and governance reviews `PASS`; pure domain boundary gate closed. |
+| M7-C2-A checkpoint schema | complete | Schema correction included; technical and governance reviews `PASS`; exact-v1/no-migration gate closed. |
+| M7-C3-A locked workspace dependency | complete | Lock-before-open, path-safety, and capability-lifetime gate is exercised by later checkpoint acceptance; hardening fixes are incorporated, but the standalone review outcome is not normalized here. |
+| M7-C2-B run/session registry | complete | Registry behavior is exercised by integrated C4/C5 acceptance; start/resume/session lifecycle gate passes, with no standalone review outcome normalized here. |
+| M7-C2-C atomic inventory checkpoint session | complete | Atomic root/window transaction and replay behavior are exercised by integrated C4/C5 acceptance; checkpoint mutation gate passes, with no standalone review outcome normalized here. |
+| M7-C2-D durable inventory readback | complete | Durable projection/readback is exercised by integrated C5 acceptance; canonical ordering/readback gate passes, with no standalone review outcome normalized here. |
+| M7-C3-B outbound reservation | complete | Independent review `PASS`; durable reservation denial-before-request gate passes. |
+| M7-C4-A durable inventory orchestration | complete | Independent review `PASS`; coordinator/lock/retry/checkpoint integration gate passes. |
+| M7-C4-B controlled checkpoint stop | complete | Controlled-stop behavior is exercised by integrated C5 pause/resume acceptance; standalone review artifact should be normalized in a future documentation pass. |
+| M7-C5 current state | closeout in progress | 10k correctness baseline `PASS`; C5-B1 independent review `PASS`; C5-B2 measurement package `PASS` only. The 100k scale gate is incomplete, with no RSS threshold claim. |
 
 Completion gate:
 - Interrupted crawl resumes correctly.
