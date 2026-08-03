@@ -11,9 +11,10 @@ deferred. M7-D3 is complete and independently reviewed as an offline,
 generation-scoped raw-page store. The owner has now authorized the full M7
 roadmap by bounded stages. M7-D4-A raw-page orphan inspection and M7-D4-B
 restriction-evidence orphan inspection are complete, each independently
-reviewed `PASS`; both remain offline/read-only and do not imply full M7 or a
-closed 100k scale gate. No raw production artifact or published snapshot
-exists in this repository.
+reviewed `PASS`; M7-D5-A raw-page replay/checkpoint integration is also
+complete and independently reviewed `PASS`. D5-B restriction replay remains
+unstarted. These stages do not imply full M7 or a closed 100k scale gate. No
+raw production artifact or published snapshot exists in this repository.
 
 ## Durable State Convention
 
@@ -1349,13 +1350,22 @@ are recorded without using repository-local commit SHAs as status.
   `PASS`; both use bounded no-follow readback, preserve immutable artifacts,
   and reject unsafe targets without mutation. D4-B focused validation was
   `34 passed, 3 skipped`; D2/D3/D4-A regression validation was `123 passed,
-  3 skipped`, with compileall and diff-check passing. The 100k scale gate
-  remains incomplete and is not implied by this authorization.
+ 3 skipped`, with compileall and diff-check passing.
+- M7-D5-A is complete and independently reviewed `PASS`. It adds an exact-v1
+  raw-page progress table to fresh checkpoint workspaces only; existing or
+  malformed schemas fail closed with no migration. Replay is operation-specific,
+  same-lock/same-database, readback-verified, idempotent for identical
+  evidence, conflicting for differing evidence, and limited to same-run known
+  inventory occurrences. Focused checkpoint/raw/architecture validation was
+  `255 passed, 14 skipped`; compileall and diff-check passed. D5-B restriction
+  replay remains a separate unstarted stage.
+- The 100k scale gate remains incomplete and is not implied by this
+  authorization or by D5-A.
 
 ## Current Execution Boundary
 
-The M7-C5 durability-first inventory slice is complete, while the 100k
-performance gate remains incomplete and deferred. The full M7 roadmap is
-owner-authorized by bounded stages; M7-D4-B is complete with its reviewed
-plan, implementation validation, and independent gate closed. No full-M7 or
-100k completion claim is made.
+The M7-C5 durability-first inventory slice and M7-D5-A raw-page
+replay/checkpoint slice are complete, while the 100k performance gate remains
+incomplete and deferred. The full M7 roadmap is owner-authorized by bounded
+stages; M7-D5-B restriction replay still needs its own reviewed plan and gate.
+No full-M7 or 100k completion claim is made.

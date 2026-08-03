@@ -112,6 +112,7 @@ def test_public_run_port_has_method_oriented_shape_and_safe_reprs(tmp_path) -> N
             "load_next_inventory_work",
             "read_schema_state",
             "reserve_outbound_attempt",
+            "replay_raw_page",
             "session_id",
             "snapshot",
                 "stream_inventory_occurrences",

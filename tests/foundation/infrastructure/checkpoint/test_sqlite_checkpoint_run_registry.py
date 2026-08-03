@@ -636,8 +636,9 @@ def test_activation_scope_retains_lock_and_exposes_only_metadata_and_invalidatio
             "reserve_outbound_attempt",
             "load_next_inventory_work",
             "commit_root_occurrence",
-            "commit_inventory_window",
-                "stream_inventory_occurrences",
+                "commit_inventory_window",
+                    "replay_raw_page",
+                    "stream_inventory_occurrences",
                 "complete_session",
                 "pause_session",
             }

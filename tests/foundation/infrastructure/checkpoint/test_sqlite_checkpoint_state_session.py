@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+from contextlib import contextmanager
+import hashlib
 import sqlite3
 import uuid
 
@@ -27,6 +29,14 @@ from knowledgenexus.foundation.domain.models.confluence_source_config import (
     ConfluenceIncludeRoot,
     ConfluenceSourceConfig,
 )
+from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
+    ConfluenceRawPageEnvelope,
+)
+from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspection import (
+    ConfluenceRawPageOrphanInspectionRequest,
+    ConfluenceRawPageOrphanInspectionResult,
+    ConfluenceRawPageOrphanInspectionDecision,
+)
 from knowledgenexus.foundation.infrastructure.checkpoint import (
     sqlite_checkpoint_workspace as workspace_module,
     sqlite_checkpoint_state_session as state_module,
@@ -41,6 +51,15 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointOperationFailureCategory,
     CheckpointReservationResult,
     CheckpointStateError,
+    RawPageReplayCommand,
+    RawPageReplayDecision,
+    RawPageReplayResult,
+)
+from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_generation_store import (
+    ConfluenceRawPageGenerationStore,
+)
+from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector import (
+    ConfluenceRawPageOrphanInspector,
 )
 
 
@@ -559,4 +578,191 @@ def test_resume_rejects_tampered_durable_inventory_facts(tmp_path, tamper_sql) -
             uuid4=_ids("223e4567-e89b-42d3-a456-426614174001"),
             utc_now=_clock,
         ):
+            pass
+
+
+def _raw_replay_command(run_id, page_id: str = "2") -> RawPageReplayCommand:
+    return RawPageReplayCommand(
+        ConfluenceRawPageOrphanInspectionRequest.capture(
+            run_id=run_id,
+            generation_id=run_id,
+            page_id=page_id,
+            source_version=None,
+        )
+    )
+
+
+@contextmanager
+def _prepare_raw_replay(tmp_path):
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(_window_commit(activation, 0, ("2",), 1))
+        envelope = ConfluenceRawPageEnvelope.capture(
+            run_id=activation.snapshot.run_id,
+            page_id="2",
+            source_version=None,
+            http_status=200,
+            body_bytes=b"raw-child",
+        )
+        ConfluenceRawPageGenerationStore(raw_root=raw_root).publish_page(envelope=envelope)
+        inspector = ConfluenceRawPageOrphanInspector(raw_root=raw_root)
+        command = _raw_replay_command(activation.snapshot.run_id)
+        yield activation, inspector, command
+
+
+def test_raw_page_replay_commits_once_and_replays_idempotently(tmp_path) -> None:
+    with _prepare_raw_replay(tmp_path) as (activation, inspector, command):
+        first = activation.replay_raw_page(command, inspector)
+        second = activation.replay_raw_page(command, inspector)
+        assert isinstance(first, RawPageReplayResult)
+        assert first.decision is RawPageReplayDecision.COMMITTED
+        assert isinstance(second, RawPageReplayResult)
+        assert second.decision is RawPageReplayDecision.REPLAYED
+        assert second.replayed is True
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchall(
+                "SELECT page_id,status,raw_sha256,byte_count FROM raw_page_progress"
+            )
+        ) == [
+            (
+                "2",
+                "committed",
+                hashlib.sha256(
+                    ConfluenceRawPageEnvelope.capture(
+                        run_id=command.request.run_id,
+                        page_id="2",
+                        source_version=None,
+                        http_status=200,
+                        body_bytes=b"raw-child",
+                    ).to_bytes()
+                ).hexdigest(),
+                len(
+                    ConfluenceRawPageEnvelope.capture(
+                        run_id=command.request.run_id,
+                        page_id="2",
+                        source_version=None,
+                        http_status=200,
+                        body_bytes=b"raw-child",
+                    ).to_bytes()
+                ),
+            )
+        ]
+
+
+def test_raw_page_replay_unknown_inventory_does_not_mutate(tmp_path) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    with _start(tmp_path) as activation:
+        envelope = ConfluenceRawPageEnvelope.capture(
+            run_id=activation.snapshot.run_id,
+            page_id="3",
+            source_version=None,
+            http_status=200,
+            body_bytes=b"unknown",
+        )
+        ConfluenceRawPageGenerationStore(raw_root=raw_root).publish_page(envelope=envelope)
+        result = activation.replay_raw_page(
+            _raw_replay_command(activation.snapshot.run_id, "3"),
+            ConfluenceRawPageOrphanInspector(raw_root=raw_root),
+        )
+        assert isinstance(result, RawPageReplayResult)
+        assert result.decision is RawPageReplayDecision.UNKNOWN_INVENTORY
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchall("SELECT * FROM raw_page_progress")
+        ) == []
+
+
+def test_raw_page_replay_different_evidence_is_conflict(tmp_path) -> None:
+    with _prepare_raw_replay(tmp_path) as (activation, inspector, command):
+        assert activation.replay_raw_page(command, inspector).decision is RawPageReplayDecision.COMMITTED
+
+        alternate = ConfluenceRawPageEnvelope.capture(
+            run_id=activation.snapshot.run_id,
+            page_id="2",
+            source_version=None,
+            http_status=200,
+            body_bytes=b"different",
+        )
+
+        class AlternateInspector:
+            def inspect_raw_page(self, *, request):
+                return ConfluenceRawPageOrphanInspectionResult(
+                    ConfluenceRawPageOrphanInspectionDecision.REPLAYABLE,
+                    alternate,
+                )
+
+        result = activation.replay_raw_page(command, AlternateInspector())
+        assert isinstance(result, RawPageReplayResult)
+        assert result.decision is RawPageReplayDecision.CONFLICT
+
+
+def test_raw_page_replay_rejects_envelope_for_different_known_page(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        activation.load_next_inventory_work()
+        activation.commit_root_occurrence(_root_commit(activation))
+        activation.load_next_inventory_work()
+        activation.commit_inventory_window(_window_commit(activation, 0, ("2", "3"), 2))
+        command = _raw_replay_command(activation.snapshot.run_id, "2")
+        mismatched = ConfluenceRawPageEnvelope.capture(
+            run_id=activation.snapshot.run_id,
+            page_id="3",
+            source_version=None,
+            http_status=200,
+            body_bytes=b"wrong-page",
+        )
+
+        class MismatchedInspector:
+            def inspect_raw_page(self, *, request):
+                return ConfluenceRawPageOrphanInspectionResult(
+                    ConfluenceRawPageOrphanInspectionDecision.REPLAYABLE,
+                    mismatched,
+                )
+
+        result = activation.replay_raw_page(command, MismatchedInspector())
+        assert isinstance(result, RawPageReplayResult)
+        assert result.decision is RawPageReplayDecision.IDENTITY_CONFLICT
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        assert workspace._mutate(
+            lambda transaction: transaction._fetchall("SELECT * FROM raw_page_progress")
+        ) == []
+
+
+def test_raw_page_progress_schema_tamper_fails_closed_on_resume(tmp_path) -> None:
+    with _prepare_raw_replay(tmp_path) as (activation, inspector, command):
+        assert activation.replay_raw_page(command, inspector).decision is RawPageReplayDecision.COMMITTED
+        run_id = activation.snapshot.run_id
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        workspace._mutate(
+            lambda transaction: transaction._execute(
+                "UPDATE raw_page_progress SET source_version='bad\u0001' WHERE run_id=?",
+                (run_id.value,),
+            )
+        )
+    request = replace(_request(tmp_path), operation=ResumeExplicitRunId(run_id))
+    with pytest.raises(CheckpointStateError):
+        with _register_checkpoint_run(request):
+            pass
+
+
+def test_raw_page_progress_source_binding_tamper_fails_closed_on_resume(tmp_path) -> None:
+    with _prepare_raw_replay(tmp_path) as (activation, inspector, command):
+        assert activation.replay_raw_page(command, inspector).decision is RawPageReplayDecision.COMMITTED
+        run_id = activation.snapshot.run_id
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        workspace._mutate(
+            lambda transaction: transaction._execute(
+                "UPDATE raw_page_progress SET source_version='v2' WHERE run_id=?",
+                (run_id.value,),
+            )
+        )
+    request = replace(_request(tmp_path), operation=ResumeExplicitRunId(run_id))
+    with pytest.raises(CheckpointStateError):
+        with _register_checkpoint_run(request):
             pass
