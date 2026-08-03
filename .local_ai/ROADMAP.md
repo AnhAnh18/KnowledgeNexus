@@ -90,7 +90,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | B1/B2/B3 complete and independently approved; M7-C durability decisions owner-approved | Structured HTTP facts, pure retry policy, injected-clock bounded executor, and the M7-C durability decision package are recorded | Plan one focused, separately authorized M7-C stage; later raw-generation integration remains blocked. |
+| M7 - Crawl reliability and scale | B1/B2/B3 complete and independently approved; C5-B1 complete; C5-B2 measurement PASS only | Durable inventory correctness is implemented and reviewed; the 100k pilot remains incomplete/pending; performance optimization is explicitly deferred | No further M7-C performance implementation is authorized; M7-D raw-generation integration remains blocked. |
 | M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
@@ -100,9 +100,10 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 Current area: M6A through M6G-D are complete and approved. The complete
 M7-A1/A2/A3 contract stack is owner-approved. M7-B1 structured HTTP outcomes,
 M7-B2 pure bounded retry policy, and M7-B3 retrying/rate-limited executor are
-implemented and independently approved. M7-C durability decisions are
-owner-approved, but every production stage remains separately gated and
-unauthorized; raw-generation and later reliability integration remain blocked.
+implemented and independently approved. M7-C5-B1 is complete and independently
+approved; C5-B2 is measurement-only with a PASS for the measurement package,
+not the 100k scale gate. The owner deferred 100k performance optimization;
+M7-D raw-generation integration remains blocked.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts

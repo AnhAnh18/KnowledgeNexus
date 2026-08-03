@@ -238,6 +238,20 @@ authorization:
 - complete a threat model covering caller-controlled configuration and durable
   checkpoint data, then add the resulting focused regression tests.
 
+### OD-C16. Deferred 100,000-page performance optimization
+
+The owner chooses to keep the current durability-first validation boundary and
+does not authorize a performance/durability optimization stage for the
+100,000-page offline scale gate at this time. The
+`m7-crawl-scale-acceptance-v2` profile remains acceptance-only, and the scale
+gate remains pending/incomplete.
+
+Any future optimization must be proposed as a separate owner-authorized stage
+and must re-review writer-lock/sidecar verification cadence, external-writer
+threat-model assumptions, invalidation rules, schema or index changes, and any
+RSS/working-set threshold. This decision changes no production behavior,
+profile values, or acceptance result.
+
 ## 3. Required closure boundaries
 
 An inventory-only M7-C acceptance suite may close only M7-C after independent

@@ -1290,10 +1290,24 @@ Review artifact:
 - M7-B3 added no checkpoint, raw-generation, fingerprint, controlled-stop,
   credential/configuration, or live-network behavior.
 
+## M7-C5 Scale and Performance State
+
+- M7-C5-B1 is complete, pushed, and independently approved. It preserves the
+  durability-first validation boundary while adding only bounded local checks
+  and cadence-based full validation.
+- M7-C5-B2 measurement is complete with `VERDICT: PASS` for the measurement
+  package only. The 100,000-page acceptance gate remains incomplete; its
+  timeout and working-set observations are evidence, not a scale PASS.
+- The owner explicitly deferred 100,000-page performance optimization. Any
+  future lock/sidecar, validation-cadence, schema/index, or memory-threshold
+  change needs a separate owner-authorized and independently reviewed stage.
+- M7-D raw-generation integration remains blocked by the owner decision
+  boundary; no M7-D production implementation is authorized.
+
 ## Next Planned Task
 
-The M7-C durability decision package is owner-approved in
-`contracts/foundation/decision_logs/M7_C_OWNER_DECISIONS.md`. Plan one focused
-M7-C production stage at a time against the approved M7-A contracts and
-completed M7-B HTTP reliability layer. M7-C implementation remains separately
-gated and is not yet authorized.
+No further M7-C performance implementation is authorized at this point. The
+next implementation stage requires an owner decision to either authorize a
+focused M7-D raw-generation plan or reprioritize an alternative roadmap stage;
+until then, preserve the current durability boundary and do not modify
+production code.
