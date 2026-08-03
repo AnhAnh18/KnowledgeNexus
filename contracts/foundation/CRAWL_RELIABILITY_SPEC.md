@@ -18,13 +18,14 @@ Precedence: `contracts/foundation/schemas/` wins every field-level dispute.
 This specification sits with the other active focused specifications
 (`CHUNKING_SPEC.md`, `JIRA_RELATION_SPEC.md`, `ACL_MATERIALIZATION_SPEC.md`,
 `ONE_PAGE_EXPORT_SPEC.md`, `RETRY_POLICY_SPEC.md`,
-`CHECKPOINT_RESUME_SPEC.md`, `RAW_GENERATION_SPEC.md`, and
-`CRAWL_ACCEPTANCE_SPEC.md` with `crawl_reliability_profile.yaml`) above the
-historical decision logs. It is a
+`CHECKPOINT_RESUME_SPEC.md`, `CHECKPOINT_STORE_SPEC.md`,
+`RAW_GENERATION_SPEC.md`, and `CRAWL_ACCEPTANCE_SPEC.md` with the M7
+reliability profiles) above the historical decision logs. It is a
 contract for future crawl-reliability work; it authorizes no production
 implementation. The owner decisions this specification narrows are recorded
 in `decision_logs/M7_OWNER_DECISIONS.md`, which remains the authoritative
-owner record of the locked numeric profile inputs.
+owner record of the locked numeric profile inputs, and the follow-on
+`decision_logs/M7_C_OWNER_DECISIONS.md` for M7-C durability decisions.
 
 ## 1. Purpose and non-goals
 
@@ -223,6 +224,12 @@ rather than proceed against a run that may still be owned by another live
 process. This section states the ownership contract only; it defines no
 file-lock library or platform-specific mechanism.
 
+For M7-C, lock scope and mutable checkpoint-workspace scope are identical. The
+process acquires the exclusive lock before it opens, initializes, or mutates the
+checkpoint database, and closes the database before releasing the lock. The
+database and lock paths are derived together from one validated workspace
+directory; callers cannot compose them independently.
+
 ## 15. Fingerprint ownership (contract level)
 
 The crawl fingerprint is constructed by the system from the approved
@@ -232,9 +239,11 @@ source URL, credentials, the source ID, raw query text, and any local
 filesystem path. A numeric profile change (§17, and the locked values in
 `decision_logs/M7_OWNER_DECISIONS.md` §2.L) is a configuration change and,
 because the fingerprint is derived from effective configuration, requires a
-new `profile_version` and produces a new fingerprint. This section states
-fingerprint ownership and exclusions only; exact canonicalization is
-deferred to M7-A3c.
+new `profile_version` and produces a new fingerprint. The offline-only
+100,000-page scale profile is therefore independently versioned as
+`m7-crawl-scale-acceptance-v2` / `"2"`; it does not revise the approved
+production mapping. This section states fingerprint ownership and exclusions
+only; exact canonicalization is deferred to M7-A3c.
 
 ## 16. Controlled-stop ownership (contract level)
 
@@ -258,6 +267,13 @@ window ceilings, and raw byte/artifact/free-disk-reserve ceilings. M7-A2
 materializes the profile as a contract artifact and defines its request/retry
 semantics. Enforcement and runtime loading remain later reviewed production
 work.
+
+The separately versioned `crawl_reliability_scale_profile.yaml` is an offline
+acceptance-only inventory-cap profile. It MAY be selected only for the 100,000-
+page scale gate in `CRAWL_ACCEPTANCE_SPEC.md`; its version is `"2"` because its
+numeric bounds differ from production. It preserves the production retry-policy
+numeric/boolean parameters, while B2 remains exactly bound to the normal profile by
+`RETRY_POLICY_SPEC.md`; no scale-profile value may alter that B2 binding.
 
 ## 18. Security and sanitized durable-evidence rules
 

@@ -23,10 +23,16 @@ decision record, not a design or implementation specification; the companion
 Precedence: `contracts/foundation/schemas/` and the active focused specs
 (`CHUNKING_SPEC.md`, `JIRA_RELATION_SPEC.md`, `ACL_MATERIALIZATION_SPEC.md`,
 `ONE_PAGE_EXPORT_SPEC.md`, `CRAWL_RELIABILITY_SPEC.md`, and
-`RETRY_POLICY_SPEC.md` with `crawl_reliability_profile.yaml`) remain unchanged
-and continue to win every field-level dispute. Nothing in this document
-overrides approved M5/M6 semantics; §3 records only additive M7 reliability
-decisions.
+`RETRY_POLICY_SPEC.md`, `CHECKPOINT_RESUME_SPEC.md`,
+`CHECKPOINT_STORE_SPEC.md`, `RAW_GENERATION_SPEC.md`, and
+`CRAWL_ACCEPTANCE_SPEC.md` with the M7 reliability profiles) continue to win
+every field-level dispute. Nothing in this document overrides approved M5/M6
+semantics; §3 records only additive M7 reliability decisions.
+
+`decision_logs/M7_C_OWNER_DECISIONS.md` is the follow-on owner record for the
+M7-C decisions it names. It supersedes this document's deferred/open wording
+only for those named decisions; all unrelated M7-A1 decisions and open items
+remain governed here.
 
 ## 1. Approved prior facts
 
@@ -216,22 +222,21 @@ by a later task as indicated:
   `m7-crawl-reliability-v1` profile file — owned by contract-only M7-A2.
   Structured HTTP metadata, pure retry-policy implementation, and the
   rate-limited executor remain future M7-B1/B2/B3 production tasks.
-- File-lock library selection, raw-envelope JSON serialization, CLI flags,
-  and production package/class names — owned by later reviewed
-  implementation tasks, not by any contract-only task.
+- M7-C resolves file-lock selection and its inventory-only CLI scope in
+  `M7_C_OWNER_DECISIONS.md`; raw-envelope serialization and production
+  package/class names remain later reviewed implementation choices.
 
 ## 4. Unresolved operational items
 
-- The exact SQLite file location, checkpoint database migration strategy,
-  and operational backup/retention policy remain open and are not addressed
-  by this document.
+- M7-C resolves its workspace layout and no-migration policy in
+  `M7_C_OWNER_DECISIONS.md`; operational backup/retention policy remains open.
 - The exact process for detecting and operator-resolving a same-fingerprint
   incomplete-run conflict (§2.F) beyond "fail closed" remains open.
-- The interaction between controlled stop (§2.J) and an operator-initiated
-  resume across process sessions remains open pending M7-A3c.
-- Disk-space and quota enforcement behavior when approaching
-  `minimum_free_disk_reserve_bytes` (§2.L) remains open pending M7-A3 and
-  later production implementation.
+- Operational implementation of controlled-stop resume across process sessions
+  remains a later M7-C task; the M7-A3c contract is complete and approved.
+- Raw disk-space enforcement near `minimum_free_disk_reserve_bytes` remains a
+  later raw-generation implementation task. M7-C inventory quota enforcement
+  is locked in `M7_C_OWNER_DECISIONS.md`.
 
 ## 5. Provenance and scope note
 

@@ -123,6 +123,40 @@ acl_contract_version
 Digest fields are lowercase SHA-256 hex strings. Version/profile fields are
 non-empty strings. `space_key` follows the approved source-config contract.
 
+M7-C version 1 uses this closed registry:
+
+```text
+fingerprint_contract_version: m7-crawl-fingerprint-v1
+deployment_api_family: confluence-data-center-rest-v1
+request_profile_version: m7-confluence-request-profile-v1
+scope_policy_version: m5-scope-policy-v1
+query_shape_profile_version: m7-confluence-inventory-query-v1
+expand_shape_profile_version: m7-confluence-inventory-expand-v1
+mapper_contract_version: m5b-confluence-inventory-mapper-v1
+raw_layout_contract_version: m7-raw-generation-layout-v1
+foundation_schema_version: "1.0"
+chunking_contract_version: 1.2.0
+jira_relation_contract_version: m6e-jira-relations-v1
+acl_contract_version: m6f-acl-materialization-v1
+```
+
+The remaining `reliability_profile_id` and `reliability_profile_version` fields
+come exactly from the validated active crawl profile: the functional gate uses
+`m7-crawl-reliability-v1` / `"1"`, and the extended offline gate uses
+`m7-crawl-scale-acceptance-v2` / `"2"`. An implementation must not substitute,
+accept caller overrides for, or infer a registry value from an unrelated M5
+configuration field.
+
+The M7-B2 retry-policy binding is deliberately separate: both gates construct
+`ConfluenceRetryPolicyProfile` only from the complete approved
+`m7-crawl-reliability-v1` / `"1"` mapping. The scale mapping MUST NOT be given
+to that constructor; it changes inventory/storage caps only, and retains the
+same numeric/boolean retry parameters. This prevents an acceptance-only scale cap from
+silently redefining the approved B2 retry behavior.
+
+Every registry value is a string. The quoted `"1.0"` spelling above is part of
+the canonical fingerprint bytes, not a JSON number.
+
 ### Canonically sorted string-array fields
 
 ```text
@@ -206,6 +240,59 @@ supply this digest directly.
 
 Changing include roots, exclusions, scope policy/config, or their version
 changes the crawl fingerprint.
+
+For M7-C version 1, the complete remaining scope configuration is exactly the
+include-root labels keyed by page ID, excluded-subtree reasons keyed by page ID,
+and include/exclude keyword collections. The canonical digest input sorts keyed
+entries by page ID and keyword collections by canonical string order, removes
+duplicate keywords, and represents an absent label/reason as explicit `null`.
+The page-ID collections themselves remain direct fingerprint fields. Raw input
+values and this digest preimage remain excluded from durable state and evidence.
+
+The exact scope-digest object is:
+
+```json
+{
+  "exclude_keywords": ["<string>", "..."],
+  "excluded_subtree_reasons": [
+    {"page_id":"<string>","reason":"<string-or-null>"}
+  ],
+  "include_keywords": ["<string>", "..."],
+  "include_root_labels": [
+    {"name":"<string-or-null>","page_id":"<string>"}
+  ]
+}
+```
+
+Its keys are sorted; it uses UTF-8 JSON with compact separators, `ensure_ascii`
+false, `allow_nan` false, no BOM, and no trailing newline; then
+`scope_config_digest` is lowercase SHA-256 hex of those bytes. Strings must be
+valid validated config strings, entries use only the shown keys, and arrays are
+sorted/deduplicated before serialization by Unicode scalar-value order with no
+locale collation or Unicode normalization. This object has no optional keys.
+
+The M7-C query/expand version labels bind exactly these acquisition shapes:
+
+```text
+root path: /rest/api/content/{numeric-page-id}
+root query: expand=space,version
+descendants path: /rest/api/search
+descendants CQL: space="{space_key}" and ancestor={numeric-root-id} and type=page
+descendants query: expand=content.ancestors,content.space,content.version,content.metadata.labels
+                   limit={effective_inventory_page_size}
+                   start={committed_cursor}
+```
+
+Any change to a listed path, literal, query key, expand value, CQL shape, or
+value-encoding rule requires a new query/expand profile version and fingerprint.
+
+### M7-C effective-input binding
+
+Before fingerprinting, the M7-C trusted validator MUST construct every
+fingerprint field from one validated effective configuration. In particular, the
+effective inventory page size MUST equal the active reliability-profile value;
+an arbitrary positive M5 source-config page size is not sufficient for M7-C.
+This requirement is additive and does not change M5 behavior.
 
 ## 7. Excluded fingerprint inputs
 
@@ -321,6 +408,10 @@ Two executions with the same scripted inputs MUST produce identical
 decisions, requests, sleeps, checkpoints, raw tree, normalized page set, and
 sanitized counters.
 
+An M7-C inventory-only acceptance suite may establish only the durable
+inventory slice. It cannot establish the full M7 acceptance gate until the
+later raw-generation scope and its required acceptance cases are complete.
+
 ## 11. Scale methodology
 
 The future offline scale gate uses:
@@ -328,7 +419,8 @@ The future offline scale gate uses:
 ```text
 functional corpus: 10,000 inventory pages
 extended corpus: 100,000 inventory pages
-inventory page size: active profile value
+functional profile: m7-crawl-reliability-v1
+extended profile: m7-crawl-scale-acceptance-v2 (profile_version "2")
 crash injection: every window/commit boundary
 RSS sampling: child process at a fixed periodic interval
 baseline RSS: after runtime initialization, before corpus processing
@@ -349,12 +441,21 @@ The absolute RSS threshold is intentionally not invented here. The owner MUST
 lock it after a reproducible baseline and before the M7 scale implementation
 gate is approved.
 
+`crawl_reliability_scale_profile.yaml` is an offline acceptance-only profile.
+Its `profile_version` is `"2"`, distinct from the approved production mapping,
+because it changes numeric inventory bounds. It has a distinct fingerprint,
+raises only the page/window caps needed to exercise the 100,000-page corpus,
+and MUST NOT be used for a live or production crawl. Its retry-policy projection
+is represented by unchanged production retry parameters as specified in §4. The ordinary
+M7-v1 production profile and its 10,000-page bound remain unchanged.
+
 ## 12. Offline fault-injection points
 
 The future integrated suite injects failure at least:
 
 ```text
 before request
+after durable outbound-attempt reservation before request
 after response
 during raw temporary write
 after raw publication
@@ -454,6 +555,8 @@ foreign SHA as a portable completion requirement
 | `A3C-FP-10` | Session controls/log settings do not change digest |
 | `A3C-FP-11` | Resume mismatch fails before request/mutation |
 | `A3C-FP-12` | Caller-supplied digest override is rejected |
+| `A3C-FP-13` | M7 page-size mismatch fails before fingerprint, request, or mutation |
+| `A3C-FP-14` | Scope-digest labels/reasons/keywords have exact canonical bytes and digest |
 
 ## 17. Controlled-stop and integrated acceptance matrix
 
