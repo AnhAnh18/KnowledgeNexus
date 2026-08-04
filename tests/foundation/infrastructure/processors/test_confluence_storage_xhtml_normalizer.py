@@ -35,6 +35,51 @@ def test_does_not_prepend_page_title() -> None:
     assert _normalize("<p>body only</p>").normalized_body_text == "body only"
 
 
+def test_confluence_layout_containers_preserve_block_order_without_warnings() -> None:
+    result = _normalize(
+        '<ac:layout>'
+        '<ac:layout-section>'
+        '<ac:layout-cell><h2>Left</h2><p>alpha</p></ac:layout-cell>'
+        '<ac:layout-cell><p>beta</p></ac:layout-cell>'
+        '</ac:layout-section>'
+        '</ac:layout>'
+    )
+    assert result.normalized_body_text == "## Left\n\nalpha\n\nbeta"
+    assert result.counters["unsupported_elements"] == 0
+    assert result.warnings == ()
+
+
+def test_nested_layout_preserves_lists_code_and_table_source_order() -> None:
+    result = _normalize(
+        '<ac:layout><ac:layout-section><ac:layout-cell>'
+        '<p>intro</p><ul><li>one</li><li>two</li></ul>'
+        '<ac:structured-macro ac:name="code">'
+        '<ac:plain-text-body>line1\nline2</ac:plain-text-body>'
+        '</ac:structured-macro>'
+        '<table><tr><th>A</th></tr><tr><td>B</td></tr></table>'
+        '</ac:layout-cell></ac:layout-section></ac:layout>'
+    )
+    text = result.normalized_body_text
+    assert text.index("intro") < text.index("- one")
+    assert text.index("- two") < text.index("line1")
+    assert text.index("line2") < text.index("| A |")
+    assert "| B |" in text
+    assert result.counters["unsupported_elements"] == 0
+    assert result.warnings == ()
+
+
+def test_empty_layout_cells_do_not_create_content_or_unsupported_warnings() -> None:
+    result = _normalize(
+        '<ac:layout><ac:layout-section>'
+        '<ac:layout-cell></ac:layout-cell>'
+        '<ac:layout-cell><p>visible</p></ac:layout-cell>'
+        '</ac:layout-section></ac:layout>'
+    )
+    assert result.normalized_body_text == "visible"
+    assert result.counters["unsupported_elements"] == 0
+    assert result.warnings == ()
+
+
 def test_renders_lists_and_nested_lists_deterministically() -> None:
     result = _normalize(
         "<ol><li>one<ul><li>nested</li></ul></li><li>two</li></ol>"
