@@ -64,6 +64,16 @@ from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluenceStorageNormalization,
     NormalizationReferenceIntent,
 )
+from knowledgenexus.foundation.domain.models.confluence_page_set import (
+    ACTIVE_PAGE_SET_PROFILE_IDENTITY,
+    ConfluencePageSetError,
+    ConfluencePageSetFailureCategory,
+    ConfluencePageSetMetrics,
+    ConfluencePageSetPageMetrics,
+    ConfluencePageSetRequest,
+    ConfluencePageSetResult,
+    ConfluencePageWorkItem,
+)
 from knowledgenexus.foundation.domain.models.chunking_profile import (
     ChunkingProfile,
     TokenizerAsset,
@@ -176,6 +186,14 @@ __all__ = [
     "ConfluencePageSource",
     "ConfluenceStorageNormalization",
     "NormalizationReferenceIntent",
+    "ACTIVE_PAGE_SET_PROFILE_IDENTITY",
+    "ConfluencePageSetError",
+    "ConfluencePageSetFailureCategory",
+    "ConfluencePageSetMetrics",
+    "ConfluencePageSetPageMetrics",
+    "ConfluencePageSetRequest",
+    "ConfluencePageSetResult",
+    "ConfluencePageWorkItem",
     "ChunkingProfile",
     "TokenizerAsset",
     "ChunkingResult",
