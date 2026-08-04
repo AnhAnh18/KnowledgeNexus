@@ -17,9 +17,10 @@ reviewed `PASS`; M7-D5-A raw-page replay/checkpoint integration and M7-D5-B
 restriction-evidence replay are complete and independently reviewed `PASS`.
 These stages do not imply a closed 100k scale gate. No
 raw production artifact or published snapshot exists in this repository.
-M8-A normalization fidelity and layout semantics is complete and independently
-reviewed `PASS`; M8-B through M8-E and M9 remain staged under the reviewed
-M8-M9 goal plan. No M10 full-snapshot work has started.
+M8-A normalization fidelity/layout semantics and M8-B complex-table migration
+are complete and independently reviewed `PASS`; M8-C through M8-E and M9
+remain staged under the reviewed M8-M9 goal plan. No M10 full-snapshot work has
+started.
 
 ## Durable State Convention
 
@@ -1395,8 +1396,47 @@ are recorded without using repository-local commit SHAs as status.
 - Environment-only gaps: the asset-backed BGE-M3 test was not invoked without
   `--tokenizer-assets-dir`; the first broad run also hit a machine temp-
   directory permission error and passed when rerun with an explicit basetemp.
-- Next stage: M8-B requires an owner-approved complex-table migration policy
-  before any existing normalized table output is changed.
+- Next stage: M8-C macro/placeholder/reference-intent completeness.
+
+## M8-B Complex-Table No-Loss Migration
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: replace the lossy M6C complex-table fallback with deterministic
+  no-loss grids/fallbacks while preserving simple-table bytes and the active
+  BGE-M3/`chunker_version=1.2.0` profile.
+- Policy identity: `confluence-table-no-loss-v1`; bounded rows/columns/slots,
+  cell/output bytes, and nested-table depth fail closed with sanitized stable
+  categories. Span markers are ordered `[rowspan:N]` then `[colspan:N]`;
+  invalid grids use the exact row-preserving `[table]` grammar.
+- Config migration: one-page export identity is now `one-page-export-v2` and
+  canonical config JSON includes the code-owned `normalization_policy_id`.
+  Schemas and chunker version remain unchanged. The next production export is
+  required to be an explicit `full_snapshot`; no delta bridge is authorized.
+- Changed files:
+  `src/knowledgenexus/foundation/infrastructure/processors/confluence_storage_xhtml_normalizer.py`,
+  `src/knowledgenexus/foundation/domain/models/one_page_export.py`,
+  `contracts/foundation/ONE_PAGE_EXPORT_SPEC.md`,
+  `tests/foundation/infrastructure/processors/test_confluence_storage_xhtml_normalizer.py`,
+  `tests/foundation/domain/models/test_one_page_export.py`, plus sanitized
+  stage artifacts under `.codex-workflow/20260804-m8b/`.
+- Validation: focused normalizer `60 passed`; parser/chunker/config/export
+  regression `258 passed, 1 skipped`; `compileall` passed; scoped `git diff
+  --check` passed. The BGE-M3 asset-backed test remains an environment-only
+  skip without `--tokenizer-assets-dir`.
+- Broad offline Foundation/Shared/Architecture run reached `2526 passed,
+  35 skipped, 40 failed`; the failures are machine path-policy/sidecar smoke
+  failures plus the historical M6G dirty-file guard that rejects the intended
+  M8-B change to `one_page_export.py`. This is not claimed as a broad PASS.
+- Plan/review artifacts:
+  `.codex-workflow/20260804-m8b/PLAN.input.md`,
+  `.codex-workflow/20260804-m8b/01-plan-review.md`,
+  `.codex-workflow/20260804-m8b/02-plan-revised.md`,
+  `.codex-workflow/20260804-m8b/03-migration.md`,
+  `.codex-workflow/20260804-m8b/04-implementation.md`, and
+  `.codex-workflow/20260804-m8b/05-review-1.md` (`VERDICT: PASS`).
+- Milestone provenance: M8-B implementation and independent review are
+  complete. Repository-local commit mappings belong only in ignored local
+  provenance state and are not used as cross-repository milestone identity.
 
 ## Current Execution Boundary
 

@@ -91,7 +91,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
 | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
-| M8 - Production-quality normalization and chunking | in progress; M8-A complete, M8-B through M8-E pending | M8-A layout fidelity independently reviewed `PASS`; complex-table migration, macro intents, page-set processing, and chunk handoff remain staged | M8-A preserves `chunker_version=1.2.0`; M8-B requires an approved normalization/config migration if existing complex-table outputs change. |
+| M8 - Production-quality normalization and chunking | in progress; M8-A and M8-B complete, M8-C through M8-E pending | M8-A layout fidelity and M8-B complex-table migration independently reviewed `PASS`; macro intents, page-set processing, and chunk handoff remain staged | M8-B preserves `chunker_version=1.2.0`, migrates config identity to `one-page-export-v2`, and requires the next production export to be a `full_snapshot`. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
@@ -111,9 +111,10 @@ independent review `PASS`; the bounded M7 roadmap is owner-accepted and the
 100k scale gate remains deferred. M7-D5-A raw-page
 replay/checkpoint integration and M7-D5-B restriction replay are complete with
 independent review `PASS`; terminal sessions fail closed for both replay paths.
-M8-A normalization fidelity is complete and independently reviewed `PASS`.
-M8-B through M8-E and all M9 tracks remain pending under the reviewed M8-M9
-goal plan; no M10 full-snapshot work has started.
+M8-A normalization fidelity and M8-B complex-table migration are complete and
+independently reviewed `PASS`. M8-C through M8-E and all M9 tracks remain
+pending under the reviewed M8-M9 goal plan; no M10 full-snapshot work has
+started.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -960,7 +961,7 @@ Completion gate:
 | Milestone | Status | Review / gate outcome |
 |---|---|---|
 | M8-A normalization fidelity and layout semantics | complete | Transparent `layout`, `layout-section`, and `layout-cell` handling; focused normalizer `47 passed`; normalize/parser regression `98 passed`; independent review `PASS`; no chunker/schema/version change. |
-| M8-B complex-table migration | pending | Requires owner-approved no-loss table policy, config/normalizer identity, golden-output update, and subsequent `full_snapshot` when existing outputs change. |
+| M8-B complex-table migration | complete | `confluence-table-no-loss-v1` approved and implemented; 60 focused normalizer tests and 258 bounded regression tests passed (one asset-only skip); config identity migrated to one-page-export-v2; independent review `PASS`; next production export must be `full_snapshot`. |
 | M8-C macro/placeholder/reference intents | pending | Must retain M6C macro behavior and add a sanitized internal intent side stream without network resolution. |
 | M8-D generation-bound page-set processing | pending | Must bind M7 run/generation/page identity and fail closed without checkpoint/export mutation. |
 | M8-E chunk stability handoff | pending | Must expose hash/ID-only internal handoff data without changing export schemas. |
