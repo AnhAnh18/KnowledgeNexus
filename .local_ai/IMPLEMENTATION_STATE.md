@@ -17,11 +17,11 @@ reviewed `PASS`; M7-D5-A raw-page replay/checkpoint integration and M7-D5-B
 restriction-evidence replay are complete and independently reviewed `PASS`.
 These stages do not imply a closed 100k scale gate. No
 raw production artifact or published snapshot exists in this repository.
-M8-A normalization fidelity and layout semantics and M8-B complex-table
-migration are complete and independently reviewed `PASS`. M8-C
-macro/placeholder/reference intents is also complete and independently
-reviewed `PASS`; M8-D/E and M9 remain staged under the reviewed M8-M9 goal
-plan. No M10 full-snapshot work has started.
+M8-A normalization fidelity and layout semantics, M8-B complex-table
+migration, and M8-C macro/placeholder/reference intents are complete and
+independently reviewed `PASS`. M8-D generation-bound page-set processing is
+also complete and independently reviewed `PASS`; M8-E and M9 remain staged
+under the reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1470,6 +1470,38 @@ are recorded without using repository-local commit SHAs as status.
   fixed and rechecked with adversarial tests.
 - Residual boundaries: intent consumers, media/relation resolution, generation-
   bound page-set processing, chunk handoff, and all M9 tracks remain pending.
+
+## M8-D Generation-Bound Deterministic Page Sets
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: compose the approved normalizer, wiki structure parser, and
+  BGE-M3 M6D chunker over an explicit ordered set of preserved M7 raw-page
+  envelopes without checkpoint, raw, or export mutation.
+- Contract: exact `CrawlRunId` run/generation identity, active profile identity
+  `bge-m3:medium:chunker-1.2.0`, non-empty ordered work items, source-version
+  equality, HTTP-200 envelope validation, all-or-nothing records, fixed
+  cross-checked metrics, recursively JSON-safe defensive copies, and sanitized
+  category-only errors.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/confluence_page_set.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`,
+  `src/knowledgenexus/foundation/application/use_cases/process_confluence_page_set.py`,
+  and
+  `src/knowledgenexus/foundation/application/use_cases/__init__.py`.
+  Synthetic model/use-case tests were added under
+  `tests/foundation/domain/models/test_confluence_page_set.py` and
+  `tests/foundation/application/use_cases/test_process_confluence_page_set.py`.
+- Validation: focused M8-D model/use-case suite `17 passed`; bounded raw-store,
+  normalizer, parser, and chunker regression `147 passed`; architecture suite
+  `70 passed`; `python -m compileall -q src tests` passed; scoped
+  `git diff --check` passed. Explicit workspace basetemp was used because the
+  machine default pytest temp root has a known permission failure.
+- Review artifact: `.codex-workflow/20260804-m8d/05-review-1.md`, verdict
+  `PASS`. The independent re-review covered malformed dependency results,
+  profile/asset/type drift, envelope/source-version and canonical page identity,
+  nested JSON, metric/error invariants, and leak-safe failure strings.
+- Residual boundaries: M8-E chunk handoff and all M9 tracks remain pending;
+  M10 full-snapshot work remains separately gated.
 
 ## Current Execution Boundary
 

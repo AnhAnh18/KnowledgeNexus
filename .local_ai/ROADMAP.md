@@ -91,7 +91,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
 | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
-| M8 - Production-quality normalization and chunking | in progress; M8-A through M8-C complete, M8-D/E pending | M8-A layout fidelity, M8-B complex-table migration, and M8-C macro/placeholder/reference-intent seam independently reviewed `PASS`; generation-bound page-set processing and chunk handoff remain staged | M8-B migrates config identity to `one-page-export-v2` and requires the next production export to be a `full_snapshot`; M8-C preserves body/config/chunker compatibility and adds no network or export behavior. |
+| M8 - Production-quality normalization and chunking | in progress; M8-A through M8-D complete, M8-E pending | M8-A layout fidelity, M8-B complex-table migration, M8-C reference intents, and M8-D generation-bound page-set seam independently reviewed `PASS`; chunk stability handoff remains staged | M8-B requires the next production export to be a `full_snapshot`; M8-D is read-only/all-or-nothing and does not mutate checkpoint, raw, or export state. |
 | M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
@@ -111,10 +111,10 @@ independent review `PASS`; the bounded M7 roadmap is owner-accepted and the
 100k scale gate remains deferred. M7-D5-A raw-page
 replay/checkpoint integration and M7-D5-B restriction replay are complete with
 independent review `PASS`; terminal sessions fail closed for both replay paths.
-M8-A normalization fidelity, M8-B complex-table migration, and M8-C reference
-intents are complete and independently reviewed `PASS`. M8-D/E and all M9
-tracks remain pending under the reviewed M8-M9 goal plan; no M10 full-snapshot
-work has started.
+M8-A normalization fidelity, M8-B complex-table migration, M8-C reference
+intents, and M8-D generation-bound page-set processing are complete and
+independently reviewed `PASS`. M8-E and all M9 tracks remain pending under the
+reviewed M8-M9 goal plan; no M10 full-snapshot work has started.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -963,7 +963,7 @@ Completion gate:
 | M8-A normalization fidelity and layout semantics | complete | Transparent `layout`, `layout-section`, and `layout-cell` handling; focused normalizer `47 passed`; normalize/parser regression `98 passed`; independent review `PASS`; no chunker/schema/version change. |
 | M8-B complex-table migration | complete | `confluence-table-no-loss-v1` approved and implemented; 60 focused normalizer tests and 258 bounded regression tests passed (one asset-only skip); config identity migrated to one-page-export-v2; independent review `PASS`; next production export must be `full_snapshot`. |
 | M8-C macro/placeholder/reference intents | complete | Added immutable/runtime-validated drawio, image/attachment, and include-page intent side stream; focused `99 passed`, architecture `69 passed`; independent review `PASS`; no counter/body/config/chunker/schema/network/export changes. |
-| M8-D generation-bound page-set processing | pending | Must bind M7 run/generation/page identity and fail closed without checkpoint/export mutation. |
+| M8-D generation-bound page-set processing | complete | Added exact ordered request/work-item/result/metrics/error models and a read-only M7 envelope adapter composing normalize → parse → chunk; focused `17 passed`, bounded regression `147 passed`, architecture `70 passed`; independent review `PASS`; no partial result or checkpoint/raw/export mutation. |
 | M8-E chunk stability handoff | pending | Must expose hash/ID-only internal handoff data without changing export schemas. |
 
 ## 11. M9 - Media, Git, Symbols, and Deletion Propagation
