@@ -107,6 +107,10 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     ResumeUniqueIncompleteRunRequest,
     StartNewRunRequest,
 )
+from knowledgenexus.foundation.ports.media_processing_port import (
+    ImageOcrPort,
+    PdfTextExtractionPort,
+)
 
 __all__ = [
     "ConfluenceInventoryPort",
@@ -184,4 +188,6 @@ __all__ = [
     "ResumeExplicitRunRequest",
     "ResumeUniqueIncompleteRunRequest",
     "StartNewRunRequest",
+    "ImageOcrPort",
+    "PdfTextExtractionPort",
 ]

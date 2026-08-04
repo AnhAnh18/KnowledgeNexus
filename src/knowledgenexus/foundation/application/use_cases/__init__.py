@@ -40,6 +40,9 @@ from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_
 from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
     AcceptConfluenceMiniCorpus,
 )
+from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
+    ProcessConfluenceMediaAttachment,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -62,4 +65,5 @@ __all__ = [
     "is_inventory_window_commit",
     "FetchAndStoreConfluenceAttachmentBody",
     "AcceptConfluenceMiniCorpus",
+    "ProcessConfluenceMediaAttachment",
 ]

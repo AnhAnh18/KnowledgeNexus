@@ -1632,8 +1632,40 @@ are recorded without using repository-local commit SHAs as status.
 - Review artifacts:
   `.codex-workflow/20260805-m9a2/05-review-1.md` (`CHANGES_REQUIRED`),
   `.codex-workflow/20260805-m9a2/08-review-2.md` (`PASS`).
-- Commit/push closeout is pending on this branch; M9-A3 is the next separately
-  planned and reviewed stage.
+- Commit/push closeout is complete on `codex/m8-m9` (`fcd9935`); M9-A3 was
+  implemented as the next separately planned and reviewed stage.
+
+## M9-A3 Offline Draw.io/PDF/OCR Processors
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: process one already-materialized M9-A2 attachment body offline,
+  preserving the schema-shaped MediaAsset evidence while returning an
+  in-memory extraction-detail projection for draw.io, digital PDF text, or
+  selected-image OCR.
+- Contract: stdlib source-first draw.io XML parsing with DTD/entity rejection,
+  bounded deterministic labels/edges/containers, closed PDF/OCR capability
+  identities, strict page/image counters and output budgets, exact `parsed` /
+  `ocr` / `failed` status matrix, MIME/filename dispatch, envelope-bound
+  content hash/raw URI, sanitized failures, and no attachment-text chunks or
+  side-effecting engine/network/file behavior.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/drawio_xml.py`,
+  `src/knowledgenexus/foundation/domain/models/media_processing.py`,
+  `src/knowledgenexus/foundation/ports/media_processing_port.py`,
+  `src/knowledgenexus/foundation/infrastructure/processors/drawio_xml_processor.py`,
+  `src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py`,
+  `src/knowledgenexus/foundation/application/use_cases/process_confluence_media_attachment.py`,
+  and package exports.
+- Validation: focused M9-A3 suite `30 passed`; architecture suite `80 passed`;
+  M9-A1/A2 regression `48 passed, 2 skipped`; M8-D/E bounded regression
+  `43 passed`; `python -m compileall -q src tests` and scoped `git diff --check`
+  passed. The broad Foundation suite remains environment-blocked by known
+  tokenizer-asset/runtime and unrelated CLI/temp-root failures; no M9-A3
+  failure was observed in the bounded suites.
+- Review artifacts:
+  `.codex-workflow/20260805-m9a3/05-review-1.md` records initial findings and
+  fixes; `.codex-workflow/20260805-m9a3/08-review-2.md` records the fresh
+  independent `VERDICT: PASS`.
 
 ## Current Execution Boundary
 
