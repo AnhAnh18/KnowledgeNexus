@@ -980,6 +980,17 @@ M9A - Media:
 - Activate `MediaAssetRecordBuilder` here if deferred.
 - Inherit parent ACL deny-safely.
 
+### M9 Execution Ledger
+
+| Stage | Status | Review / gate outcome |
+|---|---|---|
+| M9-A1 metadata-first media contract | complete | Added immutable attachment observation/policy/result models, schema-valid metadata-only MediaAsset builder, deterministic media relation-intent mapper, and strict adversarial boundaries; focused `11 passed`, bounded attachment/schema regression `87 passed`, architecture `16 passed`; independent review `PASS`; no download/raw/export/I/O. |
+| M9-A2 attachment body fetch/store boundary | pending | Requires explicit `data_root`, disk budget, body-fetch port, and path-safe raw-store policy. |
+| M9-A3 offline draw.io/PDF/OCR processors | pending | Capability-pinned processors remain deferred until A2 evidence/store seam is approved. |
+| M9-B local Git repository and code-document seam | pending | M9-B starts after its own plan review; local-clone identity and fallback-window seam remain locked. |
+| M9-C minimal symbol index | pending | Depends on M9-B code-document contract; no symbol chunk stream is active yet. |
+| M9-D1/D2 tombstone/delta propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries. |
+
 M9B - Git repository scan:
 - Configured repository and branch.
 - Source-file inventory.

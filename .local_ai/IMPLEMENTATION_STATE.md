@@ -19,9 +19,11 @@ These stages do not imply a closed 100k scale gate. No
 raw production artifact or published snapshot exists in this repository.
 M8-A normalization fidelity and layout semantics, M8-B complex-table
 migration, and M8-C macro/placeholder/reference intents are complete and
-independently reviewed `PASS`. M8-D generation-bound page-set processing is
-also complete and independently reviewed `PASS`; M8-E and M9 remain staged
-under the reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+independently reviewed `PASS`. M8-D generation-bound page-set processing and
+M8-E chunk-stability handoff are complete and independently reviewed `PASS`.
+M9-A1 metadata-first media contract is also complete and independently
+reviewed `PASS`; M9-A2 through M9-D remain staged under the reviewed M8-M9
+goal plan. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1534,6 +1536,32 @@ are recorded without using repository-local commit SHAs as status.
 - Residual boundaries: M9-A media, M9-B Git, M9-C symbols, and M9-D
   tombstone/delta propagation remain pending; M10 full-snapshot work remains
   separately gated.
+
+## M9-A1 Metadata-First Media Contract
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: define a metadata-first media observation/policy/result seam and
+  deterministic relation intents without downloading bodies, parsing files,
+  OCR, raw-store writes, export, network, or other I/O.
+- Contract: immutable, runtime-validated `MediaAsset` records with exact
+  schema/status matrix, NFC and byte-bound checks, deterministic attachment
+  ordering, atomic batch mapping, sanitized category-only errors, and explicit
+  drawio/image relation-intent semantics. `include_page` remains omitted.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/media_materialization.py`,
+  `src/knowledgenexus/foundation/domain/rules/media_asset_record_builder.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`, and
+  `src/knowledgenexus/foundation/domain/rules/__init__.py`.
+  Focused adversarial tests are in
+  `tests/foundation/domain/models/test_media_materialization.py`.
+- Validation: focused `11 passed`; bounded attachment/schema regression
+  `87 passed`; architecture `16 passed`; compileall and scoped diff-check
+  passed. The independent review covered malformed runtime types, exact
+  status/schema combinations, deterministic ordering, atomicity, and no-I/O
+  behavior; verdict `PASS` in
+  `.codex-workflow/20260805-m9a/05-review-1.md`.
+- M9-A1 is complete; M9-A2 body fetch/store is the next separately reviewed
+  stage.
 
 ## Current Execution Boundary
 
