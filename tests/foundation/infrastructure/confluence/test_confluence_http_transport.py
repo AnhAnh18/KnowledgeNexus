@@ -1034,3 +1034,59 @@ def test_non_string_query_entry_stays_type_error_with_zero_calls(
         method(path="/rest/api/search", query={"start": 0})  # type: ignore[dict-item]
 
     assert opener.calls == []
+
+
+def test_read_response_bytes_request_calls_callback_before_outbound_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(body=b'{"ok":true}')
+    transport, opener, _ = _transport(monkeypatch, response=response)
+    request = transport._build_request(path="/rest/api/content/1", query={})
+    callbacks: list[str] = []
+
+    def on_attempt_start() -> None:
+        callbacks.append("started")
+        assert opener.calls == []
+
+    body = transport._read_response_bytes_request(
+        request, on_attempt_start=on_attempt_start
+    )
+
+    assert body == b'{"ok":true}'
+    assert callbacks == ["started"]
+    assert opener.calls == [(request, 12.5)]
+
+
+def test_get_response_bytes_request_preserves_expected_non_2xx_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/",
+        404,
+        "Not Found",
+        hdrs=Message(),
+        fp=BytesIO(b""),
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+    request = transport._build_request(path="/rest/api/content/1", query={})
+
+    result = transport._get_response_bytes_request(request)
+
+    assert result.status_code == 404
+    assert result.body == b""
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ("_read_response_bytes_request", "_get_response_bytes_request"),
+)
+def test_request_level_seam_rejects_non_request_before_outbound_call(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+) -> None:
+    transport, opener, _ = _transport(monkeypatch)
+
+    with pytest.raises(TypeError, match="urllib.request.Request"):
+        getattr(transport, method_name)("not-a-request")
+
+    assert opener.calls == []

@@ -228,6 +228,8 @@ class UrllibConfluenceHttpTransport:
         *,
         on_attempt_start: Callable[[], None] | None = None,
     ) -> ConfluenceHttpResponse:
+        if not isinstance(request, urllib.request.Request):
+            raise TypeError("request expects a urllib.request.Request")
         if on_attempt_start is not None:
             on_attempt_start()
         try:
@@ -328,6 +330,8 @@ class UrllibConfluenceHttpTransport:
         *,
         on_attempt_start: Callable[[], None] | None = None,
     ) -> bytes:
+        if not isinstance(request, urllib.request.Request):
+            raise TypeError("request expects a urllib.request.Request")
         if on_attempt_start is not None:
             on_attempt_start()
 

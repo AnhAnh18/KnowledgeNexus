@@ -855,3 +855,37 @@ def test_retry_delay_includes_monotonic_rate_limit_wait() -> None:
     # evaluation, so the three-second minimum contributes two seconds to the
     # first two selected sleeps; the final backoff is four seconds.
     assert sleeper.sleeps == [2.0, 2.0, 4.0]
+
+
+def test_production_composition_get_bytes_reaches_real_inner_transport() -> None:
+    """Exercise retrying -> urllib transport -> fake opener without network."""
+    raw_body = b"raw response body via real inner transport"
+    transport, opener, _, _ = _transport(response=FakeResponse(body=raw_body))
+
+    assert isinstance(transport._inner, UrllibConfluenceHttpTransport)
+
+    result = transport.get_bytes(path="/rest/api/content/1000", query={})
+
+    assert result == raw_body
+    assert len(opener.calls) == 1
+
+
+def test_production_composition_status_observation_reaches_real_inner_transport(
+) -> None:
+    """Preserve an expected non-2xx response through both real transports."""
+    transport, opener, _, _ = _transport(
+        outcome=FakeResponse(status=404, body=b"")
+    )
+
+    assert isinstance(transport._inner, UrllibConfluenceHttpTransport)
+
+    result = transport.get_response_bytes_result(
+        path="/rest/api/content/1000/restriction/byOperation/view",
+        query={},
+    )
+
+    assert isinstance(result, ConfluenceStatusAwareExecutionResult)
+    assert result.response.status_code == 404
+    assert result.response.body == b""
+    assert result.terminal_decision is None
+    assert len(opener.calls) == 1
