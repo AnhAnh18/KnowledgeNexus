@@ -53,6 +53,23 @@
 - When two or more files share a stable schema-facing literal, move it to a common local constant instead of duplicating it.
 - When builders copy mutable inputs such as lists or dicts into output records, add tests proving the output does not alias caller-owned objects.
 
+## Public Boundary and Invariant Review
+
+- Every public/application entrypoint must validate runtime input types before
+  dereferencing fields, constructing infrastructure, or causing side effects;
+  malformed input must map to the boundary's sanitized typed failure.
+- For every typed result or status object, write a status/field truth table
+  before implementation. Require status-specific context, reject forbidden
+  fields, and validate cross-field counters against the events they actually
+  count rather than a convenient tuple length.
+- Every stage must include an adversarial negative pass separate from happy-path
+  and integration coverage. Probe `object()`, `None`, wrong enum values,
+  missing required fields, forbidden extra fields, impossible counters, and
+  malformed result combinations.
+- Type annotations, `Protocol`s, and dataclass constructors do not provide
+  runtime validation by themselves; tests must prove the public boundary's
+  fail-closed behavior.
+
 ## Plan Review
 
 When given a task plan, review the whole plan and read the code it touches

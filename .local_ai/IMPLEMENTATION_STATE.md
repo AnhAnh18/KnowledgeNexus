@@ -1433,8 +1433,9 @@ are recorded without using repository-local commit SHAs as status.
   `.codex-workflow/20260804-m8b/03-migration.md`,
   `.codex-workflow/20260804-m8b/04-implementation.md`, and
   `.codex-workflow/20260804-m8b/05-review-1.md` (`VERDICT: PASS`).
-- Commit/push provenance: pending the scoped M8-B commit and push; this line
-  will be backfilled before the next stage begins.
+- Commit/push provenance: commit `2cb9310` (`feat(foundation): complete M8-B
+  complex table migration`) pushed to `origin/codex/m8-m9`. The documentation
+  backfill is a follow-up closeout commit on the same branch.
 
 ## Current Execution Boundary
 
