@@ -62,6 +62,7 @@ from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluencePageNormalizationResult,
     ConfluencePageSource,
     ConfluenceStorageNormalization,
+    NormalizationReferenceIntent,
 )
 from knowledgenexus.foundation.domain.models.chunking_profile import (
     ChunkingProfile,
@@ -174,6 +175,7 @@ __all__ = [
     "ConfluencePageNormalizationResult",
     "ConfluencePageSource",
     "ConfluenceStorageNormalization",
+    "NormalizationReferenceIntent",
     "ChunkingProfile",
     "TokenizerAsset",
     "ChunkingResult",

@@ -166,6 +166,22 @@ def test_xhtml_failure_is_categorized_without_disclosure() -> None:
     assert "SECRET" not in str(caught.value)
 
 
+@pytest.mark.parametrize("bad_result", [None, object()])
+def test_malformed_normalizer_result_fails_before_field_access(bad_result: object) -> None:
+    class BadNormalizer:
+        def normalize(self, *, storage_xhtml: str) -> object:
+            return bad_result
+
+    use_case = NormalizeConfluencePage(
+        raw_page_reader=Reader(_raw()),
+        raw_page_mapper=ConfluenceDataCenterRawPageMapper(),
+        storage_normalizer=BadNormalizer(),
+    )
+    with pytest.raises(ConfluencePageNormalizationError) as caught:
+        use_case.execute(page_id=PAGE_ID, crawled_at=CRAWLED_AT)
+    assert caught.value.category == CATEGORY_STORAGE_XHTML
+
+
 @pytest.mark.parametrize(
     "crawled_at",
     [
