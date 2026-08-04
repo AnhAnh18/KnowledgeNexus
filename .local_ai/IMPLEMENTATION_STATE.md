@@ -1511,6 +1511,38 @@ are recorded without using repository-local commit SHAs as status.
 - Residual boundaries: M8-E chunk handoff and all M9 tracks remain pending;
   M10 full-snapshot work remains separately gated.
 
+## M8-E Chunk Stability and Update-Propagation Handoff
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: expose a deterministic, immutable hash/ID/count-only handoff for
+  M9-D without carrying normalized page text or changing Foundation schemas.
+- Contract: one-document `DocumentChunkSetSummary` plus an ordered M8-D
+  page-set adapter; exact Confluence source/profile/chunker identity, schema
+  validation before field selection, chunk content-hash recomputation from
+  transient text, global final-ID uniqueness, contiguous part metadata,
+  cross-document/order/count invariants, defensive ownership, sanitized
+  malformed-boundary errors, compact sorted-key UTF-8 JSON, and SHA-256 digest.
+  Normalized-body hash recomputation, tokenizer invocation, and private
+  chunk-ID preimage reconstruction remain M8-D-owned.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/chunk_stability.py`,
+  `src/knowledgenexus/foundation/domain/rules/chunk_stability_builder.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`, and
+  `src/knowledgenexus/foundation/domain/rules/__init__.py`.
+  Focused adversarial tests are in
+  `tests/foundation/domain/models/test_chunk_stability.py`.
+- Validation: focused M8-E `23 passed`; bounded page-set/chunker/schema
+  regression `85 passed`; architecture `16 passed`; compileall and scoped
+  diff-check passed. Explicit workspace basetemps were used due the known
+  machine pytest temp-root permission issue.
+- Review artifact: `.codex-workflow/20260804-m8e/05-review-1.md`, verdict
+  `PASS`; follow-up review fixed validator side-effect/error leakage, typed
+  page-set bypass, exact string-subclass identity, single-part metadata, and
+  cross-document duplicate-ID gaps.
+- Residual boundaries: M9-A media, M9-B Git, M9-C symbols, and M9-D
+  tombstone/delta propagation remain pending; M10 full-snapshot work remains
+  separately gated.
+
 ## Current Execution Boundary
 
 The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
