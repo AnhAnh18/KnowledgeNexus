@@ -17,6 +17,9 @@ reviewed `PASS`; M7-D5-A raw-page replay/checkpoint integration and M7-D5-B
 restriction-evidence replay are complete and independently reviewed `PASS`.
 These stages do not imply a closed 100k scale gate. No
 raw production artifact or published snapshot exists in this repository.
+M8-A normalization fidelity and layout semantics is complete and independently
+reviewed `PASS`; M8-B through M8-E and M9 remain staged under the reviewed
+M8-M9 goal plan. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1369,6 +1372,31 @@ are recorded without using repository-local commit SHAs as status.
   regression suite passed `257` tests with `15` skipped. Both replay paths now
   fail closed when the durable session is paused or completed. The 100k scale
   gate remains incomplete and is not implied by this authorization or by M7-D5.
+
+## M8-A Normalization Fidelity and Layout Semantics
+
+- Status: complete and independently reviewed `PASS`.
+- The normalizer now treats Confluence `layout`, `layout-section`, and
+  `layout-cell` as transparent structural blocks. Source order and canonical
+  block boundaries are preserved without changing the existing one-page result
+  contract.
+- Existing complex-table fallback behavior remains unchanged and is explicitly
+  deferred to M8-B. No schema, tokenizer, `chunker_version`, config identity,
+  raw-store, network, export, ACL, relation, or media behavior changed.
+- Changed production/test files:
+  `src/knowledgenexus/foundation/infrastructure/processors/confluence_storage_xhtml_normalizer.py`
+  and
+  `tests/foundation/infrastructure/processors/test_confluence_storage_xhtml_normalizer.py`.
+- Validation: focused normalizer suite `47 passed`; normalize/page-structure
+  regression `98 passed` using an explicit workspace pytest basetemp;
+  `python -m compileall -q src tests` passed; `git diff --check` passed.
+- Independent review artifact:
+  `.codex-workflow/20260804-m8a/04-review-1.md`, verdict `PASS`.
+- Environment-only gaps: the asset-backed BGE-M3 test was not invoked without
+  `--tokenizer-assets-dir`; the first broad run also hit a machine temp-
+  directory permission error and passed when rerun with an explicit basetemp.
+- Next stage: M8-B requires an owner-approved complex-table migration policy
+  before any existing normalized table output is changed.
 
 ## Current Execution Boundary
 

@@ -27,7 +27,16 @@ _JIRA_KEY = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]*$")
 _BACKTICK_RUN = re.compile(r"`+")
 _STANDARD_XML_ENTITIES = {"amp", "lt", "gt", "apos", "quot"}
 
-_BLOCK_TAGS = {"article", "div", "section"}
+# Confluence layout containers are structural blocks, not unsupported content.
+# Treating them as transparent blocks preserves source order and boundaries.
+_BLOCK_TAGS = {
+    "article",
+    "div",
+    "section",
+    "layout",
+    "layout-section",
+    "layout-cell",
+}
 _INLINE_CONTAINER_TAGS = {"span", "small", "sub", "sup"}
 _ADMONITION_LABELS = {
     "info": "Info",
