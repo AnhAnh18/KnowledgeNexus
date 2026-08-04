@@ -83,6 +83,14 @@ from knowledgenexus.foundation.domain.models.confluence_chunking import (
     ConfluenceChunkingError,
     ConfluenceChunkingFailureCategory,
 )
+from knowledgenexus.foundation.domain.models.chunk_stability import (
+    ACTIVE_CHUNKER_VERSION,
+    ChunkStabilityEntry,
+    ChunkStabilityError,
+    ChunkStabilityFailureCategory,
+    DocumentChunkSetSummary,
+    SUMMARY_FORMAT_VERSION,
+)
 from knowledgenexus.foundation.domain.models.tokenization import (
     CharacterSpan,
     TokenizationResult,
@@ -199,6 +207,12 @@ __all__ = [
     "ChunkingResult",
     "ConfluenceChunkingError",
     "ConfluenceChunkingFailureCategory",
+    "ACTIVE_CHUNKER_VERSION",
+    "ChunkStabilityEntry",
+    "ChunkStabilityError",
+    "ChunkStabilityFailureCategory",
+    "DocumentChunkSetSummary",
+    "SUMMARY_FORMAT_VERSION",
     "CharacterSpan",
     "TokenizationResult",
     "WikiBlock",
