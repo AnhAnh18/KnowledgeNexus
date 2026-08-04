@@ -34,6 +34,9 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop 
     ControlledStopPolicy,
     is_inventory_window_commit,
 )
+from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
+    AcceptConfluenceMiniCorpus,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -54,4 +57,5 @@ __all__ = [
     "ControlledStopDecision",
     "ControlledStopPolicy",
     "is_inventory_window_commit",
+    "AcceptConfluenceMiniCorpus",
 ]

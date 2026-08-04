@@ -99,6 +99,12 @@ from knowledgenexus.foundation.domain.models.media_materialization import (
     MediaPolicyDecision,
     MediaRelationIntent,
 )
+from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
+    MiniCorpusAcceptanceError,
+    MiniCorpusAcceptanceFailureCategory,
+    MiniCorpusAcceptanceRequest,
+    MiniCorpusAcceptanceSummary,
+)
 from knowledgenexus.foundation.domain.models.tokenization import (
     CharacterSpan,
     TokenizationResult,
@@ -227,6 +233,10 @@ __all__ = [
     "MediaMaterializationResult",
     "MediaPolicyDecision",
     "MediaRelationIntent",
+    "MiniCorpusAcceptanceError",
+    "MiniCorpusAcceptanceFailureCategory",
+    "MiniCorpusAcceptanceRequest",
+    "MiniCorpusAcceptanceSummary",
     "CharacterSpan",
     "TokenizationResult",
     "WikiBlock",
