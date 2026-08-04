@@ -16,10 +16,15 @@ from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CanonicalIncludeRoots,
     CommittedCheckpointTransition,
     CrawlRunId,
+    CrawlRunSnapshot,
+    CrawlRunStatus,
     IncludeRootProgress,
+    InventoryPhaseStatus,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointCommitResult,
+    CheckpointOperationFailure,
+    CheckpointOperationFailureCategory,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     CheckpointRunSelectionFailure,
@@ -110,3 +115,78 @@ def test_paused_results_require_positive_threshold_and_snapshot() -> None:
 def test_pause_decision_requires_reached_threshold() -> None:
     with pytest.raises(ValueError):
         ControlledStopDecision("pause", 0, 1, "controlled_checkpoint_stop")
+
+
+def test_result_status_matrix_rejects_missing_or_extraneous_state() -> None:
+    selection_failure = CheckpointRunSelectionFailure("run_not_found")
+    fingerprint = ConfluenceCrawlFingerprint._from_digest("a" * 64)
+    snapshot = CrawlRunSnapshot(
+        RUN,
+        RUN,
+        fingerprint,
+        CrawlRunStatus.INCOMPLETE,
+        InventoryPhaseStatus.PENDING,
+        ROOTS,
+        (IncludeRootProgress.ROOT_PENDING,),
+    )
+
+    with pytest.raises(ValueError):
+        DurableInventoryRunResult("completed")
+    with pytest.raises(ValueError):
+        DurableInventoryRunResult("inventory_complete")
+    root_commit = _result(
+        IncludeRootProgress.ROOT_PENDING,
+        IncludeRootProgress.ROOT_COMMITTED,
+    )
+    with pytest.raises(ValueError):
+        DurableInventoryRunResult(
+            "inventory_complete",
+            committed=(root_commit,),
+            snapshot=snapshot,
+        )
+    with pytest.raises(ValueError):
+        DurableInventoryRunResult(
+            "selection_failed",
+            selection_failure=selection_failure,
+            snapshot=snapshot,
+        )
+    with pytest.raises(ValueError):
+        DurableInventoryRunResult(
+            "selection_failed",
+            committed=(root_commit,),
+            selection_failure=selection_failure,
+        )
+    with pytest.raises(ValueError):
+        DurableInventoryRunResult(
+            "operation_failed",
+            operation_failure=CheckpointOperationFailure(
+                CheckpointOperationFailureCategory.INVENTORY_WINDOW_LIMIT_EXHAUSTED
+            ),
+        )
+
+
+def test_paused_result_count_matches_new_descendant_window_commits() -> None:
+    fingerprint = ConfluenceCrawlFingerprint._from_digest("a" * 64)
+    snapshot = CrawlRunSnapshot(
+        RUN,
+        RUN,
+        fingerprint,
+        CrawlRunStatus.INCOMPLETE,
+        InventoryPhaseStatus.PENDING,
+        ROOTS,
+        (IncludeRootProgress.ROOT_PENDING,),
+    )
+    window = _result(
+        IncludeRootProgress.DESCENDANTS_PENDING,
+        IncludeRootProgress.DESCENDANTS_PENDING,
+    )
+
+    with pytest.raises(ValueError):
+        DurableInventoryRunResult(
+            "paused",
+            committed=(window,),
+            reason="controlled_checkpoint_stop",
+            controlled_stop_committed_count=2,
+            controlled_stop_threshold=1,
+            snapshot=snapshot,
+        )

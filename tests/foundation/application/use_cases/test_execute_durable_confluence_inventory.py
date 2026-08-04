@@ -357,3 +357,54 @@ def test_orchestrator_rejects_malformed_window_result(tmp_path) -> None:
                 activation, malformed=True
             ),
         ).execute(request=_request(tmp_path))
+
+
+def test_invalid_request_fails_closed_before_factories_are_called(tmp_path) -> None:
+    run_port = FakeRunPort(None)
+    transport_calls = []
+    window_calls = []
+    use_case = ExecuteDurableConfluenceInventory(
+        checkpoint_run_port=run_port,
+        inventory_transport_factory=lambda value: transport_calls.append(value),
+        inventory_window_port_factory=lambda value: window_calls.append(value),
+    )
+
+    with pytest.raises(CheckpointStateError):
+        use_case.execute(request=object())
+
+    assert run_port.calls == []
+    assert transport_calls == []
+    assert window_calls == []
+
+
+def test_operation_failure_preserves_prior_durable_commits(tmp_path) -> None:
+    failure = CheckpointOperationFailure(
+        CheckpointOperationFailureCategory.INVENTORY_WINDOW_LIMIT_EXHAUSTED
+    )
+    activation = FakeActivation([_works()[0], failure])
+    result = ExecuteDurableConfluenceInventory(
+        checkpoint_run_port=FakeRunPort(activation),
+        inventory_transport_factory=lambda value: value,
+        inventory_window_port_factory=lambda value: FakeWindowPort(activation),
+    ).execute(request=_request(tmp_path))
+
+    assert result.status == "operation_failed"
+    assert result.operation_failure is failure
+    assert len(result.committed) == 1
+
+
+def test_commit_failure_preserves_prior_durable_commits(tmp_path) -> None:
+    failure = CheckpointOperationFailure(
+        CheckpointOperationFailureCategory.INVENTORY_WINDOW_LIMIT_EXHAUSTED
+    )
+    activation = FakeActivation(_works()[:2])
+    activation.commit_inventory_window = lambda command: failure
+    result = ExecuteDurableConfluenceInventory(
+        checkpoint_run_port=FakeRunPort(activation),
+        inventory_transport_factory=lambda value: value,
+        inventory_window_port_factory=lambda value: FakeWindowPort(activation),
+    ).execute(request=_request(tmp_path))
+
+    assert result.status == "operation_failed"
+    assert result.operation_failure is failure
+    assert len(result.committed) == 1

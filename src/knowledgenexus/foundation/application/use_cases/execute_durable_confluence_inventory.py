@@ -30,6 +30,7 @@ from knowledgenexus.foundation.domain.models.confluence_source_config import (
 from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop import (
     ControlledStopController,
     ControlledStopPolicy,
+    is_inventory_window_commit,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     CheckpointRunInventoryComplete,
@@ -134,6 +135,13 @@ class DurableInventoryRunResult:
                 or self.operation_failure is not None
             ):
                 raise ValueError("invalid durable inventory result")
+            actual_window_commits = sum(
+                not item.replayed
+                and is_inventory_window_commit(item.transition)
+                for item in committed
+            )
+            if actual_window_commits != self.controlled_stop_committed_count:
+                raise ValueError("invalid durable inventory result")
         elif self.status == "selection_failed":
             if type(self.selection_failure) is not CheckpointRunSelectionFailure:
                 raise ValueError("invalid durable inventory result")
@@ -142,6 +150,8 @@ class DurableInventoryRunResult:
                 or self.reason is not None
                 or self.controlled_stop_committed_count is not None
                 or self.controlled_stop_threshold is not None
+                or self.snapshot is not None
+                or committed
             ):
                 raise ValueError("invalid durable inventory result")
         elif self.status == "operation_failed":
@@ -152,6 +162,7 @@ class DurableInventoryRunResult:
                 or self.reason is not None
                 or self.controlled_stop_committed_count is not None
                 or self.controlled_stop_threshold is not None
+                or type(self.snapshot) is not CrawlRunSnapshot
             ):
                 raise ValueError("invalid durable inventory result")
         elif (
@@ -164,6 +175,12 @@ class DurableInventoryRunResult:
             raise ValueError("invalid durable inventory result")
         if self.snapshot is not None and type(self.snapshot) is not CrawlRunSnapshot:
             raise TypeError("invalid durable inventory result")
+        if self.status in {"completed", "inventory_complete"} and type(
+            self.snapshot
+        ) is not CrawlRunSnapshot:
+            raise ValueError("invalid durable inventory result")
+        if self.status == "inventory_complete" and committed:
+            raise ValueError("invalid durable inventory result")
         object.__setattr__(self, "committed", committed)
 
     def __repr__(self) -> str:
@@ -199,6 +216,12 @@ class ExecuteDurableConfluenceInventory:
         request: DurableInventoryRequest,
         controlled_stop_policy: ControlledStopPolicy | None = None,
     ) -> DurableInventoryRunResult:
+        if type(request) not in (
+            StartNewRunRequest,
+            ResumeExplicitRunRequest,
+            ResumeUniqueIncompleteRunRequest,
+        ):
+            raise CheckpointStateError() from None
         if controlled_stop_policy is None:
             controlled_stop_policy = ControlledStopPolicy()
         elif type(controlled_stop_policy) is not ControlledStopPolicy:
@@ -238,6 +261,7 @@ class ExecuteDurableConfluenceInventory:
                 if isinstance(work, CheckpointOperationFailure):
                     return DurableInventoryRunResult(
                         "operation_failed",
+                        committed=tuple(committed),
                         operation_failure=work,
                         snapshot=activation.snapshot,
                     )
@@ -268,6 +292,7 @@ class ExecuteDurableConfluenceInventory:
                 if isinstance(result, CheckpointOperationFailure):
                     return DurableInventoryRunResult(
                         "operation_failed",
+                        committed=tuple(committed),
                         operation_failure=result,
                         snapshot=activation.snapshot,
                     )
