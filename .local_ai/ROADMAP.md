@@ -961,7 +961,7 @@ Completion gate:
 |---|---|---|
 | M8-A normalization fidelity and layout semantics | complete | Transparent `layout`, `layout-section`, and `layout-cell` handling; focused normalizer `47 passed`; normalize/parser regression `98 passed`; independent review `PASS`; no chunker/schema/version change. |
 | M8-B complex-table migration | complete | `confluence-table-no-loss-v1` approved and implemented; 60 focused normalizer tests and 258 bounded regression tests passed (one asset-only skip); config identity migrated to one-page-export-v2; independent review `PASS`; next production export must be `full_snapshot`. |
-| M8-C macro/placeholder/reference intents | complete | Added immutable/runtime-validated drawio, image/attachment, and include-page intent side stream; focused `99 passed`, architecture `69 passed`; independent review `PASS`; no counter/body/config/chunker/schema/network/export changes. |
+| M8-C macro/placeholder/reference intents | complete | Added immutable/runtime-validated drawio, image/attachment, and include-page intent side stream; focused `99 passed`, architecture `69 passed`; independent review `PASS`; no counter/body/config/chunker/schema/network/export changes; closeout pushed on `codex/m8-m9`. |
 | M8-D generation-bound page-set processing | pending | Must bind M7 run/generation/page identity and fail closed without checkpoint/export mutation. |
 | M8-E chunk stability handoff | pending | Must expose hash/ID-only internal handoff data without changing export schemas. |
 

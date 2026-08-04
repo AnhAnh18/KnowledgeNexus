@@ -1468,6 +1468,10 @@ are recorded without using repository-local commit SHAs as status.
 - Review artifact: `.codex-workflow/20260804-m8c/05-review-1.md`, verdict
   `PASS`; the independent review's initial P1 on non-contiguous ordinals was
   fixed and rechecked with adversarial tests.
+- Commit/push provenance: implementation commit `a310a67`
+  (`feat(foundation): complete M8-C reference intents`) was pushed to
+  `origin/codex/m8-m9`; this SHA is provenance only, not the milestone source
+  of truth.
 - Residual boundaries: intent consumers, media/relation resolution, generation-
   bound page-set processing, chunk handoff, and all M9 tracks remain pending.
 
