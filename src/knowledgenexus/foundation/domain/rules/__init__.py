@@ -10,6 +10,9 @@ from knowledgenexus.foundation.domain.rules.text_normalization import TextNormal
 from knowledgenexus.foundation.domain.rules.chunk_stability_builder import (
     ChunkStabilitySummaryBuilder,
 )
+from knowledgenexus.foundation.domain.rules.media_asset_record_builder import (
+    MediaAssetRecordBuilder,
+)
 from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
 from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
     WikiStructureParseError,
@@ -25,6 +28,7 @@ __all__ = [
     "RelationIdGenerator",
     "TextNormalizationRules",
     "ChunkStabilitySummaryBuilder",
+    "MediaAssetRecordBuilder",
     "TombstoneIdGenerator",
     "WikiStructureParseError",
     "WikiStructureParser",
