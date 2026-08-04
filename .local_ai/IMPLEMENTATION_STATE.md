@@ -17,9 +17,11 @@ reviewed `PASS`; M7-D5-A raw-page replay/checkpoint integration and M7-D5-B
 restriction-evidence replay are complete and independently reviewed `PASS`.
 These stages do not imply a closed 100k scale gate. No
 raw production artifact or published snapshot exists in this repository.
-M8-A normalization fidelity and layout semantics is complete and independently
-reviewed `PASS`; M8-B through M8-E and M9 remain staged under the reviewed
-M8-M9 goal plan. No M10 full-snapshot work has started.
+M8-A normalization fidelity and layout semantics and M8-B complex-table
+migration are complete and independently reviewed `PASS`. M8-C
+macro/placeholder/reference intents is also complete and independently
+reviewed `PASS`; M8-D/E and M9 remain staged under the reviewed M8-M9 goal
+plan. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1436,6 +1438,38 @@ are recorded without using repository-local commit SHAs as status.
 - Commit/push provenance: commit `2cb9310` (`feat(foundation): complete M8-B
   complex table migration`) pushed to `origin/codex/m8-m9`. The documentation
   backfill is a follow-up closeout commit on the same branch.
+
+## M8-C Macro, Placeholder, and Reference Intents
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: preserve the M6C/M8-B normalization contract while adding a
+  sanitized internal side stream for drawio, image/attachment, and include-page
+  references. The side stream performs no resolution, network access, export,
+  relation creation, media extraction, or raw-store mutation.
+- Contract: `NormalizationReferenceIntent` is immutable and runtime-validated
+  for exact kind/status pairs, bounded NFC one-line identities, one-based
+  contiguous source ordinals, and unknown-identity rules. Existing result model
+  constructors remain compatible through `reference_intents=()` defaults; mutable
+  counters, warnings, and canonical documents are defensively copied.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/confluence_page_content.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`,
+  `src/knowledgenexus/foundation/infrastructure/processors/confluence_storage_xhtml_normalizer.py`,
+  and
+  `src/knowledgenexus/foundation/application/use_cases/normalize_confluence_page.py`.
+  Focused tests were added under the corresponding model, normalizer, and use-
+  case test paths.
+- Validation: focused M8-C suite `99 passed`; bounded parser/chunker/CLI/E2E
+  regression `87 passed` with an explicit workspace basetemp; architecture
+  suite `69 passed`; `python -m compileall -q src tests` passed; scoped
+  `git diff --check` passed. The default pytest temp root remains a known
+  machine permission issue, so the bounded regression used
+  `.pytest-m8c-reg`/`.pytest-m8c-independent-review`.
+- Review artifact: `.codex-workflow/20260804-m8c/05-review-1.md`, verdict
+  `PASS`; the independent review's initial P1 on non-contiguous ordinals was
+  fixed and rechecked with adversarial tests.
+- Residual boundaries: intent consumers, media/relation resolution, generation-
+  bound page-set processing, chunk handoff, and all M9 tracks remain pending.
 
 ## Current Execution Boundary
 

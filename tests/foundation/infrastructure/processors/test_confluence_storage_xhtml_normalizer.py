@@ -5,6 +5,9 @@ import pytest
 from knowledgenexus.foundation.infrastructure.processors import (
     ConfluenceStorageXhtmlNormalizer,
 )
+from knowledgenexus.foundation.domain.models.confluence_page_content import (
+    NormalizationReferenceIntent,
+)
 from knowledgenexus.foundation.domain.models.wiki_document_structure import WikiTableBlock
 from knowledgenexus.foundation.domain.rules.wiki_structure_parser import WikiStructureParser
 from knowledgenexus.foundation.ports.confluence_page_normalization_port import (
@@ -369,6 +372,66 @@ def test_include_macro_preserves_observed_page_title_or_id() -> None:
     )
     assert titled.normalized_body_text == "[included from page: Target Page]"
     assert identified.normalized_body_text == "[included from page: 2000]"
+
+
+def test_reference_intents_preserve_mixed_source_order_and_status() -> None:
+    result = _normalize(
+        '<ac:image><ri:attachment ri:filename="diagram.png"/></ac:image>'
+        '<ac:structured-macro ac:name="include">'
+        '<ri:page ri:content-title="Design"/></ac:structured-macro>'
+        '<ac:structured-macro ac:name="drawio">'
+        '<ac:parameter ac:name="diagramName">flow</ac:parameter>'
+        '</ac:structured-macro>'
+    )
+    assert result.reference_intents == (
+        NormalizationReferenceIntent(
+            ordinal=1,
+            kind="image_attachment",
+            status="deferred_mvp",
+            target_identity="diagram.png",
+            placeholder_identity="diagram.png",
+        ),
+        NormalizationReferenceIntent(
+            ordinal=2,
+            kind="include_page",
+            status="unresolved_target",
+            target_identity="Design",
+            placeholder_identity="Design",
+        ),
+        NormalizationReferenceIntent(
+            ordinal=3,
+            kind="drawio",
+            status="deferred_mvp",
+            target_identity="flow",
+            placeholder_identity="flow",
+        ),
+    )
+
+
+def test_missing_reference_identity_is_unresolved_and_leak_safe() -> None:
+    result = _normalize(
+        '<ac:image alt="SECRET\nvalue"/>'
+        '<ac:structured-macro ac:name="drawio"/>'
+        '<ac:structured-macro ac:name="include">'
+        '<ac:parameter ac:name="page">SECRET</ac:parameter>'
+        '</ac:structured-macro>'
+    )
+    assert result.reference_intents[0].target_identity == "SECRET value"
+    assert result.reference_intents[0].status == "deferred_mvp"
+    assert result.reference_intents[1].target_identity == "unknown"
+    assert result.reference_intents[1].status == "unresolved_target"
+    assert result.reference_intents[2].status == "unresolved_target"
+    assert "SECRET" not in str(result.warnings)
+
+
+def test_reference_identity_is_bounded_and_control_safe() -> None:
+    value = "x" * 300
+    result = _normalize(f'<ac:image alt="{value}"/>')
+    assert result.normalized_body_text == "[media: unknown]"
+    assert result.reference_intents[0].target_identity == "unknown"
+
+    escaped_overflow = _normalize(f'<ac:image alt="{"[" * 130}"/>')
+    assert escaped_overflow.reference_intents[0].target_identity == "unknown"
 
 
 @pytest.mark.parametrize("name", ["drawio", "drawio-sketch", "drawio-board"])
