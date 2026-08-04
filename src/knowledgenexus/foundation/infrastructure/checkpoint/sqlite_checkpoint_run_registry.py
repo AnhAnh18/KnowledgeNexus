@@ -103,6 +103,12 @@ class _RunActivated:
     def check_outbound_attempt(self) -> CheckpointOperationFailure | None:
         return self._state.check_outbound_attempt()
 
+    def complete_session(self) -> None:
+        return self._state.complete_session()
+
+    def pause_session(self) -> None:
+        return self._state.pause_session()
+
     def commit_root_occurrence(
         self, command: InventoryRootCommit
     ) -> CheckpointCommitResult | CheckpointOperationFailure:

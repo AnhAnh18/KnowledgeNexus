@@ -119,6 +119,12 @@ class FakeActivation:
         self.reserver_seen = True
         return None
 
+    def complete_session(self):
+        self.completed = True
+
+    def pause_session(self):
+        self.paused = True
+
     def reserve_outbound_attempt(self):
         self.reserver_seen = True
         return object()

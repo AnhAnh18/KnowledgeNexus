@@ -352,7 +352,14 @@ class _CheckpointStateSession:
         "_limits",
         "_utc_now",
         "_active",
+        "_observed_page_ids",
+        "_commits_since_full_validation",
+        "_last_data_version",
     )
+
+    # Full graph validation is retained at activation, recovery, stream start,
+    # and on a bounded cadence. Local checks remain transactionally fail-closed.
+    _FULL_VALIDATION_INTERVAL = 64
 
     def __init__(
         self,
@@ -370,6 +377,9 @@ class _CheckpointStateSession:
         self._limits = limits
         self._utc_now = utc_now
         self._active = True
+        self._observed_page_ids: set[str] | None = None
+        self._commits_since_full_validation = 0
+        self._last_data_version: int | None = None
 
     def _require_active(self) -> None:
         if not self._active:
@@ -385,6 +395,148 @@ class _CheckpointStateSession:
 
     def _invalidate(self) -> None:
         self._active = False
+        self._observed_page_ids = None
+        self._last_data_version = None
+
+    @staticmethod
+    def _data_version(transaction: object) -> int:
+        row = transaction._fetchone("PRAGMA data_version")
+        if type(row) is not tuple or len(row) != 1 or type(row[0]) is not int:
+            raise ValueError("invalid database version")
+        return row[0]
+
+    def _validate_inventory_local(
+        self,
+        transaction: object,
+        *,
+        ordinal: int | None = None,
+        requested_start: int | None = None,
+    ) -> None:
+        """Check operation-local invariants between periodic graph scans."""
+        self._validate_request_reservations(transaction)
+        roots = transaction._fetchall(
+            "SELECT include_root_ordinal,include_root_page_id FROM include_roots "
+            "WHERE run_id=? ORDER BY include_root_ordinal",
+            (self._run_id.value,),
+        )
+        if len(roots) != len(self._include_roots.root_ids):
+            raise ValueError("invalid durable roots")
+        for expected, row in enumerate(roots):
+            if type(row) is not tuple or len(row) != 2 or row[0] != expected:
+                raise ValueError("invalid durable roots")
+            self._include_roots.validate(expected, row[1])
+        progress_rows = transaction._fetchall(
+            "SELECT include_root_ordinal,progress,next_start,descendants_complete "
+            "FROM root_progress WHERE run_id=? ORDER BY include_root_ordinal",
+            (self._run_id.value,),
+        )
+        if len(progress_rows) != len(roots):
+            raise ValueError("invalid durable progress")
+        for expected, row in enumerate(progress_rows):
+            if type(row) is not tuple or len(row) != 4 or row[0] != expected:
+                raise ValueError("invalid durable progress")
+            checked = _read_progress(transaction, self._run_id, expected)
+            if checked is None or checked[0] != row[1] or checked[1] != row[2]:
+                raise ValueError("invalid durable progress")
+        for expected, row in enumerate(progress_rows):
+            latest = transaction._fetchone(
+                "SELECT sequence,from_progress,to_progress FROM checkpoint_transitions "
+                "WHERE run_id=? AND include_root_ordinal=? ORDER BY sequence DESC LIMIT 1",
+                (self._run_id.value, expected),
+            )
+            progress_literal = row[1]
+            if progress_literal == IncludeRootProgress.ROOT_PENDING.value:
+                if latest is not None:
+                    raise ValueError("invalid durable transition progress")
+            else:
+                if (
+                    type(latest) is not tuple
+                    or len(latest) != 3
+                    or latest[2] != progress_literal
+                ):
+                    raise ValueError("invalid durable transition progress")
+        phase = transaction._fetchone(
+            "SELECT inventory_phase FROM crawl_runs WHERE run_id=?",
+            (self._run_id.value,),
+        )
+        if phase not in ((InventoryPhaseStatus.PENDING.value,), (InventoryPhaseStatus.COMPLETE.value,)):
+            raise ValueError("invalid inventory phase")
+        expected_phase = (
+            InventoryPhaseStatus.COMPLETE.value
+            if progress_rows
+            and all(row[1] == IncludeRootProgress.DESCENDANTS_COMPLETE.value for row in progress_rows)
+            else InventoryPhaseStatus.PENDING.value
+        )
+        if phase != (expected_phase,):
+            raise ValueError("invalid inventory phase")
+        if ordinal is not None:
+            if type(ordinal) is not int or ordinal < 0 or ordinal >= len(roots):
+                raise ValueError("invalid inventory root")
+            root_id = roots[ordinal][1]
+            progress = _read_progress(transaction, self._run_id, ordinal)
+            if progress is None:
+                raise ValueError("invalid durable progress")
+            root = _read_root_commit(
+                transaction, self._run_id, ordinal, root_id, self._include_roots
+            )
+            if progress[0] == IncludeRootProgress.ROOT_PENDING.value and root is not None:
+                raise ValueError("invalid root pending state")
+            if progress[0] != IncludeRootProgress.ROOT_PENDING.value and root is None:
+                raise ValueError("missing durable root")
+            if requested_start is not None:
+                window = _read_window_commit(
+                    transaction,
+                    self._run_id,
+                    ordinal,
+                    root_id,
+                    self._include_roots,
+                    requested_start,
+                    self._limits.page_size,
+                )
+                if window is None and progress[0] == IncludeRootProgress.DESCENDANTS_PENDING.value:
+                    if progress[1] != requested_start:
+                        raise ValueError("invalid durable cursor")
+
+    def _prepare_inventory_validation(
+        self,
+        transaction: object,
+        *,
+        ordinal: int | None = None,
+        requested_start: int | None = None,
+        force_full: bool = False,
+    ) -> None:
+        current_version = self._data_version(transaction)
+        full = (
+            force_full
+            or self._last_data_version is None
+            or current_version != self._last_data_version
+            or self._commits_since_full_validation >= self._FULL_VALIDATION_INTERVAL
+        )
+        if full:
+            self._validate_inventory(transaction)
+            self._commits_since_full_validation = 0
+            self._last_data_version = current_version
+        else:
+            self._validate_inventory_local(
+                transaction, ordinal=ordinal, requested_start=requested_start
+            )
+
+    def _record_inventory_commit(self) -> None:
+        self._commits_since_full_validation += 1
+
+    def _page_ids(self, transaction: object) -> set[str]:
+        """Rebuild once per activation under the process-lifetime writer lock."""
+        if self._observed_page_ids is None:
+            self._observed_page_ids = _existing_page_ids(transaction, self._run_id)
+        return self._observed_page_ids
+
+    def _page_ids_after_commit(self, page_ids: object) -> None:
+        if self._observed_page_ids is None:
+            raise ValueError("page budget cache was not initialized")
+        for page_id in page_ids:
+            if type(page_id) is not str or not page_id:
+                raise ValueError("invalid committed page identity")
+            self._observed_page_ids.add(page_id)
 
     def _validate_request_reservations(self, transaction: object) -> int:
         rows = transaction._fetchall(
@@ -632,7 +784,11 @@ class _CheckpointStateSession:
 
     def _mutate(self, operation):
         self._require_active()
-        return self._workspace._mutate(operation)
+        try:
+            return self._workspace._mutate(operation)
+        except BaseException:
+            self._invalidate()
+            raise
 
     def read_schema_state(self) -> CheckpointSchemaState:
         self._require_active()
@@ -679,11 +835,47 @@ class _CheckpointStateSession:
 
         return self._workspace._mutate(operation)
 
-    def load_next_inventory_work(self) -> InventoryWorkItem | CheckpointOperationFailure | None:
+    def complete_session(self) -> None:
         self._require_active()
 
+        def operation(transaction: object) -> None:
+            self._validate_active_session(transaction)
+            timestamp = _reservation_timestamp(self._utc_now())
+            transaction._execute(
+                "UPDATE crawl_sessions SET status='completed',ended_at=?,"
+                "outcome_status='completed',outcome_reason='completed' "
+                "WHERE session_id=? AND run_id=? AND status='active'",
+                (timestamp, self._session_id.value, self._run_id.value),
+            )
+            if transaction._fetchone("SELECT changes()") != (1,):
+                raise ValueError("active session changed")
+
+        self._workspace._mutate(operation)
+
+    def pause_session(self) -> None:
+        self._require_active()
+
+        def operation(transaction: object) -> None:
+            self._validate_active_session(transaction)
+            timestamp = _reservation_timestamp(self._utc_now())
+            transaction._execute(
+                "UPDATE crawl_sessions SET status='paused',ended_at=?,"
+                "outcome_status='paused',outcome_reason='controlled_checkpoint_stop' "
+                "WHERE session_id=? AND run_id=? AND status='active'",
+                (timestamp, self._session_id.value, self._run_id.value),
+            )
+            if transaction._fetchone("SELECT changes()") != (1,):
+                raise ValueError("active session changed")
+
+        self._workspace._mutate(operation)
+
+    def load_next_inventory_work(self) -> InventoryWorkItem | CheckpointOperationFailure | None:
+        self._require_active()
+        committed_transition = False
+
         def operation(transaction: object):
-            self._validate_inventory(transaction)
+            nonlocal committed_transition
+            self._prepare_inventory_validation(transaction)
             rows = transaction._fetchall(
                 "SELECT r.include_root_ordinal,r.include_root_page_id,p.progress,p.next_start "
                 "FROM include_roots r JOIN root_progress p ON p.run_id=r.run_id "
@@ -743,6 +935,7 @@ class _CheckpointStateSession:
                     )
                     if transaction._fetchone("SELECT changes()") != (1,):
                         raise ValueError("root progress changed")
+                    committed_transition = True
                     return InventoryWorkItem(
                         self._run_id,
                         ordinal,
@@ -782,7 +975,10 @@ class _CheckpointStateSession:
                 raise ValueError("invalid durable progress")
             return None
 
-        return self._workspace._mutate(operation)
+        result = self._mutate(operation)
+        if committed_transition:
+            self._record_inventory_commit()
+        return result
 
     def commit_root_occurrence(
         self, command: InventoryRootCommit
@@ -810,7 +1006,9 @@ class _CheckpointStateSession:
         )
 
         def operation(transaction: object):
-            self._validate_inventory(transaction)
+            self._prepare_inventory_validation(
+                transaction, ordinal=command.include_root_ordinal
+            )
             progress = _read_progress(
                 transaction, self._run_id, command.include_root_ordinal
             )
@@ -838,7 +1036,7 @@ class _CheckpointStateSession:
                 return _failure(_OperationCategory.STATE_CONFLICT)
             if current is not None:
                 return _failure(_OperationCategory.STATE_CONFLICT)
-            existing = _existing_page_ids(transaction, self._run_id)
+            existing = self._page_ids(transaction)
             if command.metadata.page_id not in existing and len(existing) + 1 > self._limits.max_pages_per_run:
                 return _failure(_OperationCategory.INVENTORY_PAGE_BUDGET_EXHAUSTED)
             transaction._execute(
@@ -875,7 +1073,11 @@ class _CheckpointStateSession:
                 raise ValueError("root progress changed")
             return CheckpointCommitResult(transition, False)
 
-        return self._workspace._mutate(operation)
+        result = self._mutate(operation)
+        if isinstance(result, CheckpointCommitResult) and not result.replayed:
+            self._page_ids_after_commit((command.metadata.page_id,))
+            self._record_inventory_commit()
+        return result
 
     def commit_inventory_window(
         self, command: InventoryWindowCommit
@@ -900,6 +1102,7 @@ class _CheckpointStateSession:
         command = canonical_command
         if command.run_id != self._run_id or command.include_roots != self._include_roots:
             return _failure(_OperationCategory.INVENTORY_IDENTITY_CONFLICT)
+        committed_page_ids = tuple(occurrence.page_id for occurrence in command.occurrences)
         self._include_roots.validate(
             command.include_root_ordinal, command.include_root_page_id
         )
@@ -907,7 +1110,11 @@ class _CheckpointStateSession:
             return _failure(_OperationCategory.PAGINATION_INVALID)
 
         def operation(transaction: object):
-            self._validate_inventory(transaction)
+            self._prepare_inventory_validation(
+                transaction,
+                ordinal=command.include_root_ordinal,
+                requested_start=command.requested_start,
+            )
             progress = _read_progress(
                 transaction, self._run_id, command.include_root_ordinal
             )
@@ -954,7 +1161,7 @@ class _CheckpointStateSession:
             )
             if root_count is None or run_count is None or root_count[0] >= self._limits.max_windows_per_root or run_count[0] >= self._limits.max_windows_per_run:
                 return _failure(_OperationCategory.INVENTORY_WINDOW_LIMIT_EXHAUSTED)
-            existing_ids = _existing_page_ids(transaction, self._run_id)
+            existing_ids = self._page_ids(transaction)
             projected_ids = {occ.page_id for occ in command.occurrences}
             projected_new = projected_ids - existing_ids
             if len(existing_ids) + len(projected_new) > self._limits.max_pages_per_run:
@@ -1034,7 +1241,11 @@ class _CheckpointStateSession:
                     )
             return CheckpointCommitResult(transition, False)
 
-        return self._workspace._mutate(operation)
+        result = self._mutate(operation)
+        if isinstance(result, CheckpointCommitResult) and not result.replayed:
+            self._page_ids_after_commit(committed_page_ids)
+            self._record_inventory_commit()
+        return result
 
     def stream_inventory_occurrences(
         self, *, batch_size: int = 256
@@ -1042,11 +1253,13 @@ class _CheckpointStateSession:
         self._require_active()
         if type(batch_size) is not int or batch_size <= 0:
             raise CheckpointStateError() from None
-        # Validate the complete durable view before exposing the iterator.
-        self._workspace._mutate(self._validate_inventory)
+        # Streaming is a trust boundary: always validate the complete graph.
+        self._mutate(lambda transaction: self._prepare_inventory_validation(
+            transaction, force_full=True
+        ))
 
         def read_root(ordinal: int, root_id: str) -> InventoryRootCommit | None:
-            return self._workspace._mutate(
+            return self._mutate(
                 lambda transaction: _read_root_commit(
                     transaction,
                     self._run_id,
@@ -1108,7 +1321,7 @@ class _CheckpointStateSession:
                     )
                 return result
 
-            return self._workspace._mutate(operation)
+            return self._mutate(operation)
 
         def iterator() -> Iterator[InventoryRootCommit | InventoryOccurrence]:
             self._require_active()

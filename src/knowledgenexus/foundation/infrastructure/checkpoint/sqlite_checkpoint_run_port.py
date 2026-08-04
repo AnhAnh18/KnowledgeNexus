@@ -116,6 +116,12 @@ class _PublicActivation:
     def check_outbound_attempt(self) -> CheckpointOperationFailure | None:
         return self._resolve().check_outbound_attempt()
 
+    def complete_session(self) -> None:
+        return self._resolve().complete_session()
+
+    def pause_session(self) -> None:
+        return self._resolve().pause_session()
+
     def load_next_inventory_work(self) -> InventoryWorkItem | CheckpointOperationFailure | None:
         return self._resolve().load_next_inventory_work()
 

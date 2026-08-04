@@ -254,6 +254,7 @@ class ExecuteDurableConfluenceInventory:
             while True:
                 work = activation.load_next_inventory_work()
                 if work is None:
+                    activation.complete_session()
                     return DurableInventoryRunResult(
                         "completed", tuple(committed), snapshot=activation.snapshot
                     )
@@ -300,6 +301,7 @@ class ExecuteDurableConfluenceInventory:
                 committed.append(result)
                 decision = stop_controller.record(result)
                 if decision.status == "pause":
+                    activation.pause_session()
                     return DurableInventoryRunResult(
                         "paused",
                         reason=decision.reason,
