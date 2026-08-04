@@ -82,6 +82,8 @@ _EXPECTED_CATALOG_OBJECTS = {
     ("root_progress", "table"),
     ("inventory_windows", "table"),
     ("inventory_occurrences", "table"),
+    ("raw_page_progress", "table"),
+    ("raw_restriction_progress", "table"),
     ("checkpoint_transitions", "table"),
     ("request_budget_reservations", "table"),
     ("idx_crawl_sessions_run_started", "index"),
@@ -123,7 +125,7 @@ def test_fresh_and_reopen(tmp_path) -> None:
     with sqlite3.connect(tmp_path / module.DB_NAME) as conn:
         assert conn.execute("PRAGMA application_id").fetchone()[0] == module.APPLICATION_ID
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
-        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0] == 10
+        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0] == 12
         assert set(
             conn.execute(
                 "SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"

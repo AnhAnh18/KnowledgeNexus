@@ -27,11 +27,23 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointSchemaState,
     InventoryWorkItem,
     CheckpointStateError,
+    RawPageReplayCommand,
+    RawPageReplayFailure,
+    RawPageReplayResult,
+    RawRestrictionReplayCommand,
+    RawRestrictionReplayFailure,
+    RawRestrictionReplayResult,
 )
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import InventoryRootCommit
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
     InventoryOccurrence,
     InventoryWindowCommit,
+)
+from knowledgenexus.foundation.ports.confluence_raw_page_orphan_inspection_port import (
+    ConfluenceRawPageOrphanInspectionPort,
+)
+from knowledgenexus.foundation.ports.confluence_raw_restriction_orphan_inspection_port import (
+    ConfluenceRawRestrictionOrphanInspectionPort,
 )
 from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_run_registry import (
     _RunActivated,
@@ -134,6 +146,20 @@ class _PublicActivation:
         self, command: InventoryWindowCommit
     ) -> CheckpointCommitResult | CheckpointOperationFailure:
         return self._resolve().commit_inventory_window(command)
+
+    def replay_raw_page(
+        self,
+        command: RawPageReplayCommand,
+        inspector: ConfluenceRawPageOrphanInspectionPort,
+    ) -> RawPageReplayResult | RawPageReplayFailure:
+        return self._resolve().replay_raw_page(command, inspector)
+
+    def replay_raw_restriction(
+        self,
+        command: RawRestrictionReplayCommand,
+        inspector: ConfluenceRawRestrictionOrphanInspectionPort,
+    ) -> RawRestrictionReplayResult | RawRestrictionReplayFailure:
+        return self._resolve().replay_raw_restriction(command, inspector)
 
     def stream_inventory_occurrences(
         self, *, batch_size: int = 256
