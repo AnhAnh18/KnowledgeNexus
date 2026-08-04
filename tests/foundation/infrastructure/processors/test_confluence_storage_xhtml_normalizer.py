@@ -5,6 +5,8 @@ import pytest
 from knowledgenexus.foundation.infrastructure.processors import (
     ConfluenceStorageXhtmlNormalizer,
 )
+from knowledgenexus.foundation.domain.models.wiki_document_structure import WikiTableBlock
+from knowledgenexus.foundation.domain.rules.wiki_structure_parser import WikiStructureParser
 from knowledgenexus.foundation.ports.confluence_page_normalization_port import (
     ConfluenceStorageNormalizationError,
 )
@@ -98,35 +100,169 @@ def test_renders_simple_rectangular_table_as_markdown() -> None:
     assert result.counters["complex_tables"] == 0
 
 
-@pytest.mark.parametrize(
-    ("storage", "expected_text"),
-    [
-        (
-            "<table><tr><td rowspan='2'>A</td><td>B</td></tr><tr><td>C</td></tr></table>",
-            "B",
-        ),
-        (
-            "<table><tr><td>A</td></tr><tr><td>B</td><td>C</td></tr></table>",
-            "B",
-        ),
-        (
-            "<table><tr><td>A<table><tr><td>nested</td></tr></table></td></tr></table>",
-            "nested",
-        ),
-    ],
-)
-def test_complex_table_falls_back_without_dropping_cell_text(
-    storage: str,
-    expected_text: str,
-) -> None:
-    result = _normalize(storage)
-    assert result.normalized_body_text.startswith("[table]")
-    assert "A" in result.normalized_body_text
-    assert expected_text in result.normalized_body_text
+def test_complex_rowspan_grid_preserves_anchor_and_covered_slot() -> None:
+    result = _normalize(
+        "<table><tr><td rowspan='2'>A</td><td>B</td></tr>"
+        "<tr><td>C</td></tr></table>"
+    )
+    assert result.normalized_body_text == (
+        "| A [rowspan:2] | B |\n| --- | --- |\n|  | C |"
+    )
+    assert result.counters["complex_tables"] == 1
+    assert result.warnings == (
+        {"code": "complex_table_grid", "name": "table", "ordinal": 1},
+    )
+
+
+def test_irregular_rows_are_padded_without_dropping_cells() -> None:
+    result = _normalize(
+        "<table><tr><td>A</td></tr><tr><td>B</td><td>C</td></tr></table>"
+    )
+    assert result.normalized_body_text == (
+        "| A |  |\n| --- | --- |\n| B | C |"
+    )
+    assert result.counters["complex_tables"] == 1
+    assert result.warnings[0]["code"] == "complex_table_grid"
+
+
+def test_nested_table_is_rendered_inside_cell_with_stable_encoding() -> None:
+    result = _normalize(
+        "<table><tr><td>A<table><tr><td>nested</td></tr></table></td></tr></table>"
+    )
+    assert result.normalized_body_text == (
+        "| A<br><br>\\| nested \\|<br>\\| --- \\| |\n| --- |"
+    )
+    assert result.counters["complex_tables"] == 1
+    assert result.warnings == (
+        {"code": "complex_table_grid", "name": "table", "ordinal": 1},
+    )
+
+
+def test_invalid_span_uses_row_preserving_fallback_with_empty_cells() -> None:
+    result = _normalize(
+        "<table><tr><td rowspan='0'>A</td><td></td></tr>"
+        "<tr><td>B</td><td></td></tr></table>"
+    )
+    assert result.normalized_body_text == (
+        "[table]\nrow[0]: A ||\nrow[1]: B ||"
+    )
     assert result.counters["complex_tables"] == 1
     assert result.warnings == (
         {"code": "complex_table_fallback", "name": "table", "ordinal": 1},
     )
+
+
+def test_colspan_marker_order_and_exact_grid_width_are_stable() -> None:
+    result = _normalize(
+        "<table><tr><th colspan='2' rowspan='1'>Header</th></tr>"
+        "<tr><td>left</td><td>right</td></tr></table>"
+    )
+    assert result.normalized_body_text == (
+        "| Header [colspan:2] |  |\n| --- | --- |\n| left | right |"
+    )
+
+
+def test_complex_cell_encoding_preserves_unique_sentinels_and_delimiters() -> None:
+    result = _normalize(
+        "<table><tr><td>ROWA|PIPE\\SLASH\nROWA</td><td></td></tr>"
+        "<tr><td>ROWB</td><td><pre>ROWC\nROWC</pre></td></tr></table>"
+    )
+    text = result.normalized_body_text
+    assert text.count("ROWA") == 2
+    assert text.count("ROWB") == 1
+    assert text.count("ROWC") == 2
+    assert "ROWA\\|PIPE" in text
+    assert "SLASH<br>ROWA" in text
+    assert "ROWC<br>ROWC" in text
+    assert result.warnings[0]["code"] == "complex_table_grid"
+
+
+@pytest.mark.parametrize(
+    "span",
+    ["01", "0", "-1", "999999999999999999999999999999"],
+)
+def test_noncanonical_or_oversized_span_fails_closed_to_fallback(span: str) -> None:
+    result = _normalize(
+        f"<table><tr><td rowspan='{span}'>SENTINEL</td></tr></table>"
+    )
+    assert result.normalized_body_text == "[table]\nrow[0]: SENTINEL"
+    assert result.warnings == (
+        {"code": "complex_table_fallback", "name": "table", "ordinal": 1},
+    )
+
+
+def test_simple_table_with_span_value_one_keeps_legacy_bytes() -> None:
+    result = _normalize(
+        "<table><tr><th rowspan='1'>A</th><th colspan='1'>B</th></tr>"
+        "<tr><td>1</td><td>2</td></tr></table>"
+    )
+    assert result.normalized_body_text == (
+        "| A | B |\n| --- | --- |\n| 1 | 2 |"
+    )
+    assert result.counters["complex_tables"] == 0
+    assert result.warnings == ()
+
+
+def test_nested_table_depth_is_bounded_and_each_table_is_counted_once() -> None:
+    body = "leaf"
+    for _ in range(7):
+        body = f"<table><tr><td>{body}</td></tr></table>"
+    result = _normalize(body)
+    assert result.counters["complex_tables"] == 7
+    assert len(result.warnings) == 7
+    assert all(
+        warning["code"] in {"complex_table_grid", "complex_table_fallback"}
+        for warning in result.warnings
+    )
+
+
+def test_nested_table_depth_propagates_through_wrappers() -> None:
+    body = "leaf"
+    for _ in range(7):
+        body = f"<table><tr><td><p>{body}</p></td></tr></table>"
+    result = _normalize(body)
+    assert result.counters["complex_tables"] == 7
+    assert len(result.warnings) == 7
+    assert any(
+        warning["code"] == "complex_table_fallback"
+        for warning in result.warnings
+    )
+
+
+def test_failed_grid_preflight_does_not_rerender_nested_cells() -> None:
+    result = _normalize(
+        "<table><tr><td><table><tr><td colspan='2'>nested</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table></td>"
+        "<td rowspan='0'>invalid</td></tr></table>"
+    )
+    assert result.counters["complex_tables"] == 2
+    assert result.warnings == (
+        {"code": "complex_table_grid", "name": "table", "ordinal": 1},
+        {"code": "complex_table_fallback", "name": "table", "ordinal": 2},
+    )
+
+
+def test_nested_pipe_escape_keeps_outer_grid_parseable() -> None:
+    result = _normalize(
+        "<table><tr><td>A<table><tr><td>nested|x</td></tr></table></td></tr></table>"
+    )
+    document = WikiStructureParser.parse(
+        page_title="Doc",
+        normalized_body_text=result.normalized_body_text,
+    )
+    assert isinstance(document.sections[0].blocks[0], WikiTableBlock)
+    assert "nested\\|x" in result.normalized_body_text
+
+
+def test_fallback_enforces_the_per_cell_safety_limit_without_disclosure() -> None:
+    sentinel = "SENTINEL_CELL_LIMIT"
+    oversized = sentinel + ("x" * 70_000)
+    with pytest.raises(ConfluenceStorageNormalizationError) as caught:
+        _normalize(
+            "<table><tr><td rowspan='0'>" + oversized + "</td></tr></table>"
+        )
+    assert str(caught.value) == "table cell exceeds safety limit"
+    assert sentinel not in str(caught.value)
 
 
 def test_renders_links_and_omits_unsafe_link_target() -> None:
@@ -401,15 +537,15 @@ def test_code_macro_inside_list_keeps_indentation() -> None:
     assert "def f(): return 1" not in result.normalized_body_text
 
 
-def test_code_inside_table_uses_complex_fallback_without_flattening() -> None:
+def test_code_inside_table_uses_complex_grid_without_flattening() -> None:
     result = _normalize(
         "<table><tr><th>Code</th></tr><tr><td><pre>line1\nline2</pre></td></tr></table>"
     )
-    assert result.normalized_body_text.startswith("[table]")
-    assert "```\nline1\nline2\n```" in result.normalized_body_text
-    assert "line1 line2" not in result.normalized_body_text
+    assert result.normalized_body_text == (
+        "| Code |\n| --- |\n| ```<br>line1<br>line2<br>``` |"
+    )
     assert result.counters["complex_tables"] == 1
-    assert result.warnings[-1]["code"] == "complex_table_fallback"
+    assert result.warnings[-1]["code"] == "complex_table_grid"
 
 
 def test_result_repr_does_not_disclose_normalized_body() -> None:

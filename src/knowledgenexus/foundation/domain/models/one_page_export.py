@@ -31,7 +31,8 @@ ONE_PAGE_DATASET_NAME = "spen_knowledge_poc"
 ONE_PAGE_SOURCE_ID = "confluence_svmc_spensrv"
 ONE_PAGE_EXPORT_MODE = "full_snapshot"
 ONE_PAGE_SCHEMAS_VERSION = "1.0"
-ONE_PAGE_CONFIG_CONTRACT_VERSION = "one-page-export-v1"
+ONE_PAGE_CONFIG_CONTRACT_VERSION = "one-page-export-v2"
+ONE_PAGE_NORMALIZATION_POLICY_ID = "confluence-table-no-loss-v1"
 ONE_PAGE_SPACE_KEY = "SVMC"
 
 
@@ -90,6 +91,7 @@ def _canonical_config_hash(
     canonical = {
         "contract_version": ONE_PAGE_CONFIG_CONTRACT_VERSION,
         "dataset_name": ONE_PAGE_DATASET_NAME,
+        "normalization_policy_id": ONE_PAGE_NORMALIZATION_POLICY_ID,
         "source_id": ONE_PAGE_SOURCE_ID,
         "embedding_profile_text": embedding_profile_text,
         "jira_relation_profile_text": jira_relation_profile_text,

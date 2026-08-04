@@ -160,8 +160,9 @@ The canonical hash input is:
 
 ```json
 {
-  "contract_version": "one-page-export-v1",
+  "contract_version": "one-page-export-v2",
   "dataset_name": "spen_knowledge_poc",
+  "normalization_policy_id": "confluence-table-no-loss-v1",
   "source_id": "confluence_svmc_spensrv",
   "embedding_profile_text": "<normalized embedding profile text>",
   "jira_relation_profile_text": "<normalized Jira profile text>"
@@ -176,6 +177,12 @@ ensure_ascii=False
 separators=(",", ":")
 allow_nan=False
 ```
+
+The v2 `normalization_policy_id` is a code-owned Foundation contract identity,
+not operator input or a third profile file. It invalidates prior exports when
+normalization semantics change. The M8-B `confluence-table-no-loss-v1` policy
+requires the next production export to be an explicit `full_snapshot`; no
+delta may bridge this migration identity.
 
 `config_hash` is lowercase SHA-256 of the canonical JSON UTF-8 bytes.
 `chunker_version` comes from the loaded embedding profile and must also equal
