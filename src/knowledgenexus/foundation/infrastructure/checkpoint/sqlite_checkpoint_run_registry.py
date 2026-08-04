@@ -45,6 +45,7 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointCommitResult,
     CheckpointOperationFailure,
     CheckpointSchemaState,
+    CheckpointReservationResult,
     CheckpointStateError,
     InventoryWorkItem,
 )
@@ -94,6 +95,14 @@ class _RunActivated:
     def read_schema_state(self) -> CheckpointSchemaState:
         return self._state.read_schema_state()
 
+    def reserve_outbound_attempt(
+        self,
+    ) -> CheckpointReservationResult | CheckpointOperationFailure:
+        return self._state.reserve_outbound_attempt()
+
+    def check_outbound_attempt(self) -> CheckpointOperationFailure | None:
+        return self._state.check_outbound_attempt()
+
     def commit_root_occurrence(
         self, command: InventoryRootCommit
     ) -> CheckpointCommitResult | CheckpointOperationFailure:
@@ -141,6 +150,7 @@ class _PendingActivation:
     snapshot: CrawlRunSnapshot
     session_id: CrawlSessionId
     limits: _SessionLimits
+    utc_now: Callable[[], datetime] = field(repr=False, compare=False)
 
 
 @dataclass(frozen=True, repr=False)
@@ -407,7 +417,9 @@ def _activate_existing(
         "VALUES (?,?,'active',?,NULL,NULL,NULL)",
         (session_value, stored.snapshot.run_id.value, started_at),
     )
-    return _PendingActivation(stored.snapshot, CrawlSessionId(session_value), limits)
+    return _PendingActivation(
+        stored.snapshot, CrawlSessionId(session_value), limits, utc_now
+    )
 
 
 def _start_new(
@@ -466,7 +478,7 @@ def _start_new(
         "VALUES (?,?,'active',?,NULL,NULL,NULL)",
         (session_value, run_value, created_at),
     )
-    return _PendingActivation(snapshot, CrawlSessionId(session_value), limits)
+    return _PendingActivation(snapshot, CrawlSessionId(session_value), limits, utc_now)
 
 
 @contextmanager
@@ -493,6 +505,7 @@ def _register_checkpoint_run(
         effective.max_pages_per_run,
         effective.max_inventory_windows_per_root,
         effective.max_inventory_windows_per_run,
+        effective.max_total_requests_per_run,
     )
     operation, selected_run_id = selection
 
@@ -566,14 +579,15 @@ def _register_checkpoint_run(
 
         activation = _RunActivated(
             outcome.snapshot,
-            outcome.session_id,
-            _CheckpointStateSession(
+                outcome.session_id,
+                _CheckpointStateSession(
                 workspace,
                 outcome.snapshot.run_id,
                 outcome.session_id,
-                outcome.snapshot.include_roots,
-                outcome.limits,
-            ),
+                    outcome.snapshot.include_roots,
+                    outcome.limits,
+                    outcome.utc_now,
+                ),
         )
         body_failed = False
         try:

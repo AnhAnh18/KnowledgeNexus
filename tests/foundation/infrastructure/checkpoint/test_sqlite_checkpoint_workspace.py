@@ -188,6 +188,27 @@ def test_locked_workspace_initializes_reopens_and_preserves_lock_bytes(tmp_path)
         _assert_durability_pragmas(conn)
 
 
+def test_locked_workspace_allows_unrelated_sibling_directory_lifecycle(tmp_path) -> None:
+    sibling = tmp_path.parent / f"{tmp_path.name}-unrelated-sibling"
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        sibling.mkdir()
+        try:
+            assert workspace._mutate(
+                lambda transaction: transaction._fetchone("SELECT 1")
+            ) == (1,)
+        finally:
+            sibling.rmdir()
+
+
+def test_mutation_allows_sqlite_journal_lifecycle(tmp_path) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        def transient_schema(transaction):
+            transaction._execute("CREATE TABLE transient_lifecycle(value INTEGER)")
+            transaction._execute("DROP TABLE transient_lifecycle")
+
+        workspace._mutate(transient_schema)
+
+
 def test_locked_workspace_orders_lock_before_connect_and_uses_strict_open_modes(
     tmp_path, monkeypatch
 ) -> None:
@@ -351,6 +372,18 @@ def test_locked_workspace_rejects_database_identity_replacement_before_mutation(
     monkeypatch.undo()
     with module._open_locked_checkpoint_workspace(tmp_path):
         pass
+
+
+def test_locked_workspace_rejects_same_inode_database_metadata_tamper_before_mutation(
+    tmp_path,
+) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        database = tmp_path / module.DB_NAME
+        info = database.stat()
+        os.utime(database, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000))
+        with pytest.raises(CheckpointStateError) as caught:
+            workspace._mutate(lambda _transaction: pytest.fail("must not execute"))
+        _assert_sanitized(caught.value)
 
 
 def test_locked_workspace_rejects_database_replacement_after_initialization(
@@ -628,6 +661,85 @@ with module._open_locked_checkpoint_workspace(workspace):
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
+
+
+def test_locked_workspace_real_process_contender_is_bounded_and_recovers(tmp_path) -> None:
+    ready = tmp_path / "holder-ready"
+    release = tmp_path / "holder-release"
+    result = tmp_path / "contender-result"
+    holder_code = """
+import sys
+import time
+from pathlib import Path
+from knowledgenexus.foundation.infrastructure.checkpoint import sqlite_checkpoint_workspace as module
+workspace, ready, release = map(Path, sys.argv[1:])
+with module._open_locked_checkpoint_workspace(workspace):
+    ready.touch()
+    while not release.exists():
+        time.sleep(0.01)
+"""
+    contender_code = """
+import sys
+from pathlib import Path
+from knowledgenexus.foundation.infrastructure.checkpoint import sqlite_checkpoint_workspace as module
+workspace, result = map(Path, sys.argv[1:])
+try:
+    with module._open_locked_checkpoint_workspace(workspace):
+        result.write_text('acquired', encoding='ascii')
+except Exception:
+    result.write_text('failed', encoding='ascii')
+"""
+    env = dict(os.environ)
+    src = str(Path(__file__).resolve().parents[4] / "src")
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    holder = subprocess.Popen(
+        [sys.executable, "-c", holder_code, str(tmp_path), str(ready), str(release)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), holder.communicate(timeout=5)
+
+        started = time.monotonic()
+        contender = subprocess.run(
+            [sys.executable, "-c", contender_code, str(tmp_path), str(result)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=3,
+        )
+        assert contender.returncode == 0
+        assert result.read_text(encoding="ascii") == "failed"
+        assert time.monotonic() - started < 2
+
+        release.touch()
+        assert holder.wait(timeout=5) == 0
+        result.unlink()
+        recovered = subprocess.run(
+            [sys.executable, "-c", contender_code, str(tmp_path), str(result)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
+        )
+        assert recovered.returncode == 0
+        assert result.read_text(encoding="ascii") == "acquired"
+    finally:
+        if holder.poll() is None:
+            release.touch()
+            try:
+                holder.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                holder.kill()
+                holder.wait(timeout=5)
 
 
 def test_existing_empty_database_fails_without_write(tmp_path) -> None:

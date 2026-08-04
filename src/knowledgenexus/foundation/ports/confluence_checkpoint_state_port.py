@@ -51,6 +51,7 @@ class CheckpointOperationFailureCategory(StrEnum):
     PAGINATION_INVALID = "pagination_invalid"
     INVENTORY_PAGE_BUDGET_EXHAUSTED = "inventory_page_budget_exhausted"
     INVENTORY_WINDOW_LIMIT_EXHAUSTED = "inventory_window_limit_exhausted"
+    REQUEST_BUDGET_EXHAUSTED = "request_budget_exhausted"
 
     # Short aliases keep callers from having to duplicate the inventory scope
     # when a higher-level operation already supplies it.
@@ -71,6 +72,20 @@ class CheckpointOperationFailure(Exception):
 
     def __repr__(self) -> str:
         return f"CheckpointOperationFailure('{self.category.value}')"
+
+
+@dataclass(frozen=True, repr=False)
+class CheckpointReservationResult:
+    """One durably consumed outbound-attempt budget unit."""
+
+    reservation_sequence: int
+
+    def __post_init__(self) -> None:
+        if type(self.reservation_sequence) is not int or self.reservation_sequence < 0:
+            raise ValueError("invalid reservation result")
+
+    def __repr__(self) -> str:
+        return "CheckpointReservationResult()"
 
 
 @dataclass(frozen=True, repr=False)
@@ -158,6 +173,14 @@ class ConfluenceCheckpointStatePort(Protocol):
     """
 
     def read_schema_state(self) -> CheckpointSchemaState: ...
+
+    def reserve_outbound_attempt(
+        self,
+    ) -> CheckpointReservationResult | CheckpointOperationFailure: ...
+
+    def check_outbound_attempt(
+        self,
+    ) -> CheckpointOperationFailure | None: ...
 
     def load_next_inventory_work(
         self,

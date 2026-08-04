@@ -674,6 +674,69 @@ def test_status_result_rejects_non_terminal_decision() -> None:
         )
 
 
+def test_status_result_rejects_terminal_decision_for_semantic_response() -> None:
+    response = ConfluenceHttpResponse(status_code=404, body=b"Not Found")
+    decision = ConfluenceRetryPolicyDecision(
+        action=ConfluenceRetryPolicyAction.TERMINATE,
+        outcome_class=ConfluenceRetryOutcomeClass.TERMINAL_HTTP_FAILURE,
+        stable_kind=ConfluenceRetryStableKind.HTTP_TERMINAL,
+        selected_delay_seconds=None,
+        next_attempt_number=None,
+    )
+
+    with pytest.raises(ValueError, match="semantic response"):
+        ConfluenceStatusAwareExecutionResult(
+            response=response,
+            terminal_decision=decision,
+        )
+
+
+def test_status_result_requires_terminal_decision_for_non_semantic_response() -> None:
+    response = ConfluenceHttpResponse(status_code=400, body=b"Bad Request")
+
+    with pytest.raises(ValueError, match="requires a terminal decision"):
+        ConfluenceStatusAwareExecutionResult(
+            response=response,
+            terminal_decision=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("status_code", "outcome_class", "stable_kind"),
+    [
+        (
+            400,
+            ConfluenceRetryOutcomeClass.BUDGET_EXHAUSTED,
+            ConfluenceRetryStableKind.REQUEST_BUDGET_EXHAUSTED,
+        ),
+        (
+            503,
+            ConfluenceRetryOutcomeClass.TERMINAL_HTTP_FAILURE,
+            ConfluenceRetryStableKind.HTTP_TERMINAL,
+        ),
+    ],
+)
+def test_status_result_rejects_outcome_class_that_disagrees_with_status(
+    status_code: int,
+    outcome_class: ConfluenceRetryOutcomeClass,
+    stable_kind: ConfluenceRetryStableKind,
+) -> None:
+    response = ConfluenceHttpResponse(status_code=status_code, body=b"failure")
+    decision = ConfluenceRetryPolicyDecision(
+        action=ConfluenceRetryPolicyAction.TERMINATE,
+        outcome_class=outcome_class,
+        stable_kind=stable_kind,
+        selected_delay_seconds=None,
+        next_attempt_number=None,
+    )
+
+    with pytest.raises(ValueError, match="status and terminal decision disagree"):
+        ConfluenceStatusAwareExecutionResult(
+            response=response,
+            terminal_decision=decision,
+        )
+
+
 def test_status_result_repr_safe() -> None:
     """ConfluenceStatusAwareExecutionResult repr does not disclose body."""
     response = ConfluenceHttpResponse(

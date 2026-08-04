@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import StrEnum
+import re
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CanonicalIncludeRoots,
@@ -29,6 +31,7 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointCommitResult,
     CheckpointOperationFailure,
     CheckpointOperationFailureCategory,
+    CheckpointReservationResult,
     CheckpointSchemaState,
     InventoryWorkItem,
 )
@@ -44,10 +47,39 @@ class _OperationCategory(StrEnum):
     PAGINATION_INVALID = "pagination_invalid"
     INVENTORY_PAGE_BUDGET_EXHAUSTED = "inventory_page_budget_exhausted"
     INVENTORY_WINDOW_LIMIT_EXHAUSTED = "inventory_window_limit_exhausted"
+    REQUEST_BUDGET_EXHAUSTED = "request_budget_exhausted"
 
 
 def _failure(category: _OperationCategory) -> CheckpointOperationFailure:
     return CheckpointOperationFailure(CheckpointOperationFailureCategory(category.value))
+
+
+_RESERVATION_TIMESTAMP = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$"
+)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _reservation_timestamp(value: object) -> str:
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        raise ValueError("invalid reservation timestamp")
+    utc = value.astimezone(timezone.utc)
+    result = utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
+    if not _RESERVATION_TIMESTAMP.fullmatch(result):
+        raise ValueError("invalid reservation timestamp")
+    return result
+
+
+def _validate_reservation_timestamp(value: object) -> None:
+    if type(value) is not str or not _RESERVATION_TIMESTAMP.fullmatch(value):
+        raise ValueError("invalid durable reservation")
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError:
+        raise ValueError("invalid durable reservation") from None
 
 
 def _json_tuple(value: object) -> str:
@@ -303,6 +335,7 @@ class _SessionLimits:
     max_pages_per_run: int
     max_windows_per_root: int
     max_windows_per_run: int
+    max_total_requests_per_run: int
 
     def __repr__(self) -> str:
         return "_SessionLimits()"
@@ -317,6 +350,7 @@ class _CheckpointStateSession:
         "_session_id",
         "_include_roots",
         "_limits",
+        "_utc_now",
         "_active",
     )
 
@@ -327,23 +361,71 @@ class _CheckpointStateSession:
         session_id: object,
         include_roots: CanonicalIncludeRoots,
         limits: _SessionLimits,
+        utc_now: Callable[[], datetime],
     ) -> None:
         self._workspace = workspace
         self._run_id = run_id
         self._session_id = session_id
         self._include_roots = include_roots
         self._limits = limits
+        self._utc_now = utc_now
         self._active = True
 
     def _require_active(self) -> None:
         if not self._active:
             raise CheckpointStateError() from None
 
+    def _validate_active_session(self, transaction: object) -> None:
+        row = transaction._fetchone(
+            "SELECT run_id,status FROM crawl_sessions WHERE session_id=?",
+            (self._session_id.value,),
+        )
+        if row != (self._run_id.value, "active"):
+            raise ValueError("invalid active session")
+
     def _invalidate(self) -> None:
         self._active = False
 
+    def _validate_request_reservations(self, transaction: object) -> int:
+        rows = transaction._fetchall(
+            "SELECT run_id,reservation_sequence,reserved_at "
+            "FROM request_budget_reservations "
+            "ORDER BY run_id,reservation_sequence"
+        )
+        grouped: dict[str, list[tuple[int, str]]] = {}
+        for row in rows:
+            if type(row) is not tuple or len(row) != 3:
+                raise ValueError("invalid durable reservation")
+            run_value, sequence, reserved_at = row
+            if type(run_value) is not str or not run_value:
+                raise ValueError("invalid durable reservation")
+            try:
+                checked_run = CrawlRunId(run_value)
+            except Exception:
+                raise ValueError("invalid durable reservation") from None
+            if type(sequence) is not int or sequence < 0:
+                raise ValueError("invalid durable reservation")
+            _validate_reservation_timestamp(reserved_at)
+            grouped.setdefault(checked_run.value, []).append((sequence, reserved_at))
+
+        known_runs = {
+            row[0]
+            for row in transaction._fetchall("SELECT run_id FROM crawl_runs")
+            if type(row) is tuple and len(row) == 1 and type(row[0]) is str
+        }
+        if set(grouped) - known_runs:
+            raise ValueError("invalid durable reservation")
+        current = grouped.get(self._run_id.value, [])
+        for run_value, items in grouped.items():
+            if [sequence for sequence, _ in items] != list(range(len(items))):
+                raise ValueError("invalid durable reservation")
+            if run_value == self._run_id.value and len(items) > self._limits.max_total_requests_per_run:
+                raise ValueError("request budget exceeded")
+        return len(current)
+
     def _validate_inventory(self, transaction: object) -> None:
         """Fail closed when any durable inventory fact is missing or malformed."""
+        self._validate_request_reservations(transaction)
         root_rows = transaction._fetchall(
             "SELECT include_root_ordinal,include_root_page_id FROM include_roots "
             "WHERE run_id=? ORDER BY include_root_ordinal",
@@ -562,6 +644,38 @@ class _CheckpointStateSession:
             if type(row) is not tuple or len(row) != 1 or type(row[0]) is not int:
                 raise ValueError("invalid schema state")
             return CheckpointSchemaState(row[0])
+
+        return self._workspace._mutate(operation)
+
+    def reserve_outbound_attempt(
+        self,
+    ) -> CheckpointReservationResult | CheckpointOperationFailure:
+        self._require_active()
+
+        def operation(transaction: object):
+            self._validate_active_session(transaction)
+            count = self._validate_request_reservations(transaction)
+            if count >= self._limits.max_total_requests_per_run:
+                return _failure(_OperationCategory.REQUEST_BUDGET_EXHAUSTED)
+            timestamp = _reservation_timestamp(self._utc_now())
+            transaction._execute(
+                "INSERT INTO request_budget_reservations "
+                "(run_id,reservation_sequence,reserved_at) VALUES (?,?,?)",
+                (self._run_id.value, count, timestamp),
+            )
+            return CheckpointReservationResult(count)
+
+        return self._workspace._mutate(operation)
+
+    def check_outbound_attempt(self) -> CheckpointOperationFailure | None:
+        self._require_active()
+
+        def operation(transaction: object):
+            self._validate_active_session(transaction)
+            count = self._validate_request_reservations(transaction)
+            if count >= self._limits.max_total_requests_per_run:
+                return _failure(_OperationCategory.REQUEST_BUDGET_EXHAUSTED)
+            return None
 
         return self._workspace._mutate(operation)
 
@@ -1117,6 +1231,7 @@ def _validate_durable_inventory_state(
     validator._include_roots = include_roots
     validator._limits = limits or _SessionLimits(
         page_size if page_size is not None else 2**31 - 1,
+        2**63 - 1,
         2**63 - 1,
         2**63 - 1,
         2**63 - 1,

@@ -11,6 +11,10 @@ from urllib.parse import quote
 
 import portalocker
 
+from knowledgenexus.foundation.infrastructure.locking import (
+    confluence_crawl_writer_lock as _writer_lock,
+)
+
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointStateError,
 )
@@ -109,7 +113,7 @@ _INDEX_LAYOUTS = {
 @dataclass(frozen=True)
 class _DatabaseObservation:
     absent: bool
-    identity: tuple[int, int, int, int] | None
+    identity: tuple[int, int, int, int, int, int, int] | None
 
 
 @dataclass(frozen=True)
@@ -233,16 +237,35 @@ def _observe_regular_entry(path: Path) -> _EntryObservation:
     return _EntryObservation(False, _entry_identity(info))
 
 
-def _workspace_identity(workspace: Path) -> tuple[tuple[int, int], ...]:
+def _workspace_metadata(info: os.stat_result) -> tuple[int, int, int]:
+    """Return stable directory identity without child-lifecycle metadata."""
+    return (info.st_dev, info.st_ino, info.st_mode)
+
+
+def _workspace_identity(
+    workspace: Path,
+) -> tuple[tuple[int, int, int], ...]:
     try:
         chain = list(workspace.parents)[::-1] + [workspace]
-        return tuple(_entry_identity(ancestor.lstat()) for ancestor in chain)
+        observations = []
+        for ancestor in chain:
+            info = ancestor.lstat()
+            attrs = getattr(info, "st_file_attributes", 0)
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISDIR(info.st_mode)
+                or attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            ):
+                raise _fail()
+            observations.append(_workspace_metadata(info))
+        return tuple(observations)
     except Exception:
         raise _fail() from None
 
 
 def _verify_workspace_identity(
-    workspace: Path, expected: tuple[tuple[int, int], ...]
+    workspace: Path,
+    expected: tuple[tuple[int, int, int], ...],
 ) -> None:
     if _workspace_identity(workspace) != expected:
         raise _fail()
@@ -311,20 +334,49 @@ def _normalized_sql(sql: str | None) -> str:
 def _observe_database(path: Path) -> _DatabaseObservation:
     failed = False
     try:
-        if not path.exists():
-            return _DatabaseObservation(True, None)
-        info = path.stat()
-        return _DatabaseObservation(False, (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns))
+        info = path.lstat()
+        attrs = getattr(info, "st_file_attributes", 0)
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+            raise _fail()
+        return _DatabaseObservation(
+            False,
+            (
+                info.st_dev,
+                info.st_ino,
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_mode,
+                info.st_ctime_ns,
+                getattr(info, "st_nlink", 1),
+            ),
+        )
+    except FileNotFoundError:
+        return _DatabaseObservation(True, None)
     except Exception:
         failed = True
     if failed:
         raise _fail()
 
 
-def _verify_database_identity(path: Path, expected: tuple[int, int]) -> None:
-    """Reject a database path that no longer names the opened database file."""
+def _verify_database_identity(
+    path: Path,
+    expected: tuple[int, int, int, int, int, int, int],
+    *,
+    allow_transaction_metadata: bool = False,
+) -> None:
+    """Reject replacement or metadata tampering of the active database."""
     current = _observe_database(path)
-    if current.absent or current.identity[:2] != expected:
+    if current.absent or current.identity is None:
+        raise _fail()
+    if allow_transaction_metadata:
+        same_entry = (
+            current.identity[:2] == expected[:2]
+            and current.identity[4] == expected[4]
+            and current.identity[6] == expected[6]
+        )
+    else:
+        same_entry = current.identity == expected
+    if not same_entry:
         raise _fail()
 
 
@@ -534,17 +586,19 @@ def _initialize_or_validate_connection(conn: sqlite3.Connection, *, initialize: 
 class _PrivateCheckpointTransaction:
     """Narrow C2-B transaction seam; the SQLite connection never escapes it."""
 
-    __slots__ = ("_connection", "_token", "_verify_writer_lock")
+    __slots__ = ("_connection", "_token", "_verify_writer_lock", "_refresh_sidecars")
 
     def __init__(
         self,
         connection: sqlite3.Connection,
         token: _ActiveCheckpointToken,
         verify_writer_lock: Callable[[], None],
+        refresh_sidecars: Callable[[], None],
     ) -> None:
         self._connection = connection
         self._token = token
         self._verify_writer_lock = verify_writer_lock
+        self._refresh_sidecars = refresh_sidecars
 
     def _require_active(self) -> None:
         if not self._token.active:
@@ -558,10 +612,14 @@ class _PrivateCheckpointTransaction:
     def _begin_immediate(self) -> None:
         self._require_active()
         self._connection.execute("BEGIN IMMEDIATE")
+        # BEGIN IMMEDIATE may create the rollback journal before the first
+        # statement callback verifies the writer lease.
+        self._refresh_sidecars()
 
     def _execute(self, sql: str, parameters: tuple[object, ...] = ()) -> None:
         self._require_active()
         self._connection.execute(sql, parameters)
+        self._refresh_sidecars()
 
     def _fetchone(self, sql: str, parameters: tuple[object, ...] = ()) -> tuple | None:
         self._require_active()
@@ -587,6 +645,7 @@ class _LockedCheckpointWorkspace:
         "_workspace_identity",
         "_token",
         "_transaction",
+        "_writer_lease",
     )
 
     def __init__(
@@ -596,11 +655,12 @@ class _LockedCheckpointWorkspace:
         workspace: Path,
         lock: Path,
         database: Path,
-        database_identity: tuple[int, int],
+        database_identity: tuple[int, int, int, int, int, int, int],
         lock_identity: tuple[int, int],
         prior_lock: _EntryObservation,
-        workspace_identity: tuple[tuple[int, int], ...],
+        workspace_identity: tuple[tuple[int, int, int], ...],
         token: _ActiveCheckpointToken,
+        writer_lease=None,
     ) -> None:
         self._connection = connection
         self._lock_handle = lock_handle
@@ -613,6 +673,7 @@ class _LockedCheckpointWorkspace:
         self._workspace_identity = workspace_identity
         self._token = token
         self._transaction: _PrivateCheckpointTransaction | None = None
+        self._writer_lease = writer_lease
 
     def _require_active(self) -> None:
         if not self._token.active:
@@ -634,29 +695,65 @@ class _LockedCheckpointWorkspace:
                 connection.close()
             except Exception:
                 pass
-        lock_handle = self._lock_handle
+        lease = self._writer_lease
+        self._writer_lease = None
+        if lease is not None:
+            try:
+                lease.close()
+            except Exception:
+                pass
         self._lock_handle = None
-        if lock_handle is not None:
-            try:
-                portalocker.unlock(lock_handle)
-            except Exception:
-                pass
-            try:
-                lock_handle.close()
-            except Exception:
-                pass
 
-    def _verify_writer_lock(self) -> None:
+    def _verify_writer_lock(self, *, allow_transaction_lifecycle: bool = False) -> None:
         if not self._token.active:
             raise _fail()
-        _verify_locked_entry(
-            self._workspace,
-            self._lock,
-            self._lock_identity,
-            self._prior_lock,
-            self._workspace_identity,
+        if self._writer_lease is not None:
+            self._writer_lease._verify(
+                allow_sidecar_lifecycle=allow_transaction_lifecycle
+            )
+        if allow_transaction_lifecycle:
+            _, guarded_lock = _guard_workspace(self._workspace)
+            current_lock = _observe_regular_entry(guarded_lock)
+            if (
+                guarded_lock != self._lock
+                or current_lock.absent
+                or current_lock.identity != self._lock_identity
+                or (
+                    not self._prior_lock.absent
+                    and current_lock.identity != self._prior_lock.identity
+                )
+            ):
+                raise _fail()
+        else:
+            _verify_locked_entry(
+                self._workspace,
+                self._lock,
+                self._lock_identity,
+                self._prior_lock,
+                self._workspace_identity,
+            )
+        _verify_database_identity(
+            self._database,
+            self._database_identity,
+            allow_transaction_metadata=allow_transaction_lifecycle,
         )
-        _verify_database_identity(self._database, self._database_identity)
+
+    def _refresh_database_identity(self) -> None:
+        current = _observe_database(self._database)
+        previous = self._database_identity
+        if (
+            current.absent
+            or current.identity[:2] != previous[:2]
+            or current.identity[4] != previous[4]
+            or current.identity[6] != previous[6]
+        ):
+            raise _fail()
+        self._database_identity = current.identity
+
+    def _refresh_sidecar_observations(self) -> None:
+        if self._writer_lease is not None:
+            self._writer_lease._refresh_sidecars()
+            self._workspace_identity = _workspace_identity(self._workspace)
 
     def _mutate(
         self, operation: Callable[[_PrivateCheckpointTransaction], _T]
@@ -668,13 +765,20 @@ class _LockedCheckpointWorkspace:
                 raise _fail()
             self._verify_writer_lock()
             transaction = _PrivateCheckpointTransaction(
-                self._connection, self._token, self._verify_writer_lock
+                self._connection,
+                self._token,
+                lambda: self._verify_writer_lock(allow_transaction_lifecycle=True),
+                self._refresh_sidecar_observations,
             )
             self._transaction = transaction
             transaction._begin_immediate()
             result = operation(transaction)
             transaction._require_active()
             self._connection.commit()
+            self._refresh_sidecar_observations()
+            # SQLite legitimately updates database size/timestamps on commit;
+            # make that committed observation the baseline for the next unit.
+            self._refresh_database_identity()
             return result
         except Exception:
             try:
@@ -701,21 +805,28 @@ def _open_locked_checkpoint_workspace(
     """Own one nonblocking writer lock and its private writable SQLite handle."""
     connection = None
     lock_handle = None
-    locked = False
+    writer_lease = None
     capability = None
     failed = False
     missing_initial_database = False
+    yielded = False
+    body_exception: BaseException | None = None
     try:
         db, lock = _guard_workspace(workspace)
         guarded_workspace = _workspace_identity(workspace)
         prior_lock = _observe_regular_entry(lock)
-        lock_handle, handle_identity = _open_lock_handle(lock)
-        portalocker.lock(lock_handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
-        locked = True
+        writer_lease = _writer_lock._acquire_writer_lock(workspace)
+        lock_handle = writer_lease._handle
+        handle_identity = writer_lease._lock_metadata[:2]
+        # Creating an absent lock legitimately updates the workspace directory
+        # metadata; the lease has already captured the post-acquisition chain.
+        guarded_workspace = _workspace_identity(workspace)
+        writer_lease._verify()
 
         db, _ = _verify_locked_entry(
             workspace, lock, handle_identity, prior_lock, guarded_workspace
         )
+        writer_lease._verify()
         initial_observation = None
         if require_initialized:
             # Classify an absent resume database only after winning the writer
@@ -730,6 +841,7 @@ def _open_locked_checkpoint_workspace(
         db, _ = _verify_locked_entry(
             workspace, lock, handle_identity, prior_lock, guarded_workspace
         )
+        writer_lease._verify()
         if _observe_database(db) != observation:
             raise _fail()
 
@@ -738,9 +850,12 @@ def _open_locked_checkpoint_workspace(
             # O_EXCL distinguishes our one allowed fresh create from an
             # unvalidated database inserted after the read-only preflight.
             claimed_database_identity = _claim_absent_database(db)
+            writer_lease._refresh_workspace_chain()
+            guarded_workspace = _workspace_identity(workspace)
         db, _ = _verify_locked_entry(
             workspace, lock, handle_identity, prior_lock, guarded_workspace
         )
+        writer_lease._verify()
         current_database = _observe_database(db)
         if observation.absent:
             if (
@@ -751,7 +866,7 @@ def _open_locked_checkpoint_workspace(
                 raise _fail()
         elif current_database != observation:
             raise _fail()
-        database_identity = current_database.identity[:2]
+        database_identity = current_database.identity
 
         connection = _open_writable_connection(db)
         if observation.absent:
@@ -761,14 +876,29 @@ def _open_locked_checkpoint_workspace(
         _verify_locked_entry(
             workspace, lock, handle_identity, prior_lock, guarded_workspace
         )
+        writer_lease._verify()
         _initialize_or_validate_connection(connection, initialize=observation.absent)
+        writer_lease._refresh_workspace_chain()
+        guarded_workspace = _workspace_identity(workspace)
         if observation.absent:
-            _verify_database_identity(db, database_identity)
+            # Fresh creation is the one permitted database identity transition;
+            # capture its complete post-initialization metadata baseline.
+            initialized_database = _observe_database(db)
+            if (
+                initialized_database.absent
+                or initialized_database.identity[:2] != database_identity[:2]
+            ):
+                raise _fail()
+            database_identity = initialized_database.identity
         else:
+            # Existing databases must remain byte/path-identical through
+            # initialization; same-inode chmod/utime changes are failures.
             _verify_database_observation(db, observation)
+            database_identity = observation.identity
         _verify_locked_entry(
             workspace, lock, handle_identity, prior_lock, guarded_workspace
         )
+        writer_lease._verify()
 
         token = _ActiveCheckpointToken()
         capability = _LockedCheckpointWorkspace(
@@ -782,12 +912,16 @@ def _open_locked_checkpoint_workspace(
             prior_lock,
             guarded_workspace,
             token,
+            writer_lease,
         )
+        yielded = True
         yield capability
-    except Exception:
+    except BaseException as error:
         # The missing-database marker is intentional; cleanup failures must
         # still take precedence over that classification below.
-        if not missing_initial_database:
+        if yielded:
+            body_exception = error
+        elif not missing_initial_database:
             failed = True
     finally:
         if capability is not None:
@@ -801,19 +935,16 @@ def _open_locked_checkpoint_workspace(
                     connection.close()
                 except Exception:
                     failed = True
-        if lock_handle is not None:
-            if locked and (capability is None or capability._lock_handle is not None):
+        if writer_lease is not None:
+            if capability is None or capability._writer_lease is not None:
                 try:
-                    portalocker.unlock(lock_handle)
-                except Exception:
-                    failed = True
-            if capability is None or capability._lock_handle is not None:
-                try:
-                    lock_handle.close()
+                    writer_lease.close()
                 except Exception:
                     failed = True
     if failed:
         _raise_sanitized_failure()
+    if body_exception is not None:
+        raise body_exception.with_traceback(body_exception.__traceback__)
     if missing_initial_database:
         error = _fail()
         setattr(error, "_missing_initial_database", True)

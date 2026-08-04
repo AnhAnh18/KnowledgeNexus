@@ -41,10 +41,26 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointCommitResult,
     CheckpointOperationFailure,
     CheckpointOperationFailureCategory,
+    CheckpointReservationResult,
     CheckpointSchemaState,
     CheckpointStateError,
     ConfluenceCheckpointStatePort,
     InventoryWorkItem,
+)
+from knowledgenexus.foundation.ports.confluence_crawl_writer_lock_port import (
+    ConfluenceCrawlWriterLockLease,
+    ConfluenceCrawlWriterLockPort,
+)
+from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+    CheckpointRunActivation,
+    CheckpointRunInventoryComplete,
+    CheckpointRunOutcome,
+    CheckpointRunSelectionFailure,
+    CheckpointRunSelectionFailureCategory,
+    ConfluenceCheckpointRunPort,
+    ResumeExplicitRunRequest,
+    ResumeUniqueIncompleteRunRequest,
+    StartNewRunRequest,
 )
 
 __all__ = [
@@ -74,8 +90,20 @@ __all__ = [
     "CheckpointCommitResult",
     "CheckpointOperationFailure",
     "CheckpointOperationFailureCategory",
+    "CheckpointReservationResult",
     "CheckpointSchemaState",
     "CheckpointStateError",
     "ConfluenceCheckpointStatePort",
     "InventoryWorkItem",
+    "ConfluenceCrawlWriterLockLease",
+    "ConfluenceCrawlWriterLockPort",
+    "CheckpointRunActivation",
+    "CheckpointRunInventoryComplete",
+    "CheckpointRunOutcome",
+    "CheckpointRunSelectionFailure",
+    "CheckpointRunSelectionFailureCategory",
+    "ConfluenceCheckpointRunPort",
+    "ResumeExplicitRunRequest",
+    "ResumeUniqueIncompleteRunRequest",
+    "StartNewRunRequest",
 ]

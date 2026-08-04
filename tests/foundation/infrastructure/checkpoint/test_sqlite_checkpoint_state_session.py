@@ -7,6 +7,7 @@ import uuid
 import pytest
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    CrawlSessionId,
     InventoryRootCommit,
     ResumeExplicitRunId,
     StartNewRun,
@@ -36,6 +37,7 @@ from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_run_r
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointOperationFailure,
     CheckpointOperationFailureCategory,
+    CheckpointReservationResult,
     CheckpointStateError,
 )
 
@@ -99,6 +101,55 @@ def _start(path, *, profile=None, roots=("root",)):
         ),
         utc_now=_clock,
     )
+
+
+def test_reserve_outbound_attempt_is_durable_and_denies_at_cap(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        activation._state._limits = replace(
+            activation._state._limits, max_total_requests_per_run=2
+        )
+        first = activation.reserve_outbound_attempt()
+        second = activation.reserve_outbound_attempt()
+        denied = activation.reserve_outbound_attempt()
+        assert isinstance(first, CheckpointReservationResult)
+        assert isinstance(second, CheckpointReservationResult)
+        assert (first.reservation_sequence, second.reservation_sequence) == (0, 1)
+        assert isinstance(denied, CheckpointOperationFailure)
+        assert denied.category is CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED
+        run_id = activation.snapshot.run_id
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        rows = workspace._mutate(
+            lambda transaction: transaction._fetchall(
+                "SELECT reservation_sequence,reserved_at FROM request_budget_reservations "
+                "WHERE run_id=? ORDER BY reservation_sequence",
+                (run_id.value,),
+            )
+        )
+    assert rows == [
+        (0, "2026-08-01T01:02:03.456Z"),
+        (1, "2026-08-01T01:02:03.456Z"),
+    ]
+
+    resume_request = replace(
+        _request(tmp_path),
+        operation=ResumeExplicitRunId(run_id),
+    )
+    with _register_checkpoint_run(resume_request, utc_now=_clock) as resumed:
+        resumed._state._limits = replace(
+            resumed._state._limits, max_total_requests_per_run=2
+        )
+        assert resumed.snapshot.run_id == run_id
+        denied_again = resumed.reserve_outbound_attempt()
+        assert isinstance(denied_again, CheckpointOperationFailure)
+        assert denied_again.category is CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED
+
+
+def test_reservation_rejects_a_session_that_is_no_longer_active(tmp_path) -> None:
+    with _start(tmp_path) as activation:
+        activation._state._session_id = CrawlSessionId("not-the-active-session")
+        with pytest.raises(CheckpointStateError):
+            activation.reserve_outbound_attempt()
 
 
 def _root_commit(activation: _RunActivated, root_id: str = "root") -> InventoryRootCommit:
@@ -309,6 +360,36 @@ def test_malformed_terminal_cursor_is_rejected_on_resume(tmp_path) -> None:
         with _register_checkpoint_run(
             _request(tmp_path),
             uuid4=_ids("223e4567-e89b-42d3-a456-426614174000"),
+            utc_now=_clock,
+        ):
+            pass
+
+
+@pytest.mark.parametrize(
+    "tamper_sql",
+    (
+        "UPDATE request_budget_reservations SET reserved_at='not-a-timestamp'",
+        "UPDATE request_budget_reservations SET reservation_sequence=3",
+    ),
+)
+def test_resume_rejects_malformed_request_reservation_rows(tmp_path, tamper_sql) -> None:
+    with _start(tmp_path) as activation:
+        reservation = activation.reserve_outbound_attempt()
+        assert isinstance(reservation, CheckpointReservationResult)
+        run_id = activation.snapshot.run_id
+
+    with workspace_module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        workspace._mutate(
+            lambda transaction: transaction._execute(tamper_sql)
+        )
+
+    request = replace(
+        _request(tmp_path), operation=ResumeExplicitRunId(run_id)
+    )
+    with pytest.raises(CheckpointStateError):
+        with _register_checkpoint_run(
+            request,
+            uuid4=_ids("223e4567-e89b-42d3-a456-426614174002"),
             utc_now=_clock,
         ):
             pass
