@@ -19,6 +19,16 @@ from knowledgenexus.foundation.ports.confluence_page_observation_port import (
     ConfluenceObservationTooLargeError,
     ConfluenceRestrictionFetchPort,
 )
+from knowledgenexus.foundation.ports.confluence_attachment_body_fetch_port import (
+    ConfluenceAttachmentBodyFetchError,
+    ConfluenceAttachmentBodyFetchPort,
+    ConfluenceAttachmentBodyTooLargeError,
+)
+from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
+    ConfluenceRawAttachmentStoreError,
+    ConfluenceRawAttachmentStoreFailureCategory,
+    ConfluenceRawAttachmentStorePort,
+)
 from knowledgenexus.foundation.ports.raw_page_observation_store_port import (
     RawObservationStoreError,
     RawObservationStorePort,
@@ -110,6 +120,12 @@ __all__ = [
     "ConfluenceObservationFetchError",
     "ConfluenceObservationTooLargeError",
     "ConfluenceRestrictionFetchPort",
+    "ConfluenceAttachmentBodyFetchError",
+    "ConfluenceAttachmentBodyFetchPort",
+    "ConfluenceAttachmentBodyTooLargeError",
+    "ConfluenceRawAttachmentStoreError",
+    "ConfluenceRawAttachmentStoreFailureCategory",
+    "ConfluenceRawAttachmentStorePort",
     "RawObservationStoreError",
     "RawObservationStorePort",
     "RawPageReadError",

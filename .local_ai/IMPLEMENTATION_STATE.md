@@ -24,8 +24,9 @@ independently reviewed `PASS`. M8-AC controlled mini-corpus acceptance is
 implemented and independently re-reviewed `PASS`, but the real gate remains
 `pending_external_input` because no approved 10-20 page generation/selection/
 tokenizer input was supplied. M9-A1 metadata-first media contract is also
-complete and independently reviewed `PASS`; M9-A2 through M9-D remain staged
-under the reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
+independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
+reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1601,8 +1602,38 @@ are recorded without using repository-local commit SHAs as status.
   status/schema combinations, deterministic ordering, atomicity, and no-I/O
   behavior; verdict `PASS` in
   `.codex-workflow/20260805-m9a/05-review-1.md`.
-- Commit/push closeout is pending on this branch; M9-A2 body fetch/store is the
-  next separately reviewed stage.
+- M9-A1 closeout is recorded above; its commit/push closeout remains grouped
+  with the current approved M9-A2 stage on this branch.
+
+## M9-A2 Attachment Body Fetch and Store Boundary
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: fetch one policy-selected attachment body through a typed port,
+  validate the bounded response, publish canonical immutable raw evidence, and
+  return a downloaded-but-not-processed `MediaAsset` result without parsing,
+  OCR, export, checkpoint, ACL, or downstream storage behavior.
+- Contract: explicit absolute `data_root`, frozen body/total/free-disk budget,
+  category-only sanitized ports/errors, canonical envelope JSON, no-clobber
+  replay/conflict semantics, bounded regular-file scan, hardlink/symlink/
+  reparse rejection, root/parent identity checks across scan-to-publication,
+  canonicalized per-root budget serialization, and fail-closed forged-input and
+  unexpected-exception handling.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/media_body_materialization.py`,
+  `src/knowledgenexus/foundation/ports/confluence_attachment_body_fetch_port.py`,
+  `src/knowledgenexus/foundation/ports/confluence_raw_attachment_store_port.py`,
+  `src/knowledgenexus/foundation/application/use_cases/fetch_and_store_confluence_attachment_body.py`,
+  `src/knowledgenexus/foundation/infrastructure/raw_store/confluence_raw_attachment_store.py`,
+  and the corresponding package exports. Focused adversarial tests cover
+  models, use-case, raw store, and architecture boundaries.
+- Validation: focused `37 passed, 2 skipped`; M9-A1/raw-store regression
+  selection `50 passed, 3 skipped`; `python -m compileall -q src tests` passed;
+  scoped `git diff --check` passed.
+- Review artifacts:
+  `.codex-workflow/20260805-m9a2/05-review-1.md` (`CHANGES_REQUIRED`),
+  `.codex-workflow/20260805-m9a2/08-review-2.md` (`PASS`).
+- Commit/push closeout is pending on this branch; M9-A3 is the next separately
+  planned and reviewed stage.
 
 ## Current Execution Boundary
 

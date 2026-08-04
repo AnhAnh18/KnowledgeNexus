@@ -115,7 +115,8 @@ M8-A through M8-E are complete and independently reviewed `PASS`. M8-AC
 controlled mini-corpus acceptance is implemented and independently re-reviewed
 `PASS`, but its real gate remains `pending_external_input` until an approved
 10-20 page generation/selection/tokenizer input is supplied. M9-A1 is complete
-and independently reviewed `PASS`; M9-A2 through M9-D remain staged under the
+and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
+independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
 reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
@@ -988,7 +989,7 @@ M9A - Media:
 | Stage | Status | Review / gate outcome |
 |---|---|---|
 | M9-A1 metadata-first media contract | complete | Added immutable attachment observation/policy/result models, schema-valid metadata-only MediaAsset builder, deterministic media relation-intent mapper, and strict adversarial boundaries; focused `11 passed`, bounded attachment/schema regression `87 passed`, architecture `16 passed`; independent review `PASS`; no download/raw/export/I/O. |
-| M9-A2 attachment body fetch/store boundary | pending | Requires explicit `data_root`, disk budget, body-fetch port, and path-safe raw-store policy. |
+| M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
 | M9-A3 offline draw.io/PDF/OCR processors | pending | Capability-pinned processors remain deferred until A2 evidence/store seam is approved. |
 | M9-B local Git repository and code-document seam | pending | M9-B starts after its own plan review; local-clone identity and fallback-window seam remain locked. |
 | M9-C minimal symbol index | pending | Depends on M9-B code-document contract; no symbol chunk stream is active yet. |

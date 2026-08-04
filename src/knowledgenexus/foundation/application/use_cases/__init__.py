@@ -34,6 +34,9 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop 
     ControlledStopPolicy,
     is_inventory_window_commit,
 )
+from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
+    FetchAndStoreConfluenceAttachmentBody,
+)
 from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
     AcceptConfluenceMiniCorpus,
 )
@@ -57,5 +60,6 @@ __all__ = [
     "ControlledStopDecision",
     "ControlledStopPolicy",
     "is_inventory_window_commit",
+    "FetchAndStoreConfluenceAttachmentBody",
     "AcceptConfluenceMiniCorpus",
 ]

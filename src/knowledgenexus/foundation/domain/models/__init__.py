@@ -99,6 +99,15 @@ from knowledgenexus.foundation.domain.models.media_materialization import (
     MediaPolicyDecision,
     MediaRelationIntent,
 )
+from knowledgenexus.foundation.domain.models.media_body_materialization import (
+    MediaAttachmentBodyEnvelope,
+    MediaAttachmentPublicationOutcome,
+    MediaAttachmentRawArtifact,
+    MediaBodyMaterializationError,
+    MediaBodyMaterializationFailureCategory,
+    MediaBodyMaterializationResult,
+    MediaBodyStoreBudget,
+)
 from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
     MiniCorpusAcceptanceError,
     MiniCorpusAcceptanceFailureCategory,
@@ -233,6 +242,13 @@ __all__ = [
     "MediaMaterializationResult",
     "MediaPolicyDecision",
     "MediaRelationIntent",
+    "MediaAttachmentBodyEnvelope",
+    "MediaAttachmentPublicationOutcome",
+    "MediaAttachmentRawArtifact",
+    "MediaBodyMaterializationError",
+    "MediaBodyMaterializationFailureCategory",
+    "MediaBodyMaterializationResult",
+    "MediaBodyStoreBudget",
     "MiniCorpusAcceptanceError",
     "MiniCorpusAcceptanceFailureCategory",
     "MiniCorpusAcceptanceRequest",
