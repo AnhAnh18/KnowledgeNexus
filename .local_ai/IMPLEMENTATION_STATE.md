@@ -1504,6 +1504,10 @@ are recorded without using repository-local commit SHAs as status.
   `PASS`. The independent re-review covered malformed dependency results,
   profile/asset/type drift, envelope/source-version and canonical page identity,
   nested JSON, metric/error invariants, and leak-safe failure strings.
+- Commit/push provenance: implementation commit `85f5054`
+  (`feat(foundation): complete M8-D page set processing`) was pushed to
+  `origin/codex/m8-m9`; this SHA is provenance only, not the milestone source
+  of truth.
 - Residual boundaries: M8-E chunk handoff and all M9 tracks remain pending;
   M10 full-snapshot work remains separately gated.
 
