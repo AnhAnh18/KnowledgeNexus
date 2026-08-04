@@ -199,6 +199,18 @@ def test_mutation_allows_sqlite_journal_lifecycle(tmp_path) -> None:
         workspace._mutate(transient_schema)
 
 
+def test_locked_workspace_allows_unrelated_sibling_directory_lifecycle(tmp_path) -> None:
+    sibling = tmp_path.parent / f"{tmp_path.name}-unrelated-sibling"
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        sibling.mkdir()
+        try:
+            assert workspace._mutate(
+                lambda transaction: transaction._fetchone("SELECT 1")
+            ) == (1,)
+        finally:
+            sibling.rmdir()
+
+
 def test_locked_workspace_orders_lock_before_connect_and_uses_strict_open_modes(
     tmp_path, monkeypatch
 ) -> None:

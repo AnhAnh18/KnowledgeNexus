@@ -88,7 +88,7 @@ def _observe(path: Path, *, directory: bool = False) -> _EntryObservation:
     return _EntryObservation(False, _entry_metadata(info))
 
 
-def _workspace_chain(workspace: Path) -> tuple[tuple[int, int, int, int, int, int, int], ...]:
+def _workspace_chain(workspace: Path) -> tuple[tuple[int, int, int], ...]:
     try:
         chain = list(workspace.parents)[::-1] + [workspace]
         observations = tuple(_observe(item, directory=True) for item in chain)
@@ -98,7 +98,11 @@ def _workspace_chain(workspace: Path) -> tuple[tuple[int, int, int, int, int, in
         _raise_failure()
     if any(item.absent or item.metadata is None for item in observations):
         _raise_failure()
-    return tuple(item.metadata for item in observations if item.metadata is not None)
+    return tuple(
+        item.metadata[:3]
+        for item in observations
+        if item.metadata is not None
+    )
 
 
 def _validate_workspace(value: Path) -> tuple[Path, Path, tuple, dict[str, _EntryObservation]]:
@@ -376,20 +380,12 @@ class _WriterLockLease:
                 _raise_failure()
 
     def _chain_matches(self, current, allow_lifecycle: bool) -> bool:
-        if current == self._workspace_chain:
-            return True
-        if not allow_lifecycle or len(current) != len(self._workspace_chain):
-            return False
-        # SQLite sidecar creation/removal changes only the workspace directory's
-        # directory metadata; ancestors must remain byte-for-byte unchanged.
-        for index, (before, after) in enumerate(zip(self._workspace_chain, current)):
-            if index < len(current) - 1:
-                if before != after:
-                    return False
-                continue
-            if before[:2] != after[:2] or before[2] != after[2] or before[6] != after[6]:
-                return False
-        return True
+        del allow_lifecycle
+        # Child and sibling entry lifecycles legitimately update directory
+        # size/timestamps/link counts. The chain therefore records only the
+        # entry identity and mode; _validate_workspace still performs fresh
+        # no-symlink/no-reparse/type checks for every component on every pass.
+        return current == self._workspace_chain
 
     def _refresh_workspace_chain(self) -> None:
         """Advance the chain after a permitted derived-entry lifecycle change."""

@@ -245,21 +245,14 @@ def _observe_regular_entry(path: Path) -> _EntryObservation:
     return _EntryObservation(False, _entry_identity(info))
 
 
-def _workspace_metadata(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
-    return (
-        info.st_dev,
-        info.st_ino,
-        info.st_mode,
-        info.st_size,
-        info.st_mtime_ns,
-        info.st_ctime_ns,
-        getattr(info, "st_nlink", 1),
-    )
+def _workspace_metadata(info: os.stat_result) -> tuple[int, int, int]:
+    """Return stable directory identity without child-lifecycle metadata."""
+    return (info.st_dev, info.st_ino, info.st_mode)
 
 
 def _workspace_identity(
     workspace: Path,
-) -> tuple[tuple[int, int, int, int, int, int, int], ...]:
+) -> tuple[tuple[int, int, int], ...]:
     try:
         chain = list(workspace.parents)[::-1] + [workspace]
         observations = []
@@ -280,7 +273,7 @@ def _workspace_identity(
 
 def _verify_workspace_identity(
     workspace: Path,
-    expected: tuple[tuple[int, int, int, int, int, int, int], ...],
+    expected: tuple[tuple[int, int, int], ...],
 ) -> None:
     if _workspace_identity(workspace) != expected:
         raise _fail()
@@ -673,7 +666,7 @@ class _LockedCheckpointWorkspace:
         database_identity: tuple[int, int, int, int, int, int, int],
         lock_identity: tuple[int, int],
         prior_lock: _EntryObservation,
-        workspace_identity: tuple[tuple[int, int, int, int, int, int, int], ...],
+        workspace_identity: tuple[tuple[int, int, int], ...],
         token: _ActiveCheckpointToken,
         writer_lease=None,
     ) -> None:

@@ -57,15 +57,17 @@ def test_writer_lock_rejects_preexisting_sidecar_deletion(tmp_path) -> None:
         lease.close()
 
 
-def test_writer_lock_rejects_same_inode_ancestor_metadata_change(tmp_path) -> None:
+def test_writer_lock_allows_unrelated_sibling_directory_lifecycle(tmp_path) -> None:
     lease = module._acquire_writer_lock(tmp_path)
+    sibling = tmp_path.parent / f"{tmp_path.name}-unrelated-sibling"
     try:
-        ancestor = tmp_path.parent
-        info = ancestor.stat()
-        os.utime(ancestor, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000))
-        with pytest.raises(CheckpointStateError):
-            lease._verify()
+        sibling.mkdir()
+        lease._verify()
+        sibling.rmdir()
+        lease._verify()
     finally:
+        if sibling.exists():
+            sibling.rmdir()
         lease.close()
 
 
