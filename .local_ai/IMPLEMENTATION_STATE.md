@@ -18,12 +18,14 @@ restriction-evidence replay are complete and independently reviewed `PASS`.
 These stages do not imply a closed 100k scale gate. No
 raw production artifact or published snapshot exists in this repository.
 M8-A normalization fidelity and layout semantics, M8-B complex-table
-migration, and M8-C macro/placeholder/reference intents are complete and
-independently reviewed `PASS`. M8-D generation-bound page-set processing and
-M8-E chunk-stability handoff are complete and independently reviewed `PASS`.
-M9-A1 metadata-first media contract is also complete and independently
-reviewed `PASS`; M9-A2 through M9-D remain staged under the reviewed M8-M9
-goal plan. No M10 full-snapshot work has started.
+migration, M8-C macro/placeholder/reference intents, M8-D generation-bound
+page-set processing, and M8-E chunk-stability handoff are complete and
+independently reviewed `PASS`. M8-AC controlled mini-corpus acceptance is
+implemented and independently re-reviewed `PASS`, but the real gate remains
+`pending_external_input` because no approved 10-20 page generation/selection/
+tokenizer input was supplied. M9-A1 metadata-first media contract is also
+complete and independently reviewed `PASS`; M9-A2 through M9-D remain staged
+under the reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1536,6 +1538,37 @@ are recorded without using repository-local commit SHAs as status.
 - Residual boundaries: M9-A media, M9-B Git, M9-C symbols, and M9-D
   tombstone/delta propagation remain pending; M10 full-snapshot work remains
   separately gated.
+
+## M8-AC Controlled Mini-Corpus Acceptance (M8-D.5)
+
+- Status: implementation and independent re-review complete `PASS`; real gate
+  remains `pending_external_input`.
+- Objective: run two fresh deterministic, aggregate-only passes over an
+  operator-approved 10-20 page M7 generation before relying on M10 for the
+  first real-corpus signal. The seam is retroactive M8-D.5 evidence and does
+  not change M8-D/E processing semantics.
+- Contract: exact run/generation-bound selection, source-byte and explicit
+  write fingerprints, per-pass M8-D/M8-E digests, tokenizer-asset digest,
+  chunk/token distributions and coverage observations, strict status/counter
+  validation, exact negative probes, sanitized CLI categories, no raw content
+  or report leaks, and no output/checkpoint/export writes.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/confluence_mini_corpus_acceptance.py`,
+  `src/knowledgenexus/foundation/application/use_cases/accept_confluence_mini_corpus.py`,
+  `src/knowledgenexus/foundation/cli/accept_confluence_mini_corpus.py`, plus
+  the relevant package exports. Focused adversarial tests cover models,
+  use-case, CLI, and architecture boundaries.
+- Validation: focused fix suite `15 passed, 2 skipped`; `python -m compileall
+  -q src tests` passed; scoped `git diff --check` passed. The bounded M8-D/E
+  regression selection reached `164 passed, 1 failed`; the single failure is
+  the unrelated pre-existing canonical-document schema test in
+  `test_build_confluence_chunks.py`.
+- Review artifacts:
+  `.codex-workflow/20260805-m8ac/05-review-1.md` (`CHANGES_REQUIRED`),
+  `.codex-workflow/20260805-m8ac/08-review-2.md` (`PASS`).
+- Real acceptance is not claimed until the operator supplies a sanitized
+  aggregate report from an approved generation, ordered 10-20 page selection,
+  and pinned tokenizer assets. No raw/runtime artifact is tracked.
 
 ## M9-A1 Metadata-First Media Contract
 
