@@ -93,7 +93,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
 | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
-| M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+| M10 - First full POC Foundation snapshot | in progress; M10-A complete | M10-A wire models independently reviewed `PASS`; M10-B/C/D/E remain pending; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
 
@@ -1068,6 +1068,16 @@ Acceptance categories:
   snapshot.
 - Security: no PAT/token values in config, logs, reports, or exports.
 - Boundary: no embedding, no Qdrant, no retrieval, no chat, no Gauss.
+
+### M10 Execution Ledger
+
+| Stage | Status | Review / gate outcome |
+|---|---|---|
+| M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
+| M10-B trusted multi-source composition | pending | Next bounded stage; consumes M7/M8/M9 handoffs without exporter or CLI work. |
+| M10-C cross-stream projection and generic completion | pending | Requires M10-B approved output; must preserve M6G one-page behavior. |
+| M10-D CLI and publication boundary | pending | Requires M10-C approved generic projection/completion path. |
+| M10-E synthetic acceptance and external real-run gate | pending_external_input | Synthetic acceptance follows M10-D; real operator evidence requires approved inputs and remains separate. |
 
 ## 13. Current Execution Boundary
 

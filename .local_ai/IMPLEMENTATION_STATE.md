@@ -28,8 +28,10 @@ complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
 independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
 explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
-reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with
-no export/store/checkpoint side effects. No M10 full-snapshot work has started.
+reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
+export/store/checkpoint side effects. M10-A wire models are complete and
+independently reviewed `PASS`; M10-B is the next bounded stage. No M10
+exporter/CLI or real full-snapshot run has started.
 
 ## Durable State Convention
 
@@ -1759,3 +1761,20 @@ The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
 replay/checkpoint stages are complete with their independent gates and are
 owner-accepted as the roadmap closeout. The 100k performance gate remains a
 separate deferred follow-up; no 100k scale PASS is claimed.
+
+## M10-A Wire Contract and Trusted Input Models
+
+- Status: complete and independently reviewed `PASS`.
+- Added additive runtime-validated M10 models for approved Confluence scope/
+  exclusions, media policy, trusted normalized profile identity, request,
+  metrics, projection, result status matrix, and generic quality-report input.
+- Bound config hash to the M6G canonical normalized profile preimage and
+  `ChunkingProfile.chunker_version`; rejected forged fields, strict-RFC3339
+  violations, unsafe/reparse dataset roots, impossible counters, and malformed
+  stream/source-scope values before dependencies.
+- Validation: focused `23 passed`; M6G compatibility `37 passed`; compileall/
+  diff-check passed. Final independent review is `VERDICT: PASS` in
+  `.codex-workflow/20260805-m10/17-m10a-review-3.md`.
+- Residual boundary: no exporter, CLI, orchestration, or real full-snapshot
+  invocation is included; M10-B is next and M8-AC remains
+  `pending_external_input`.
