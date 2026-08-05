@@ -16,6 +16,9 @@ from knowledgenexus.foundation.application.use_cases.normalize_confluence_page i
     ConfluencePageNormalizationError,
     NormalizeConfluencePage,
 )
+from knowledgenexus.foundation.application.use_cases.process_confluence_page_set import (
+    ProcessConfluencePageSet,
+)
 from knowledgenexus.foundation.application.use_cases.materialize_confluence_acl import (
     MaterializeConfluenceAcl,
 )
@@ -31,6 +34,28 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop 
     ControlledStopPolicy,
     is_inventory_window_commit,
 )
+from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
+    FetchAndStoreConfluenceAttachmentBody,
+)
+from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
+    AcceptConfluenceMiniCorpus,
+)
+from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
+    ProcessConfluenceMediaAttachment,
+)
+from knowledgenexus.foundation.application.use_cases.build_git_code_documents import (
+    BuildGitCodeDocuments,
+    BuildGitCodeDocumentsRequest,
+)
+from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
+from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
+from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
+from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
+    ComposeM10Snapshot,
+    M10CompositionFailure,
+    M10CompositionFailureCategory,
+    M10CompositionResult,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -41,6 +66,7 @@ __all__ = [
     "PageObservationCollectionResult",
     "ConfluencePageNormalizationError",
     "NormalizeConfluencePage",
+    "ProcessConfluencePageSet",
     "MaterializeConfluenceAcl",
     "DurableInventoryRunResult",
     "DurableInventoryTransport",
@@ -50,4 +76,16 @@ __all__ = [
     "ControlledStopDecision",
     "ControlledStopPolicy",
     "is_inventory_window_commit",
+    "FetchAndStoreConfluenceAttachmentBody",
+    "AcceptConfluenceMiniCorpus",
+    "ProcessConfluenceMediaAttachment",
+    "BuildGitCodeDocuments",
+    "BuildGitCodeDocumentsRequest",
+    "BuildGitSymbols",
+    "ProjectTombstones",
+    "PropagateDelta",
+    "ComposeM10Snapshot",
+    "M10CompositionFailure",
+    "M10CompositionFailureCategory",
+    "M10CompositionResult",
 ]

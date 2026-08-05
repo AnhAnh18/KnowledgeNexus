@@ -7,7 +7,16 @@ from knowledgenexus.foundation.domain.rules.dataset_version_generator import (
 from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
 from knowledgenexus.foundation.domain.rules.relation_id_generator import RelationIdGenerator
 from knowledgenexus.foundation.domain.rules.text_normalization import TextNormalizationRules
+from knowledgenexus.foundation.domain.rules.chunk_stability_builder import (
+    ChunkStabilitySummaryBuilder,
+)
+from knowledgenexus.foundation.domain.rules.media_asset_record_builder import (
+    MediaAssetRecordBuilder,
+)
 from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
+from knowledgenexus.foundation.domain.rules.symbol_id_generator import SymbolIdGenerator
+from knowledgenexus.foundation.domain.rules.symbol_record_builder import SymbolRecordBuilder
+from knowledgenexus.foundation.domain.rules.tombstone_record_builder import TombstoneRecordBuilder
 from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
     WikiStructureParseError,
     WikiStructureParser,
@@ -21,7 +30,12 @@ __all__ = [
     "DocumentIdGenerator",
     "RelationIdGenerator",
     "TextNormalizationRules",
+    "ChunkStabilitySummaryBuilder",
+    "MediaAssetRecordBuilder",
     "TombstoneIdGenerator",
+    "SymbolIdGenerator",
+    "SymbolRecordBuilder",
+    "TombstoneRecordBuilder",
     "WikiStructureParseError",
     "WikiStructureParser",
     "OccurrenceResolutionConflict",

@@ -17,6 +17,7 @@ from knowledgenexus.foundation.domain.models.one_page_export import (
     ONE_PAGE_CONFIG_CONTRACT_VERSION,
     ONE_PAGE_DATASET_NAME,
     ONE_PAGE_EXPORT_MODE,
+    ONE_PAGE_NORMALIZATION_POLICY_ID,
     ONE_PAGE_SCHEMAS_VERSION,
     ONE_PAGE_SOURCE_ID,
     ONE_PAGE_SPACE_KEY,
@@ -94,7 +95,8 @@ def test_contract_constants_are_exact() -> None:
     assert ONE_PAGE_SOURCE_ID == "confluence_svmc_spensrv"
     assert ONE_PAGE_EXPORT_MODE == "full_snapshot"
     assert ONE_PAGE_SCHEMAS_VERSION == "1.0"
-    assert ONE_PAGE_CONFIG_CONTRACT_VERSION == "one-page-export-v1"
+    assert ONE_PAGE_CONFIG_CONTRACT_VERSION == "one-page-export-v2"
+    assert ONE_PAGE_NORMALIZATION_POLICY_ID == "confluence-table-no-loss-v1"
     assert ONE_PAGE_SPACE_KEY == "SVMC"
 
 
@@ -120,6 +122,7 @@ def test_bundle_config_hash_uses_canonical_json_algorithm() -> None:
     canonical = {
         "contract_version": ONE_PAGE_CONFIG_CONTRACT_VERSION,
         "dataset_name": ONE_PAGE_DATASET_NAME,
+        "normalization_policy_id": ONE_PAGE_NORMALIZATION_POLICY_ID,
         "source_id": ONE_PAGE_SOURCE_ID,
         "embedding_profile_text": "embedding-profile-text",
         "jira_relation_profile_text": "jira-profile-text",
@@ -134,6 +137,29 @@ def test_bundle_config_hash_uses_canonical_json_algorithm() -> None:
         ).encode("utf-8")
     ).hexdigest()
     assert bundle.config_hash == expected
+
+
+def test_table_policy_identity_invalidates_the_previous_export_hash() -> None:
+    import hashlib
+    import json
+
+    old_canonical = {
+        "contract_version": "one-page-export-v1",
+        "dataset_name": ONE_PAGE_DATASET_NAME,
+        "source_id": ONE_PAGE_SOURCE_ID,
+        "embedding_profile_text": "embedding-profile-text",
+        "jira_relation_profile_text": "jira-profile-text",
+    }
+    old_hash = hashlib.sha256(
+        json.dumps(
+            old_canonical,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert _bundle().config_hash != old_hash
 
 
 def test_config_hash_cannot_be_supplied_or_overridden() -> None:

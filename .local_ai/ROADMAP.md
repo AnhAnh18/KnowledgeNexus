@@ -91,9 +91,9 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
 | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
-| M8 - Production-quality normalization and chunking | planned | Only early text normalization and chunk ID rules exist | Structure-aware processing later. |
-| M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
-| M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+| M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+| M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
+| M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
 
@@ -111,6 +111,19 @@ independent review `PASS`; the bounded M7 roadmap is owner-accepted and the
 100k scale gate remains deferred. M7-D5-A raw-page
 replay/checkpoint integration and M7-D5-B restriction replay are complete with
 independent review `PASS`; terminal sessions fail closed for both replay paths.
+M8-A through M8-E are complete and independently reviewed `PASS`. M8-AC
+controlled mini-corpus acceptance is implemented and independently re-reviewed
+`PASS`, but its real gate remains `pending_external_input` until an approved
+10-20 page generation/selection/tokenizer input is supplied. M9-A1 is complete
+and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
+independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+M9-B and M9-C are independently approved. M9-D1 tombstone contract and
+explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+approved. M9-D2 remains read-only and does not perform export/store/checkpoint
+side effects. M10-A through M10-D are complete and independently reviewed
+`PASS`. M10-E synthetic acceptance is complete and independently reviewed
+`PASS`; no real full-snapshot run has started, and the M8-AC real gate remains
+`pending_external_input`.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -952,6 +965,17 @@ Completion gate:
 - Chunk text used for hash/ID is exactly the exported text.
 - No downstream embedding mutation is needed.
 
+### M8 Stage Ledger
+
+| Milestone | Status | Review / gate outcome |
+|---|---|---|
+| M8-A normalization fidelity and layout semantics | complete | Transparent `layout`, `layout-section`, and `layout-cell` handling; focused normalizer `47 passed`; normalize/parser regression `98 passed`; independent review `PASS`; no chunker/schema/version change. |
+| M8-B complex-table migration | complete | `confluence-table-no-loss-v1` approved and implemented; 60 focused normalizer tests and 258 bounded regression tests passed (one asset-only skip); config identity migrated to one-page-export-v2; independent review `PASS`; next production export must be `full_snapshot`. |
+| M8-C macro/placeholder/reference intents | complete | Added immutable/runtime-validated drawio, image/attachment, and include-page intent side stream; focused `99 passed`, architecture `69 passed`; independent review `PASS`; no counter/body/config/chunker/schema/network/export changes; closeout pushed on `codex/m8-m9`. |
+| M8-D generation-bound page-set processing | complete | Added exact ordered request/work-item/result/metrics/error models and a read-only M7 envelope adapter composing normalize → parse → chunk; focused `17 passed`, bounded regression `147 passed`, architecture `70 passed`; independent review `PASS`; no partial result or checkpoint/raw/export mutation; closeout pushed on `codex/m8-m9`. |
+| M8-E chunk stability handoff | complete | Added immutable text-free `ChunkStabilityEntry`/`DocumentChunkSetSummary` with strict schema/hash/profile/order/count validation, canonical UTF-8 JSON and SHA-256 digest; focused `23 passed`, bounded regression `85 passed`, architecture `16 passed`; independent review `PASS`; no export/state/network/I/O changes. |
+| M8-AC controlled mini-corpus acceptance (M8-D.5) | pending_external_input | Aggregate-only 10-20 page acceptance seam implemented and independently re-reviewed `PASS`; focused `15 passed, 2 skipped`, compileall/diff-check passed; requires operator-approved generation, ordered page selection, profile, and tokenizer assets for the real gate. |
+
 ## 11. M9 - Media, Git, Symbols, and Deletion Propagation
 
 Split this milestone into independent tracks.
@@ -965,6 +989,18 @@ M9A - Media:
 - Video deferred.
 - Activate `MediaAssetRecordBuilder` here if deferred.
 - Inherit parent ACL deny-safely.
+
+### M9 Execution Ledger
+
+| Stage | Status | Review / gate outcome |
+|---|---|---|
+| M9-A1 metadata-first media contract | complete | Added immutable attachment observation/policy/result models, schema-valid metadata-only MediaAsset builder, deterministic media relation-intent mapper, and strict adversarial boundaries; focused `11 passed`, bounded attachment/schema regression `87 passed`, architecture `16 passed`; independent review `PASS`; no download/raw/export/I/O. |
+| M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
+| M9-A3 offline draw.io/PDF/OCR processors | complete; independently reviewed `PASS` | Added bounded stdlib draw.io XML parsing, pinned digital-PDF text and image-OCR capability ports/processors, strict schema/status/detail binding, and MIME/filename dispatch over the M9-A2 envelope; focused `30 passed`, architecture `80 passed`, M9-A1/A2 regression `48 passed, 2 skipped`, compileall and diff-check passed. No engine/network/file side effects, attachment-text chunks, schema changes, or raw writes. |
+| M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
+| M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
+| M9-D1 tombstone contract and explicit cascade | complete; independently reviewed `PASS` | Added runtime-validated tombstone models, schema-valid deterministic builder, atomic document-root cascade use case, exact-field/JSON/cycle-safe boundaries, and injected schema-validator dependency. Focused `31 passed`; M9/M8 regression `42 passed`; architecture/schema `37 passed`; full architecture `86 passed`; compileall/diff-check passed; final review `VERDICT: PASS` in `.codex-workflow/20260805-m9d1/19-review-final.md`. |
+| M9-D2 delta/inventory diff propagation | complete; independently reviewed `PASS` | Added deterministic M8-E summary diffing, explicit inventory-state handling, config invalidation cascades, atomic tombstone-only results, canonical digest, and strict malformed-boundary validation. Focused `90 passed`; M9-D1/M8-E `54 passed`; bounded M9-A/B/C `284 passed, 2 skipped, 1 deselected` (external tokenizer asset case); architecture `87 passed`; compileall/diff-check passed; final review in `.codex-workflow/20260805-m9d2/16-review-final.md`. |
 
 M9B - Git repository scan:
 - Configured repository and branch.
@@ -1035,6 +1071,16 @@ Acceptance categories:
   snapshot.
 - Security: no PAT/token values in config, logs, reports, or exports.
 - Boundary: no embedding, no Qdrant, no retrieval, no chat, no Gauss.
+
+### M10 Execution Ledger
+
+| Stage | Status | Review / gate outcome |
+|---|---|---|
+| M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
+| M10-B trusted multi-source composition | complete; independently reviewed `PASS` | Added typed Confluence/Git handoffs, canonical shared-schema validation, source ownership/provenance, ACL inheritance, relation/media/symbol/sync gates, deterministic composition, empty initial tombstones, and sanitized application boundary. Focused `51 passed`; M9 `120 passed`; M6G `37 passed`; architecture `88 passed`; compileall/diff-check passed. Final review `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` is `VERDICT: PASS`. |
+| M10-C cross-stream projection and generic completion | complete; independently reviewed `PASS` | Added additive generic `m10_quality` completion with strict canonical validation, exact stream/metric/source-scope invariants, deterministic sanitized 12-section reporting, no-clobber cleanup, and preserved M6G behavior. Focused `50 passed, 1 skipped`; M6G exporter/writer/publisher/one-page `118 passed, 8 skipped`; architecture `88 passed`; compileall/diff-check passed. Initial review found two P1 and one P2 boundary issues; bounded fix plan/review artifacts `47-49` addressed them. Final independent review `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` is `PASS`. |
+| M10-D CLI and publication boundary | complete; independently reviewed `PASS` | Added offline sanitized CLI, M3 writer/completer/publisher wiring, no-clobber preflight, strict post-publication acceptance, and bounded rollback on acceptance failure. Focused M10-D/E suite `40 passed`; architecture `89 passed`; fresh review `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` is `PASS`. |
+| M10-E synthetic acceptance and external real-run gate | synthetic acceptance complete; real gate `pending_external_input` | Deterministic synthetic ten-file acceptance and repeatability are complete and independently reviewed `PASS`; real operator evidence still requires approved Confluence/Git inputs, ordered scope, and tokenizer assets. |
 
 ## 13. Current Execution Boundary
 
@@ -1350,6 +1396,7 @@ Before full POC:
 | Query-time ACL resolver | Out of Foundation scope | Retrieval/platform permission concern. | Retrieval/platform ACL task. |
 | Embedding/Qdrant | Out of Foundation scope | Owned by Indexing. | Indexing snapshot importer/indexer task. |
 | Retrieval/chat/Gauss | Out of Foundation scope | Owned by Retrieval/Chat. | Retrieval/chat milestones. |
+| M8-D profile identity source-of-truth cleanup | Post-POC product hardening | `process_confluence_page_set._profile_identity` duplicates the full active `ChunkingProfile` contract as literals, so contract changes can drift across boundaries even though validation remains strict. | After the first product/POC proves the contract, derive the page-set identity/fingerprint from one canonical profile identity/provenance helper; add drift and mutation tests, then run an independent review specifically for duplicate contract constants. |
 
 ## 16. Roadmap Maintenance Rules
 

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluenceStorageNormalization,
+    NormalizationReferenceIntent,
 )
 from knowledgenexus.foundation.ports.confluence_page_normalization_port import (
     ConfluenceStorageNormalizationError,
@@ -27,7 +28,16 @@ _JIRA_KEY = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]*$")
 _BACKTICK_RUN = re.compile(r"`+")
 _STANDARD_XML_ENTITIES = {"amp", "lt", "gt", "apos", "quot"}
 
-_BLOCK_TAGS = {"article", "div", "section"}
+# Confluence layout containers are structural blocks, not unsupported content.
+# Treating them as transparent blocks preserves source order and boundaries.
+_BLOCK_TAGS = {
+    "article",
+    "div",
+    "section",
+    "layout",
+    "layout-section",
+    "layout-cell",
+}
 _INLINE_CONTAINER_TAGS = {"span", "small", "sub", "sup"}
 _ADMONITION_LABELS = {
     "info": "Info",
@@ -37,6 +47,18 @@ _ADMONITION_LABELS = {
     "panel": "Panel",
 }
 _DRAWIO_MACROS = {"drawio", "drawio-sketch", "drawio-board"}
+_TABLE_CELL_TAGS = {"th", "td"}
+_TABLE_SPAN_VALUE = re.compile(r"^[1-9][0-9]*$")
+
+# Complex tables are untrusted input. Keep grid allocation and recursive
+# rendering bounded before any large integer or nested structure is expanded.
+_MAX_TABLE_ROWS = 256
+_MAX_TABLE_COLUMNS = 128
+_MAX_TABLE_SLOTS = 32_768
+_MAX_TABLE_CELL_BYTES = 65_536
+_MAX_TABLE_OUTPUT_BYTES = 1_048_576
+_MAX_NESTED_TABLE_DEPTH = 4
+_MAX_REFERENCE_INTENTS = 256
 
 
 class ConfluenceStorageXhtmlNormalizer(ConfluenceStorageNormalizerPort):
@@ -74,6 +96,7 @@ class ConfluenceStorageXhtmlNormalizer(ConfluenceStorageNormalizerPort):
             normalized_body_text=normalized,
             counters=renderer.counters(),
             warnings=tuple(renderer.warnings),
+            reference_intents=tuple(renderer.reference_intents),
         )
 
 
@@ -86,6 +109,7 @@ class _Renderer:
         self.unsupported_elements = 0
         self.complex_tables = 0
         self.warnings: list[dict[str, object]] = []
+        self.reference_intents: list[NormalizationReferenceIntent] = []
 
     def counters(self) -> dict[str, object]:
         return {
@@ -106,30 +130,37 @@ class _Renderer:
             }
         )
 
-    def render_children(self, element: ET.Element) -> str:
+    def render_children(self, element: ET.Element, *, table_depth: int = 0) -> str:
         parts: list[str] = []
         if element.text:
             parts.append(_escape_markdown_text(element.text))
         for child in element:
-            parts.append(self.render(child))
+            parts.append(self.render(child, table_depth=table_depth))
             if child.tail:
                 parts.append(_escape_markdown_text(child.tail))
         return "".join(parts)
 
-    def render(self, element: ET.Element) -> str:
+    def render(self, element: ET.Element, *, table_depth: int = 0) -> str:
         name = _local_name(element.tag)
 
         if name in {"structured-macro", "macro"}:
-            return self._render_macro(element)
+            return self._render_macro(element, table_depth=table_depth)
         if name == "image" or name == "img":
             self.media_placeholders += 1
             attachment = _descendant(element, "attachment")
             identity = (
                 _attribute(attachment, "filename")
                 if attachment is not None
-                else _attribute(element, "alt")
+                else None
             )
-            return f"[media: {_placeholder_value(identity)}]"
+            if not identity:
+                identity = _attribute(element, "alt")
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(
+                kind="image_attachment",
+                identity=placeholder,
+            )
+            return f"[media: {placeholder}]"
         if name == "link" and _has_descendant(element, "attachment"):
             self.media_placeholders += 1
             attachment = _descendant(element, "attachment")
@@ -138,51 +169,63 @@ class _Renderer:
                 if attachment is not None
                 else None
             )
-            return f"[media: {_placeholder_value(identity)}]"
+            if not identity:
+                identity = _attribute(element, "alt")
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(
+                kind="image_attachment",
+                identity=placeholder,
+            )
+            return f"[media: {placeholder}]"
 
         if name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             level = int(name[1])
-            return f"\n\n{'#' * level} {self.render_children(element).strip()}\n\n"
+            return f"\n\n{'#' * level} {self.render_children(element, table_depth=table_depth).strip()}\n\n"
         if name == "p":
-            return f"\n\n{self.render_children(element).strip()}\n\n"
+            return f"\n\n{self.render_children(element, table_depth=table_depth).strip()}\n\n"
         if name == "br":
             return "\n"
         if name == "hr":
             return "\n\n---\n\n"
         if name in {"strong", "b"}:
-            return f"**{self.render_children(element).strip()}**"
+            return f"**{self.render_children(element, table_depth=table_depth).strip()}**"
         if name in {"em", "i"}:
-            return f"*{self.render_children(element).strip()}*"
+            return f"*{self.render_children(element, table_depth=table_depth).strip()}*"
         if name == "code":
             return _inline_code(_plain_text(element))
         if name == "pre":
             return _fenced_code(_plain_text(element))
         if name == "blockquote":
-            return _blockquote(self.render_children(element))
+            return _blockquote(self.render_children(element, table_depth=table_depth))
         if name in {"ul", "ol"}:
-            return self._render_list(element, ordered=name == "ol", depth=0)
+            return self._render_list(
+                element,
+                ordered=name == "ol",
+                depth=0,
+                table_depth=table_depth,
+            )
         if name == "li":
-            return self.render_children(element)
+            return self.render_children(element, table_depth=table_depth)
         if name == "table":
-            return self._render_table(element)
+            return self._render_table(element, depth=table_depth)
         if name == "a":
-            return self._render_link(element)
+            return self._render_link(element, table_depth=table_depth)
         if name in _BLOCK_TAGS:
-            return f"\n\n{self.render_children(element)}\n\n"
+            return f"\n\n{self.render_children(element, table_depth=table_depth)}\n\n"
         if name in _INLINE_CONTAINER_TAGS:
-            return self.render_children(element)
+            return self.render_children(element, table_depth=table_depth)
 
         self.unsupported_elements += 1
         self.warn("unsupported_element", name)
-        body = self.render_children(element).strip()
+        body = self.render_children(element, table_depth=table_depth).strip()
         if name in {"script", "style"}:
             return f"[unsupported:{_sanitize_name(name)} omitted]"
         if body:
             return body
         return f"[unsupported:{_sanitize_name(name)}]"
 
-    def _render_link(self, element: ET.Element) -> str:
-        label = self.render_children(element).strip() or "link"
+    def _render_link(self, element: ET.Element, *, table_depth: int = 0) -> str:
+        label = self.render_children(element, table_depth=table_depth).strip() or "link"
         href = _attribute(element, "href")
         if not href:
             self.warn("link_target_missing", "a")
@@ -193,7 +236,14 @@ class _Renderer:
         target = href.replace(" ", "%20").replace(")", "\\)")
         return f"[{label}]({target})"
 
-    def _render_list(self, element: ET.Element, *, ordered: bool, depth: int) -> str:
+    def _render_list(
+        self,
+        element: ET.Element,
+        *,
+        ordered: bool,
+        depth: int,
+        table_depth: int = 0,
+    ) -> str:
         lines: list[str] = []
         item_number = 1
         for child in element:
@@ -208,7 +258,7 @@ class _Renderer:
                 if child_name in {"ul", "ol"}:
                     nested.append(item_child)
                 else:
-                    direct_parts.append(self.render(item_child))
+                    direct_parts.append(self.render(item_child, table_depth=table_depth))
                 if item_child.tail:
                     direct_parts.append(_escape_markdown_text(item_child.tail))
 
@@ -229,56 +279,64 @@ class _Renderer:
                     nested_list,
                     ordered=_local_name(nested_list.tag) == "ol",
                     depth=depth + 1,
+                    table_depth=table_depth,
                 ).strip("\n")
                 if nested_rendered:
                     lines.append(nested_rendered)
             item_number += 1
         return "\n\n" + "\n".join(lines) + "\n\n"
 
-    def _render_table(self, element: ET.Element) -> str:
+    def _render_table(self, element: ET.Element, *, depth: int = 0) -> str:
         rows = _table_rows(element)
-        rendered_rows: list[list[str]] = []
-        raw_rows: list[list[str]] = []
+        if len(rows) > _MAX_TABLE_ROWS:
+            raise ConfluenceStorageNormalizationError(
+                "table exceeds safety limit"
+            )
+        if depth > _MAX_NESTED_TABLE_DEPTH:
+            return self._render_table_fallback(rows, depth=depth)
+
         complex_shape = not rows
         expected_width: int | None = None
 
         for row in rows:
-            cells = [child for child in row if _local_name(child.tag) in {"th", "td"}]
+            cells = [child for child in row if _local_name(child.tag) in _TABLE_CELL_TAGS]
             if not cells:
                 complex_shape = True
-                continue
             if any(
-                _has_span(cell)
+                _span_requires_complex(cell)
                 or _has_nested_table(cell)
                 or _has_block_code(cell)
                 for cell in cells
             ):
                 complex_shape = True
-            raw_values = [
-                _normalize_final_text(self.render_children(cell)) for cell in cells
-            ]
-            values = [_single_line(value).replace("|", "\\|") for value in raw_values]
             if expected_width is None:
-                expected_width = len(values)
-            elif len(values) != expected_width:
+                expected_width = len(cells)
+            elif len(cells) != expected_width:
                 complex_shape = True
-            rendered_rows.append(values)
-            raw_rows.append(raw_values)
 
-        if complex_shape or expected_width is None:
-            self.complex_tables += 1
-            self.warn("complex_table_fallback", "table")
-            meaningful: list[str] = []
-            for raw_row in raw_rows:
-                if any("\n" in cell for cell in raw_row):
-                    meaningful.extend(cell for cell in raw_row if cell)
-                elif any(raw_row):
-                    meaningful.append(" | ".join(raw_row))
-            if not meaningful:
-                fallback = _single_line(self.render_children(element))
-                meaningful = [fallback] if fallback else []
-            return "\n\n[table]\n" + "\n".join(meaningful) + "\n\n"
+        if not complex_shape and expected_width is not None:
+            rendered_rows = [
+                [
+                    _single_line(_normalize_final_text(self.render_children(cell))).replace(
+                        "|", "\\|"
+                    )
+                    for cell in row
+                    if _local_name(cell.tag) in _TABLE_CELL_TAGS
+                ]
+                for row in rows
+            ]
+            return self._render_simple_table(rendered_rows)
 
+        grid = self._build_complex_table_grid(rows, depth=depth)
+        if grid is None:
+            return self._render_table_fallback(rows, depth=depth)
+
+        self.complex_tables += 1
+        self.warn("complex_table_grid", "table")
+        return self._render_grid_table(grid)
+
+    @staticmethod
+    def _render_simple_table(rendered_rows: list[list[str]]) -> str:
         header = rendered_rows[0]
         lines = [
             "| " + " | ".join(header) + " |",
@@ -287,7 +345,135 @@ class _Renderer:
         lines.extend("| " + " | ".join(row) + " |" for row in rendered_rows[1:])
         return "\n\n" + "\n".join(lines) + "\n\n"
 
-    def _render_macro(self, element: ET.Element) -> str:
+    def _build_complex_table_grid(
+        self,
+        rows: list[ET.Element],
+        *,
+        depth: int,
+    ) -> list[list[str]] | None:
+        if not rows or len(rows) > _MAX_TABLE_ROWS:
+            return None
+
+        occupied = [
+            [False] * _MAX_TABLE_COLUMNS for _ in range(len(rows))
+        ]
+        values: list[list[str | None]] = [
+            [None] * _MAX_TABLE_COLUMNS for _ in range(len(rows))
+        ]
+        placements: list[tuple[int, ET.Element, int, int, int]] = []
+        width = 0
+        occupied_slots = 0
+
+        for row_index, row in enumerate(rows):
+            cells = [child for child in row if _local_name(child.tag) in _TABLE_CELL_TAGS]
+            if not cells:
+                return None
+            for cell in cells:
+                rowspan = _parse_table_span(cell, "rowspan")
+                colspan = _parse_table_span(cell, "colspan")
+                if rowspan is None or colspan is None:
+                    return None
+                if row_index + rowspan > len(rows):
+                    return None
+                if colspan > _MAX_TABLE_COLUMNS or rowspan > _MAX_TABLE_ROWS:
+                    return None
+                if occupied_slots + (rowspan * colspan) > _MAX_TABLE_SLOTS:
+                    return None
+
+                start_column: int | None = None
+                for candidate in range(_MAX_TABLE_COLUMNS - colspan + 1):
+                    if all(
+                        not occupied[grid_row][grid_column]
+                        for grid_row in range(row_index, row_index + rowspan)
+                        for grid_column in range(candidate, candidate + colspan)
+                    ):
+                        start_column = candidate
+                        break
+                if start_column is None:
+                    return None
+
+                for grid_row in range(row_index, row_index + rowspan):
+                    for grid_column in range(
+                        start_column,
+                        start_column + colspan,
+                    ):
+                        occupied[grid_row][grid_column] = True
+                        occupied_slots += 1
+                placements.append((row_index, cell, rowspan, colspan, start_column))
+                width = max(width, start_column + colspan)
+
+        if width == 0 or width > _MAX_TABLE_COLUMNS:
+            return None
+        for row_index, cell, rowspan, colspan, start_column in placements:
+            raw_value = _normalize_final_text(
+                self.render_children(cell, table_depth=depth + 1)
+            )
+            if len(raw_value.encode("utf-8")) > _MAX_TABLE_CELL_BYTES:
+                raise ConfluenceStorageNormalizationError(
+                    "table cell exceeds safety limit"
+                )
+            marker = ""
+            if rowspan > 1:
+                marker += f" [rowspan:{rowspan}]"
+            if colspan > 1:
+                marker += f" [colspan:{colspan}]"
+            values[row_index][start_column] = _encode_complex_table_cell(
+                raw_value + marker
+            )
+        result = [
+            [values[row_index][column] or "" for column in range(width)]
+            for row_index in range(len(rows))
+        ]
+        rendered = self._render_grid_table(result)
+        if len(rendered.encode("utf-8")) > _MAX_TABLE_OUTPUT_BYTES:
+            raise ConfluenceStorageNormalizationError(
+                "table output exceeds safety limit"
+            )
+        return result
+
+    def _render_grid_table(self, grid: list[list[str]]) -> str:
+        if not grid or not grid[0]:
+            return self._render_table_fallback([], depth=0)
+        width = len(grid[0])
+        lines = [
+            "| " + " | ".join(grid[0]) + " |",
+            "| " + " | ".join("---" for _ in range(width)) + " |",
+        ]
+        lines.extend("| " + " | ".join(row) + " |" for row in grid[1:])
+        return "\n\n" + "\n".join(lines) + "\n\n"
+
+    def _render_table_fallback(
+        self,
+        rows: list[ET.Element],
+        *,
+        depth: int,
+    ) -> str:
+        lines: list[str] = []
+        for row_index, row in enumerate(rows):
+            cells = [child for child in row if _local_name(child.tag) in _TABLE_CELL_TAGS]
+            encoded_cells: list[str] = []
+            for cell in cells:
+                raw_value = _normalize_final_text(
+                    self.render_children(cell, table_depth=depth + 1)
+                )
+                if len(raw_value.encode("utf-8")) > _MAX_TABLE_CELL_BYTES:
+                    raise ConfluenceStorageNormalizationError(
+                        "table cell exceeds safety limit"
+                    )
+                encoded_cells.append(_encode_complex_table_cell(raw_value))
+            lines.append(f"row[{row_index}]: " + " || ".join(encoded_cells))
+        if not lines:
+            lines.append("row[0]: ")
+        rendered = "\n\n[table]\n" + "\n".join(lines) + "\n\n"
+        if len(rendered.encode("utf-8")) > _MAX_TABLE_OUTPUT_BYTES:
+            raise ConfluenceStorageNormalizationError(
+                "table output exceeds safety limit"
+            )
+        self.complex_tables += 1
+        self.warn("complex_table_fallback", "table")
+        return rendered
+
+    def _render_macro(self, element: ET.Element, *, table_depth: int = 0) -> str:
         name = _sanitize_name(_attribute(element, "name") or "unknown")
         rich_body = _child(element, "rich-text-body")
         plain_body = _child(element, "plain-text-body")
@@ -307,13 +493,21 @@ class _Renderer:
         if name == "expand":
             self.handled_macros[name] += 1
             title = parameters.get("title", "").strip()
-            body = self.render_children(rich_body) if rich_body is not None else ""
+            body = (
+                self.render_children(rich_body, table_depth=table_depth)
+                if rich_body is not None
+                else ""
+            )
             title_line = f"**{_escape_markdown_text(title)}**\n\n" if title else ""
             return f"\n\n{title_line}{body}\n\n"
 
         if name == "excerpt":
             self.handled_macros[name] += 1
-            return self.render_children(rich_body) if rich_body is not None else ""
+            return (
+                self.render_children(rich_body, table_depth=table_depth)
+                if rich_body is not None
+                else ""
+            )
 
         if name in {"include", "excerpt-include"}:
             self.handled_macros[name] += 1
@@ -326,7 +520,12 @@ class _Renderer:
                 )
             if not identity:
                 identity = parameters.get("page") or parameters.get("title")
-            return f"[included from page: {_placeholder_value(identity)}]"
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(
+                kind="include_page",
+                identity=placeholder,
+            )
+            return f"[included from page: {placeholder}]"
 
         if name in _DRAWIO_MACROS:
             self.handled_macros[name] += 1
@@ -340,7 +539,9 @@ class _Renderer:
                 attachment = _descendant(element, "attachment")
                 if attachment is not None:
                     identity = _attribute(attachment, "filename")
-            return f"[diagram: {_placeholder_value(identity)}]"
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(kind="drawio", identity=placeholder)
+            return f"[diagram: {placeholder}]"
 
         if name == "jira":
             self.handled_macros[name] += 1
@@ -357,7 +558,11 @@ class _Renderer:
 
         if name in _ADMONITION_LABELS:
             self.handled_macros[name] += 1
-            body = self.render_children(rich_body) if rich_body is not None else ""
+            body = (
+                self.render_children(rich_body, table_depth=table_depth)
+                if rich_body is not None
+                else ""
+            )
             body = _normalize_final_text(body)
             content = f"**{_ADMONITION_LABELS[name]}:**"
             if body:
@@ -370,13 +575,34 @@ class _Renderer:
         for child in element:
             child_name = _local_name(child.tag)
             if child_name == "rich-text-body":
-                body_parts.append(self.render_children(child))
+                body_parts.append(
+                    self.render_children(child, table_depth=table_depth)
+                )
             elif child_name == "plain-text-body":
                 body_parts.append(_escape_markdown_text(_plain_text(child)))
         body = _normalize_final_text("\n\n".join(body_parts))
         if body:
             return f"\n\n[macro:{name}]\n\n{body}\n\n"
         return f"[macro:{name} omitted]"
+
+    def _emit_reference_intent(self, *, kind: str, identity: str) -> None:
+        if len(self.reference_intents) >= _MAX_REFERENCE_INTENTS:
+            raise ConfluenceStorageNormalizationError(
+                "reference intent limit exceeded"
+            )
+        status = "deferred_mvp" if identity != "unknown" else "unresolved_target"
+        if kind == "include_page":
+            status = "unresolved_target"
+        ordinal = len(self.reference_intents) + 1
+        self.reference_intents.append(
+            NormalizationReferenceIntent(
+                ordinal=ordinal,
+                kind=kind,
+                status=status,
+                target_identity=identity,
+                placeholder_identity=identity,
+            )
+        )
 
 
 def _replace_named_entities(fragment: str) -> str:
@@ -496,6 +722,61 @@ def _has_span(cell: ET.Element) -> bool:
     return False
 
 
+def _parse_table_span(cell: ET.Element, name: str) -> int | None:
+    value = _attribute(cell, name)
+    if value is None:
+        return 1
+    if not _TABLE_SPAN_VALUE.fullmatch(value):
+        return None
+    limit = _MAX_TABLE_ROWS if name == "rowspan" else _MAX_TABLE_COLUMNS
+    if len(value) > len(str(limit)):
+        return None
+    parsed = int(value)
+    if parsed > limit:
+        return None
+    return parsed
+
+
+def _span_requires_complex(cell: ET.Element) -> bool:
+    for name in ("rowspan", "colspan"):
+        value = _attribute(cell, name)
+        if value is None:
+            continue
+        parsed = _parse_table_span(cell, name)
+        if parsed is None or parsed != 1:
+            return True
+    return False
+
+
+def _encode_complex_table_cell(value: str) -> str:
+    """Encode complex-table cells without changing simple-table output."""
+
+    # Preserve existing Markdown escapes (including nested-table pipes), while
+    # escaping raw backslashes and unescaped pipes exactly once.
+    encoded: list[str] = []
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if character == "\n":
+            encoded.append("<br>")
+            index += 1
+            continue
+        if character == "\\":
+            if index + 1 < len(value) and value[index + 1] in {"|", "\\"}:
+                encoded.append("\\" + value[index + 1])
+                index += 2
+            else:
+                encoded.append("\\\\")
+                index += 1
+            continue
+        if character == "|":
+            encoded.append("\\|")
+        else:
+            encoded.append(character)
+        index += 1
+    return "".join(encoded)
+
+
 def _has_nested_table(cell: ET.Element) -> bool:
     return any(
         descendant is not cell and _local_name(descendant.tag) == "table"
@@ -519,14 +800,21 @@ def _placeholder_value(value: str | None) -> str:
     if not value:
         return "unknown"
     normalized = unicodedata.normalize("NFC", value)
+    normalized = "".join(
+        " " if ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F else character
+        for character in normalized
+    )
     normalized = _single_line(normalized)
     if not normalized:
         return "unknown"
-    return (
+    escaped = (
         normalized.replace("\\", "\\\\")
         .replace("[", "\\[")
         .replace("]", "\\]")
     )
+    if len(escaped.encode("utf-8")) > 256:
+        return "unknown"
+    return escaped
 
 
 def _escape_markdown_text(value: str) -> str:

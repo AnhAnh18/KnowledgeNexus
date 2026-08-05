@@ -19,6 +19,16 @@ from knowledgenexus.foundation.ports.confluence_page_observation_port import (
     ConfluenceObservationTooLargeError,
     ConfluenceRestrictionFetchPort,
 )
+from knowledgenexus.foundation.ports.confluence_attachment_body_fetch_port import (
+    ConfluenceAttachmentBodyFetchError,
+    ConfluenceAttachmentBodyFetchPort,
+    ConfluenceAttachmentBodyTooLargeError,
+)
+from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
+    ConfluenceRawAttachmentStoreError,
+    ConfluenceRawAttachmentStoreFailureCategory,
+    ConfluenceRawAttachmentStorePort,
+)
 from knowledgenexus.foundation.ports.raw_page_observation_store_port import (
     RawObservationStoreError,
     RawObservationStorePort,
@@ -36,6 +46,11 @@ from knowledgenexus.foundation.ports.tokenizer_port import (
     TokenizerFailureCategory,
     TokenizerPort,
 )
+from knowledgenexus.foundation.ports.git_repository_read_port import (
+    GitRepositoryReadPort,
+    GitRepositoryReaderError,
+)
+from knowledgenexus.foundation.ports.symbol_parser_port import SymbolParserPort
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointFailureCategory,
     CheckpointCommitResult,
@@ -97,6 +112,15 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     ResumeUniqueIncompleteRunRequest,
     StartNewRunRequest,
 )
+from knowledgenexus.foundation.ports.media_processing_port import (
+    ImageOcrPort,
+    PdfTextExtractionPort,
+)
+from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
+    M10PublisherPort,
+    M10StagingCompleterPort,
+    M10StagingWriterPort,
+)
 
 __all__ = [
     "ConfluenceInventoryPort",
@@ -110,6 +134,12 @@ __all__ = [
     "ConfluenceObservationFetchError",
     "ConfluenceObservationTooLargeError",
     "ConfluenceRestrictionFetchPort",
+    "ConfluenceAttachmentBodyFetchError",
+    "ConfluenceAttachmentBodyFetchPort",
+    "ConfluenceAttachmentBodyTooLargeError",
+    "ConfluenceRawAttachmentStoreError",
+    "ConfluenceRawAttachmentStoreFailureCategory",
+    "ConfluenceRawAttachmentStorePort",
     "RawObservationStoreError",
     "RawObservationStorePort",
     "RawPageReadError",
@@ -121,6 +151,9 @@ __all__ = [
     "TokenizerError",
     "TokenizerFailureCategory",
     "TokenizerPort",
+    "GitRepositoryReadPort",
+    "GitRepositoryReaderError",
+    "SymbolParserPort",
     "CheckpointFailureCategory",
     "CheckpointCommitResult",
     "CheckpointOperationFailure",
@@ -168,4 +201,9 @@ __all__ = [
     "ResumeExplicitRunRequest",
     "ResumeUniqueIncompleteRunRequest",
     "StartNewRunRequest",
+    "ImageOcrPort",
+    "PdfTextExtractionPort",
+    "M10PublisherPort",
+    "M10StagingCompleterPort",
+    "M10StagingWriterPort",
 ]

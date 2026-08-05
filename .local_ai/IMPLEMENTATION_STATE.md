@@ -17,6 +17,22 @@ reviewed `PASS`; M7-D5-A raw-page replay/checkpoint integration and M7-D5-B
 restriction-evidence replay are complete and independently reviewed `PASS`.
 These stages do not imply a closed 100k scale gate. No
 raw production artifact or published snapshot exists in this repository.
+M8-A normalization fidelity and layout semantics, M8-B complex-table
+migration, M8-C macro/placeholder/reference intents, M8-D generation-bound
+page-set processing, and M8-E chunk-stability handoff are complete and
+independently reviewed `PASS`. M8-AC controlled mini-corpus acceptance is
+implemented and independently re-reviewed `PASS`, but the real gate remains
+`pending_external_input` because no approved 10-20 page generation/selection/
+tokenizer input was supplied. M9-A1 metadata-first media contract is also
+complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
+independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
+explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
+export/store/checkpoint side effects. M10-A through M10-D are complete and
+independently reviewed `PASS`. M10-E synthetic acceptance is complete and
+independently reviewed `PASS`; no real full-snapshot run has started, and the
+M8-AC real gate remains `pending_external_input`.
 
 ## Durable State Convention
 
@@ -1370,9 +1386,461 @@ are recorded without using repository-local commit SHAs as status.
   fail closed when the durable session is paused or completed. The 100k scale
   gate remains incomplete and is not implied by this authorization or by M7-D5.
 
+## M8-A Normalization Fidelity and Layout Semantics
+
+- Status: complete and independently reviewed `PASS`.
+- The normalizer now treats Confluence `layout`, `layout-section`, and
+  `layout-cell` as transparent structural blocks. Source order and canonical
+  block boundaries are preserved without changing the existing one-page result
+  contract.
+- Existing complex-table fallback behavior remains unchanged and is explicitly
+  deferred to M8-B. No schema, tokenizer, `chunker_version`, config identity,
+  raw-store, network, export, ACL, relation, or media behavior changed.
+- Changed production/test files:
+  `src/knowledgenexus/foundation/infrastructure/processors/confluence_storage_xhtml_normalizer.py`
+  and
+  `tests/foundation/infrastructure/processors/test_confluence_storage_xhtml_normalizer.py`.
+- Validation: focused normalizer suite `47 passed`; normalize/page-structure
+  regression `98 passed` using an explicit workspace pytest basetemp;
+  `python -m compileall -q src tests` passed; `git diff --check` passed.
+- Independent review artifact:
+  `.codex-workflow/20260804-m8a/04-review-1.md`, verdict `PASS`.
+- Environment-only gaps: the asset-backed BGE-M3 test was not invoked without
+  `--tokenizer-assets-dir`; the first broad run also hit a machine temp-
+  directory permission error and passed when rerun with an explicit basetemp.
+- Next stage: M8-C macro/placeholder/reference-intent completeness.
+
+## M8-B Complex-Table No-Loss Migration
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: replace the lossy M6C complex-table fallback with deterministic
+  no-loss grids/fallbacks while preserving simple-table bytes and the active
+  BGE-M3/`chunker_version=1.2.0` profile.
+- Policy identity: `confluence-table-no-loss-v1`; bounded rows/columns/slots,
+  cell/output bytes, and nested-table depth fail closed with sanitized stable
+  categories. Span markers are ordered `[rowspan:N]` then `[colspan:N]`;
+  invalid grids use the exact row-preserving `[table]` grammar.
+- Config migration: one-page export identity is now `one-page-export-v2` and
+  canonical config JSON includes the code-owned `normalization_policy_id`.
+  Schemas and chunker version remain unchanged. The next production export is
+  required to be an explicit `full_snapshot`; no delta bridge is authorized.
+- Changed files:
+  `src/knowledgenexus/foundation/infrastructure/processors/confluence_storage_xhtml_normalizer.py`,
+  `src/knowledgenexus/foundation/domain/models/one_page_export.py`,
+  `contracts/foundation/ONE_PAGE_EXPORT_SPEC.md`,
+  `tests/foundation/infrastructure/processors/test_confluence_storage_xhtml_normalizer.py`,
+  `tests/foundation/domain/models/test_one_page_export.py`, plus sanitized
+  stage artifacts under `.codex-workflow/20260804-m8b/`.
+- Validation: focused normalizer `60 passed`; parser/chunker/config/export
+  regression `258 passed, 1 skipped`; `compileall` passed; scoped `git diff
+  --check` passed. The BGE-M3 asset-backed test remains an environment-only
+  skip without `--tokenizer-assets-dir`.
+- Broad offline Foundation/Shared/Architecture run reached `2526 passed,
+  35 skipped, 40 failed`; the failures are machine path-policy/sidecar smoke
+  failures plus the historical M6G dirty-file guard that rejects the intended
+  M8-B change to `one_page_export.py`. This is not claimed as a broad PASS.
+- Plan/review artifacts:
+  `.codex-workflow/20260804-m8b/PLAN.input.md`,
+  `.codex-workflow/20260804-m8b/01-plan-review.md`,
+  `.codex-workflow/20260804-m8b/02-plan-revised.md`,
+  `.codex-workflow/20260804-m8b/03-migration.md`,
+  `.codex-workflow/20260804-m8b/04-implementation.md`, and
+  `.codex-workflow/20260804-m8b/05-review-1.md` (`VERDICT: PASS`).
+- Commit/push provenance: commit `2cb9310` (`feat(foundation): complete M8-B
+  complex table migration`) pushed to `origin/codex/m8-m9`. The documentation
+  backfill is a follow-up closeout commit on the same branch.
+
+## M8-C Macro, Placeholder, and Reference Intents
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: preserve the M6C/M8-B normalization contract while adding a
+  sanitized internal side stream for drawio, image/attachment, and include-page
+  references. The side stream performs no resolution, network access, export,
+  relation creation, media extraction, or raw-store mutation.
+- Contract: `NormalizationReferenceIntent` is immutable and runtime-validated
+  for exact kind/status pairs, bounded NFC one-line identities, one-based
+  contiguous source ordinals, and unknown-identity rules. Existing result model
+  constructors remain compatible through `reference_intents=()` defaults; mutable
+  counters, warnings, and canonical documents are defensively copied.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/confluence_page_content.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`,
+  `src/knowledgenexus/foundation/infrastructure/processors/confluence_storage_xhtml_normalizer.py`,
+  and
+  `src/knowledgenexus/foundation/application/use_cases/normalize_confluence_page.py`.
+  Focused tests were added under the corresponding model, normalizer, and use-
+  case test paths.
+- Validation: focused M8-C suite `99 passed`; bounded parser/chunker/CLI/E2E
+  regression `87 passed` with an explicit workspace basetemp; architecture
+  suite `69 passed`; `python -m compileall -q src tests` passed; scoped
+  `git diff --check` passed. The default pytest temp root remains a known
+  machine permission issue, so the bounded regression used
+  `.pytest-m8c-reg`/`.pytest-m8c-independent-review`.
+- Review artifact: `.codex-workflow/20260804-m8c/05-review-1.md`, verdict
+  `PASS`; the independent review's initial P1 on non-contiguous ordinals was
+  fixed and rechecked with adversarial tests.
+- Commit/push provenance: implementation commit `a310a67`
+  (`feat(foundation): complete M8-C reference intents`) was pushed to
+  `origin/codex/m8-m9`; this SHA is provenance only, not the milestone source
+  of truth.
+- Residual boundaries: intent consumers, media/relation resolution, generation-
+  bound page-set processing, chunk handoff, and all M9 tracks remain pending.
+
+## M8-D Generation-Bound Deterministic Page Sets
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: compose the approved normalizer, wiki structure parser, and
+  BGE-M3 M6D chunker over an explicit ordered set of preserved M7 raw-page
+  envelopes without checkpoint, raw, or export mutation.
+- Contract: exact `CrawlRunId` run/generation identity, active profile identity
+  `bge-m3:medium:chunker-1.2.0`, non-empty ordered work items, source-version
+  equality, HTTP-200 envelope validation, all-or-nothing records, fixed
+  cross-checked metrics, recursively JSON-safe defensive copies, and sanitized
+  category-only errors.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/confluence_page_set.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`,
+  `src/knowledgenexus/foundation/application/use_cases/process_confluence_page_set.py`,
+  and
+  `src/knowledgenexus/foundation/application/use_cases/__init__.py`.
+  Synthetic model/use-case tests were added under
+  `tests/foundation/domain/models/test_confluence_page_set.py` and
+  `tests/foundation/application/use_cases/test_process_confluence_page_set.py`.
+- Validation: focused M8-D model/use-case suite `17 passed`; bounded raw-store,
+  normalizer, parser, and chunker regression `147 passed`; architecture suite
+  `70 passed`; `python -m compileall -q src tests` passed; scoped
+  `git diff --check` passed. Explicit workspace basetemp was used because the
+  machine default pytest temp root has a known permission failure.
+- Review artifact: `.codex-workflow/20260804-m8d/05-review-1.md`, verdict
+  `PASS`. The independent re-review covered malformed dependency results,
+  profile/asset/type drift, envelope/source-version and canonical page identity,
+  nested JSON, metric/error invariants, and leak-safe failure strings.
+- Commit/push provenance: implementation commit `85f5054`
+  (`feat(foundation): complete M8-D page set processing`) was pushed to
+  `origin/codex/m8-m9`; this SHA is provenance only, not the milestone source
+  of truth.
+- Residual boundaries: M8-E chunk handoff and all M9 tracks remain pending;
+  M10 full-snapshot work remains separately gated.
+- Post-closeout technical debt (deferred until post-POC product hardening):
+  `process_confluence_page_set._profile_identity` currently repeats the active
+  `ChunkingProfile` contract as application-level literals. This is strict but
+  not single-source-of-truth. Product hardening must centralize profile
+  identity/fingerprint derivation and add drift tests; the independent M8-D
+  review did not catch this duplication.
+
+## M8-E Chunk Stability and Update-Propagation Handoff
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: expose a deterministic, immutable hash/ID/count-only handoff for
+  M9-D without carrying normalized page text or changing Foundation schemas.
+- Contract: one-document `DocumentChunkSetSummary` plus an ordered M8-D
+  page-set adapter; exact Confluence source/profile/chunker identity, schema
+  validation before field selection, chunk content-hash recomputation from
+  transient text, global final-ID uniqueness, contiguous part metadata,
+  cross-document/order/count invariants, defensive ownership, sanitized
+  malformed-boundary errors, compact sorted-key UTF-8 JSON, and SHA-256 digest.
+  Normalized-body hash recomputation, tokenizer invocation, and private
+  chunk-ID preimage reconstruction remain M8-D-owned.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/chunk_stability.py`,
+  `src/knowledgenexus/foundation/domain/rules/chunk_stability_builder.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`, and
+  `src/knowledgenexus/foundation/domain/rules/__init__.py`.
+  Focused adversarial tests are in
+  `tests/foundation/domain/models/test_chunk_stability.py`.
+- Validation: focused M8-E `23 passed`; bounded page-set/chunker/schema
+  regression `85 passed`; architecture `16 passed`; compileall and scoped
+  diff-check passed. Explicit workspace basetemps were used due the known
+  machine pytest temp-root permission issue.
+- Review artifact: `.codex-workflow/20260804-m8e/05-review-1.md`, verdict
+  `PASS`; follow-up review fixed validator side-effect/error leakage, typed
+  page-set bypass, exact string-subclass identity, single-part metadata, and
+  cross-document duplicate-ID gaps.
+- Residual boundaries: M9-A media, M9-B Git, M9-C symbols, and M9-D
+  tombstone/delta propagation remain pending; M10 full-snapshot work remains
+  separately gated.
+
+## M8-AC Controlled Mini-Corpus Acceptance (M8-D.5)
+
+- Status: implementation and independent re-review complete `PASS`; real gate
+  remains `pending_external_input`.
+- Objective: run two fresh deterministic, aggregate-only passes over an
+  operator-approved 10-20 page M7 generation before relying on M10 for the
+  first real-corpus signal. The seam is retroactive M8-D.5 evidence and does
+  not change M8-D/E processing semantics.
+- Contract: exact run/generation-bound selection, source-byte and explicit
+  write fingerprints, per-pass M8-D/M8-E digests, tokenizer-asset digest,
+  chunk/token distributions and coverage observations, strict status/counter
+  validation, exact negative probes, sanitized CLI categories, no raw content
+  or report leaks, and no output/checkpoint/export writes.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/confluence_mini_corpus_acceptance.py`,
+  `src/knowledgenexus/foundation/application/use_cases/accept_confluence_mini_corpus.py`,
+  `src/knowledgenexus/foundation/cli/accept_confluence_mini_corpus.py`, plus
+  the relevant package exports. Focused adversarial tests cover models,
+  use-case, CLI, and architecture boundaries.
+- Validation: focused fix suite `15 passed, 2 skipped`; `python -m compileall
+  -q src tests` passed; scoped `git diff --check` passed. The bounded M8-D/E
+  regression selection reached `164 passed, 1 failed`; the single failure is
+  the unrelated pre-existing canonical-document schema test in
+  `test_build_confluence_chunks.py`.
+- Review artifacts:
+  `.codex-workflow/20260805-m8ac/05-review-1.md` (`CHANGES_REQUIRED`),
+  `.codex-workflow/20260805-m8ac/08-review-2.md` (`PASS`).
+- Real acceptance is not claimed until the operator supplies a sanitized
+  aggregate report from an approved generation, ordered 10-20 page selection,
+  and pinned tokenizer assets. No raw/runtime artifact is tracked.
+
+## M9-A1 Metadata-First Media Contract
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: define a metadata-first media observation/policy/result seam and
+  deterministic relation intents without downloading bodies, parsing files,
+  OCR, raw-store writes, export, network, or other I/O.
+- Contract: immutable, runtime-validated `MediaAsset` records with exact
+  schema/status matrix, NFC and byte-bound checks, deterministic attachment
+  ordering, atomic batch mapping, sanitized category-only errors, and explicit
+  drawio/image relation-intent semantics. `include_page` remains omitted.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/media_materialization.py`,
+  `src/knowledgenexus/foundation/domain/rules/media_asset_record_builder.py`,
+  `src/knowledgenexus/foundation/domain/models/__init__.py`, and
+  `src/knowledgenexus/foundation/domain/rules/__init__.py`.
+  Focused adversarial tests are in
+  `tests/foundation/domain/models/test_media_materialization.py`.
+- Validation: focused `11 passed`; bounded attachment/schema regression
+  `87 passed`; architecture `16 passed`; compileall and scoped diff-check
+  passed. The independent review covered malformed runtime types, exact
+  status/schema combinations, deterministic ordering, atomicity, and no-I/O
+  behavior; verdict `PASS` in
+  `.codex-workflow/20260805-m9a/05-review-1.md`.
+- M9-A1 closeout is recorded above; its commit/push closeout remains grouped
+  with the current approved M9-A2 stage on this branch.
+
+## M9-A2 Attachment Body Fetch and Store Boundary
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: fetch one policy-selected attachment body through a typed port,
+  validate the bounded response, publish canonical immutable raw evidence, and
+  return a downloaded-but-not-processed `MediaAsset` result without parsing,
+  OCR, export, checkpoint, ACL, or downstream storage behavior.
+- Contract: explicit absolute `data_root`, frozen body/total/free-disk budget,
+  category-only sanitized ports/errors, canonical envelope JSON, no-clobber
+  replay/conflict semantics, bounded regular-file scan, hardlink/symlink/
+  reparse rejection, root/parent identity checks across scan-to-publication,
+  canonicalized per-root budget serialization, and fail-closed forged-input and
+  unexpected-exception handling.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/media_body_materialization.py`,
+  `src/knowledgenexus/foundation/ports/confluence_attachment_body_fetch_port.py`,
+  `src/knowledgenexus/foundation/ports/confluence_raw_attachment_store_port.py`,
+  `src/knowledgenexus/foundation/application/use_cases/fetch_and_store_confluence_attachment_body.py`,
+  `src/knowledgenexus/foundation/infrastructure/raw_store/confluence_raw_attachment_store.py`,
+  and the corresponding package exports. Focused adversarial tests cover
+  models, use-case, raw store, and architecture boundaries.
+- Validation: focused `37 passed, 2 skipped`; M9-A1/raw-store regression
+  selection `50 passed, 3 skipped`; `python -m compileall -q src tests` passed;
+  scoped `git diff --check` passed.
+- Review artifacts:
+  `.codex-workflow/20260805-m9a2/05-review-1.md` (`CHANGES_REQUIRED`),
+  `.codex-workflow/20260805-m9a2/08-review-2.md` (`PASS`).
+- Commit/push closeout is complete on `codex/m8-m9` (`fcd9935`); M9-A3 was
+  implemented as the next separately planned and reviewed stage.
+
+## M9-A3 Offline Draw.io/PDF/OCR Processors
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: process one already-materialized M9-A2 attachment body offline,
+  preserving the schema-shaped MediaAsset evidence while returning an
+  in-memory extraction-detail projection for draw.io, digital PDF text, or
+  selected-image OCR.
+- Contract: stdlib source-first draw.io XML parsing with DTD/entity rejection,
+  bounded deterministic labels/edges/containers, closed PDF/OCR capability
+  identities, strict page/image counters and output budgets, exact `parsed` /
+  `ocr` / `failed` status matrix, MIME/filename dispatch, envelope-bound
+  content hash/raw URI, sanitized failures, and no attachment-text chunks or
+  side-effecting engine/network/file behavior.
+- Changed production files:
+  `src/knowledgenexus/foundation/domain/models/drawio_xml.py`,
+  `src/knowledgenexus/foundation/domain/models/media_processing.py`,
+  `src/knowledgenexus/foundation/ports/media_processing_port.py`,
+  `src/knowledgenexus/foundation/infrastructure/processors/drawio_xml_processor.py`,
+  `src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py`,
+  `src/knowledgenexus/foundation/application/use_cases/process_confluence_media_attachment.py`,
+  and package exports.
+- Validation: focused M9-A3 suite `30 passed`; architecture suite `80 passed`;
+  M9-A1/A2 regression `48 passed, 2 skipped`; M8-D/E bounded regression
+  `43 passed`; `python -m compileall -q src tests` and scoped `git diff --check`
+  passed. The broad Foundation suite remains environment-blocked by known
+  tokenizer-asset/runtime and unrelated CLI/temp-root failures; no M9-A3
+  failure was observed in the bounded suites.
+- Review artifacts:
+  `.codex-workflow/20260805-m9a3/05-review-1.md` records initial findings and
+  fixes; `.codex-workflow/20260805-m9a3/08-review-2.md` records the fresh
+  independent `VERDICT: PASS`.
+
+## M9-B Pinned Local Git Code-Document Seam
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: read source bytes only from the pinned local `spen-sdk` commit on
+  `develop`, build schema-valid Git `CanonicalDocument` records, and emit
+  deterministic fallback `code_window` chunks while reserving C++/Java symbol
+  authority for M9-C.
+- Contract: exact repository/branch/commit identity, strict POSIX path and
+  casefold policy, generated/vendor/binary exclusions, bounded tree/file/raw/
+  normalized/memory budgets, commit-bound blob reads, atomic no-partial-result
+  behavior, active BGE-M3 medium profile, and sanitized fail-closed public
+  boundaries.
+- Validation: focused M9-B `35 passed`; M9-A regression `47 passed`; M8-D/E
+  regression `70 passed`; compileall and scoped diff-check passed.
+- Review artifact: `.codex-workflow/20260804-m9b/40-review-18.md` records the
+  final fresh independent `VERDICT: PASS` after bounded fixes.
+
+## M9-C Minimal Symbol Index
+
+- Status: complete and independently re-reviewed `PASS`.
+- Objective: activate the bounded C++/Java tree-sitter symbol stream over
+  M9-B authority observations while preserving M9-B's fallback-plan invariants.
+- Contract: atomic `BuildGitSymbols` result, exact commit/path provenance,
+  runtime-validated parser spans, deterministic class/namespace/package/method/
+  function/enum/struct/interface extraction, overload IDs, schema-valid
+  `SymbolRecord` and `code_symbol`/error-only `code_window` chunks, pinned
+  BGE-M3 token/profile identity, and no export/network/raw/checkpoint side
+  effects. Kotlin/XML remain M9-B fallback-only.
+- Parser dependencies: `tree-sitter==0.25.2`, `tree-sitter-cpp==0.23.4`,
+  `tree-sitter-java==0.23.5`.
+- Validation: focused M9-C `10 passed`; M9-B regression `27 passed`; M8-D/E
+  regression `40 passed`; M9-A regression `65 passed`; architecture `85 passed`;
+  compileall and diff-check passed.
+- Review artifacts: `.codex-workflow/20260805-m9c/05-review-1.md` records the
+  initial `FAIL` and two P1 findings; bounded fix plan/review are in
+  `06-fix-plan.input.md` and `07-fix-plan-review.md`; fresh
+  `.codex-workflow/20260805-m9c/09-review-2.md` records final `VERDICT: PASS`.
+
+## M9-D1 Tombstone Contract and Explicit Cascade
+
+- Status: complete and independently reviewed `PASS`.
+- Added immutable/runtime-validated `TombstoneTarget`, request, metrics, and
+  result models with exact field sets, schema-shaped record validation,
+  deterministic ID preimage checks, nullable optional fields, cycle-safe JSON
+  validation, and sanitized impossible-counter/forged-input failures.
+- Added schema-valid `TombstoneRecordBuilder` with validator mutation guards
+  and atomic `ProjectTombstones` document-root cascade with fixed ordering,
+  injected validator dependency, canonical bytes, duplicate/collision policy,
+  and no filesystem/network/export/checkpoint side effects.
+- Validation: focused `31 passed`; M9/M8 regression `42 passed`; architecture/
+  schema `37 passed`; full architecture `86 passed`; compileall/diff-check
+  passed. Final independent review is `VERDICT: PASS` in
+  `.codex-workflow/20260805-m9d1/19-review-final.md`.
+- Residual boundary: M8-AC real mini-corpus gate remains
+  `pending_external_input`; M9-D2 is recorded in the next section.
+
+## M9-D2 Delta and Inventory Diff Propagation
+
+- Status: complete and independently reviewed `PASS`.
+- Added immutable/runtime-validated inventory, request, metrics, status, and
+  result models over M8-E `DocumentChunkSetSummary` inputs, including exact
+  nested summary revalidation, outcome/count/digest invariants, and sanitized
+  atomic failures.
+- Added deterministic read-only propagation for unchanged/changed/removed
+  documents, chunk hash/ID diffs, explicit inventory states, and config-hash
+  invalidation cascades through the M9-D1 tombstone projector. No exporter,
+  store, checkpoint, network, clock, metadata, Qdrant, or embedding side
+  effects are present.
+- Validation: focused `90 passed`; M9-D1/M8-E `54 passed`; bounded M9-A/B/C
+  `284 passed, 2 skipped, 1 deselected` (one external tokenizer-asset case);
+  architecture `87 passed`; compileall/diff-check passed.
+- Review artifacts: `.codex-workflow/20260805-m9d2/12-review-final.md`
+  records the pre-fix P2 coverage finding; `.codex-workflow/20260805-m9d2/16-review-final.md`
+  is the fresh final independent review.
+- Residual boundary: M8-AC real mini-corpus acceptance remains
+  `pending_external_input`; M10 full-snapshot work has not started.
+
 ## Current Execution Boundary
 
 The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
 replay/checkpoint stages are complete with their independent gates and are
 owner-accepted as the roadmap closeout. The 100k performance gate remains a
 separate deferred follow-up; no 100k scale PASS is claimed.
+
+## M10-A Wire Contract and Trusted Input Models
+
+- Status: complete and independently reviewed `PASS`.
+- Added additive runtime-validated M10 models for approved Confluence scope/
+  exclusions, media policy, trusted normalized profile identity, request,
+  metrics, projection, result status matrix, and generic quality-report input.
+- Bound config hash to the M6G canonical normalized profile preimage and
+  `ChunkingProfile.chunker_version`; rejected forged fields, strict-RFC3339
+  violations, unsafe/reparse dataset roots, impossible counters, and malformed
+  stream/source-scope values before dependencies.
+- Validation: focused `23 passed`; M6G compatibility `37 passed`; compileall/
+  diff-check passed. Final independent review is `VERDICT: PASS` in
+  `.codex-workflow/20260805-m10/17-m10a-review-3.md`.
+- Residual boundary: no exporter, CLI, orchestration, or real full-snapshot
+  invocation is included; M10-B is now complete, M10-C is next, and M8-AC remains
+  `pending_external_input`.
+
+## M10-B Trusted Multi-Source Composition
+
+- Status: complete and independently reviewed `PASS`.
+- Added typed Confluence/Git handoffs and an all-or-nothing in-memory
+  composition boundary. Canonical shared Foundation schemas are authoritative;
+  injected validators are isolated observers and cannot bypass validation.
+  Source ownership, page/source-version and Git commit/path provenance, ACL
+  inheritance, relation target grammar, media budget/raw-content provenance,
+  symbol linkage, sync identity/version/cardinality, deterministic ordering,
+  exact metrics, and empty initial tombstones are enforced before projection.
+- Added sanitized application failures, callable adapter/validator checks,
+  forged result guards, and adversarial malformed-input coverage.
+- Validation: focused M10-A/B `51 passed`; bounded M9 `120 passed`; M6G
+  compatibility `37 passed`; architecture `88 passed`; compileall and
+  diff-check passed. Final fresh review is
+  `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` with
+  `VERDICT: PASS`.
+- Residual boundary: no CLI/publication or real full-snapshot invocation is
+  included; M10-D and M10-E remain pending and M8-AC remains
+  `pending_external_input`.
+
+## M10-C Cross-Stream Projection and Generic Completion
+
+- Status: complete and independently reviewed `PASS`.
+- Added additive `m10_quality` completion to the staging completer while
+  preserving the legacy one-page/M6G path. Generic mode performs strict
+  duplicate-key/non-finite JSON parsing, canonical schema validation on
+  defensive copies, exact eight-stream counts, source-scope equality, actual
+  relation/ACL/media/symbol/sync/tombstone metric checks, and deterministic
+  sanitized twelve-section reporting with no-clobber cleanup.
+- The independent review found unsafe profile strings, wrong path runtime
+  side effects, and blank JSONL acceptance. A bounded fix added strict ASCII
+  profile identifiers, concrete platform `Path` validation before method
+  calls, and blank-line rejection, with adversarial coverage.
+- Validation: focused `50 passed, 1 skipped`; M6G
+  completer/writer/publisher/one-page `118 passed, 8 skipped`; architecture
+  `88 passed`; compileall/diff-check passed. Final independent review is
+  `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` with
+  `VERDICT: PASS`.
+- Residual boundary: M10-E real full-snapshot evidence remains
+  `pending_external_input`; M8-AC real mini-corpus remains
+  `pending_external_input`.
+
+## M10-D/E CLI, Publication, and Synthetic Acceptance
+
+- Status: bounded implementation complete and independently reviewed `PASS`.
+- Added an offline sanitized CLI and infrastructure wiring over the existing
+  M3 staging writer, completer, and publisher seams. Publication performs
+  strict ten-file readback, deterministic digesting, no-clobber preflight, and
+  rollback that restores the exact prior pointer/final state after acceptance
+  failure.
+- Acceptance validates defensive copies and detects validator mutation of
+  parsed records or published bytes. Non-integer `SystemExit` payloads and
+  digest/filesystem failures are sanitized at the public boundary.
+- Synthetic acceptance proves deterministic ten-file output and repeatability;
+  no network, credentials, raw/runtime data, or real snapshot was used.
+- Validation: focused `40 passed`; M10-A/B/C `98 passed, 6 skipped`; M6G `37
+  passed`; M8/M9 `125 passed`; architecture `89 passed`; compileall and
+  diff-check passed. Fresh independent review is
+  `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` with
+  verdict `PASS`.
+- Residual boundary: real M10 full-snapshot evidence remains
+  `pending_external_input`; M8-AC real mini-corpus remains
+  `pending_external_input`.
