@@ -27,9 +27,9 @@ tokenizer input was supplied. M9-A1 metadata-first media contract is also
 complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
 independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
-explicit cascade is independently reviewed `PASS`; M9-D2 delta/inventory
-diff propagation remains staged under the reviewed M8-M9 goal plan. No M10
-full-snapshot work has started.
+explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with
+no export/store/checkpoint side effects. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1723,8 +1723,29 @@ are recorded without using repository-local commit SHAs as status.
   schema `37 passed`; full architecture `86 passed`; compileall/diff-check
   passed. Final independent review is `VERDICT: PASS` in
   `.codex-workflow/20260805-m9d1/19-review-final.md`.
-- Residual boundary: M9-D2 snapshot diff/delta propagation is not implemented;
-  M8-AC real mini-corpus gate remains `pending_external_input`.
+- Residual boundary: M8-AC real mini-corpus gate remains
+  `pending_external_input`; M9-D2 is recorded in the next section.
+
+## M9-D2 Delta and Inventory Diff Propagation
+
+- Status: complete and independently reviewed `PASS`.
+- Added immutable/runtime-validated inventory, request, metrics, status, and
+  result models over M8-E `DocumentChunkSetSummary` inputs, including exact
+  nested summary revalidation, outcome/count/digest invariants, and sanitized
+  atomic failures.
+- Added deterministic read-only propagation for unchanged/changed/removed
+  documents, chunk hash/ID diffs, explicit inventory states, and config-hash
+  invalidation cascades through the M9-D1 tombstone projector. No exporter,
+  store, checkpoint, network, clock, metadata, Qdrant, or embedding side
+  effects are present.
+- Validation: focused `90 passed`; M9-D1/M8-E `54 passed`; bounded M9-A/B/C
+  `284 passed, 2 skipped, 1 deselected` (one external tokenizer-asset case);
+  architecture `87 passed`; compileall/diff-check passed.
+- Review artifacts: `.codex-workflow/20260805-m9d2/12-review-final.md`
+  records the pre-fix P2 coverage finding; `.codex-workflow/20260805-m9d2/16-review-final.md`
+  is the fresh final independent review.
+- Residual boundary: M8-AC real mini-corpus acceptance remains
+  `pending_external_input`; M10 full-snapshot work has not started.
 
 ## Current Execution Boundary
 

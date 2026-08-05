@@ -92,7 +92,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
 | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
-| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3, M9-B, M9-C, and M9-D1 independently approved; M9-D2 remains pending | Split into independent tracks. |
+| M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
@@ -118,9 +118,9 @@ controlled mini-corpus acceptance is implemented and independently re-reviewed
 and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
 independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are independently approved. M9-D1 tombstone contract and
-explicit cascade is independently approved; M9-D2 delta/inventory diff
-propagation remains staged under the reviewed M8-M9 goal plan. No M10
-full-snapshot work has started.
+explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+approved. M9-D2 remains read-only and does not perform export/store/checkpoint
+side effects. No M10 full-snapshot work has started.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -997,7 +997,7 @@ M9A - Media:
 | M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
 | M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
 | M9-D1 tombstone contract and explicit cascade | complete; independently reviewed `PASS` | Added runtime-validated tombstone models, schema-valid deterministic builder, atomic document-root cascade use case, exact-field/JSON/cycle-safe boundaries, and injected schema-validator dependency. Focused `31 passed`; M9/M8 regression `42 passed`; architecture/schema `37 passed`; full architecture `86 passed`; compileall/diff-check passed; final review `VERDICT: PASS` in `.codex-workflow/20260805-m9d1/19-review-final.md`. |
-| M9-D2 delta/inventory diff propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries; snapshot diff and delta logic remain deferred. |
+| M9-D2 delta/inventory diff propagation | complete; independently reviewed `PASS` | Added deterministic M8-E summary diffing, explicit inventory-state handling, config invalidation cascades, atomic tombstone-only results, canonical digest, and strict malformed-boundary validation. Focused `90 passed`; M9-D1/M8-E `54 passed`; bounded M9-A/B/C `284 passed, 2 skipped, 1 deselected` (external tokenizer asset case); architecture `87 passed`; compileall/diff-check passed; final review in `.codex-workflow/20260805-m9d2/16-review-final.md`. |
 
 M9B - Git repository scan:
 - Configured repository and branch.

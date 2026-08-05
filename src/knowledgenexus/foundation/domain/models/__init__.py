@@ -111,6 +111,15 @@ from knowledgenexus.foundation.domain.models.tombstone_propagation import (
     TombstoneReason,
     TombstoneTarget,
 )
+from knowledgenexus.foundation.domain.models.delta_propagation import (
+    DeltaInventoryEntry,
+    DeltaInventoryState,
+    DeltaPropagationFailureCategory,
+    DeltaPropagationMetrics,
+    DeltaPropagationRequest,
+    DeltaPropagationResult,
+    DeltaPropagationStatus,
+)
 from knowledgenexus.foundation.domain.models.confluence_chunking import (
     ChunkingResult,
     ConfluenceChunkingError,
@@ -311,6 +320,13 @@ __all__ = [
     "TombstoneProjectionStatus",
     "TombstoneReason",
     "TombstoneTarget",
+    "DeltaInventoryEntry",
+    "DeltaInventoryState",
+    "DeltaPropagationFailureCategory",
+    "DeltaPropagationMetrics",
+    "DeltaPropagationRequest",
+    "DeltaPropagationResult",
+    "DeltaPropagationStatus",
     "ChunkingResult",
     "ConfluenceChunkingError",
     "ConfluenceChunkingFailureCategory",

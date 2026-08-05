@@ -49,6 +49,7 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
 )
 from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
 from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
+from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -76,4 +77,5 @@ __all__ = [
     "BuildGitCodeDocumentsRequest",
     "BuildGitSymbols",
     "ProjectTombstones",
+    "PropagateDelta",
 ]
