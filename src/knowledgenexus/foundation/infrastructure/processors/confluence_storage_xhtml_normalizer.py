@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluenceStorageNormalization,
+    NormalizationReferenceIntent,
 )
 from knowledgenexus.foundation.ports.confluence_page_normalization_port import (
     ConfluenceStorageNormalizationError,
@@ -57,6 +58,7 @@ _MAX_TABLE_SLOTS = 32_768
 _MAX_TABLE_CELL_BYTES = 65_536
 _MAX_TABLE_OUTPUT_BYTES = 1_048_576
 _MAX_NESTED_TABLE_DEPTH = 4
+_MAX_REFERENCE_INTENTS = 256
 
 
 class ConfluenceStorageXhtmlNormalizer(ConfluenceStorageNormalizerPort):
@@ -94,6 +96,7 @@ class ConfluenceStorageXhtmlNormalizer(ConfluenceStorageNormalizerPort):
             normalized_body_text=normalized,
             counters=renderer.counters(),
             warnings=tuple(renderer.warnings),
+            reference_intents=tuple(renderer.reference_intents),
         )
 
 
@@ -106,6 +109,7 @@ class _Renderer:
         self.unsupported_elements = 0
         self.complex_tables = 0
         self.warnings: list[dict[str, object]] = []
+        self.reference_intents: list[NormalizationReferenceIntent] = []
 
     def counters(self) -> dict[str, object]:
         return {
@@ -147,9 +151,16 @@ class _Renderer:
             identity = (
                 _attribute(attachment, "filename")
                 if attachment is not None
-                else _attribute(element, "alt")
+                else None
             )
-            return f"[media: {_placeholder_value(identity)}]"
+            if not identity:
+                identity = _attribute(element, "alt")
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(
+                kind="image_attachment",
+                identity=placeholder,
+            )
+            return f"[media: {placeholder}]"
         if name == "link" and _has_descendant(element, "attachment"):
             self.media_placeholders += 1
             attachment = _descendant(element, "attachment")
@@ -158,7 +169,14 @@ class _Renderer:
                 if attachment is not None
                 else None
             )
-            return f"[media: {_placeholder_value(identity)}]"
+            if not identity:
+                identity = _attribute(element, "alt")
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(
+                kind="image_attachment",
+                identity=placeholder,
+            )
+            return f"[media: {placeholder}]"
 
         if name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             level = int(name[1])
@@ -502,7 +520,12 @@ class _Renderer:
                 )
             if not identity:
                 identity = parameters.get("page") or parameters.get("title")
-            return f"[included from page: {_placeholder_value(identity)}]"
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(
+                kind="include_page",
+                identity=placeholder,
+            )
+            return f"[included from page: {placeholder}]"
 
         if name in _DRAWIO_MACROS:
             self.handled_macros[name] += 1
@@ -516,7 +539,9 @@ class _Renderer:
                 attachment = _descendant(element, "attachment")
                 if attachment is not None:
                     identity = _attribute(attachment, "filename")
-            return f"[diagram: {_placeholder_value(identity)}]"
+            placeholder = _placeholder_value(identity)
+            self._emit_reference_intent(kind="drawio", identity=placeholder)
+            return f"[diagram: {placeholder}]"
 
         if name == "jira":
             self.handled_macros[name] += 1
@@ -559,6 +584,25 @@ class _Renderer:
         if body:
             return f"\n\n[macro:{name}]\n\n{body}\n\n"
         return f"[macro:{name} omitted]"
+
+    def _emit_reference_intent(self, *, kind: str, identity: str) -> None:
+        if len(self.reference_intents) >= _MAX_REFERENCE_INTENTS:
+            raise ConfluenceStorageNormalizationError(
+                "reference intent limit exceeded"
+            )
+        status = "deferred_mvp" if identity != "unknown" else "unresolved_target"
+        if kind == "include_page":
+            status = "unresolved_target"
+        ordinal = len(self.reference_intents) + 1
+        self.reference_intents.append(
+            NormalizationReferenceIntent(
+                ordinal=ordinal,
+                kind=kind,
+                status=status,
+                target_identity=identity,
+                placeholder_identity=identity,
+            )
+        )
 
 
 def _replace_named_entities(fragment: str) -> str:
@@ -756,14 +800,21 @@ def _placeholder_value(value: str | None) -> str:
     if not value:
         return "unknown"
     normalized = unicodedata.normalize("NFC", value)
+    normalized = "".join(
+        " " if ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F else character
+        for character in normalized
+    )
     normalized = _single_line(normalized)
     if not normalized:
         return "unknown"
-    return (
+    escaped = (
         normalized.replace("\\", "\\\\")
         .replace("[", "\\[")
         .replace("]", "\\]")
     )
+    if len(escaped.encode("utf-8")) > 256:
+        return "unknown"
+    return escaped
 
 
 def _escape_markdown_text(value: str) -> str:

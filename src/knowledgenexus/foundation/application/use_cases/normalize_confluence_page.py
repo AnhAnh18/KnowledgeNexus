@@ -5,6 +5,7 @@ from datetime import datetime
 
 from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluencePageNormalizationResult,
+    ConfluenceStorageNormalization,
 )
 from knowledgenexus.foundation.domain.records.canonical_document_record_builder import (
     CanonicalDocumentRecordBuilder,
@@ -97,6 +98,8 @@ class NormalizeConfluencePage:
             )
         except ConfluenceStorageNormalizationError as exc:
             raise ConfluencePageNormalizationError(CATEGORY_STORAGE_XHTML) from exc
+        if type(normalized) is not ConfluenceStorageNormalization:
+            raise ConfluencePageNormalizationError(CATEGORY_STORAGE_XHTML)
 
         document_id = DocumentIdGenerator.confluence_page_id(source.page_id)
         acl_id = AclIdGenerator.generate_acl_id(document_id)
@@ -127,6 +130,7 @@ class NormalizeConfluencePage:
             canonical_document=canonical_document,
             counters=dict(normalized.counters),
             warnings=tuple(dict(warning) for warning in normalized.warnings),
+            reference_intents=tuple(normalized.reference_intents),
         )
 
 
