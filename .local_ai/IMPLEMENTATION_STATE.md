@@ -26,8 +26,10 @@ implemented and independently re-reviewed `PASS`, but the real gate remains
 tokenizer input was supplied. M9-A1 metadata-first media contract is also
 complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
 independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
-M9-B and M9-C are now independently approved; M9-D remains staged under the
-reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
+explicit cascade is independently reviewed `PASS`; M9-D2 delta/inventory
+diff propagation remains staged under the reviewed M8-M9 goal plan. No M10
+full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1705,6 +1707,24 @@ are recorded without using repository-local commit SHAs as status.
   initial `FAIL` and two P1 findings; bounded fix plan/review are in
   `06-fix-plan.input.md` and `07-fix-plan-review.md`; fresh
   `.codex-workflow/20260805-m9c/09-review-2.md` records final `VERDICT: PASS`.
+
+## M9-D1 Tombstone Contract and Explicit Cascade
+
+- Status: complete and independently reviewed `PASS`.
+- Added immutable/runtime-validated `TombstoneTarget`, request, metrics, and
+  result models with exact field sets, schema-shaped record validation,
+  deterministic ID preimage checks, nullable optional fields, cycle-safe JSON
+  validation, and sanitized impossible-counter/forged-input failures.
+- Added schema-valid `TombstoneRecordBuilder` with validator mutation guards
+  and atomic `ProjectTombstones` document-root cascade with fixed ordering,
+  injected validator dependency, canonical bytes, duplicate/collision policy,
+  and no filesystem/network/export/checkpoint side effects.
+- Validation: focused `31 passed`; M9/M8 regression `42 passed`; architecture/
+  schema `37 passed`; full architecture `86 passed`; compileall/diff-check
+  passed. Final independent review is `VERDICT: PASS` in
+  `.codex-workflow/20260805-m9d1/19-review-final.md`.
+- Residual boundary: M9-D2 snapshot diff/delta propagation is not implemented;
+  M8-AC real mini-corpus gate remains `pending_external_input`.
 
 ## Current Execution Boundary
 

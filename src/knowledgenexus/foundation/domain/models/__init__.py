@@ -101,6 +101,16 @@ from knowledgenexus.foundation.domain.models.symbol_index import (
     SymbolParseResult,
     SymbolParseStatus,
 )
+from knowledgenexus.foundation.domain.models.tombstone_propagation import (
+    TombstoneEntityType,
+    TombstoneProjectionFailureCategory,
+    TombstoneProjectionMetrics,
+    TombstoneProjectionRequest,
+    TombstoneProjectionResult,
+    TombstoneProjectionStatus,
+    TombstoneReason,
+    TombstoneTarget,
+)
 from knowledgenexus.foundation.domain.models.confluence_chunking import (
     ChunkingResult,
     ConfluenceChunkingError,
@@ -293,6 +303,14 @@ __all__ = [
     "ParsedSymbol",
     "SymbolParseResult",
     "SymbolParseStatus",
+    "TombstoneEntityType",
+    "TombstoneProjectionFailureCategory",
+    "TombstoneProjectionMetrics",
+    "TombstoneProjectionRequest",
+    "TombstoneProjectionResult",
+    "TombstoneProjectionStatus",
+    "TombstoneReason",
+    "TombstoneTarget",
     "ChunkingResult",
     "ConfluenceChunkingError",
     "ConfluenceChunkingFailureCategory",
