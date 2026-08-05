@@ -29,9 +29,10 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
 explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
 reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
-export/store/checkpoint side effects. M10-A wire models and M10-B trusted
-multi-source composition are complete and independently reviewed `PASS`. No
-M10 exporter/CLI or real full-snapshot run has started.
+export/store/checkpoint side effects. M10-A wire models, M10-B trusted
+multi-source composition, and M10-C cross-stream projection/generic
+completion are complete and independently reviewed `PASS`. M10-D CLI and
+publication remain next; no real full-snapshot run has started.
 
 ## Durable State Convention
 
@@ -1796,6 +1797,27 @@ separate deferred follow-up; no 100k scale PASS is claimed.
   diff-check passed. Final fresh review is
   `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` with
   `VERDICT: PASS`.
-- Residual boundary: no exporter, generic completion, CLI/publication, or
-  real full-snapshot invocation is included; M10-C is next and M8-AC remains
+- Residual boundary: no CLI/publication or real full-snapshot invocation is
+  included; M10-D and M10-E remain pending and M8-AC remains
   `pending_external_input`.
+
+## M10-C Cross-Stream Projection and Generic Completion
+
+- Status: complete and independently reviewed `PASS`.
+- Added additive `m10_quality` completion to the staging completer while
+  preserving the legacy one-page/M6G path. Generic mode performs strict
+  duplicate-key/non-finite JSON parsing, canonical schema validation on
+  defensive copies, exact eight-stream counts, source-scope equality, actual
+  relation/ACL/media/symbol/sync/tombstone metric checks, and deterministic
+  sanitized twelve-section reporting with no-clobber cleanup.
+- The independent review found unsafe profile strings, wrong path runtime
+  side effects, and blank JSONL acceptance. A bounded fix added strict ASCII
+  profile identifiers, concrete platform `Path` validation before method
+  calls, and blank-line rejection, with adversarial coverage.
+- Validation: focused `50 passed, 1 skipped`; M6G
+  completer/writer/publisher/one-page `118 passed, 8 skipped`; architecture
+  `88 passed`; compileall/diff-check passed. Final independent review is
+  `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` with
+  `VERDICT: PASS`.
+- Residual boundary: M10-D CLI/publication and M10-E synthetic/external gate
+  remain pending; M8-AC real mini-corpus remains `pending_external_input`.

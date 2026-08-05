@@ -93,7 +93,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
 | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
-| M10 - First full POC Foundation snapshot | in progress; M10-A/B complete | M10-A wire models and M10-B trusted composition independently reviewed `PASS`; M10-C/D remain pending; M10-E remains `pending_external_input`; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+| M10 - First full POC Foundation snapshot | in progress; M10-A/B/C complete | M10-A wire models, M10-B trusted composition, and M10-C generic completion independently reviewed `PASS`; M10-D remains pending; M10-E remains `pending_external_input`; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
 
@@ -120,7 +120,9 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are independently approved. M9-D1 tombstone contract and
 explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
 approved. M9-D2 remains read-only and does not perform export/store/checkpoint
-side effects. No M10 full-snapshot work has started.
+side effects. M10-A, M10-B, and M10-C are complete and independently reviewed
+`PASS`; M10-D is next. No CLI/publication boundary or real full-snapshot run
+has started.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -1075,7 +1077,7 @@ Acceptance categories:
 |---|---|---|
 | M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
 | M10-B trusted multi-source composition | complete; independently reviewed `PASS` | Added typed Confluence/Git handoffs, canonical shared-schema validation, source ownership/provenance, ACL inheritance, relation/media/symbol/sync gates, deterministic composition, empty initial tombstones, and sanitized application boundary. Focused `51 passed`; M9 `120 passed`; M6G `37 passed`; architecture `88 passed`; compileall/diff-check passed. Final review `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` is `VERDICT: PASS`. |
-| M10-C cross-stream projection and generic completion | pending | Requires M10-B approved output; must preserve M6G one-page behavior. |
+| M10-C cross-stream projection and generic completion | complete; independently reviewed `PASS` | Added additive generic `m10_quality` completion with strict canonical validation, exact stream/metric/source-scope invariants, deterministic sanitized 12-section reporting, no-clobber cleanup, and preserved M6G behavior. Focused `50 passed, 1 skipped`; M6G exporter/writer/publisher/one-page `118 passed, 8 skipped`; architecture `88 passed`; compileall/diff-check passed. Initial review found two P1 and one P2 boundary issues; bounded fix plan/review artifacts `47-49` addressed them. Final independent review `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` is `PASS`. |
 | M10-D CLI and publication boundary | pending | Requires M10-C approved generic projection/completion path. |
 | M10-E synthetic acceptance and external real-run gate | pending_external_input | Synthetic acceptance follows M10-D; real operator evidence requires approved inputs and remains separate. |
 
