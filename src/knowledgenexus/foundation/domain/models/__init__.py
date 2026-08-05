@@ -91,6 +91,14 @@ from knowledgenexus.foundation.domain.models.chunk_stability import (
     DocumentChunkSetSummary,
     SUMMARY_FORMAT_VERSION,
 )
+from knowledgenexus.foundation.domain.models.media_materialization import (
+    ConfluenceAttachmentObservation,
+    MediaMaterializationError,
+    MediaMaterializationFailureCategory,
+    MediaMaterializationResult,
+    MediaPolicyDecision,
+    MediaRelationIntent,
+)
 from knowledgenexus.foundation.domain.models.tokenization import (
     CharacterSpan,
     TokenizationResult,
@@ -213,6 +221,12 @@ __all__ = [
     "ChunkStabilityFailureCategory",
     "DocumentChunkSetSummary",
     "SUMMARY_FORMAT_VERSION",
+    "ConfluenceAttachmentObservation",
+    "MediaMaterializationError",
+    "MediaMaterializationFailureCategory",
+    "MediaMaterializationResult",
+    "MediaPolicyDecision",
+    "MediaRelationIntent",
     "CharacterSpan",
     "TokenizationResult",
     "WikiBlock",
