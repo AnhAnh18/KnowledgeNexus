@@ -29,9 +29,9 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
 explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
 reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
-export/store/checkpoint side effects. M10-A wire models are complete and
-independently reviewed `PASS`; M10-B is the next bounded stage. No M10
-exporter/CLI or real full-snapshot run has started.
+export/store/checkpoint side effects. M10-A wire models and M10-B trusted
+multi-source composition are complete and independently reviewed `PASS`. No
+M10 exporter/CLI or real full-snapshot run has started.
 
 ## Durable State Convention
 
@@ -1776,5 +1776,26 @@ separate deferred follow-up; no 100k scale PASS is claimed.
   diff-check passed. Final independent review is `VERDICT: PASS` in
   `.codex-workflow/20260805-m10/17-m10a-review-3.md`.
 - Residual boundary: no exporter, CLI, orchestration, or real full-snapshot
-  invocation is included; M10-B is next and M8-AC remains
+  invocation is included; M10-B is now complete, M10-C is next, and M8-AC remains
+  `pending_external_input`.
+
+## M10-B Trusted Multi-Source Composition
+
+- Status: complete and independently reviewed `PASS`.
+- Added typed Confluence/Git handoffs and an all-or-nothing in-memory
+  composition boundary. Canonical shared Foundation schemas are authoritative;
+  injected validators are isolated observers and cannot bypass validation.
+  Source ownership, page/source-version and Git commit/path provenance, ACL
+  inheritance, relation target grammar, media budget/raw-content provenance,
+  symbol linkage, sync identity/version/cardinality, deterministic ordering,
+  exact metrics, and empty initial tombstones are enforced before projection.
+- Added sanitized application failures, callable adapter/validator checks,
+  forged result guards, and adversarial malformed-input coverage.
+- Validation: focused M10-A/B `51 passed`; bounded M9 `120 passed`; M6G
+  compatibility `37 passed`; architecture `88 passed`; compileall and
+  diff-check passed. Final fresh review is
+  `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` with
+  `VERDICT: PASS`.
+- Residual boundary: no exporter, generic completion, CLI/publication, or
+  real full-snapshot invocation is included; M10-C is next and M8-AC remains
   `pending_external_input`.

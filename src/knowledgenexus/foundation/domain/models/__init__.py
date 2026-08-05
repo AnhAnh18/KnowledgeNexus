@@ -421,3 +421,17 @@ __all__ = [
     "M10SnapshotRequest", "M10SnapshotMetrics", "M10SnapshotProjection",
     "M10SnapshotResult", "M10QualityReportInput",
 ]
+
+from knowledgenexus.foundation.domain.models.m10_composition import (
+    M10SchemaValidator,
+    M10ConfluenceAdapter,
+    M10ConfluenceHandoff,
+    M10GitAdapter,
+    M10GitHandoff,
+    compose_m10_projection,
+)
+
+__all__ += [
+    "M10SchemaValidator", "M10ConfluenceAdapter", "M10ConfluenceHandoff", "M10GitAdapter",
+    "M10GitHandoff", "compose_m10_projection",
+]

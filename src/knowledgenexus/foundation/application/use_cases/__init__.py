@@ -50,6 +50,12 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
 from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
 from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
 from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
+from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
+    ComposeM10Snapshot,
+    M10CompositionFailure,
+    M10CompositionFailureCategory,
+    M10CompositionResult,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -78,4 +84,8 @@ __all__ = [
     "BuildGitSymbols",
     "ProjectTombstones",
     "PropagateDelta",
+    "ComposeM10Snapshot",
+    "M10CompositionFailure",
+    "M10CompositionFailureCategory",
+    "M10CompositionResult",
 ]

@@ -188,7 +188,7 @@ class M10SnapshotRequest:
             if type(getattr(self, n)) is not str or not _POSIX.fullmatch(getattr(self, n)): raise M10SnapshotError(f"invalid {n}")
         if type(self.git_commit) is not str or not _HEX40.fullmatch(self.git_commit): raise M10SnapshotError("invalid git_commit")
         _timestamp(self.generated_at)
-        if type(self.dataset_root) is not Path or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
+        if not isinstance(self.dataset_root, Path) or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
         if self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid export_mode")
         object.__setattr__(self, "confluence_exclusions", ex); object.__setattr__(self, "ordered_page_ids", pages)
 
