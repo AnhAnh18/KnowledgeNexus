@@ -369,7 +369,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             exc.category,
             published_pages=exc.published_pages,
         )
-    except BaseException:
+    except Exception:
         return _write_failure("unexpected")
     sys.stdout.write(
         json.dumps(

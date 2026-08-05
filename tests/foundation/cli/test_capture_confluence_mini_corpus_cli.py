@@ -11,6 +11,7 @@ from knowledgenexus.foundation.cli.capture_confluence_mini_corpus import (
     _capture_pages,
     _load_page_ids,
     _publish_selection,
+    main,
 )
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
@@ -21,6 +22,16 @@ from knowledgenexus.foundation.infrastructure.confluence import ConfluenceHttpRe
 
 
 RUN_ID = CrawlRunId("12345678-1234-4234-8234-123456789abc")
+
+
+def test_help_exits_successfully_without_failure_json(capsys) -> None:
+    with pytest.raises(SystemExit) as caught:
+        main(["--help"])
+
+    captured = capsys.readouterr()
+    assert caught.value.code == 0
+    assert "usage: capture-confluence-mini-corpus" in captured.out
+    assert captured.err == ""
 
 
 def _raw(page_id: str, version: int = 7) -> bytes:
