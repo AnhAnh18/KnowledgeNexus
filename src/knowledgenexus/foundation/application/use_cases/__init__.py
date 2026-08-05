@@ -43,6 +43,10 @@ from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corp
 from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
     ProcessConfluenceMediaAttachment,
 )
+from knowledgenexus.foundation.application.use_cases.build_git_code_documents import (
+    BuildGitCodeDocuments,
+    BuildGitCodeDocumentsRequest,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -66,4 +70,6 @@ __all__ = [
     "FetchAndStoreConfluenceAttachmentBody",
     "AcceptConfluenceMiniCorpus",
     "ProcessConfluenceMediaAttachment",
+    "BuildGitCodeDocuments",
+    "BuildGitCodeDocumentsRequest",
 ]

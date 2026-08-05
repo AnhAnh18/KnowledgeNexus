@@ -26,7 +26,7 @@ implemented and independently re-reviewed `PASS`, but the real gate remains
 tokenizer input was supplied. M9-A1 metadata-first media contract is also
 complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
 independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
-reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+reviewed M8-M9 goal plan. M9-B is independently approved; no M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1666,6 +1666,23 @@ are recorded without using repository-local commit SHAs as status.
   `.codex-workflow/20260805-m9a3/05-review-1.md` records initial findings and
   fixes; `.codex-workflow/20260805-m9a3/08-review-2.md` records the fresh
   independent `VERDICT: PASS`.
+
+## M9-B Pinned Local Git Code-Document Seam
+
+- Status: complete and independently reviewed `PASS`.
+- Objective: read source bytes only from the pinned local `spen-sdk` commit on
+  `develop`, build schema-valid Git `CanonicalDocument` records, and emit
+  deterministic fallback `code_window` chunks while reserving C++/Java symbol
+  authority for M9-C.
+- Contract: exact repository/branch/commit identity, strict POSIX path and
+  casefold policy, generated/vendor/binary exclusions, bounded tree/file/raw/
+  normalized/memory budgets, commit-bound blob reads, atomic no-partial-result
+  behavior, active BGE-M3 medium profile, and sanitized fail-closed public
+  boundaries.
+- Validation: focused M9-B `35 passed`; M9-A regression `47 passed`; M8-D/E
+  regression `70 passed`; compileall and scoped diff-check passed.
+- Review artifact: `.codex-workflow/20260804-m9b/40-review-18.md` records the
+  final fresh independent `VERDICT: PASS` after bounded fixes.
 
 ## Current Execution Boundary
 
