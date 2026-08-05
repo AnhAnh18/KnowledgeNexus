@@ -1383,7 +1383,7 @@ Before full POC:
 | Query-time ACL resolver | Out of Foundation scope | Retrieval/platform permission concern. | Retrieval/platform ACL task. |
 | Embedding/Qdrant | Out of Foundation scope | Owned by Indexing. | Indexing snapshot importer/indexer task. |
 | Retrieval/chat/Gauss | Out of Foundation scope | Owned by Retrieval/Chat. | Retrieval/chat milestones. |
-| M8-D profile identity source-of-truth cleanup | Next M8 maintenance pass | `process_confluence_page_set._profile_identity` duplicates the full active `ChunkingProfile` contract as literals, so contract changes can drift across boundaries even though validation remains strict. | Derive the page-set identity/fingerprint from one canonical profile identity/provenance helper; add drift and mutation tests, then run an independent review specifically for duplicate contract constants. |
+| M8-D profile identity source-of-truth cleanup | Post-POC product hardening | `process_confluence_page_set._profile_identity` duplicates the full active `ChunkingProfile` contract as literals, so contract changes can drift across boundaries even though validation remains strict. | After the first product/POC proves the contract, derive the page-set identity/fingerprint from one canonical profile identity/provenance helper; add drift and mutation tests, then run an independent review specifically for duplicate contract constants. |
 
 ## 16. Roadmap Maintenance Rules
 

@@ -1518,11 +1518,12 @@ are recorded without using repository-local commit SHAs as status.
   of truth.
 - Residual boundaries: M8-E chunk handoff and all M9 tracks remain pending;
   M10 full-snapshot work remains separately gated.
-- Post-closeout technical debt: `process_confluence_page_set._profile_identity`
-  currently repeats the active `ChunkingProfile` contract as application-level
-  literals. This is strict but not single-source-of-truth. The next M8
-  maintenance pass must centralize profile identity/fingerprint derivation and
-  add drift tests; the independent M8-D review did not catch this duplication.
+- Post-closeout technical debt (deferred until post-POC product hardening):
+  `process_confluence_page_set._profile_identity` currently repeats the active
+  `ChunkingProfile` contract as application-level literals. This is strict but
+  not single-source-of-truth. Product hardening must centralize profile
+  identity/fingerprint derivation and add drift tests; the independent M8-D
+  review did not catch this duplication.
 
 ## M8-E Chunk Stability and Update-Propagation Handoff
 
