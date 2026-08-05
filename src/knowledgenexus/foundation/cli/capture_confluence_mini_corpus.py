@@ -1,9 +1,10 @@
 """Controlled read-only capture for one M8 mini-corpus generation.
 
-The command accepts an external file containing 10--20 explicitly selected
-Confluence page IDs.  Each page is fetched exactly once through the approved
-M6A adapter, validated by the approved raw-page mapper, wrapped in the M7
-generation envelope, and atomically published through the generation store.
+The command accepts either an external file containing 10--20 explicitly
+selected page IDs or one bounded root/space inventory with an exact expected
+page count. Each selected page body is fetched exactly once through the
+approved M6A adapter, validated by the approved raw-page mapper, wrapped in the
+M7 generation envelope, and atomically published through the generation store.
 
 Credentials are environment-only.  Output is aggregate-only except for the
 operator-supplied run ID, which is needed by the subsequent M8-AC command.
@@ -22,7 +23,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn, Protocol
 
+from knowledgenexus.foundation.application.use_cases.build_confluence_inventory import (
+    BuildConfluenceInventory,
+)
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+from knowledgenexus.foundation.domain.models.confluence_source_config import (
+    ConfluenceIncludeRoot,
+    ConfluenceSourceConfig,
+)
 from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
     ConfluenceRawPageEnvelope,
     ConfluenceRawPagePublicationOutcome,
@@ -31,6 +39,7 @@ from knowledgenexus.foundation.domain.rules.confluence_page_id import (
     require_confluence_page_id,
 )
 from knowledgenexus.foundation.infrastructure.confluence import (
+    ConfluenceDataCenterInventoryAdapter,
     ConfluenceDataCenterPageAdapter,
     UrllibConfluenceHttpTransport,
 )
@@ -55,6 +64,8 @@ _EXIT_CODES = {
     "page_mapping": 4,
     "raw_publication": 5,
     "selection_publication": 6,
+    "inventory_discovery": 7,
+    "inventory_scope": 8,
 }
 
 
@@ -79,6 +90,16 @@ class _PageMapper(Protocol):
 
 class _GenerationStore(Protocol):
     def publish_page(self, *, envelope: ConfluenceRawPageEnvelope): ...
+
+
+class _InventoryPort(Protocol):
+    def iter_page_metadata(
+        self,
+        *,
+        space_key: str,
+        root_page_id: str,
+        page_size: int,
+    ): ...
 
 
 class _SanitizedArgumentParser(argparse.ArgumentParser):
@@ -144,6 +165,53 @@ def _load_page_ids(path: Path) -> tuple[str, ...]:
     return page_ids
 
 
+def _discover_page_ids(
+    *,
+    inventory_port: _InventoryPort,
+    root_page_id: str,
+    space_key: str,
+    expected_page_count: int,
+    page_size: int,
+) -> tuple[str, ...]:
+    try:
+        root_page_id = require_confluence_page_id(root_page_id)
+        if (
+            type(space_key) is not str
+            or not space_key
+            or type(expected_page_count) is not int
+            or not 10 <= expected_page_count <= 20
+            or type(page_size) is not int
+            or page_size <= 0
+        ):
+            raise ValueError
+        inventory = BuildConfluenceInventory(
+            inventory_port=inventory_port,
+        ).execute(
+            config=ConfluenceSourceConfig(
+                source_id="m8ac-prep",
+                space_key=space_key,
+                include_roots=(ConfluenceIncludeRoot(page_id=root_page_id),),
+                page_size=page_size,
+            )
+        )
+    except Exception:
+        raise _CaptureError("inventory_discovery") from None
+
+    if (
+        len(inventory) != expected_page_count
+        or any(item.scope_status != "included" for item in inventory)
+        or sum(item.page_id == root_page_id for item in inventory) != 1
+    ):
+        raise _CaptureError("inventory_scope") from None
+    descendants = tuple(
+        item.page_id for item in inventory if item.page_id != root_page_id
+    )
+    page_ids = (root_page_id, *descendants)
+    if len(set(page_ids)) != len(page_ids):
+        raise _CaptureError("inventory_scope") from None
+    return page_ids
+
+
 def _rfc3339_now() -> str:
     return (
         datetime.now(timezone.utc)
@@ -159,7 +227,12 @@ def _capture_pages(
     page_fetcher: _PageFetcher,
     page_mapper: _PageMapper,
     generation_store: _GenerationStore,
+    expected_space_key: str | None = None,
 ) -> tuple[dict[str, str], ...]:
+    if expected_space_key is not None and (
+        type(expected_space_key) is not str or not expected_space_key
+    ):
+        raise TypeError("expected space key is invalid")
     selection: list[dict[str, str]] = []
     published = 0
     for page_id in page_ids:
@@ -176,7 +249,14 @@ def _capture_pages(
                 expected_page_id=page_id,
             )
             source_version = source.source_version
-            if type(source_version) is not str or not source_version:
+            if (
+                type(source_version) is not str
+                or not source_version
+                or (
+                    expected_space_key is not None
+                    and source.space_key != expected_space_key
+                )
+            ):
                 raise ValueError
             envelope = ConfluenceRawPageEnvelope.capture(
                 run_id=run_id,
@@ -276,7 +356,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         description="Capture 10-20 explicit Confluence pages into one M8 generation.",
     )
     parser.add_argument("--data-root", required=True)
-    parser.add_argument("--page-ids-path", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--page-ids-path")
+    source.add_argument("--root-page-id")
+    parser.add_argument("--space-key")
+    parser.add_argument("--expected-page-count", type=int)
+    parser.add_argument("--inventory-page-size", type=int, default=25)
+    parser.add_argument("--max-search-pages", type=int, default=10)
     parser.add_argument("--selection-out", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
@@ -284,11 +370,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _run(args: argparse.Namespace) -> tuple[str, int]:
+def _run(args: argparse.Namespace) -> tuple[str, int, str]:
     data_root = _safe_external_path(args.data_root)
-    page_ids_path = _safe_external_path(args.page_ids_path)
     selection_out = _safe_external_path(args.selection_out)
-    if not data_root.is_dir() or not page_ids_path.is_file():
+    if not data_root.is_dir():
         raise _ConfigurationError
     if not selection_out.parent.is_dir() or selection_out.exists():
         raise _ConfigurationError
@@ -307,7 +392,32 @@ def _run(args: argparse.Namespace) -> tuple[str, int]:
     generation_path = data_root / "confluence" / "generations" / str(run_id)
     if os.path.lexists(generation_path):
         raise _ConfigurationError
-    page_ids = _load_page_ids(page_ids_path)
+
+    explicit_mode = args.page_ids_path is not None
+    if explicit_mode:
+        if args.space_key is not None or args.expected_page_count is not None:
+            raise _ConfigurationError
+        page_ids_path = _safe_external_path(args.page_ids_path)
+        if not page_ids_path.is_file():
+            raise _ConfigurationError
+        page_ids = _load_page_ids(page_ids_path)
+    else:
+        if (
+            type(args.root_page_id) is not str
+            or type(args.space_key) is not str
+            or type(args.expected_page_count) is not int
+            or not 10 <= args.expected_page_count <= 20
+            or type(args.inventory_page_size) is not int
+            or args.inventory_page_size <= 0
+            or type(args.max_search_pages) is not int
+            or args.max_search_pages <= 0
+        ):
+            raise _ConfigurationError
+        try:
+            require_confluence_page_id(args.root_page_id)
+        except (TypeError, ValueError):
+            raise _ConfigurationError from None
+        page_ids = ()
 
     # Publication capability must be proven before credentials are read and
     # before any request can be issued.
@@ -331,15 +441,30 @@ def _run(args: argparse.Namespace) -> tuple[str, int]:
         store = ConfluenceRawPageGenerationStore(raw_root=data_root)
     except (TypeError, ValueError):
         raise _ConfigurationError from None
+    if not explicit_mode:
+        page_ids = _discover_page_ids(
+            inventory_port=ConfluenceDataCenterInventoryAdapter(
+                transport=transport,
+                max_search_pages=args.max_search_pages,
+            ),
+            root_page_id=args.root_page_id,
+            space_key=args.space_key,
+            expected_page_count=args.expected_page_count,
+            page_size=args.inventory_page_size,
+        )
+
     selection = _capture_pages(
         run_id=run_id,
         page_ids=page_ids,
         page_fetcher=page_fetcher,
         page_mapper=mapper,
         generation_store=store,
+        expected_space_key=None if explicit_mode else args.space_key,
     )
     _publish_selection(selection_out, selection)
-    return str(run_id), len(selection)
+    return str(run_id), len(selection), (
+        "explicit_list" if explicit_mode else "bounded_root_inventory"
+    )
 
 
 def _write_failure(category: str, *, published_pages: int = 0) -> int:
@@ -361,7 +486,7 @@ def _write_failure(category: str, *, published_pages: int = 0) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = _parse_args(argv)
-        run_id, count = _run(args)
+        run_id, count, selection_source = _run(args)
     except _ConfigurationError:
         return _write_failure("configuration")
     except _CaptureError as exc:
@@ -379,6 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "requested_pages": count,
                 "published_pages": count,
                 "selection_written": True,
+                "selection_source": selection_source,
             },
             sort_keys=True,
             separators=(",", ":"),
