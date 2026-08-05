@@ -29,10 +29,10 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
 explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
 reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
-export/store/checkpoint side effects. M10-A wire models, M10-B trusted
-multi-source composition, and M10-C cross-stream projection/generic
-completion are complete and independently reviewed `PASS`. M10-D CLI and
-publication remain next; no real full-snapshot run has started.
+export/store/checkpoint side effects. M10-A through M10-D are complete and
+independently reviewed `PASS`. M10-E synthetic acceptance is complete and
+independently reviewed `PASS`; no real full-snapshot run has started, and the
+M8-AC real gate remains `pending_external_input`.
 
 ## Durable State Convention
 
@@ -1819,5 +1819,28 @@ separate deferred follow-up; no 100k scale PASS is claimed.
   `88 passed`; compileall/diff-check passed. Final independent review is
   `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` with
   `VERDICT: PASS`.
-- Residual boundary: M10-D CLI/publication and M10-E synthetic/external gate
-  remain pending; M8-AC real mini-corpus remains `pending_external_input`.
+- Residual boundary: M10-E real full-snapshot evidence remains
+  `pending_external_input`; M8-AC real mini-corpus remains
+  `pending_external_input`.
+
+## M10-D/E CLI, Publication, and Synthetic Acceptance
+
+- Status: bounded implementation complete and independently reviewed `PASS`.
+- Added an offline sanitized CLI and infrastructure wiring over the existing
+  M3 staging writer, completer, and publisher seams. Publication performs
+  strict ten-file readback, deterministic digesting, no-clobber preflight, and
+  rollback that restores the exact prior pointer/final state after acceptance
+  failure.
+- Acceptance validates defensive copies and detects validator mutation of
+  parsed records or published bytes. Non-integer `SystemExit` payloads and
+  digest/filesystem failures are sanitized at the public boundary.
+- Synthetic acceptance proves deterministic ten-file output and repeatability;
+  no network, credentials, raw/runtime data, or real snapshot was used.
+- Validation: focused `40 passed`; M10-A/B/C `98 passed, 6 skipped`; M6G `37
+  passed`; M8/M9 `125 passed`; architecture `89 passed`; compileall and
+  diff-check passed. Fresh independent review is
+  `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` with
+  verdict `PASS`.
+- Residual boundary: real M10 full-snapshot evidence remains
+  `pending_external_input`; M8-AC real mini-corpus remains
+  `pending_external_input`.

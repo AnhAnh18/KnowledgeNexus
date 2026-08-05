@@ -26,6 +26,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _POSIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _PROCESSING = ("failed", "not_processed", "ocr", "parsed", "summarized")
 _RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+_CONCRETE_PATH_TYPE = type(Path())
 
 class M10SnapshotError(ValueError):
     pass
@@ -265,7 +266,7 @@ class M10SnapshotResult:
             if type(self.digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", self.digest) or self.failure_category is not None: raise M10SnapshotError("invalid successful result")
             if self.status == "composed" and self.dataset_version is not None: raise M10SnapshotError("composed result cannot have dataset version")
             if self.status in ("staged", "published") and (type(self.dataset_version) is not str or not self.dataset_version): raise M10SnapshotError("missing dataset version")
-            if self.status == "published" and (type(self.final_path) is not Path or not self.final_path.is_absolute()): raise M10SnapshotError("missing final path")
+            if self.status == "published" and (type(self.final_path) is not _CONCRETE_PATH_TYPE or not self.final_path.is_absolute()): raise M10SnapshotError("missing final path")
             if self.status != "published" and self.final_path is not None: raise M10SnapshotError("unexpected final path")
 
 @dataclass(frozen=True)
