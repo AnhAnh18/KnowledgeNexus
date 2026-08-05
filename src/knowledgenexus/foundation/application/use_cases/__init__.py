@@ -47,6 +47,7 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
     BuildGitCodeDocuments,
     BuildGitCodeDocumentsRequest,
 )
+from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
 
 __all__ = [
     "BuildConfluenceInventory",
@@ -72,4 +73,5 @@ __all__ = [
     "ProcessConfluenceMediaAttachment",
     "BuildGitCodeDocuments",
     "BuildGitCodeDocumentsRequest",
+    "BuildGitSymbols",
 ]

@@ -25,8 +25,9 @@ implemented and independently re-reviewed `PASS`, but the real gate remains
 `pending_external_input` because no approved 10-20 page generation/selection/
 tokenizer input was supplied. M9-A1 metadata-first media contract is also
 complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
-independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
-reviewed M8-M9 goal plan. M9-B is independently approved; no M10 full-snapshot work has started.
+independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+M9-B and M9-C are now independently approved; M9-D remains staged under the
+reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
 
 ## Durable State Convention
 
@@ -1683,6 +1684,27 @@ are recorded without using repository-local commit SHAs as status.
   regression `70 passed`; compileall and scoped diff-check passed.
 - Review artifact: `.codex-workflow/20260804-m9b/40-review-18.md` records the
   final fresh independent `VERDICT: PASS` after bounded fixes.
+
+## M9-C Minimal Symbol Index
+
+- Status: complete and independently re-reviewed `PASS`.
+- Objective: activate the bounded C++/Java tree-sitter symbol stream over
+  M9-B authority observations while preserving M9-B's fallback-plan invariants.
+- Contract: atomic `BuildGitSymbols` result, exact commit/path provenance,
+  runtime-validated parser spans, deterministic class/namespace/package/method/
+  function/enum/struct/interface extraction, overload IDs, schema-valid
+  `SymbolRecord` and `code_symbol`/error-only `code_window` chunks, pinned
+  BGE-M3 token/profile identity, and no export/network/raw/checkpoint side
+  effects. Kotlin/XML remain M9-B fallback-only.
+- Parser dependencies: `tree-sitter==0.25.2`, `tree-sitter-cpp==0.23.4`,
+  `tree-sitter-java==0.23.5`.
+- Validation: focused M9-C `10 passed`; M9-B regression `27 passed`; M8-D/E
+  regression `40 passed`; M9-A regression `65 passed`; architecture `85 passed`;
+  compileall and diff-check passed.
+- Review artifacts: `.codex-workflow/20260805-m9c/05-review-1.md` records the
+  initial `FAIL` and two P1 findings; bounded fix plan/review are in
+  `06-fix-plan.input.md` and `07-fix-plan-review.md`; fresh
+  `.codex-workflow/20260805-m9c/09-review-2.md` records final `VERDICT: PASS`.
 
 ## Current Execution Boundary
 

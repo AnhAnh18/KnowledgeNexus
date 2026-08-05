@@ -92,7 +92,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
 | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
-| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3 and M9-B independently approved; M9-C/D remain pending | Split into independent tracks. |
+| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3, M9-B, and M9-C independently approved; M9-D remains pending | Split into independent tracks. |
 | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
 
 ## 2. Current Task
@@ -116,8 +116,9 @@ controlled mini-corpus acceptance is implemented and independently re-reviewed
 `PASS`, but its real gate remains `pending_external_input` until an approved
 10-20 page generation/selection/tokenizer input is supplied. M9-A1 is complete
 and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
-independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
-reviewed M8-M9 goal plan. M9-B is independently approved; no M10 full-snapshot work has started.
+independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+M9-B and M9-C are independently approved; M9-D remains staged under the
+reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -992,7 +993,7 @@ M9A - Media:
 | M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
 | M9-A3 offline draw.io/PDF/OCR processors | complete; independently reviewed `PASS` | Added bounded stdlib draw.io XML parsing, pinned digital-PDF text and image-OCR capability ports/processors, strict schema/status/detail binding, and MIME/filename dispatch over the M9-A2 envelope; focused `30 passed`, architecture `80 passed`, M9-A1/A2 regression `48 passed, 2 skipped`, compileall and diff-check passed. No engine/network/file side effects, attachment-text chunks, schema changes, or raw writes. |
 | M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
-| M9-C minimal symbol index | pending | Depends on M9-B code-document contract; no symbol chunk stream is active yet. |
+| M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
 | M9-D1/D2 tombstone/delta propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries. |
 
 M9B - Git repository scan:

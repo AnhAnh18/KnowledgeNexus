@@ -50,6 +50,7 @@ from knowledgenexus.foundation.ports.git_repository_read_port import (
     GitRepositoryReadPort,
     GitRepositoryReaderError,
 )
+from knowledgenexus.foundation.ports.symbol_parser_port import SymbolParserPort
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointFailureCategory,
     CheckpointCommitResult,
@@ -147,6 +148,7 @@ __all__ = [
     "TokenizerPort",
     "GitRepositoryReadPort",
     "GitRepositoryReaderError",
+    "SymbolParserPort",
     "CheckpointFailureCategory",
     "CheckpointCommitResult",
     "CheckpointOperationFailure",

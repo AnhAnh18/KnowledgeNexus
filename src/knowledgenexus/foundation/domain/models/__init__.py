@@ -91,6 +91,16 @@ from knowledgenexus.foundation.domain.models.git_code_source import (
     GitScanMetrics,
     GitSourceConfig,
 )
+from knowledgenexus.foundation.domain.models.symbol_index import (
+    BuildGitSymbolsRequest,
+    GitSymbolIndexFailureCategory,
+    GitSymbolIndexMetrics,
+    GitSymbolIndexResult,
+    GitSymbolIndexStatus,
+    ParsedSymbol,
+    SymbolParseResult,
+    SymbolParseStatus,
+)
 from knowledgenexus.foundation.domain.models.confluence_chunking import (
     ChunkingResult,
     ConfluenceChunkingError,
@@ -275,6 +285,14 @@ __all__ = [
     "GitScanBudgets",
     "GitScanMetrics",
     "GitSourceConfig",
+    "BuildGitSymbolsRequest",
+    "GitSymbolIndexFailureCategory",
+    "GitSymbolIndexMetrics",
+    "GitSymbolIndexResult",
+    "GitSymbolIndexStatus",
+    "ParsedSymbol",
+    "SymbolParseResult",
+    "SymbolParseStatus",
     "ChunkingResult",
     "ConfluenceChunkingError",
     "ConfluenceChunkingFailureCategory",
