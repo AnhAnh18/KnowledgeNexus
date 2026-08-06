@@ -1783,6 +1783,37 @@ performance gate remain deferred; no 100k scale PASS is claimed.
   `23 passed`); `python -m compileall -q src tests` passed; `git diff --check`
   passed.
 
+## Stage B Durable Batch Sidecar State
+
+- Status: complete and independently reviewed `PASS`.
+- Added additive `batch_state.sqlite3` persistence for the Stage A batch port,
+  bound to the canonical workspace/run/generation/config/inventory and full
+  ordered occurrence stream. It shares the existing M7 writer lock without
+  nested acquisition, preserves exact-v1 bytes/catalog, supports durable CAS
+  claim/renew/commit/fail/requeue, retry history, terminal fencing, pending
+  enumeration, and deterministic reopen/resume.
+- Review artifacts: `.codex-workflow/20260806-scale/03-stage-b-plan-final.md`,
+  `.codex-workflow/20260806-scale/07-stage-b-fix-plan-final.md`,
+  `.codex-workflow/20260806-scale/11-stage-b-fix2-plan-final.md`,
+  `.codex-workflow/20260806-scale/15-stage-b-fix3-plan-final.md`,
+  `.codex-workflow/20260806-scale/19-stage-b-fix4-plan-final.md`, and fresh
+  review `.codex-workflow/20260806-scale/21-stage-b-fix4-independent-review.md`.
+- Validation: sidecar `36 passed`; Stage A/M7 `23 passed`; M7 checkpoint/
+  architecture regressions `161 passed, 12 skipped`; compileall and
+  diff-check passed.
+- Boundary: this is durable checkpoint infrastructure only. It does not add
+  live transport, raw/export/chunk publication, RSS sampling, or 1k/10k/100k
+  scale evidence; no `100k PASS` is claimed.
+
+## M9-A4 OCR Productionization Plan State
+
+- Plan reviewed and finalised in `.codex-workflow/20260806-scale-ocr/03-m9a4-plan-final.md`.
+- Contract/policy seam is the next bounded implementation stage; actual OCR
+  activation remains `pending_external_input` until an engine approval record
+  identifies the engine/runtime/model/build, offline/network policy, limits,
+  and sanitized acceptance evidence. No engine is guessed or claimed
+  production-ready.
+
 ## M10-A Wire Contract and Trusted Input Models
 
 - Status: complete and independently reviewed `PASS`.
