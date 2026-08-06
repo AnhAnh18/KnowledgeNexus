@@ -20,6 +20,7 @@ _PAGE_ID = re.compile(r"^confluence:page:[0-9]+$")
 _MEDIA_ID = re.compile(r"^confluence:attachment:(?:att)?[0-9]+$")
 _MIME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _SOURCE_VERSION = re.compile(r"^[^\x00-\x1f\x7f-\x9f]{1,256}$")
+_ENGINE_CAPABILITY = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _RFC3339 = re.compile(
     r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})T"
     r"(?:[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.[0-9]+)?"
@@ -308,12 +309,15 @@ class MediaExtractionDetail:
     status: str
     text_sha256: str | None = None
     warning: str | None = None
+    pdf_page_number: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.ordinal) is not int or self.ordinal <= 0:
             raise ValueError("ordinal is invalid")
         if type(self.locator) is not MediaSourceLocator:
             raise TypeError("locator is invalid")
+        if self.pdf_page_number is not None and (type(self.pdf_page_number) is not int or self.pdf_page_number <= 0):
+            raise ValueError("pdf_page_number is invalid")
         try:
             locator = MediaSourceLocator(
                 parent_page_id=self.locator.parent_page_id,
@@ -327,7 +331,10 @@ class MediaExtractionDetail:
             raise ValueError("locator is invalid") from None
         if not isinstance(self.processor_kind, MediaProcessorKind):
             raise TypeError("processor_kind is invalid")
-        if self.processor_kind in _CAPABILITIES:
+        if self.processor_kind is MediaProcessorKind.IMAGE_OCR:
+            if type(self.capability_id) is not str or not _ENGINE_CAPABILITY.fullmatch(self.capability_id) or type(self.capability_version) is not str or not self.capability_version:
+                raise ValueError("capability identity is invalid")
+        elif self.processor_kind in _CAPABILITIES:
             _capability(self.processor_kind, self.capability_id, self.capability_version)
         elif (self.capability_id, self.capability_version) != ("stdlib-drawio-v1", "1"):
             raise ValueError("capability identity is invalid")
@@ -345,6 +352,8 @@ class MediaExtractionDetail:
         elif self.processor_kind is MediaProcessorKind.PDF_TEXT:
             if self.locator.pdf_page_number is None or self.locator.image_index is not None:
                 raise ValueError("PDF locator is invalid")
+            if self.status not in {"parsed", "ocr", "failed"}:
+                raise ValueError("PDF status is invalid")
         elif self.processor_kind is MediaProcessorKind.IMAGE_OCR:
             if self.locator.image_index is None or self.locator.pdf_page_number is not None:
                 raise ValueError("OCR locator is invalid")
@@ -493,10 +502,11 @@ class MediaProcessingResult:
             seen_locators.add(locator_key)
             rebuilt.append(copied)
         status = asset["processing_status"]
-        if any(detail.status != status for detail in rebuilt):
+        if status == "failed":
+            if any(detail.status != "failed" for detail in rebuilt):
+                raise ValueError("detail status mismatch")
+        elif any(detail.status not in {"parsed", "ocr"} for detail in rebuilt):
             raise ValueError("detail status mismatch")
-        if len({detail.processor_kind for detail in rebuilt}) != 1:
-            raise ValueError("detail processor mismatch")
         for detail in rebuilt:
             locator = detail.locator
             if (

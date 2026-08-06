@@ -114,6 +114,8 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
 )
 from knowledgenexus.foundation.ports.media_processing_port import (
     ImageOcrPort,
+    OcrCapabilityPort,
+    PdfPageRasterizerPort,
     PdfTextExtractionPort,
 )
 from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
@@ -202,6 +204,8 @@ __all__ = [
     "ResumeUniqueIncompleteRunRequest",
     "StartNewRunRequest",
     "ImageOcrPort",
+    "OcrCapabilityPort",
+    "PdfPageRasterizerPort",
     "PdfTextExtractionPort",
     "M10PublisherPort",
     "M10StagingCompleterPort",

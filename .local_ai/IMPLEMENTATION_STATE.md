@@ -1679,6 +1679,24 @@ are recorded without using repository-local commit SHAs as status.
   fixes; `.codex-workflow/20260805-m9a3/08-review-2.md` records the fresh
   independent `VERDICT: PASS`.
 
+## M9-A4 OCR Productionization Stage A
+
+- Status: bounded contract/policy seam complete and independently reviewed
+  `PASS`; production engine activation remains `pending_external_input`.
+- Added runtime-validated OCR limits/request/result envelopes, canonical
+  source/page/image binding, PDF rasterizer capability boundary, digital-first
+  mixed-PDF/image-only fallback, selected-image OCR policy, resource/quality/
+  cancellation/deadline limits, and fail-closed no-partial-result handling.
+  Existing fixture capability identities remain unchanged; no subprocess,
+  network, cloud, or engine runtime was introduced.
+- Validation: focused Fix3 `30 passed`; M9/media regression `37 passed`;
+  compileall and diff-check passed. Fresh independent review is
+  `.codex-workflow/20260806-scale-ocr/17-m9a4-fix3-independent-review.md`
+  with `VERDICT: PASS`.
+- Engine gate: an approval artifact is still required to identify the engine,
+  runtime/model/build identity, offline/network policy, limits, and sanitized
+  acceptance evidence before any production OCR claim.
+
 ## M9-B Pinned Local Git Code-Document Seam
 
 - Status: complete and independently reviewed `PASS`.
