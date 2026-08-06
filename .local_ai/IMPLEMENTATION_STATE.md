@@ -1823,6 +1823,20 @@ performance gate remain deferred; no 100k scale PASS is claimed.
   live transport, raw/export/chunk publication, RSS sampling, or 1k/10k/100k
   scale evidence; no `100k PASS` is claimed.
 
+## Bounded Synthetic Scale Validation State
+
+- Status: 1,000-page synthetic validation complete and independently reviewed
+  `PASS`; 10,000-page measurement remains pending.
+- Fix 4 evidence: `.codex-workflow/20260806-scale-validation/scale-validation-fix4-1000.json`.
+  Fresh independent review: `.codex-workflow/20260806-scale-validation/21-fix4-independent-review.md`.
+- The evidence covers full control/retry/terminal ledgers, checkpoint metrics
+  and pending order, D-H fault/reopen cases, non-vacuous replay bounds,
+  memory/SQLite parity, and `15/15` malformed side-effect checks.
+- Validation: independent 1,000-page harness exit `0`; focused batch/SQLite
+  suite `59 passed`; compileall and diff-check passed.
+- Boundary: this is synthetic-only evidence. It does not close the 10k/100k,
+  RSS, live transport, M8-AC real-corpus, M10 real-POC, or OCR engine gates.
+
 ## M9-A4 OCR Productionization Plan State
 
 - Plan reviewed and finalised in `.codex-workflow/20260806-scale-ocr/03-m9a4-plan-final.md`.

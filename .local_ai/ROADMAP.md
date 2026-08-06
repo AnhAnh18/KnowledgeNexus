@@ -909,6 +909,12 @@ Contract decomposition:
   composition. It is additive and does not migrate or modify the exact-v1 M7
   database. Production transport, RSS sampling, and 100k evidence remain
   deferred.
+- Bounded synthetic scale validation Fix 4: complete and independently
+  reviewed `PASS` for the 1,000-page artifact. The harness now verifies full
+  control/retry/terminal ledgers, all four crash/reopen phases, replay bounds,
+  adversarial side-effect isolation, and memory/SQLite observation parity.
+  The 10,000-page run remains `measurement_pending`; RSS, live transport, and
+  the 100k gate remain deferred.
 
 ### M7-C Durable Milestone Ledger
 
