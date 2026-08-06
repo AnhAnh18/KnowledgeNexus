@@ -1759,9 +1759,29 @@ are recorded without using repository-local commit SHAs as status.
 ## Current Execution Boundary
 
 The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
-replay/checkpoint stages are complete with their independent gates and are
-owner-accepted as the roadmap closeout. The 100k performance gate remains a
-separate deferred follow-up; no 100k scale PASS is claimed.
+replay/checkpoint stages are complete with their independent gates. Stage A's
+in-memory batch orchestration/checkpoint-resume reference slice is also
+complete and independently reviewed `PASS`; it provides runtime-validated
+batch contracts, deterministic partitioning, lease fencing/reclaim, retry and
+resume accounting, bounded resource budgets, and adversarial tests. SQLite v2,
+production transport, RSS sampling, real-scale validation, and the 100k
+performance gate remain deferred; no 100k scale PASS is claimed.
+
+## Stage A Bounded Batch Orchestration State
+
+- Status: complete and independently reviewed `PASS`.
+- Review workflow artifacts: `.codex-workflow/20260805-scale-ocr/17-scale-fix3-plan-final.md`,
+  `.codex-workflow/20260805-scale-ocr/21-scale-fix4-plan-final.md`,
+  `.codex-workflow/20260805-scale-ocr/25-scale-fix5-plan-final.md`,
+  `.codex-workflow/20260805-scale-ocr/29-scale-fix6-plan-final.md`,
+  `.codex-workflow/20260805-scale-ocr/33-scale-fix7-plan-final.md`, and fresh
+  review `.codex-workflow/20260805-scale-ocr/35-scale-fix7-independent-review.md`.
+- Implementation is intentionally bounded to an in-memory/reference slice.
+  It does not replace the durable SQLite checkpoint store or establish a live
+  crawl/10k/100k acceptance gate.
+- Validation: focused Stage A suite `20 passed` (domain-inclusive review run
+  `23 passed`); `python -m compileall -q src tests` passed; `git diff --check`
+  passed.
 
 ## M10-A Wire Contract and Trusted Input Models
 

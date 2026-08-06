@@ -90,7 +90,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+| M7 - Crawl reliability and scale | Bounded stages complete through D5-B; Stage A batch-orchestration reference slice independently reviewed `PASS`; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages plus the bounded in-memory batch/checkpoint-resume slice are independently reviewed `PASS`; SQLite v2, production transport, RSS, optimization, and 100k evidence remain deferred | Owner accepts bounded-stage progress; no 100k scale PASS or production transport claim is made. |
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
 | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
 | M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
@@ -895,6 +895,13 @@ Contract decomposition:
   workspace raw-page replay/checkpoint integration only. M7-D5-B restriction
   replay is also complete and separately reviewed `PASS`; neither stage closes
   the 100k scale gate.
+- Stage A bounded batch orchestration: complete and independently reviewed
+  `PASS`; adds runtime-validated batch identity/request/lease/checkpoint/
+  metrics/result contracts, deterministic partitioning, in-memory CAS lease
+  reclaim, per-batch retry and resume accounting, bounded queue/byte/page
+  budgets, and adversarial coverage. This is a reference slice only; it does
+  not claim SQLite durability, production transport, RSS sampling, or 100k
+  scale evidence.
 
 ### M7-C Durable Milestone Ledger
 
