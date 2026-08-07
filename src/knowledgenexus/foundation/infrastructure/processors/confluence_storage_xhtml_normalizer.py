@@ -823,6 +823,7 @@ def _escape_markdown_text(value: str) -> str:
 
 
 def _inline_code(value: str) -> str:
+    value = value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
     fence = _safe_backtick_fence(value)
     padding = " " if value.startswith("`") or value.endswith("`") else ""
     return f"{fence}{padding}{value}{padding}{fence}"
