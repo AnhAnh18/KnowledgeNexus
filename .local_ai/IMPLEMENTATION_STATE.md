@@ -1606,8 +1606,12 @@ are recorded without using repository-local commit SHAs as status.
   succeeded pages; 401 chunks; 20 reference intents across 7 pages; 8 table
   pages; content kinds `code_block=143`, `prose=231`, `table=27`; deterministic
   repeat, source/selection stability, negative probe, and no-write checks all
-  passed. The pinned tokenizer asset digest matched the active profile. Raw
-  pages and runtime artifacts remain outside Git.
+  passed. The pinned tokenizer asset digest matched the active profile;
+  `page_set_digest=27a8b4e8c4ddf3669c6597aaf59bd85045ad0b646b4e9255efad2d795ed6ae9a`,
+  `chunk_stability_digest=d6078afa3c096cfce50924a831fe20167ef4617b4e9a515cbd15d91b533d42a1`,
+  and the final sanitized receipt digest was
+  `2534b13b9e3f86ad97750ae1968f3c15e675a3c857098cfac33d583d24c22ac5`.
+  Raw pages and runtime artifacts remain outside Git.
 
 ## M9-A1 Metadata-First Media Contract
 
