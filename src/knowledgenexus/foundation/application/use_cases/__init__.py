@@ -1,11 +1,28 @@
 from knowledgenexus.foundation.application.use_cases.build_confluence_inventory import (
     BuildConfluenceInventory,
 )
+from knowledgenexus.foundation.application.use_cases.build_sync_state_snapshot import (
+    BuildSyncStateSnapshot,
+    SyncStateSnapshotError,
+    SyncStateSnapshotResult,
+)
+from knowledgenexus.foundation.application.use_cases.assemble_m10_handoffs import (
+    AssembleConfluenceM10Handoff,
+    AssembleGitM10Handoff,
+    M10HandoffAssemblyError,
+)
 from knowledgenexus.foundation.application.use_cases.build_confluence_chunks import (
     BuildConfluenceChunks,
 )
 from knowledgenexus.foundation.application.use_cases.build_confluence_jira_relations import (
     BuildConfluenceJiraRelations,
+)
+from knowledgenexus.foundation.application.use_cases.materialize_confluence_media_relations import (
+    MaterializeConfluenceMediaRelations,
+    MediaRelationMaterializationError,
+    MediaRelationMaterializationFailureCategory,
+    MediaRelationMaterializationMetrics,
+    MediaRelationMaterializationResult,
 )
 from knowledgenexus.foundation.application.use_cases.collect_confluence_page_observations import (  # noqa: E501
     CollectConfluencePageObservations,
@@ -43,6 +60,11 @@ from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corp
 from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
     ProcessConfluenceMediaAttachment,
 )
+from knowledgenexus.foundation.application.use_cases.process_confluence_media_batch import (
+    MediaBatchProcessingError,
+    MediaBatchProcessingResult,
+    ProcessConfluenceMediaBatch,
+)
 from knowledgenexus.foundation.application.use_cases.build_git_code_documents import (
     BuildGitCodeDocuments,
     BuildGitCodeDocumentsRequest,
@@ -56,11 +78,29 @@ from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import
     M10CompositionFailureCategory,
     M10CompositionResult,
 )
+from knowledgenexus.foundation.application.use_cases.evaluate_foundation_gates import (
+    FoundationGateEvaluationError,
+    EvaluateBoundedMediaCorpusAcceptance,
+    EvaluateBoundedMediaGate,
+    EvaluateScaleGateEvidence,
+    EvaluateScaleGate,
+)
 
 __all__ = [
     "BuildConfluenceInventory",
+    "BuildSyncStateSnapshot",
+    "SyncStateSnapshotError",
+    "SyncStateSnapshotResult",
+    "AssembleConfluenceM10Handoff",
+    "AssembleGitM10Handoff",
+    "M10HandoffAssemblyError",
     "BuildConfluenceChunks",
     "BuildConfluenceJiraRelations",
+    "MaterializeConfluenceMediaRelations",
+    "MediaRelationMaterializationError",
+    "MediaRelationMaterializationFailureCategory",
+    "MediaRelationMaterializationMetrics",
+    "MediaRelationMaterializationResult",
     "CollectConfluencePageObservations",
     "PageObservationCollectionError",
     "PageObservationCollectionResult",
@@ -79,6 +119,9 @@ __all__ = [
     "FetchAndStoreConfluenceAttachmentBody",
     "AcceptConfluenceMiniCorpus",
     "ProcessConfluenceMediaAttachment",
+    "MediaBatchProcessingError",
+    "MediaBatchProcessingResult",
+    "ProcessConfluenceMediaBatch",
     "BuildGitCodeDocuments",
     "BuildGitCodeDocumentsRequest",
     "BuildGitSymbols",
@@ -88,4 +131,9 @@ __all__ = [
     "M10CompositionFailure",
     "M10CompositionFailureCategory",
     "M10CompositionResult",
+    "FoundationGateEvaluationError",
+    "EvaluateBoundedMediaCorpusAcceptance",
+    "EvaluateBoundedMediaGate",
+    "EvaluateScaleGateEvidence",
+    "EvaluateScaleGate",
 ]

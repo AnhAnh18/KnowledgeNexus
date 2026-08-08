@@ -187,6 +187,13 @@ from knowledgenexus.foundation.domain.models.foundation_gate import (
     OcrEngineApproval,
     ScaleGateEvidence,
 )
+from knowledgenexus.foundation.domain.models.foundation_gate_inputs import (
+    BoundedMediaGateRequest,
+    PublishedSnapshotReadback,
+    SanitizedMediaProcessorOutcome,
+    SanitizedMediaProcessorRun,
+    ScaleGateRequest,
+)
 from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
     MiniCorpusAcceptanceError,
     MiniCorpusAcceptanceFailureCategory,
@@ -397,6 +404,11 @@ __all__ = [
     "BoundedMediaCorpusAcceptance",
     "OcrEngineApproval",
     "ScaleGateEvidence",
+    "BoundedMediaGateRequest",
+    "PublishedSnapshotReadback",
+    "SanitizedMediaProcessorOutcome",
+    "SanitizedMediaProcessorRun",
+    "ScaleGateRequest",
     "text_digest",
     "MiniCorpusAcceptanceError",
     "MiniCorpusAcceptanceFailureCategory",
