@@ -227,6 +227,40 @@ def test_confluence_materialized_source_runs_acl_before_generic_relations(tmp_pa
     assert result.relations == confluence.relations
 
 
+def test_confluence_materialized_source_merges_generic_relations_with_page_relations(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    generic = {
+        **confluence.relations[0],
+        "relation_id": "rel:fedcba9876543210",
+        "relation_type": "embeds_media",
+        "target_id": "confluence:attachment:missing",
+        "resolution_status": "unresolved_target",
+    }
+
+    class PageStage:
+        def execute(self, request):
+            return _Output(
+                source_version=confluence.source_version,
+                raw_artifact_identity=confluence.raw_artifact_identity,
+                documents=confluence.documents,
+                chunks=confluence.chunks,
+                relations=confluence.relations,
+            )
+
+    class RelationStage:
+        def execute(self, request, **state):
+            return _Output(relations=(generic,))
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), relation_stage=RelationStage()
+    ).collect(request)
+    assert {row["relation_id"] for row in result.relations} == {
+        confluence.relations[0]["relation_id"],
+        generic["relation_id"],
+    }
+
+
 def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_and_keeps_enrichment(tmp_path) -> None:
     confluence, _ = _handoffs()
     request = _request(tmp_path)

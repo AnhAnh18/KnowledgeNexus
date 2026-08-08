@@ -273,7 +273,8 @@ class ConfluenceM10MaterializedSource:
                 if chunks is not None:
                     state["chunks"] = _records(chunks, "chunks")
             elif stage_name == "relation_stage":
-                relations = _records_from_result(result, ("relations", "records"), "relations")
+                relation_rows = _records_from_result(result, ("relations", "records"), "relations")
+                relations = _merge_records(relations, relation_rows, identity="relation_id")
                 docs = _field(result, "documents")
                 chunks = _field(result, "chunks")
                 if docs is not None:
