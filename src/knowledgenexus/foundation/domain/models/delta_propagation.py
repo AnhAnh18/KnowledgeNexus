@@ -131,19 +131,23 @@ class DeltaPropagationRequest:
     current_summaries: tuple[DocumentChunkSetSummary, ...]
     inventory: tuple[DeltaInventoryEntry, ...] = ()
     previous_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
+    previous_acl_hashes: tuple[tuple[str, str], ...] = ()
+    current_acl_hashes: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         expected_fields = frozenset({
             "previous_dataset_version", "current_dataset_version", "previous_config_hash",
-            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents",
+            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents", "previous_acl_hashes", "current_acl_hashes",
         })
         actual_fields = frozenset(vars(self))
         # previous_dependents was introduced as an optional wire extension;
         # accept legacy in-memory requests and normalize the absent field.
-        if actual_fields == expected_fields - {"previous_dependents"}:
-            object.__setattr__(self, "previous_dependents", ())
-        elif actual_fields != expected_fields:
+        missing_optional = expected_fields - actual_fields
+        if (actual_fields - expected_fields) or not missing_optional.issubset({"previous_dependents", "previous_acl_hashes", "current_acl_hashes"}):
             raise TypeError("model fields are invalid")
+        if missing_optional:
+            for field in missing_optional:
+                object.__setattr__(self, field, ())
         previous = _opaque("previous_dataset_version", self.previous_dataset_version)
         current = _opaque("current_dataset_version", self.current_dataset_version)
         if previous == current:
@@ -199,6 +203,21 @@ class DeltaPropagationRequest:
                     raise ValueError("previous dependent targets contain duplicate IDs")
                 target_keys.add(key)
         object.__setattr__(self, "previous_dependents", tuple(self.previous_dependents))
+        for field in ("previous_acl_hashes", "current_acl_hashes"):
+            values = getattr(self, field)
+            if type(values) is not tuple:
+                raise TypeError(f"{field} is invalid")
+            seen_acl: set[str] = set()
+            for item in values:
+                if type(item) is not tuple or len(item) != 2:
+                    raise TypeError(f"{field} entries are invalid")
+                document_id, fingerprint = item
+                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_acl:
+                    raise ValueError(f"{field} document ID is invalid")
+                if type(fingerprint) is not str or _SHA256.fullmatch(fingerprint) is None:
+                    raise ValueError(f"{field} fingerprint is invalid")
+                seen_acl.add(document_id)
+            object.__setattr__(self, field, tuple(values))
 
 
 @dataclass(frozen=True, repr=False)

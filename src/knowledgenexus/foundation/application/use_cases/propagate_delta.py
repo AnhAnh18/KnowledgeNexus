@@ -80,6 +80,12 @@ class PropagateDelta:
                     raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
                 inventory[entry.document_id] = entry
             dependents = {document_id: targets for document_id, targets in request.previous_dependents}
+            if not set(dependents).issubset(previous):
+                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+            previous_acl = dict(request.previous_acl_hashes)
+            current_acl = dict(request.current_acl_hashes)
+            if not set(previous_acl).issubset(previous) or not set(current_acl).issubset(current):
+                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
 
             records: list[dict[str, object]] = []
             document_outcomes: list[tuple[str, str]] = []
@@ -134,7 +140,8 @@ class PropagateDelta:
                     )
                     continue
 
-                if old.document_content_hash == new.document_content_hash:
+                acl_changed = bool(previous_acl or current_acl) and previous_acl.get(document_id) != current_acl.get(document_id)
+                if old.document_content_hash == new.document_content_hash and not acl_changed:
                     unchanged_count += 1
                     document_outcomes.append((document_id, "unchanged"))
                     continue
