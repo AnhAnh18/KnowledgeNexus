@@ -89,6 +89,7 @@ class PropagateDelta:
 
             records: list[dict[str, object]] = []
             document_outcomes: list[tuple[str, str]] = []
+            reemit_document_ids: list[str] = []
             new_count = unchanged_count = changed_count = removed_count = 0
             union_ids = set(previous) | set(current)
             for inventory_id in inventory:
@@ -141,6 +142,8 @@ class PropagateDelta:
                     continue
 
                 acl_changed = bool(previous_acl or current_acl) and previous_acl.get(document_id) != current_acl.get(document_id)
+                if acl_changed:
+                    reemit_document_ids.append(document_id)
                 if old.document_content_hash == new.document_content_hash and not acl_changed:
                     unchanged_count += 1
                     document_outcomes.append((document_id, "unchanged"))
@@ -194,6 +197,7 @@ class PropagateDelta:
                     "symbol_tombstone_count": metrics.symbol_tombstone_count,
                 },
                 "document_outcomes": tuple(document_outcomes),
+                "reemit_document_ids": tuple(reemit_document_ids),
                 "records": tuple(records),
                 "status": DeltaPropagationStatus.SUCCESS.value,
             }
@@ -209,6 +213,7 @@ class PropagateDelta:
                 metrics=metrics,
                 digest=digest,
                 document_outcomes=tuple(document_outcomes),
+                reemit_document_ids=tuple(reemit_document_ids),
             )
         except _Failure as exc:
             return DeltaPropagationResult(

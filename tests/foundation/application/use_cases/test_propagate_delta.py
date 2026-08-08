@@ -203,6 +203,7 @@ def test_acl_only_change_is_marked_changed_without_content_tombstones() -> None:
     )
     assert result.status is DeltaPropagationStatus.SUCCESS
     assert result.document_outcomes == ((old.document_id, "changed"),)
+    assert result.reemit_document_ids == (old.document_id,)
     assert result.records == ()
 
 
