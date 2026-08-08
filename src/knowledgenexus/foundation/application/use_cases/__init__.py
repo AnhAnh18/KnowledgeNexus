@@ -54,6 +54,11 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop 
 from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
     FetchAndStoreConfluenceAttachmentBody,
 )
+from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_raw_page_generation import (
+    FetchAndStoreConfluenceRawPageGeneration,
+    GenerationRawPageFetchError,
+    GenerationRawPageFetchResult,
+)
 from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
     AcceptConfluenceMiniCorpus,
 )
@@ -123,6 +128,9 @@ __all__ = [
     "ControlledStopPolicy",
     "is_inventory_window_commit",
     "FetchAndStoreConfluenceAttachmentBody",
+    "FetchAndStoreConfluenceRawPageGeneration",
+    "GenerationRawPageFetchError",
+    "GenerationRawPageFetchResult",
     "AcceptConfluenceMiniCorpus",
     "ProcessConfluenceMediaAttachment",
     "MediaBatchProcessingError",
