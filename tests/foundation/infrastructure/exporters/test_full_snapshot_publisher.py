@@ -309,6 +309,17 @@ def test_delta_publisher_requires_and_publishes_against_existing_base(tmp_path: 
     assert (dataset_root / "LATEST.txt").read_bytes() == f"{VALID_DATASET_VERSION}\n".encode()
 
 
+@pytest.mark.parametrize("bad_path", [None, object(), "C:/dataset"])
+def test_publish_rejects_wrong_runtime_path_types_before_access(tmp_path: Path, bad_path: object) -> None:
+    staging_path = _create_completed_staging(tmp_path / "staging")
+    with pytest.raises(TypeError):
+        FullSnapshotPublisher.publish(
+            staging_path=bad_path,  # type: ignore[arg-type]
+            dataset_root=tmp_path,
+            validator=FoundationSchemaValidator(),
+        )
+
+
 def test_full_snapshot_with_base_version_is_rejected(tmp_path: Path) -> None:
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()

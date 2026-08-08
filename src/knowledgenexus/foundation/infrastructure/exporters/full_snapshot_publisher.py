@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 
 DATASET_VERSION_PATTERN = re.compile(r"^v[0-9]{8}-[0-9]{6}-[0-9]{6}Z$")
 LATEST_FILE_NAME = "LATEST.txt"
+_CONCRETE_PATH_TYPE = type(Path())
+
+
+def _validate_publish_inputs(*, staging_path: object, dataset_root: object, validator: object) -> None:
+    """Reject forged runtime types before any path or validator access."""
+    if type(staging_path) is not _CONCRETE_PATH_TYPE or type(dataset_root) is not _CONCRETE_PATH_TYPE:
+        raise TypeError("publish paths must be concrete Path values")
+    if type(validator) is not FoundationSchemaValidator:
+        raise TypeError("publish validator is invalid")
 
 
 class FullSnapshotPublisher:
@@ -34,6 +43,7 @@ class FullSnapshotPublisher:
         dataset_root: Path,
         validator: FoundationSchemaValidator,
     ) -> Path:
+        _validate_publish_inputs(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
         _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
         _verify_completed_file_set(staging_path)
 
@@ -163,6 +173,7 @@ class DeltaSnapshotPublisher:
 
     @staticmethod
     def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
+        _validate_publish_inputs(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
         _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
         _verify_completed_file_set(staging_path)
         manifest = _load_manifest(staging_path / "manifest.json")
@@ -193,6 +204,8 @@ class M10SnapshotPublisher:
 
     @staticmethod
     def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
+        _validate_publish_inputs(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
+        _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
         manifest = _load_manifest(staging_path / "manifest.json")
         mode = manifest.get("export_mode")
         if mode == "full_snapshot":
