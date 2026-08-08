@@ -18,7 +18,7 @@ _MEDIA_TARGET = re.compile(r"^confluence:attachment:[^\s:]+$")
 _TOMBSTONE_RELATION = re.compile(r"^rel:[0-9a-f]{16}$")
 _TOMBSTONE_CONFLUENCE_ACL = re.compile(r"^acl:confluence:[^\s:]+$")
 _TOMBSTONE_GIT_DOCUMENT = re.compile(r"^git:file:[^\s]+$")
-_TOMBSTONE_GIT_ACL = re.compile(r"^acl:repo:[^\s:]+$")
+_TOMBSTONE_GIT_ACL = re.compile(r"^acl:repo:[^\s:]+(?::[0-9a-f]{16})?$")
 _HANDOFF_FIELDS = {"run_id", "generation_id", "source_version", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "raw_artifact_identity", "errors", "tombstones"}
 _GIT_FIELDS = {"repository", "branch", "commit", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "errors", "tombstones"}
 _RESULT_FIELDS = {"projection", "failure_category"}
@@ -242,8 +242,11 @@ def _validate_tombstone_ownership(
         if grammar is not None:
             if grammar.fullmatch(entity_id) is None:
                 raise M10SnapshotError(f"{name.title()} tombstone ownership is invalid")
-            if name == "git" and entity_type == "acl" and request is not None and entity_id != f"acl:repo:{request.git_repository}":
-                raise M10SnapshotError("Git tombstone ownership is invalid")
+            if name == "git" and entity_type == "acl" and request is not None:
+                repository_acl = f"acl:repo:{request.git_repository}"
+                per_file_acl = re.fullmatch(re.escape(repository_acl) + r":[0-9a-f]{16}", entity_id)
+                if entity_id != repository_acl and per_file_acl is None:
+                    raise M10SnapshotError("Git tombstone ownership is invalid")
             continue
         # Symbol IDs are generated as repo:branch:file:qualified_name.  Keep
         # the grammar source-safe without assuming a repository name here.

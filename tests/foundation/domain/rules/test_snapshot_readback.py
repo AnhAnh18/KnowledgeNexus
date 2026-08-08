@@ -69,3 +69,26 @@ def test_delta_readback_rejects_tombstone_outside_prior_snapshot() -> None:
     },)
     with pytest.raises(SnapshotReadbackError, match="prior snapshot"):
         validate_snapshot_streams(streams, export_mode="delta", prior_streams=_streams())
+
+
+def test_readback_requires_sync_row_for_each_emitted_entity() -> None:
+    streams = _streams()
+    streams["sync_state"] = ()
+    with pytest.raises(SnapshotReadbackError, match="sync closure"):
+        validate_snapshot_streams(streams, export_mode="full_snapshot")
+
+
+def test_delta_readback_matches_tombstone_entity_type_to_prior_stream() -> None:
+    streams = _streams()
+    streams["tombstones"] = ({
+        "tombstone_id": "tombstone:wrong-type",
+        "entity_type": "chunk",
+        "entity_id": streams["documents"][0]["document_id"],
+        "reason": "source_deleted",
+        "detail": None,
+        "detected_at": "2026-07-11T00:00:00Z",
+        "dataset_version": "v20260711-000000-000000Z",
+        "source_version_last_seen": None,
+    },)
+    with pytest.raises(SnapshotReadbackError, match="prior snapshot"):
+        validate_snapshot_streams(streams, export_mode="delta", prior_streams=_streams())

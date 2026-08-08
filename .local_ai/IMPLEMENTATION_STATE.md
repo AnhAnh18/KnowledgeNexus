@@ -2043,7 +2043,8 @@ performance gate remain deferred; no 100k scale PASS is claimed.
   CLI suite `16 passed` in the current workspace.
 - Verification on 2026-08-08: `3199 passed, 40 skipped` with the pinned local
   tokenizer bundle; M10 delta/readback focused suite `12 passed`; published
-  snapshot readback now rejects non-UTF-8 quality sidecars.
+  snapshot readback now rejects non-UTF-8 quality sidecars, incomplete sync
+  closures, and cross-type tombstone targets.
 
 ## M11 PLM Read-Only Ingestion (HOLD)
 

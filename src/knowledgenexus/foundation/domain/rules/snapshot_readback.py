@@ -10,6 +10,14 @@ _IDS = {
     "documents": "document_id", "chunks": "chunk_id", "relations": "relation_id", "acl": "acl_id",
     "media_assets": "media_id", "symbols": "symbol_id", "sync_state": "entity_id", "tombstones": "tombstone_id",
 }
+_TOMBSTONE_ENTITY_STREAMS = {
+    "document": "documents",
+    "chunk": "chunks",
+    "relation": "relations",
+    "acl": "acl",
+    "media": "media_assets",
+    "symbol": "symbols",
+}
 
 
 class SnapshotReadbackError(ValueError):
@@ -140,14 +148,29 @@ def validate_snapshot_streams(
         if row.get("chunk_id") is not None and row.get("chunk_id") not in chunk_ids:
             raise SnapshotReadbackError("symbol chunk is missing")
 
+    # A Git repository marker is not a document/media entity, so derive it
+    # from emitted Git provenance as well as any explicit repo row.
+    expected_sync_ids = document_ids | media_ids
+    expected_sync_ids.update(
+        row.get("repo")
+        for row in normalized["documents"]
+        if row.get("source_system") == "git" and type(row.get("repo")) is str
+    )
+    expected_sync_ids.update(
+        row.get("entity_id")
+        for row in normalized["sync_state"]
+        if row.get("entity_type") == "repo" and type(row.get("entity_id")) is str
+    )
     sync_ids: set[str] = set()
     for row in normalized["sync_state"]:
         entity_id = row.get("entity_id")
         entity_type = row.get("entity_type")
         expected_type = "page" if entity_id in document_ids and str(entity_id).startswith("confluence:page:") else "file" if entity_id in document_ids else "attachment" if entity_id in media_ids else "repo"
-        if entity_id in sync_ids or row.get("schema_version") != "1.0" or row.get("status") != "active" or entity_type != expected_type or (entity_id not in entity_ids and entity_type != "repo"):
+        if entity_id in sync_ids or entity_id not in expected_sync_ids or row.get("schema_version") != "1.0" or row.get("status") != "active" or entity_type != expected_type:
             raise SnapshotReadbackError("sync entity is missing")
         sync_ids.add(entity_id)
+    if sync_ids != expected_sync_ids:
+        raise SnapshotReadbackError("sync closure is incomplete")
     tombstone_ids = {row["tombstone_id"] for row in normalized["tombstones"]}
     if len(tombstone_ids) != len(normalized["tombstones"]):
         raise SnapshotReadbackError("tombstone identity is invalid")
@@ -162,7 +185,14 @@ def validate_snapshot_streams(
             for name in _STREAMS
         ):
             raise SnapshotReadbackError("prior stream type is invalid")
-        prior_ids: set[str] = set()
+        prior_ids_by_type: dict[str, set[str]] = {
+            entity_type: {
+                row.get(_IDS[stream_name])
+                for row in prior_streams[stream_name]
+                if type(row.get(_IDS[stream_name])) is str
+            }
+            for entity_type, stream_name in _TOMBSTONE_ENTITY_STREAMS.items()
+        }
         # Tombstones are delta metadata; they are not valid targets for a
         # subsequent tombstone and therefore are excluded from the entity set.
         for name in _STREAMS:
@@ -175,9 +205,11 @@ def validate_snapshot_streams(
                 identity = row.get(identity_field)
                 if type(identity) is not str or not identity:
                     raise SnapshotReadbackError("prior stream identity is invalid")
-                prior_ids.add(identity)
-        if any(row.get("entity_id") not in prior_ids for row in normalized["tombstones"]):
-            raise SnapshotReadbackError("tombstone target is not in prior snapshot")
+        for row in normalized["tombstones"]:
+            entity_type = row.get("entity_type")
+            entity_id = row.get("entity_id")
+            if entity_type not in prior_ids_by_type or entity_id not in prior_ids_by_type[entity_type]:
+                raise SnapshotReadbackError("tombstone target is not in prior snapshot")
 
     return SnapshotClosureReport(
         stream_counts=tuple(sorted((name, len(normalized[name])) for name in _STREAMS)),
