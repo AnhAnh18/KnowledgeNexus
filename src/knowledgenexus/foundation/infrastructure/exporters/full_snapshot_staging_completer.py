@@ -144,8 +144,15 @@ def _validate_m10_streams(*, staging_path: Path, manifest: dict[str, object], va
     for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
         records = _read_strict_jsonl_records(staging_path / file_name)
         if count_key == "tombstones":
-            if records:
-                raise ValueError("initial tombstones must be empty")
+            if manifest.get("export_mode") == "full_snapshot" and records:
+                raise ValueError("full snapshots must not contain tombstones")
+            if manifest.get("export_mode") == "delta":
+                for record in records:
+                    before = deepcopy(record)
+                    isolated = deepcopy(record)
+                    validator.validate_record("TombstoneRecord", isolated)
+                    if isolated != before:
+                        raise ValueError("canonical validator mutated a tombstone")
             streams[count_key] = records
             continue
         if len(records) != manifest["counts"][count_key]:
@@ -219,7 +226,7 @@ def _verify_m10_metric_counts(quality: M10QualityReportInput, streams: dict[str,
 
 def _render_m10_quality_report(manifest: Mapping[str, object], quality: M10QualityReportInput) -> str:
     counts = quality.expected_counts
-    lines = ["# Foundation Export Quality Report", "", "## Snapshot", "", "- Export mode: `full_snapshot`", f"- Dataset version: `{manifest['dataset_version']}`", f"- Generated at: `{manifest['generated_at']}`", f"- Schemas version: `{manifest['schemas_version']}`", "", "## Active Profiles", "", f"- Active profile: `{quality.active_profile}`", f"- Profile status: `{quality.profile_status}`", f"- Chunker version: `{quality.chunker_version}`", "", "## Record Counts", "", "| Record type | Count |", "|---|---:|"]
+    lines = ["# Foundation Export Quality Report", "", "## Snapshot", "", f"- Export mode: `{manifest['export_mode']}`", f"- Dataset version: `{manifest['dataset_version']}`", f"- Generated at: `{manifest['generated_at']}`", f"- Schemas version: `{manifest['schemas_version']}`", "", "## Active Profiles", "", f"- Active profile: `{quality.active_profile}`", f"- Profile status: `{quality.profile_status}`", f"- Chunker version: `{quality.chunker_version}`", "", "## Record Counts", "", "| Record type | Count |", "|---|---:|"]
     lines.extend(f"| {key} | {counts[key]} |" for key in COUNT_KEYS)
     for title, field in (("Jira Relation Quality", "jira_metrics"), ("ACL Quality", "acl_metrics"), ("Media Quality", "media_metrics"), ("Symbol Quality", "symbol_metrics"), ("Sync State", "sync_metrics"), ("Tombstones", "tombstone_metrics"), ("Completion Checks", "completion_checks")):
         lines.extend(["", f"## {title}", ""])
@@ -299,12 +306,13 @@ def _load_manifest(path: Path) -> dict[str, object]:
 
 
 def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
-    if manifest.get("export_mode") != "full_snapshot":
-        raise ValueError("Manifest export_mode must be 'full_snapshot'")
-    if "base_dataset_version" in manifest:
-        raise ValueError(
-            "Full-snapshot Manifest must not contain base_dataset_version"
-        )
+    mode = manifest.get("export_mode")
+    if mode not in {"full_snapshot", "delta"}:
+        raise ValueError("Manifest export_mode is invalid")
+    if mode == "full_snapshot" and "base_dataset_version" in manifest:
+        raise ValueError("Full-snapshot Manifest must not contain base_dataset_version")
+    if mode == "delta" and (type(manifest.get("base_dataset_version")) is not str or not manifest.get("base_dataset_version") or manifest.get("base_dataset_version") == manifest.get("dataset_version")):
+        raise ValueError("Delta Manifest requires a distinct base_dataset_version")
 
     counts = manifest.get("counts")
     if not isinstance(counts, Mapping):

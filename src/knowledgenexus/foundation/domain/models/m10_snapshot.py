@@ -152,6 +152,7 @@ class M10SnapshotRequest:
     media_policy: M10MediaPolicy; profile_bundle: OnePageExportProfileBundle; generated_at: str
     dataset_root: Path; export_mode: str
     profile_identity: M10ProfileIdentity | None = None
+    base_dataset_version: str | None = None
     def __post_init__(self):
         _guard(self, M10SnapshotRequest)
         if type(self.profile_identity) is not M10ProfileIdentity:
@@ -190,7 +191,9 @@ class M10SnapshotRequest:
         if type(self.git_commit) is not str or not _HEX40.fullmatch(self.git_commit): raise M10SnapshotError("invalid git_commit")
         _timestamp(self.generated_at)
         if not isinstance(self.dataset_root, Path) or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
-        if self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid export_mode")
+        if self.export_mode not in {"full_snapshot", "delta"}: raise M10SnapshotError("invalid export_mode")
+        if self.export_mode == "delta" and (type(self.base_dataset_version) is not str or not self.base_dataset_version): raise M10SnapshotError("delta export requires base_dataset_version")
+        if self.export_mode == M10_EXPORT_MODE and self.base_dataset_version is not None: raise M10SnapshotError("full snapshot cannot declare base_dataset_version")
         object.__setattr__(self, "confluence_exclusions", ex); object.__setattr__(self, "ordered_page_ids", pages)
 
 @dataclass(frozen=True)
@@ -220,7 +223,7 @@ class M10SnapshotProjection:
         _guard(self, M10SnapshotProjection)
         if self.dataset_name != M10_DATASET_NAME or self.schemas_version != M10_SCHEMAS_VERSION or type(self.source_scopes) is not dict: raise M10SnapshotError("invalid projection identity")
         _validated_metrics(self.metrics)
-        if type(self.generated_at) is not str or type(self.config_hash) is not str or not _HEX64.fullmatch(self.config_hash) or self.chunker_version != ACTIVE_CHUNKER_VERSION or self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid projection metadata")
+        if type(self.generated_at) is not str or type(self.config_hash) is not str or not _HEX64.fullmatch(self.config_hash) or self.chunker_version != ACTIVE_CHUNKER_VERSION or self.export_mode not in {"full_snapshot", "delta"}: raise M10SnapshotError("invalid projection metadata")
         _timestamp(self.generated_at)
         scopes = self.source_scopes
         if set(scopes) - {"confluence", "git"} or "confluence" not in scopes or tuple(scopes) != tuple(sorted(scopes)):
@@ -249,6 +252,7 @@ class M10SnapshotProjection:
         supplied = kwargs.pop("chunker_version", request.profile_bundle.chunking_profile.chunker_version)
         if supplied != request.profile_bundle.chunking_profile.chunker_version:
             raise M10SnapshotError("chunker version mismatch")
+        kwargs.setdefault("export_mode", request.export_mode)
         return cls(chunker_version=supplied, config_hash=request.profile_bundle.config_hash, generated_at=request.generated_at, **kwargs)
 
 @dataclass(frozen=True)
