@@ -130,6 +130,12 @@ def _scale_failure_reason(request: ScaleGateRequest) -> str | None:
             reasons.append(label)
     if first.stream_counts != second.stream_counts:
         reasons.append("stream_counts_differ")
+    if first.transport != second.transport:
+        reasons.append("transport_differs")
+    if request.evidence_kind == "sanitized_real_capture" and (
+        first.transport != "production" or second.transport != "production"
+    ):
+        reasons.append("real_evidence_requires_production_transport")
     if first.observed_pages < request.target_pages or second.observed_pages < request.target_pages:
         reasons.append("target_pages_unmet")
     return ";".join(reasons) if reasons else None
