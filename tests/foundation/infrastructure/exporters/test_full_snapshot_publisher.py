@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from knowledgenexus.foundation.infrastructure.exporters import (
+    DeltaSnapshotPublisher,
     FullSnapshotPublisher,
     FullSnapshotStagingCompleter,
     FullSnapshotStagingWriter,
@@ -283,6 +284,29 @@ def test_delta_manifest_is_rejected_before_publication(tmp_path: Path) -> None:
         _publish(staging_path, dataset_root)
 
     assert staging_path.is_dir()
+
+
+def test_delta_publisher_requires_and_publishes_against_existing_base(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    base = dataset_root / OLD_DATASET_VERSION
+    base.mkdir()
+    staging_path = _create_completed_staging(dataset_root / "staging")
+    _mutate_manifest(
+        staging_path,
+        lambda manifest: (manifest.__setitem__("export_mode", "delta"), manifest.__setitem__("base_dataset_version", OLD_DATASET_VERSION)),
+    )
+
+    final_path = DeltaSnapshotPublisher.publish(
+        staging_path=staging_path,
+        dataset_root=dataset_root,
+        validator=FoundationSchemaValidator(),
+    )
+
+    assert final_path == dataset_root / VALID_DATASET_VERSION
+    assert not staging_path.exists()
+    assert base.is_dir()
+    assert (dataset_root / "LATEST.txt").read_bytes() == f"{VALID_DATASET_VERSION}\n".encode()
 
 
 def test_full_snapshot_with_base_version_is_rejected(tmp_path: Path) -> None:

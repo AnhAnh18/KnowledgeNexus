@@ -1,5 +1,7 @@
 from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher import (
+    DeltaSnapshotPublisher,
     FullSnapshotPublisher,
+    M10SnapshotPublisher,
 )
 from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import (
     FullSnapshotStagingCompleter,
@@ -20,6 +22,8 @@ from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader im
 
 __all__ = [
     "FullSnapshotPublisher",
+    "DeltaSnapshotPublisher",
+    "M10SnapshotPublisher",
     "FullSnapshotStagingCompleter",
     "FullSnapshotStagingWriter",
     "JsonlRecordWriter",

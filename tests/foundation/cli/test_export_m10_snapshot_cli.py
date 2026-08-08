@@ -59,3 +59,14 @@ def test_cli_sanitizes_non_integer_system_exit(monkeypatch, capsys):
     assert captured.out == ""
     assert json.loads(captured.err) == {"category": "unexpected", "status": "failed"}
     assert "secret" not in captured.err
+
+
+def test_cli_rejects_malformed_success_result_without_leaking(monkeypatch, tmp_path, capsys):
+    request = _request(tmp_path)
+    confluence, git = _handoffs()
+
+    monkeypatch.setattr(cli, "run", lambda **_: object())
+    assert cli.main(request=request, confluence_adapter=_Adapter(confluence), git_adapter=_Adapter(git)) == cli.EXIT_UNEXPECTED
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {"category": "unexpected", "status": "failed"}

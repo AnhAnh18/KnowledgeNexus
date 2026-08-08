@@ -125,6 +125,83 @@ def _verify_publisher_invariants(manifest: Mapping[str, object]) -> str:
     return dataset_version
 
 
+def _verify_delta_publisher_invariants(manifest: Mapping[str, object], *, dataset_root: Path) -> str:
+    """Validate the version chain before publishing a delta directory.
+
+    Delta staging is completed by the M10 completer, but publication still
+    needs an independent guard that the referenced base is a local, regular
+    snapshot directory.  This prevents a malformed manifest from advertising
+    a delta detached from the prior dataset.
+    """
+    if manifest.get("export_mode") != "delta":
+        raise ValueError("Manifest export_mode must be 'delta'")
+    counts = manifest.get("counts")
+    if not isinstance(counts, Mapping):
+        raise TypeError("Manifest counts must be a mapping")
+    if set(counts) != set(COUNT_KEYS):
+        raise ValueError("Manifest counts must contain exactly the full-snapshot count keys")
+    for value in counts.values():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("Manifest counts values must be actual integers")
+        if value < 0:
+            raise ValueError("Manifest counts values must be non-negative")
+
+    dataset_version = manifest.get("dataset_version")
+    base_version = manifest.get("base_dataset_version")
+    if not isinstance(dataset_version, str) or DATASET_VERSION_PATTERN.fullmatch(dataset_version) is None:
+        raise ValueError("Manifest dataset_version is invalid")
+    if not isinstance(base_version, str) or DATASET_VERSION_PATTERN.fullmatch(base_version) is None or base_version == dataset_version:
+        raise ValueError("Delta Manifest requires a distinct base_dataset_version")
+    base_path = dataset_root / base_version
+    if base_path.parent != dataset_root or base_path.is_symlink() or not base_path.is_dir():
+        raise FileNotFoundError("Delta base snapshot is unavailable")
+    return dataset_version
+
+
+class DeltaSnapshotPublisher:
+    """Publish one completed delta snapshot using the same atomic M3 seam."""
+
+    @staticmethod
+    def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
+        _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
+        _verify_completed_file_set(staging_path)
+        manifest = _load_manifest(staging_path / "manifest.json")
+        validator.validate_record("Manifest", manifest)
+        dataset_version = _verify_delta_publisher_invariants(manifest, dataset_root=dataset_root)
+        final_path = dataset_root / dataset_version
+        if final_path.parent.resolve() != dataset_root.resolve():
+            raise ValueError("Final snapshot path must be a direct dataset-root child")
+        if final_path.exists() or final_path.is_symlink():
+            raise FileExistsError(f"Final snapshot already exists: {final_path}")
+        latest_path = dataset_root / LATEST_FILE_NAME
+        _verify_latest_path(latest_path)
+        staging_path.rename(final_path)
+        try:
+            _write_latest(latest_path, dataset_version)
+        except Exception:
+            # Keep the staging/final transition recoverable if pointer write fails.
+            try:
+                final_path.rename(staging_path)
+            except OSError:
+                pass
+            raise
+        return final_path
+
+
+class M10SnapshotPublisher:
+    """Dispatch full and delta publications without weakening either gate."""
+
+    @staticmethod
+    def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
+        manifest = _load_manifest(staging_path / "manifest.json")
+        mode = manifest.get("export_mode")
+        if mode == "full_snapshot":
+            return FullSnapshotPublisher.publish(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
+        if mode == "delta":
+            return DeltaSnapshotPublisher.publish(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
+        raise ValueError("Manifest export_mode is invalid")
+
+
 def _verify_latest_path(latest_path: Path) -> None:
     if latest_path.is_symlink():
         raise FileExistsError(f"LATEST path must not be a symlink: {latest_path}")

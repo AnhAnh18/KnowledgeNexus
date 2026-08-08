@@ -17,6 +17,7 @@ from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import 
     M10SnapshotExportFailure,
 )
 from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
+from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotResult
 from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
 
 
@@ -104,7 +105,29 @@ def main(
         return _fail(exc.category, _EXIT_CODES[exc.category])
     except BaseException:
         return _fail("unexpected", EXIT_UNEXPECTED)
-    sys.stdout.write(json.dumps({"status": "success", "dataset_version": result.dataset_version, "digest": result.digest, "counts": {key: getattr(result.metrics, key) for key in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")}, "network_used": False, "credentials_used": False}, sort_keys=True, allow_nan=False) + "\n")
+    # Do not let a malformed injected result escape through this operator
+    # boundary; only a published, runtime-validated result is printable.
+    try:
+        if type(result) is not M10SnapshotResult:
+            raise TypeError
+        M10SnapshotResult.__post_init__(result)
+        if result.status != "published" or result.metrics is None:
+            raise ValueError
+        counts = {
+            key: getattr(result.metrics, key)
+            for key in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")
+        }
+        payload = {
+            "status": "success",
+            "dataset_version": result.dataset_version,
+            "digest": result.digest,
+            "counts": counts,
+            "network_used": False,
+            "credentials_used": False,
+        }
+        sys.stdout.write(json.dumps(payload, sort_keys=True, allow_nan=False) + "\n")
+    except BaseException:
+        return _fail("unexpected", EXIT_UNEXPECTED)
     return 0
 
 
