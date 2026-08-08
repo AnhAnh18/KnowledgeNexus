@@ -262,6 +262,8 @@ class ScaleGateEvidence:
         elif self.status == "pass":
             if self.observed_pages < self.target_pages or self.run_count < 2 or seen != _STREAM_SET:
                 raise ValueError("scale evidence is incomplete")
+            if self.evidence_kind == "sanitized_real_capture" and self.transport != "production":
+                raise ValueError("sanitized real scale evidence requires production transport")
             if not all((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
                 raise ValueError("scale checks are incomplete")
             if self.evidence_kind is None or self.evidence_digest is None:

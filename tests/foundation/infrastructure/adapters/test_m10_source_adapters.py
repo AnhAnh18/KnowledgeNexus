@@ -12,6 +12,8 @@ from knowledgenexus.foundation.infrastructure.adapters.m10_source_adapters impor
     M10SourceAdapterError,
 )
 from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import ComposeM10Snapshot
+from knowledgenexus.foundation.application.use_cases.materialize_confluence_media_relations import MaterializeConfluenceMediaRelations
+from knowledgenexus.foundation.domain.models import MediaMaterializationResult
 from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
 
 
@@ -150,6 +152,143 @@ def test_materialized_sources_reject_wrong_request_before_stage_call(tmp_path) -
         ConfluenceM10MaterializedSource(page_stage=Exploding()).collect(object())  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="invalid request"):
         GitM10MaterializedSource(document_stage=Exploding()).collect(object())  # type: ignore[arg-type]
+
+
+def test_confluence_materialized_source_runs_media_before_relation_stage(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+    )
+    events: list[str] = []
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class MediaStage:
+        def execute(self, request, **state):
+            assert "media_assets" in state
+            events.append("media")
+            return _Output(media_assets=())
+
+    class RelationStage:
+        def execute(self, request, **state):
+            assert state["media_assets"] == ()
+            events.append("relation")
+            return confluence.relations
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), media_stage=MediaStage(), relation_stage=RelationStage()
+    ).collect(request)
+    assert events == ["media", "relation"]
+    assert result.relations == confluence.relations
+
+
+def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_and_keeps_enrichment(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    media = MediaMaterializationResult(assets=(), relation_intents=())
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+        media_result=media,
+    )
+    enriched_documents = tuple({**record, "metadata": {"enriched": True}} for record in confluence.documents)
+    enriched_chunks = tuple({**record, "text": "enriched"} for record in confluence.chunks)
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class EnrichingRelationStage:
+        # Match MaterializeConfluenceMediaRelations' keyword-only seam.
+        def execute(self, *, documents, chunks, media, page_references=(), page_targets=()):
+            assert documents == confluence.documents
+            assert chunks == confluence.chunks
+            assert media is media_result
+            assert page_references == ()
+            assert page_targets == ()
+            return _Output(documents=enriched_documents, chunks=enriched_chunks, relations=())
+
+    media_result = media
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), relation_stage=EnrichingRelationStage()
+    ).collect(request)
+    assert result.documents == enriched_documents
+    assert result.chunks == enriched_chunks
+
+
+def test_confluence_materialized_source_accepts_actual_media_relation_materializer(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+        media_result=MediaMaterializationResult(assets=(), relation_intents=()),
+    )
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), relation_stage=MaterializeConfluenceMediaRelations()
+    ).collect(request)
+    assert result.documents == confluence.documents
+    assert result.chunks == confluence.chunks
+
+
+def test_confluence_materialized_source_accepts_combined_materializer_at_media_seam(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+        media_result=MediaMaterializationResult(assets=(), relation_intents=()),
+    )
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), media_stage=MaterializeConfluenceMediaRelations()
+    ).collect(request)
+    assert result.documents == confluence.documents
+    assert result.chunks == confluence.chunks
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["source_version", "raw_artifact_identity"],
+)
+def test_confluence_materialized_source_requires_stage_provenance(tmp_path, missing) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    values = {
+        "source_version": confluence.source_version,
+        "raw_artifact_identity": confluence.raw_artifact_identity,
+        "documents": confluence.documents,
+        "chunks": confluence.chunks,
+    }
+    values.pop(missing)
+
+    class PageStage:
+        def execute(self, request):
+            return _Output(**values)
+
+    with pytest.raises(ValueError, match="page stage provenance is invalid"):
+        ConfluenceM10MaterializedSource(page_stage=PageStage()).collect(request)
 
 
 def test_adapter_sanitizes_unexpected_provider_exception(tmp_path) -> None:

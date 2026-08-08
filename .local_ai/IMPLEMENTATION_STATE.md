@@ -2,6 +2,10 @@
 
 ## Current Milestone
 
+The current priority is Confluence closeout. PLM M11 is explicitly held until
+the remaining real Confluence gates are completed and the required sanitized
+PLM MCP evidence is available.
+
 M6 is complete and approved. M7-C durable crawl implementation is complete
 through C4-B and has an integrated correctness path. The M7-C5 inventory
 durability slice is now complete and independently reviewed `PASS`; the
@@ -21,9 +25,9 @@ M8-A normalization fidelity and layout semantics, M8-B complex-table
 migration, M8-C macro/placeholder/reference intents, M8-D generation-bound
 page-set processing, and M8-E chunk-stability handoff are complete and
 independently reviewed `PASS`. M8-AC controlled mini-corpus acceptance is
-implemented and independently re-reviewed `PASS`, but the real gate remains
-`pending_external_input` because no approved 10-20 page generation/selection/
-tokenizer input was supplied. M9-A1 metadata-first media contract is also
+implemented and independently re-reviewed `PASS`; the operator has now run
+the approved real mini-corpus and supplied the acceptance/chunk handoff.
+M9-A1 metadata-first media contract is also
 complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
 independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
 M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
@@ -31,8 +35,19 @@ explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
 reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
 export/store/checkpoint side effects. M10-A through M10-D are complete and
 independently reviewed `PASS`. M10-E synthetic acceptance is complete and
-independently reviewed `PASS`; no real full-snapshot run has started, and the
-M8-AC real gate remains `pending_external_input`.
+independently reviewed `PASS`; no real full-snapshot run has started. OCR,
+media, M10, second-sync, and scale evidence remain external gates.
+
+## Confluence-First Execution Priority
+
+- Reuse the operator-supplied M8-AC acceptance/chunk handoff; no second M8
+  crawl is required unless the source generation changes.
+- Complete the M9-A4 OCR productionization decision before enabling any OCR
+  engine in the production path.
+- Run the bounded real M10 full-snapshot acceptance for the agreed Confluence/
+  Git scope and record its sanitized outcome.
+- Keep PLM M11 on hold. Do not build a PLM adapter, crawler, or response model
+  until sanitized read-only MCP fixtures prove the actual API contract.
 
 ## Durable State Convention
 
@@ -1927,3 +1942,115 @@ performance gate remain deferred; no 100k scale PASS is claimed.
 - Residual boundary: real M10 full-snapshot evidence remains
   `pending_external_input`; M8-AC real mini-corpus remains
   `pending_external_input`.
+
+## Confluence Relation/Media Context Closeout
+
+- Status: bounded implementation started.
+- Added `MaterializeConfluenceMediaRelations` as a post-ACL generic relation
+  stage. It converts normalized media intents into schema-valid deterministic
+  `embeds_media` RelationRecords, resolves matched attachments, emits stable
+  `unresolved_target` attachment markers for missing references, and appends
+  relation IDs to the owning page and its chunks.
+- The stage enforces page ownership, media parent consistency, duplicate IDs,
+  schema validation, and impossible status/count combinations. It deliberately
+  leaves the existing Jira relation path unchanged and emits no
+  `attachment_text` chunks, matching v7.4 D20.
+- Validation: focused media/materialization suite `17 passed`; compileall and
+  `git diff --check` passed.
+- Remaining closeout: wire this stage into the real Confluence/M10 adapter,
+  add `includes_page`/`links_to_page` resolution, and run the real bounded M10
+  snapshot gate. OCR engine activation remains a separate external-input gate.
+
+## Foundation Goal F1 Progress
+
+- Status: bounded implementation complete; real M10 evidence remains pending.
+- `ConfluencePageSetResult` now preserves an immutable per-page
+  `reference_intents_by_page` side stream and includes it in canonical replay
+  bytes; `ProcessConfluencePageSet` populates it instead of dropping reference
+  provenance.
+- The normalizer now emits `page_link` intents for positively identified
+  Confluence page URLs. The generic media/reference materializer can emit
+  `includes_page` and `links_to_page` records with deterministic unresolved
+  page markers, in addition to `embeds_media`.
+- Validation: focused F1 regression `74 + 41` tests passed; compileall and
+  `git diff --check` passed.
+- The generic stage is wired into the concrete Confluence M10 adapter; real
+  source execution remains an external gate.
+- M10 now validates resolved media parent ownership, resolved page relation
+  ownership, and relation-ID references when generic relation streams are
+  present; the legacy Jira-only fixture path remains compatible.
+
+## Foundation Goal F2 Progress
+
+- Status: bounded producer/projection and adapter integration complete; real
+  source execution remains pending.
+- Added `SyncStateRecordBuilder` and `BuildSyncStateSnapshot` for deterministic
+  page/attachment/file/repository rows from emitted document/media streams.
+- The builder validates entity type, status, timestamps, hashes, schema shape,
+  duplicate IDs, source ownership, and impossible runtime inputs before any
+  injected validator is used.
+- Validation: sync-state/use-case focused suite `13 passed`; record-builder
+  suite `177 passed`; application-boundary suite `26 passed`; compileall and
+  `git diff --check` passed.
+- Concrete M10 handoff assembly derives sync rows from emitted page,
+  attachment, file, and repository streams. Skipped media remain explicit in
+  the media policy/status contract.
+
+## Foundation Goal F3 Progress
+
+- Status: bounded handoff assembly and concrete source-adapter boundaries
+  complete; real source execution remains pending.
+- Added `AssembleConfluenceM10Handoff` and `AssembleGitM10Handoff`. These
+  assemble trusted materialized streams and derive sync rows through the F2
+  projection instead of accepting manually injected sync-state dictionaries.
+- Validation: M10 composition/application suite `15 passed`; focused F2 suite
+  remains green; compileall and `git diff --check` passed.
+- `ConfluenceM10Adapter` and `GitM10Adapter` sanitize provider output,
+  assemble handoffs, derive sync rows, and now carry optional delta tombstones.
+  Provider ports still require operator-supplied real source inputs.
+- Adapter/composition acceptance now derives the Git repository sync row with
+  the pinned commit version, matching M10 provenance validation.
+
+## Foundation Goal F4 Progress
+
+- Status: bounded media orchestration implemented; real OCR activation remains
+  an external approval gate.
+- Added `ProcessConfluenceMediaBatch` to process materialized attachments
+  atomically, sort assets deterministically, preserve extraction-detail groups,
+  and report sanitized capability failures without partial output.
+- M8-AC real-corpus status remains owner-supplied/external; no raw corpus or
+  credential evidence was read or copied into the repository. OCR engine
+  activation still requires the approved engine/runtime/model artifact.
+- Added a strict sanitized F4/F7 operator CLI for JSON metadata envelopes;
+  duplicate keys, raw/extra fields, invalid types, oversized input, and failed
+  gate status are rejected without echoing paths or payload values.
+- Validation: media batch focused suite `4 passed`; existing M9 media tests and
+  compile/diff checks remain green.
+
+## Foundation Goal F5-F7 Progress
+
+- F5: full-snapshot exporter, publication, readback, and deterministic
+  synthetic acceptance are complete; bounded real Confluence/Git snapshot
+  evidence is still pending.
+- F6: delta projection, tombstone cascades, ACL-only re-emission intents,
+  prior-target membership checks, strict readback, and full-to-delta publisher
+  wiring are complete. A real second-sync run is still pending.
+- F7: scale gate models/evaluator and production-transport enforcement are
+  complete; 10k synthetic repeatability passed, while 100k and sanitized real
+  production evidence remain pending.
+- Operator evaluation CLI validation: `10 passed` focused; F4/F7 evaluator and
+  CLI suite `16 passed` in the current workspace.
+- Verification on 2026-08-08: `3152 passed, 39 skipped` with the pinned local
+  tokenizer bundle; focused gate/exporter suite `59 passed, 6 skipped`.
+
+## M11 PLM Read-Only Ingestion (HOLD)
+
+- Status: deferred by owner while Confluence closeout is the active priority.
+- No PLM MCP server/tools or sanitized real response fixtures are available in
+  the current execution environment.
+- No PLM crawler, adapter, response schema, or bulk-download behavior is
+  implemented or authorized.
+- Resume entry condition: sanitized read-only evidence for the documented PLM
+  tools, including representative success/error responses and enough repeated
+  calls to establish pagination/truncation, identity, timestamp, attachment,
+  authorization, permission, and retry semantics.

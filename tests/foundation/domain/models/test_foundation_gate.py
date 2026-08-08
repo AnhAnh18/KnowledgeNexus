@@ -124,3 +124,12 @@ def test_scale_gate_requires_two_readback_runs_and_all_streams() -> None:
                           acl_closed=True, sync_closed=True, atomic_publish=True, no_clobber=True,
                           sanitized_output=True, transport="offline_fixture", evidence_kind="synthetic_fixture",
                           evidence_digest="c" * 64)
+    with pytest.raises(ValueError):
+        ScaleGateEvidence(
+            status="pass", profile_id="m7-crawl-scale-acceptance-v2", target_pages=10000,
+            observed_pages=10000, run_count=2, stream_counts=streams,
+            deterministic_repeat=True, readback_valid=True, relation_closed=True,
+            acl_closed=True, sync_closed=True, atomic_publish=True, no_clobber=True,
+            sanitized_output=True, transport="offline_fixture",
+            evidence_kind="sanitized_real_capture", evidence_digest="c" * 64,
+        )

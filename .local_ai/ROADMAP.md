@@ -2,7 +2,7 @@
 
 This file is local execution guidance, not a normative contract.
 
-Last workspace verification: 2026-07-23.
+Last workspace verification: 2026-08-08.
 
 Precedence:
 1. `contracts/foundation/schemas/`
@@ -94,10 +94,11 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
 | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; M9-A4 contract/policy seam independently reviewed `PASS`; OCR production activation `pending_external_input` | M9-A1/A2/A3, M9-A4 Stage A, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; no OCR engine approval/evidence exists yet; M8-AC real gate remains `pending_external_input` | Delta propagation and OCR contracts are bounded seams; engine activation, M10 real inputs, and full production evidence remain gated. |
 | M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+| M11 - PLM read-only ingestion | **hold** | No real PLM MCP response fixtures are available in this environment; no PLM crawler or adapter is authorized yet | Resume only after sanitized read-only MCP evidence proves the API contract. Confluence closeout is the current priority. |
 
 ## 2. Current Task
 
-Current area: M6A through M6G-D are complete and approved. M7-C0 through
+Current area: Confluence closeout after M10. M6A through M6G-D are complete and approved. M7-C0 through
 M7-C4-B are implemented and covered by the durable checkpoint/run-state path.
 M7-C5 inventory durability acceptance is complete and independently reviewed
 `PASS`: the 10k correctness baseline and C5-B1 are approved, while C5-B2 is
@@ -123,7 +124,10 @@ approved. M9-D2 remains read-only and does not perform export/store/checkpoint
 side effects. M10-A through M10-D are complete and independently reviewed
 `PASS`. M10-E synthetic acceptance is complete and independently reviewed
 `PASS`; no real full-snapshot run has started, and the M8-AC real gate remains
-`pending_external_input`.
+`pending_external_input`. The next active work is to complete the remaining
+Confluence real-input gates and produce a real, bounded Confluence snapshot.
+PLM M11 is explicitly held until that Confluence work is accepted and the
+required sanitized PLM MCP evidence becomes available.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -1103,7 +1107,23 @@ Acceptance categories:
 | M10-D CLI and publication boundary | complete; independently reviewed `PASS` | Added offline sanitized CLI, M3 writer/completer/publisher wiring, no-clobber preflight, strict post-publication acceptance, and bounded rollback on acceptance failure. Focused M10-D/E suite `40 passed`; architecture `89 passed`; fresh review `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` is `PASS`. |
 | M10-E synthetic acceptance and external real-run gate | synthetic acceptance complete; real gate `pending_external_input` | Deterministic synthetic ten-file acceptance and repeatability are complete and independently reviewed `PASS`; real operator evidence still requires approved Confluence/Git inputs, ordered scope, and tokenizer assets. |
 
-## 13. Current Execution Boundary
+## 13. Current Execution Boundary and Next Priority
+
+The repository remains Confluence-first. The next implementation work must stay
+within the existing Foundation contracts and close the bounded Confluence path
+before opening a new PLM connector track:
+
+1. Supply and run the approved real M8-AC mini-corpus gate (10-20 pages plus
+   the required tokenizer assets).
+2. Resolve the M9-A4 OCR productionization decision and activate OCR only after
+   an approved engine/runtime/model and bounded acceptance evidence exist.
+3. Run the real M10 full-snapshot acceptance for the agreed Confluence/Git
+   scope, including schema, ACL, media, symbol, sync, and publication gates.
+4. Record the Confluence closeout and owner decision before resuming M11 PLM.
+
+M11 PLM remains a deferred, read-only future track. No PLM API fields,
+pagination behavior, attachment authorization, or retry semantics may be
+implemented from tool descriptions alone.
 
 - Preserve the completed, owner-accepted bounded M7 durability/replay stages;
   the 100k scale gate and optimization remain deferred.

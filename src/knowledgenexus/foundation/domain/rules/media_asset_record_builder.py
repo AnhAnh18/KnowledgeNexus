@@ -207,7 +207,7 @@ class MediaAssetRecordBuilder:
             if key in seen:
                 _fail(MediaMaterializationFailureCategory.DUPLICATE_ID)
             seen.add(key)
-            if intent.kind == "include_page":
+            if intent.kind in {"include_page", "page_link"}:
                 continue
             if intent.kind not in {"drawio", "image_attachment"}:
                 _fail(MediaMaterializationFailureCategory.INVALID_INTENT)

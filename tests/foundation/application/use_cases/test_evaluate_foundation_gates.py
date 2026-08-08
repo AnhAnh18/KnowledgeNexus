@@ -5,8 +5,10 @@ import pytest
 from knowledgenexus.foundation.application.use_cases.evaluate_foundation_gates import (
     FoundationGateEvaluationError,
     EvaluateBoundedMediaCorpusAcceptance,
+    EvaluateOcrEngineApproval,
     EvaluateScaleGateEvidence,
 )
+from knowledgenexus.foundation.domain.models.foundation_gate import OcrEngineApproval
 from knowledgenexus.foundation.domain.models.foundation_gate_inputs import (
     BoundedMediaGateRequest,
     PublishedSnapshotReadback,
@@ -40,12 +42,20 @@ def _media_run(*, source_after: str = "a" * 64, failed: bool = False) -> Sanitiz
 
 def test_bounded_media_evaluator_derives_digest_and_requires_repeat() -> None:
     request = BoundedMediaGateRequest(
-        first_run=_media_run(), second_run=_media_run(), evidence_kind="sanitized_real_capture"
+        first_run=_media_run(), second_run=_media_run(), evidence_kind="sanitized_real_capture",
+        real_capture_attested=True, transport="production",
     )
     result = EvaluateBoundedMediaCorpusAcceptance().execute(request=request)
     assert result.status == "complete"
     assert result.evidence_digest is not None
     assert result.processed_count == 5
+
+    pending = EvaluateBoundedMediaCorpusAcceptance().execute(
+        request=BoundedMediaGateRequest(
+            first_run=_media_run(), second_run=_media_run(), evidence_kind="sanitized_real_capture"
+        )
+    )
+    assert pending.status == "pending_external_input"
 
     failed = EvaluateBoundedMediaCorpusAcceptance().execute(
         request=BoundedMediaGateRequest(
@@ -60,6 +70,13 @@ def test_bounded_media_evaluator_derives_digest_and_requires_repeat() -> None:
 def test_bounded_media_evaluator_rejects_wrong_runtime_types(value: object) -> None:
     with pytest.raises(FoundationGateEvaluationError):
         EvaluateBoundedMediaCorpusAcceptance().execute(request=value)
+
+
+def test_ocr_approval_evaluator_accepts_only_valid_model() -> None:
+    approval = OcrEngineApproval(status="pending_external_input")
+    assert EvaluateOcrEngineApproval().execute(request=approval) is approval
+    with pytest.raises(FoundationGateEvaluationError):
+        EvaluateOcrEngineApproval().execute(request=object())
 
 
 def _readback(*, digest: str = "d" * 64, closed: bool = True) -> PublishedSnapshotReadback:

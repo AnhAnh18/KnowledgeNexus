@@ -8,6 +8,7 @@ from collections import Counter
 
 from knowledgenexus.foundation.domain.models.foundation_gate import (
     BoundedMediaCorpusAcceptance,
+    OcrEngineApproval,
     ScaleGateEvidence,
 )
 from knowledgenexus.foundation.domain.models.foundation_gate_inputs import (
@@ -61,6 +62,24 @@ class EvaluateBoundedMediaCorpusAcceptance:
     def execute(self, *, request: object) -> BoundedMediaCorpusAcceptance:
         if type(request) is not BoundedMediaGateRequest:
             raise FoundationGateEvaluationError("request is invalid")
+        if request.evidence_kind == "sanitized_real_capture" and (
+            not request.real_capture_attested or request.transport != "production"
+        ):
+            # A digest-only envelope can be fabricated offline; keep it pending
+            # until the operator supplies an attestation from the production run.
+            return BoundedMediaCorpusAcceptance(
+                status="pending_external_input",
+                evidence_kind=None,
+                kind_counts=(),
+                processed_count=0,
+                skipped_count=0,
+                failed_count=0,
+                deterministic_repeat=False,
+                source_unchanged=False,
+                no_silent_omission=False,
+                evidence_digest=None,
+                failure_reason=None,
+            )
         first, second = request.first_run, request.second_run
         # The request model has already rejected duplicate/omitted identities;
         # repeat facts are compared before any status-derived aggregation.
@@ -71,6 +90,8 @@ class EvaluateBoundedMediaCorpusAcceptance:
         reason = _media_failure_reason(request, counts=counts)
         facts = {
             "evidence_kind": request.evidence_kind,
+            "real_capture_attested": request.real_capture_attested,
+            "transport": request.transport,
             "expected_media_ids": first.expected_media_ids,
             "first": first.canonical_facts(),
             "second": second.canonical_facts(),
@@ -109,6 +130,15 @@ class EvaluateBoundedMediaCorpusAcceptance:
             no_silent_omission=True,
             evidence_digest=_digest_facts(facts),
         )
+
+
+class EvaluateOcrEngineApproval:
+    """Validate and return a sanitized M9-A4 OCR approval record."""
+
+    def execute(self, *, request: object) -> OcrEngineApproval:
+        if type(request) is not OcrEngineApproval:
+            raise FoundationGateEvaluationError("request is invalid")
+        return request
 
 
 def _scale_failure_reason(request: ScaleGateRequest) -> str | None:
@@ -201,6 +231,7 @@ __all__ = [
     "FoundationGateEvaluationError",
     "EvaluateBoundedMediaCorpusAcceptance",
     "EvaluateBoundedMediaGate",
+    "EvaluateOcrEngineApproval",
     "EvaluateScaleGateEvidence",
     "EvaluateScaleGate",
     "BoundedMediaGateRequest",

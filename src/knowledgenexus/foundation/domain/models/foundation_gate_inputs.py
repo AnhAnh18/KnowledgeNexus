@@ -188,12 +188,22 @@ class BoundedMediaGateRequest:
     first_run: SanitizedMediaProcessorRun
     second_run: SanitizedMediaProcessorRun
     evidence_kind: str
+    real_capture_attested: bool = False
+    transport: str = "offline_fixture"
 
     def __post_init__(self) -> None:
         if type(self.first_run) is not SanitizedMediaProcessorRun or type(self.second_run) is not SanitizedMediaProcessorRun:
             raise TypeError("media runs are invalid")
         if type(self.evidence_kind) is not str or self.evidence_kind not in {"synthetic_fixture", "sanitized_real_capture"}:
             raise ValueError("evidence_kind is invalid")
+        if type(self.real_capture_attested) is not bool:
+            raise TypeError("real_capture_attested is invalid")
+        if type(self.transport) is not str or self.transport not in {"offline_fixture", "production"}:
+            raise ValueError("transport is invalid")
+        if self.evidence_kind == "synthetic_fixture" and self.real_capture_attested:
+            raise ValueError("synthetic media evidence cannot be real-capture attested")
+        if self.evidence_kind == "synthetic_fixture" and self.transport != "offline_fixture":
+            raise ValueError("synthetic media evidence must use offline transport")
         if self.first_run.expected_media_ids != self.second_run.expected_media_ids:
             raise ValueError("media run scopes differ")
 

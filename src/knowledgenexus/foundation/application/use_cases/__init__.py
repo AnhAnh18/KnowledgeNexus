@@ -82,6 +82,7 @@ from knowledgenexus.foundation.application.use_cases.evaluate_foundation_gates i
     FoundationGateEvaluationError,
     EvaluateBoundedMediaCorpusAcceptance,
     EvaluateBoundedMediaGate,
+    EvaluateOcrEngineApproval,
     EvaluateScaleGateEvidence,
     EvaluateScaleGate,
 )
@@ -134,6 +135,7 @@ __all__ = [
     "FoundationGateEvaluationError",
     "EvaluateBoundedMediaCorpusAcceptance",
     "EvaluateBoundedMediaGate",
+    "EvaluateOcrEngineApproval",
     "EvaluateScaleGateEvidence",
     "EvaluateScaleGate",
 ]

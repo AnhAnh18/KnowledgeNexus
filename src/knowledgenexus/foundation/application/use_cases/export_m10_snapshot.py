@@ -176,7 +176,7 @@ def _derive_quality(request: M10SnapshotRequest, projection: M10SnapshotProjecti
         "repos": sum(row.get("entity_type") == "repo" for row in streams["sync_state"]),
     }
     tombstones = {"rows_total": len(streams["tombstones"]), "initial_empty": int(not streams["tombstones"])}
-    if tombstones["rows_total"] != 0:
+    if request.export_mode == "full_snapshot" and tombstones["rows_total"] != 0:
         raise ValueError("initial tombstones must be empty")
     quality = M10QualityReportInput(
         active_profile=request.profile_bundle.chunking_profile.active_profile,
@@ -190,7 +190,7 @@ def _derive_quality(request: M10SnapshotRequest, projection: M10SnapshotProjecti
         symbol_metrics=symbols,
         sync_metrics=sync,
         tombstone_metrics=tombstones,
-        completion_checks={"schema_validation": True, "counts_match": True, "tombstones_empty": True, "projection_consistency": True},
+        completion_checks={"schema_validation": True, "counts_match": True, "tombstones_empty": not bool(streams["tombstones"]), "projection_consistency": True},
     )
     if projection.config_hash != request.profile_bundle.config_hash or projection.chunker_version != request.profile_bundle.chunking_profile.chunker_version:
         raise ValueError("profile or chunker drift")
@@ -338,6 +338,9 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
             assert_validation_bytes_unchanged()
     if request.export_mode == "full_snapshot" and streams["tombstones"]:
         raise ValueError
+    if request.export_mode == "delta":
+        if any(row.get("dataset_version") != dataset_version for row in streams["tombstones"]):
+            raise ValueError("tombstone dataset version does not match manifest")
     expected_streams = {name: tuple(getattr(projection, name)) for name in _COUNT_KEYS}
     if any(_canonical_json(list(streams[name])) != _canonical_json(list(expected_streams[name])) for name in _COUNT_KEYS):
         raise ValueError

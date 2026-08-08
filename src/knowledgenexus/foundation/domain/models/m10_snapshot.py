@@ -242,6 +242,10 @@ class M10SnapshotProjection:
             val = _tuple(n, getattr(self, n));
             if any(type(x) is not dict for x in val): raise M10SnapshotError(f"{n} contains invalid record")
             object.__setattr__(self, n, tuple(copy.deepcopy(x) for x in val))
+        if self.metrics.tombstones != len(self.tombstones):
+            raise M10SnapshotError("tombstone metric count does not match stream")
+        if self.export_mode == M10_EXPORT_MODE and self.tombstones:
+            raise M10SnapshotError("full snapshots must not contain tombstones")
         object.__setattr__(self, "source_scopes", copy.deepcopy(self.source_scopes))
 
     @classmethod

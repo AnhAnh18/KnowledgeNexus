@@ -19,6 +19,27 @@ def _normalize(storage: str):
     return ConfluenceStorageXhtmlNormalizer().normalize(storage_xhtml=storage)
 
 
+def test_inline_code_newlines_replaced_with_spaces() -> None:
+    result = _normalize('<p><code>line1\nline2\r\nline3\rline4</code></p>')
+    assert result.normalized_body_text == '```line1 line2 line3 line4```'
+    assert '\n' not in result.normalized_body_text
+
+
+def test_inline_code_with_newlines_and_backticks_gets_safe_fence() -> None:
+    # Regression for the processing_failed bug found during M8-AC first
+    # acceptance attempt: raw newlines inside an inline <code> span used to
+    # survive normalization, so a line consisting solely of the opening
+    # backtick fence could appear on its own line and be misread by
+    # WikiStructureParser as an unclosed block fence. Collapsing embedded
+    # newlines to spaces keeps the whole span on one line, which can never
+    # match the fence-open pattern.
+    result = _normalize('<p><code>line1\n`line2`\nline3</code></p>')
+    assert result.normalized_body_text == '```line1 `line2` line3```'
+    assert '\n' not in result.normalized_body_text
+    parsed = WikiStructureParser.parse(page_title='Test', normalized_body_text=result.normalized_body_text)
+    assert len(parsed.sections) > 0
+
+
 def test_normalizes_baseline_blocks_inline_markup_and_unicode() -> None:
     result = _normalize(
         "<h1>Head</h1><p>Cafe\u0301 <strong>bold</strong> <em>em</em><br/>next</p>"
@@ -614,3 +635,19 @@ def test_code_inside_table_uses_complex_grid_without_flattening() -> None:
 def test_result_repr_does_not_disclose_normalized_body() -> None:
     result = _normalize("<p>REVIEW_SENTINEL_SECRET</p>")
     assert "REVIEW_SENTINEL_SECRET" not in repr(result)
+
+
+def test_confluence_page_link_emits_reference_intent_without_changing_markdown() -> None:
+    result = _normalize(
+        '<p><a href="/wiki/spaces/SPEN/pages/12345/design">Design page</a></p>'
+    )
+    assert result.normalized_body_text == "[Design page](/wiki/spaces/SPEN/pages/12345/design)"
+    assert result.reference_intents[0].kind == "page_link"
+    assert result.reference_intents[0].target_identity == "confluence:page:12345"
+
+
+def test_external_pages_path_is_not_guessed_as_confluence_relation() -> None:
+    result = _normalize(
+        '<p><a href="https://external.example/pages/12345/design">External</a></p>'
+    )
+    assert result.reference_intents == ()
