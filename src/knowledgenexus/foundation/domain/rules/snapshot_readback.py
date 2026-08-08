@@ -34,25 +34,26 @@ def validate_snapshot_streams(
     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
 ) -> SnapshotClosureReport:
     """Validate cross-stream identity and ownership without mutating input."""
-    if type(streams) is not dict or set(streams) != set(_STREAMS):
+    if not isinstance(streams, Mapping) or set(streams) != set(_STREAMS):
         raise SnapshotReadbackError("stream set is invalid")
     if export_mode not in {"full_snapshot", "delta"}:
         raise SnapshotReadbackError("export mode is invalid")
     normalized: dict[str, tuple[dict[str, object], ...]] = {}
     for name in _STREAMS:
         value = streams[name]
-        if type(value) is not tuple:
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
             raise SnapshotReadbackError("stream type is invalid")
         rows: list[dict[str, object]] = []
         seen: set[str] = set()
         for row in value:
-            if type(row) is not dict:
+            if not isinstance(row, Mapping):
                 raise SnapshotReadbackError("stream record is invalid")
-            identity = row.get(_IDS[name])
+            record = dict(row)
+            identity = record.get(_IDS[name])
             if type(identity) is not str or not identity or identity in seen:
                 raise SnapshotReadbackError("stream identity is invalid")
             seen.add(identity)
-            rows.append(dict(row))
+            rows.append(record)
         normalized[name] = tuple(rows)
 
     document_ids = {row["document_id"] for row in normalized["documents"]}
@@ -83,8 +84,9 @@ def validate_snapshot_streams(
 
     def _relation_refs(row: dict[str, object]) -> None:
         references = row.get("relation_ids", [])
-        if type(references) is not list:
+        if not isinstance(references, Sequence) or isinstance(references, (str, bytes, bytearray)):
             raise SnapshotReadbackError("relation references are invalid")
+        references = tuple(references)
         try:
             duplicate = len(references) != len(set(references))
         except TypeError:
@@ -152,14 +154,28 @@ def validate_snapshot_streams(
     if export_mode == "full_snapshot" and normalized["tombstones"]:
         raise SnapshotReadbackError("full snapshot contains tombstones")
     if prior_streams is not None:
-        if type(prior_streams) is not dict or set(prior_streams) != set(_STREAMS):
+        if not isinstance(prior_streams, Mapping) or set(prior_streams) != set(_STREAMS):
             raise SnapshotReadbackError("prior stream set is invalid")
-        prior_ids = {
-            row.get(_IDS[name])
+        if any(
+            not isinstance(prior_streams[name], Sequence)
+            or isinstance(prior_streams[name], (str, bytes, bytearray))
             for name in _STREAMS
-            for row in prior_streams[name]
-            if type(row) is dict
-        }
+        ):
+            raise SnapshotReadbackError("prior stream type is invalid")
+        prior_ids: set[str] = set()
+        # Tombstones are delta metadata; they are not valid targets for a
+        # subsequent tombstone and therefore are excluded from the entity set.
+        for name in _STREAMS:
+            if name == "tombstones":
+                continue
+            identity_field = _IDS[name]
+            for row in prior_streams[name]:
+                if not isinstance(row, Mapping):
+                    raise SnapshotReadbackError("prior stream record is invalid")
+                identity = row.get(identity_field)
+                if type(identity) is not str or not identity:
+                    raise SnapshotReadbackError("prior stream identity is invalid")
+                prior_ids.add(identity)
         if any(row.get("entity_id") not in prior_ids for row in normalized["tombstones"]):
             raise SnapshotReadbackError("tombstone target is not in prior snapshot")
 

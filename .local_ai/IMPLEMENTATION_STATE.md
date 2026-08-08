@@ -2032,16 +2032,17 @@ performance gate remain deferred; no 100k scale PASS is claimed.
 - F5: full-snapshot exporter, publication, readback, and deterministic
   synthetic acceptance are complete; bounded real Confluence/Git snapshot
   evidence is still pending.
-- F6: delta projection, tombstone cascades, ACL-only re-emission intents,
-  prior-target membership checks, strict readback, and full-to-delta publisher
-  wiring are complete. A real second-sync run is still pending.
+- F6: delta projection, bounded M10 second-sync orchestration, tombstone
+  cascades, ACL-only re-emission intents, prior-target membership checks,
+  recursive strict readback, and full-to-delta publisher wiring are complete.
+  A real second-sync run is still pending.
 - F7: scale gate models/evaluator and production-transport enforcement are
   complete; 10k synthetic repeatability passed, while 100k and sanitized real
   production evidence remain pending.
 - Operator evaluation CLI validation: `10 passed` focused; F4/F7 evaluator and
   CLI suite `16 passed` in the current workspace.
-- Verification on 2026-08-08: `3152 passed, 39 skipped` with the pinned local
-  tokenizer bundle; focused gate/exporter suite `59 passed, 6 skipped`.
+- Verification on 2026-08-08: `3199 passed, 40 skipped` with the pinned local
+  tokenizer bundle; M10 delta/readback focused suite `11 passed`.
 
 ## M11 PLM Read-Only Ingestion (HOLD)
 
