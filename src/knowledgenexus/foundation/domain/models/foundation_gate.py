@@ -76,8 +76,8 @@ class OcrEngineApproval:
     limits: OcrLimits = OcrLimits()
     evidence_kind: str | None = None
     evidence_digest: str | None = None
-    failure_reason: str | None = None
     approved_at: str | None = None
+    failure_reason: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.status) is not str or self.status not in {"approved", "pending_external_input", "failed"}:
@@ -88,10 +88,10 @@ class OcrEngineApproval:
             _optional_identity(getattr(self, field), field)
         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
             raise ValueError("evidence_kind is invalid")
-        if self.failure_reason is not None and (type(self.failure_reason) is not str or not self.failure_reason or len(self.failure_reason) > 256):
-            raise ValueError("failure_reason is invalid")
         if self.approved_at is not None and (type(self.approved_at) is not str or _RFC3339.fullmatch(self.approved_at) is None):
             raise ValueError("approved_at is invalid")
+        if self.failure_reason is not None and (type(self.failure_reason) is not str or not self.failure_reason or len(self.failure_reason) > 256):
+            raise ValueError("failure_reason is invalid")
         if self.status == "approved":
             required = (self.engine_id, self.engine_version, self.runtime_identity, self.model_identity, self.build_identity, self.evidence_kind, self.evidence_digest, self.approved_at)
             if any(value is None for value in required) or self.offline_only is not True:
@@ -200,7 +200,6 @@ class ScaleGateEvidence:
     duration_milliseconds: int | None = None
     evidence_kind: str | None = None
     evidence_digest: str | None = None
-    failure_reason: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.status) is not str or self.status not in {"pass", "pending_external_input", "failed"}:
@@ -238,10 +237,8 @@ class ScaleGateEvidence:
             raise ValueError("RSS counters are inconsistent")
         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
             raise ValueError("evidence_kind is invalid")
-        if self.failure_reason is not None and (type(self.failure_reason) is not str or not self.failure_reason or len(self.failure_reason) > 256):
-            raise ValueError("failure_reason is invalid")
         if self.status == "pending_external_input":
-            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or self.failure_reason is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
+            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
                 raise ValueError("pending scale gate carries observations")
         elif self.status == "pass":
             if self.observed_pages < self.target_pages or self.run_count < 2 or seen != _STREAM_SET:
@@ -251,8 +248,8 @@ class ScaleGateEvidence:
             if self.evidence_kind is None or self.evidence_digest is None:
                 raise ValueError("scale evidence digest is missing")
             _digest(self.evidence_digest, "evidence_digest")
-        elif self.evidence_digest is not None or self.failure_reason is None:
-            raise ValueError("failed scale gate carries invalid evidence")
+        elif self.evidence_digest is not None:
+            raise ValueError("failed scale gate carries evidence")
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(status={self.status!r}, target_pages={self.target_pages})"
