@@ -395,6 +395,12 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
             if target_doc is None or source_doc is None or target_doc.get("source_system") != "confluence" or source_doc.get("source_system") != "confluence":
                 raise M10SnapshotError("resolved page relation ownership is invalid")
     relation_ids = {_identity(row, "relation_id") for row in streams["relations"]}
+    relation_owners = {
+        _identity(row, "document_id"): row for row in streams["documents"]
+    }
+    relation_owners.update(
+        {_identity(row, "chunk_id"): row for row in streams["chunks"]}
+    )
     for stream_name in ("documents", "chunks"):
         for row in streams[stream_name]:
             referenced = row.get("relation_ids", [])
@@ -405,6 +411,11 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
                 or any(value not in relation_ids for value in referenced)
             ):
                 raise M10SnapshotError("relation ID closure is invalid")
+    for record in streams["relations"]:
+        relation_id = _identity(record, "relation_id")
+        owner = relation_owners.get(record.get("source_id"))
+        if owner is None or relation_id not in owner.get("relation_ids", []):
+            raise M10SnapshotError("relation owner linkage is invalid")
     for record in streams["media_assets"]:
         if not request.media_policy.include_attachments or len(streams["media_assets"]) > request.media_policy.max_assets:
             raise M10SnapshotError("media policy or budget is invalid")

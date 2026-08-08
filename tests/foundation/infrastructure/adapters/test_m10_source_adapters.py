@@ -188,6 +188,45 @@ def test_confluence_materialized_source_runs_media_before_relation_stage(tmp_pat
     assert result.relations == confluence.relations
 
 
+def test_confluence_materialized_source_runs_acl_before_generic_relations(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+    )
+    events: list[str] = []
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class AclStage:
+        def execute(self, request, **state):
+            assert state["documents"] == confluence.documents
+            events.append("acl")
+            return _Output(
+                documents=tuple({**row, "acl_tags": ["space:SVMC"]} for row in confluence.documents),
+                chunks=tuple({**row, "acl_tags": ["space:SVMC"]} for row in confluence.chunks),
+                acl=confluence.acl,
+            )
+
+    class RelationStage:
+        def execute(self, request, **state):
+            assert state["documents"][0]["acl_tags"] == ["space:SVMC"]
+            assert state["chunks"][0]["acl_tags"] == ["space:SVMC"]
+            events.append("relation")
+            return confluence.relations
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), acl_stage=AclStage(), relation_stage=RelationStage()
+    ).collect(request)
+    assert events == ["acl", "relation"]
+    assert result.relations == confluence.relations
+
+
 def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_and_keeps_enrichment(tmp_path) -> None:
     confluence, _ = _handoffs()
     request = _request(tmp_path)

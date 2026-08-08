@@ -230,9 +230,11 @@ class ConfluenceM10MaterializedSource:
             state["media"] = page_media_result
             media = _records_from_result(page_media_result, ("assets", "media_assets"), "media_assets")
             state["media_assets"] = media
-        # Media must run before generic relation materialization so a relation
-        # stage can resolve attachment intents against the current asset set.
-        for stage_name, stage in (("media_stage", self._media_stage), ("relation_stage", self._relation_stage), ("acl_stage", self._acl_stage), ("tombstone_stage", self._tombstone_stage)):
+        # Media must run before ACL/relation materialization so relation stages
+        # can resolve attachment intents against the current asset set. Generic
+        # relations intentionally run after ACL so their IDs are appended to
+        # the final ACL-enriched documents and chunks.
+        for stage_name, stage in (("media_stage", self._media_stage), ("acl_stage", self._acl_stage), ("relation_stage", self._relation_stage), ("tombstone_stage", self._tombstone_stage)):
             if stage is None:
                 continue
             result = _stage_call(stage, request=request, state=state)

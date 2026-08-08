@@ -98,6 +98,27 @@ def test_relation_status_and_sync_state_rules(tmp_path):
         compose_m10_projection(request, M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (), confluence.symbols, ({**sync, "status": "tombstoned"},), confluence.raw_artifact_identity), git, schema_validator=NoopValidator())
 
 
+def test_relation_must_be_linked_from_its_source_record(tmp_path):
+    request = _request(tmp_path)
+    confluence, git = _handoffs()
+    unlinked = {**confluence.relations[0], "relation_id": "rel:fedcba9876543210"}
+    handoff = M10ConfluenceHandoff(
+        confluence.run_id,
+        confluence.generation_id,
+        confluence.source_version,
+        confluence.documents,
+        confluence.chunks,
+        (confluence.relations[0], unlinked),
+        confluence.acl,
+        (),
+        confluence.symbols,
+        confluence.sync_state,
+        confluence.raw_artifact_identity,
+    )
+    with pytest.raises(M10SnapshotError, match="relation owner linkage"):
+        compose_m10_projection(request, handoff, git, schema_validator=NoopValidator())
+
+
 @pytest.mark.parametrize("target", ["unknown", "none", "null", "unresolved", " "])
 def test_unresolved_relation_placeholders_fail_closed(tmp_path, target):
     request = _request(tmp_path); confluence, git = _handoffs()
