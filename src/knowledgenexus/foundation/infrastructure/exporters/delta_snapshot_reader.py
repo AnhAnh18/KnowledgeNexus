@@ -147,7 +147,7 @@ def read_delta_snapshot(
     if type(manifest) is not dict or manifest.get("export_mode") != "delta":
         raise ValueError("snapshot is not a delta export")
     quality_report = path / "quality_report.md"
-    if not quality_report.is_file() or quality_report.is_symlink() or not quality_report.read_bytes():
+    if not quality_report.is_file() or quality_report.is_symlink() or not _quality_report_bytes(quality_report):
         raise ValueError("delta quality report is invalid")
     base = manifest.get("base_dataset_version")
     dataset = manifest.get("dataset_version")
@@ -216,7 +216,7 @@ def read_published_snapshot(
     manifest = _strict_json(path / "manifest.json")
     if type(manifest) is not dict or manifest.get("export_mode") not in {"full_snapshot", "delta"}:
         raise ValueError("snapshot mode is invalid")
-    if not (path / "quality_report.md").read_bytes():
+    if not _quality_report_bytes(path / "quality_report.md"):
         raise ValueError("snapshot quality report is invalid")
     dataset_version = manifest.get("dataset_version")
     if type(dataset_version) is not str or _DATASET_VERSION.fullmatch(dataset_version) is None:
@@ -285,6 +285,18 @@ def _strict_json_line(line: str) -> object:
         return result
 
     return json.loads(line, object_pairs_hook=reject_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite JSON")))
+
+
+def _quality_report_bytes(path: Path) -> bytes:
+    """Require a non-empty UTF-8 quality report while preserving digest bytes."""
+    payload = path.read_bytes()
+    try:
+        decoded = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("snapshot quality report is invalid") from None
+    if not payload or not decoded:
+        raise ValueError("snapshot quality report is invalid")
+    return payload
 
 
 __all__ = [

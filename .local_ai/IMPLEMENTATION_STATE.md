@@ -2042,7 +2042,8 @@ performance gate remain deferred; no 100k scale PASS is claimed.
 - Operator evaluation CLI validation: `10 passed` focused; F4/F7 evaluator and
   CLI suite `16 passed` in the current workspace.
 - Verification on 2026-08-08: `3199 passed, 40 skipped` with the pinned local
-  tokenizer bundle; M10 delta/readback focused suite `11 passed`.
+  tokenizer bundle; M10 delta/readback focused suite `12 passed`; published
+  snapshot readback now rejects non-UTF-8 quality sidecars.
 
 ## M11 PLM Read-Only Ingestion (HOLD)
 

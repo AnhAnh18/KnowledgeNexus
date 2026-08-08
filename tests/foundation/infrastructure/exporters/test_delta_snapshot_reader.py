@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -51,3 +52,12 @@ def test_published_reader_rejects_invalid_version_and_snapshot_path() -> None:
             validator=FoundationSchemaValidator(),
             expected_dataset_version="v20260715-000000-000000Z",
         )
+
+
+def test_published_reader_rejects_non_utf8_quality_report(tmp_path: Path) -> None:
+    snapshot = tmp_path / _VERSION
+    shutil.copytree(_fixture(), snapshot)
+    (snapshot / "quality_report.md").write_bytes(b"\xff")
+
+    with pytest.raises(ValueError, match="quality report"):
+        read_published_snapshot(snapshot, validator=FoundationSchemaValidator())
