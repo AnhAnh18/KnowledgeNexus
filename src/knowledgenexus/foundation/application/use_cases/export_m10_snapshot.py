@@ -323,7 +323,7 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
     if isolated_manifest != manifest:
         raise ValueError("validator mutated manifest")
     assert_validation_bytes_unchanged()
-    if manifest.get("dataset_version") != dataset_version or manifest.get("generated_at") != generated_at or manifest.get("config_hash") != projection.config_hash or manifest.get("chunker_version") != projection.chunker_version or manifest.get("schemas_version") != projection.schemas_version or _canonical_json(manifest.get("source_scopes")) != _canonical_json(projection.source_scopes) or _canonical_json(manifest.get("counts")) != _canonical_json(expected_counts):
+    if manifest.get("dataset_version") != dataset_version or manifest.get("generated_at") != generated_at or manifest.get("export_mode") != request.export_mode or (request.export_mode == "delta" and manifest.get("base_dataset_version") != request.base_dataset_version) or manifest.get("config_hash") != projection.config_hash or manifest.get("chunker_version") != projection.chunker_version or manifest.get("schemas_version") != projection.schemas_version or _canonical_json(manifest.get("source_scopes")) != _canonical_json(projection.source_scopes) or _canonical_json(manifest.get("counts")) != _canonical_json(expected_counts):
         raise ValueError
     streams = {
         name: _strict_jsonl_bytes(validation_bytes[f"{name}.jsonl"])
@@ -336,7 +336,7 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
             if isolated_row != row:
                 raise ValueError("validator mutated record")
             assert_validation_bytes_unchanged()
-    if streams["tombstones"]:
+    if request.export_mode == "full_snapshot" and streams["tombstones"]:
         raise ValueError
     expected_streams = {name: tuple(getattr(projection, name)) for name in _COUNT_KEYS}
     if any(_canonical_json(list(streams[name])) != _canonical_json(list(expected_streams[name])) for name in _COUNT_KEYS):
@@ -405,7 +405,7 @@ class ExportM10Snapshot:
             raise M10SnapshotExportFailure("projection") from None
 
         try:
-            manifest = self._staging_writer.write(staging_path=staging_path, validator=self._validator, dataset_version=dataset_version, generated_at=generated_at, config_hash=projection.config_hash, chunker_version=projection.chunker_version, schemas_version=projection.schemas_version, documents=projection.documents, chunks=projection.chunks, relations=projection.relations, acl=projection.acl, media_assets=projection.media_assets, symbols=projection.symbols, sync_state=projection.sync_state, tombstones=projection.tombstones, source_scopes=projection.source_scopes)
+            manifest = self._staging_writer.write(staging_path=staging_path, validator=self._validator, dataset_version=dataset_version, generated_at=generated_at, config_hash=projection.config_hash, chunker_version=projection.chunker_version, schemas_version=projection.schemas_version, documents=projection.documents, chunks=projection.chunks, relations=projection.relations, acl=projection.acl, media_assets=projection.media_assets, symbols=projection.symbols, sync_state=projection.sync_state, tombstones=projection.tombstones, source_scopes=projection.source_scopes, export_mode=request.export_mode, base_dataset_version=request.base_dataset_version)
         except Exception:
             _cleanup_staging(staging_path)
             raise M10SnapshotExportFailure("staging") from None
