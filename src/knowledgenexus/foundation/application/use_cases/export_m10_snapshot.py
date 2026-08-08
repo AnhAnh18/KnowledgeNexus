@@ -37,6 +37,9 @@ from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
     M10StagingCompleterPort,
     M10StagingWriterPort,
 )
+from knowledgenexus.foundation.domain.rules.snapshot_readback import (
+    validate_snapshot_streams,
+)
 
 
 _JSONL_FILE_SCHEMA_PAIRS = (
@@ -336,6 +339,10 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
             if isolated_row != row:
                 raise ValueError("validator mutated record")
             assert_validation_bytes_unchanged()
+    validate_snapshot_streams(
+        streams,
+        export_mode=request.export_mode,
+    )
     if request.export_mode == "full_snapshot" and streams["tombstones"]:
         raise ValueError
     if request.export_mode == "delta":

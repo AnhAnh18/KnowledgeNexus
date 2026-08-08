@@ -133,6 +133,20 @@ def _path(value: object) -> str:
     return value
 
 
+def _confluence_version_matches(record: dict[str, object], handoff_version: str) -> bool:
+    """Accept per-page versions when one bounded run spans revisions.
+
+    ``source_version`` remains mandatory on every emitted record.  A handoff
+    may use ``mixed`` as its generation-level marker when pages were captured
+    at different Confluence versions; single-version legacy handoffs retain
+    the stricter equality check.
+    """
+    value = record.get("source_version")
+    if type(value) is not str or not value:
+        return False
+    return handoff_version == "mixed" or value == handoff_version
+
+
 def _validate_records(streams: dict[str, tuple[dict[str, object], ...]], injected_validator: M10SchemaValidator, canonical_validator: M10SchemaValidator) -> dict[str, tuple[dict[str, object], ...]]:
     if not callable(getattr(injected_validator, "validate_record", None)) or not callable(getattr(canonical_validator, "validate_record", None)):
         raise TypeError("schema validator is invalid")
@@ -328,7 +342,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
         source = record["source_system"]
         if source == "confluence":
             page = record.get("page_id")
-            if type(page) is not str or page not in request.ordered_page_ids or record.get("source_version") != confluence.source_version:
+            if type(page) is not str or page not in request.ordered_page_ids or not _confluence_version_matches(record, confluence.source_version):
                 raise M10SnapshotError("Confluence document provenance is invalid")
             confluence_pages.append(page)
         elif source == "git":
@@ -359,7 +373,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
         parent_acl = acl_by_document[parent].get("acl_tags")
         if record.get("acl_tags") != parent_acl:
             raise M10SnapshotError("chunk ACL inheritance is invalid")
-        if record.get("source_system") == "confluence" and (record.get("page_id") not in request.ordered_page_ids or record.get("page_id") != next(doc.get("page_id") for doc in documents if doc["document_id"] == parent) or record.get("source_version") != confluence.source_version):
+        if record.get("source_system") == "confluence" and (record.get("page_id") not in request.ordered_page_ids or record.get("page_id") != next(doc.get("page_id") for doc in documents if doc["document_id"] == parent) or not _confluence_version_matches(record, confluence.source_version)):
             raise M10SnapshotError("Confluence chunk provenance is invalid")
         if record.get("source_system") == "git" and (record.get("repo") != request.git_repository or record.get("branch") != request.git_branch or record.get("source_version") != request.git_commit or record["acl_tags"] != [f"repo:{request.git_repository}"]):
             raise M10SnapshotError("Git chunk ACL/provenance is invalid")
@@ -421,7 +435,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
             raise M10SnapshotError("media policy or budget is invalid")
         parent = record.get("parent_document_id")
         parent_record = next((doc for doc in documents if doc["document_id"] == parent), None)
-        if parent_record is None or parent_record.get("source_system") != "confluence" or record.get("source_system") != "confluence" or record.get("source_version") != confluence.source_version or record.get("processing_status") not in request.media_policy.allowed_processing_statuses:
+        if parent_record is None or parent_record.get("source_system") != "confluence" or record.get("source_system") != "confluence" or not _confluence_version_matches(record, confluence.source_version) or record.get("processing_status") not in request.media_policy.allowed_processing_statuses:
             raise M10SnapshotError("media provenance/policy is invalid")
         downloaded = record.get("download_status") == "downloaded"
         content_hash, raw_uri = record.get("content_hash"), record.get("raw_uri")

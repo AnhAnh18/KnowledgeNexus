@@ -40,6 +40,7 @@ class BuildSyncStateSnapshot:
         media_assets: object = (),
         repository_id: object | None = None,
         repository_version: object | None = None,
+        inventory: object | None = None,
     ) -> SyncStateSnapshotResult:
         if type(source_id) is not str or not source_id or type(synced_at) is not str or not synced_at:
             raise SyncStateSnapshotError("invalid input")
@@ -49,6 +50,15 @@ class BuildSyncStateSnapshot:
             raise SyncStateSnapshotError("invalid input")
         if repository_version is not None and (type(repository_version) is not str or not repository_version):
             raise SyncStateSnapshotError("invalid input")
+        if inventory is not None:
+            return self._from_inventory(
+                source_id=source_id,
+                synced_at=synced_at,
+                documents=documents,
+                media_assets=media_assets,
+                repository_id=repository_id,
+                inventory=inventory,
+            )
         rows: list[dict[str, object]] = []
         seen: set[str] = set()
         for document in documents:
@@ -109,6 +119,47 @@ class BuildSyncStateSnapshot:
                     last_synced_at=synced_at,
                 )
             )
+        rows.sort(key=lambda record: str(record["entity_id"]))
+        return SyncStateSnapshotResult(records=tuple(rows))
+
+    @staticmethod
+    def _from_inventory(
+        *,
+        source_id: str,
+        synced_at: str,
+        documents: tuple[dict[str, object], ...],
+        media_assets: tuple[dict[str, object], ...],
+        repository_id: str | None,
+        inventory: object,
+    ) -> SyncStateSnapshotResult:
+        if type(inventory) is not tuple or any(type(row) is not dict for row in inventory):
+            raise SyncStateSnapshotError("invalid authoritative inventory")
+        expected: set[str] = {
+            str(row.get("document_id")) for row in documents
+        } | {str(row.get("media_id")) for row in media_assets}
+        if repository_id is not None:
+            expected.add(repository_id)
+        rows: list[dict[str, object]] = []
+        seen: set[str] = set()
+        allowed = {
+            "source_id", "entity_id", "entity_type", "last_seen_version",
+            "last_content_hash", "last_synced_at", "status",
+        }
+        for row in inventory:
+            if set(row) != allowed:
+                raise SyncStateSnapshotError("authoritative inventory fields are invalid")
+            if row.get("source_id") != source_id or row.get("last_synced_at") != synced_at:
+                raise SyncStateSnapshotError("authoritative inventory provenance is invalid")
+            entity_id = row.get("entity_id")
+            if type(entity_id) is not str or entity_id in seen or entity_id not in expected:
+                raise SyncStateSnapshotError("authoritative inventory identity is invalid")
+            seen.add(entity_id)
+            try:
+                rows.append(SyncStateRecordBuilder.build(**row))
+            except (TypeError, ValueError):
+                raise SyncStateSnapshotError("authoritative inventory record is invalid") from None
+        if seen != expected:
+            raise SyncStateSnapshotError("authoritative inventory does not cover emitted entities")
         rows.sort(key=lambda record: str(record["entity_id"]))
         return SyncStateSnapshotResult(records=tuple(rows))
 

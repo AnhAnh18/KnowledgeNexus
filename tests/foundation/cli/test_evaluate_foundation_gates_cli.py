@@ -12,8 +12,8 @@ from knowledgenexus.foundation.cli import evaluate_foundation_gates as cli
 _DIGEST = "a" * 64
 _KINDS = ("chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf")
 _STREAMS = (
-    ["acl", 10], ["chunks", 20], ["documents", 10], ["media_assets", 5],
-    ["relations", 4], ["symbols", 2], ["sync_state", 13], ["tombstones", 0],
+    ["acl", 10000], ["chunks", 20], ["documents", 10000], ["media_assets", 5],
+    ["relations", 4], ["symbols", 2], ["sync_state", 10005], ["tombstones", 0],
 )
 
 

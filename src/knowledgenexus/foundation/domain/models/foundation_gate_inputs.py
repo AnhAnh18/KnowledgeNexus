@@ -250,6 +250,13 @@ class PublishedSnapshotReadback:
             seen.add(stream)
         if seen != _STREAMS:
             raise ValueError("stream_counts must cover all Foundation streams")
+        stream_count_map = dict(self.stream_counts)
+        if stream_count_map["documents"] < self.observed_pages:
+            raise ValueError("document count cannot be below observed page count")
+        if stream_count_map["acl"] < stream_count_map["documents"]:
+            raise ValueError("ACL count cannot be below document count")
+        if stream_count_map["sync_state"] < stream_count_map["documents"] + stream_count_map["media_assets"]:
+            raise ValueError("sync-state count cannot cover emitted entities")
         for field in (
             "readback_valid", "relation_closed", "acl_closed", "sync_closed",
             "atomic_publish", "no_clobber", "sanitized_output",

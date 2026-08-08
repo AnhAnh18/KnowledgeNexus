@@ -38,6 +38,7 @@ class AssembleConfluenceM10Handoff:
         acl: object,
         media_assets: object = (),
         tombstones: object = (),
+        sync_inventory: object = (),
     ) -> M10ConfluenceHandoff:
         if type(request) is not M10SnapshotRequest:
             raise M10HandoffAssemblyError("invalid request")
@@ -49,12 +50,14 @@ class AssembleConfluenceM10Handoff:
         acl_rows = _records(acl, "acl")
         media_rows = _records(media_assets, "media_assets")
         tombstone_rows = _records(tombstones, "tombstones")
+        inventory_rows = _records(sync_inventory, "sync_inventory")
         try:
             sync = BuildSyncStateSnapshot().execute(
                 source_id=request.confluence_scope.source_id,
                 synced_at=request.generated_at,
                 documents=docs,
                 media_assets=media_rows,
+                inventory=inventory_rows if inventory_rows else None,
             )
         except (SyncStateSnapshotError, TypeError, ValueError):
             raise M10HandoffAssemblyError("sync state assembly failed") from None
@@ -90,6 +93,7 @@ class AssembleGitM10Handoff:
         acl: object,
         symbols: object = (),
         tombstones: object = (),
+        sync_inventory: object = (),
     ) -> M10GitHandoff:
         if type(request) is not M10SnapshotRequest:
             raise M10HandoffAssemblyError("invalid request")
@@ -98,6 +102,7 @@ class AssembleGitM10Handoff:
         acl_rows = _records(acl, "acl")
         symbol_rows = _records(symbols, "symbols")
         tombstone_rows = _records(tombstones, "tombstones")
+        inventory_rows = _records(sync_inventory, "sync_inventory")
         try:
             sync = BuildSyncStateSnapshot().execute(
                 source_id=request.git_repository,
@@ -105,6 +110,7 @@ class AssembleGitM10Handoff:
                 documents=docs,
                 repository_id=request.git_repository,
                 repository_version=request.git_commit,
+                inventory=inventory_rows if inventory_rows else None,
             )
             return M10GitHandoff(
                 request.git_repository,

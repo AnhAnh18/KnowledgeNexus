@@ -9,6 +9,11 @@ from knowledgenexus.foundation.infrastructure.adapters.m10_source_adapters impor
     GitMaterializedSourcePort,
     M10SourceAdapterError,
 )
+from knowledgenexus.foundation.infrastructure.adapters.m10_composition_root import (
+    ConfluenceM10CompositionRoot,
+    GitM10CompositionRoot,
+    M10CompositionRootError,
+)
 
 __all__ = [
     "ConfluenceM10Adapter",
@@ -20,4 +25,7 @@ __all__ = [
     "GitMaterializedInput",
     "GitMaterializedSourcePort",
     "M10SourceAdapterError",
+    "ConfluenceM10CompositionRoot",
+    "GitM10CompositionRoot",
+    "M10CompositionRootError",
 ]

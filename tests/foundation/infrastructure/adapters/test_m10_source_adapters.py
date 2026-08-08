@@ -341,6 +341,36 @@ def test_confluence_materialized_source_accepts_combined_materializer_at_media_s
     assert result.chunks == confluence.chunks
 
 
+def test_combined_media_relation_stage_preserves_assets(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    asset = {"media_id": "confluence:attachment:1", "parent_document_id": confluence.documents[0]["document_id"]}
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+    )
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class CombinedStage:
+        def execute(self, request, **state):
+            return _Output(
+                relations=confluence.relations,
+                documents=confluence.documents,
+                chunks=confluence.chunks,
+                media_assets=(asset,),
+            )
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), media_stage=CombinedStage()
+    ).collect(request)
+    assert result.media_assets == (asset,)
+
+
 @pytest.mark.parametrize(
     "missing",
     ["source_version", "raw_artifact_identity"],

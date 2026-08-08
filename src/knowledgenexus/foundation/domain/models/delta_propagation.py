@@ -25,7 +25,8 @@ from knowledgenexus.foundation.domain.models.tombstone_propagation import (
 
 _OPAQUE = re.compile(r"^\S+$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_DOCUMENT_ID = re.compile(r"^confluence:page:\S+$")
+_DOCUMENT_ID = re.compile(r"^(?:confluence:page|git):\S+$")
+_ACL_ID = re.compile(r"^acl:\S+$")
 _MISSING = object()
 _ENTITY_RANK = {"document": 0, "chunk": 1, "media": 2, "relation": 3, "acl": 4, "symbol": 5}
 _OUTCOME_STATES = frozenset({"new", "unchanged", "changed", "removed"})
@@ -133,17 +134,23 @@ class DeltaPropagationRequest:
     previous_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
     previous_acl_hashes: tuple[tuple[str, str], ...] = ()
     current_acl_hashes: tuple[tuple[str, str], ...] = ()
+    current_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
+    previous_acl_records: tuple[dict[str, object], ...] = ()
+    current_acl_records: tuple[dict[str, object], ...] = ()
+    previous_chunk_records: tuple[dict[str, object], ...] = ()
+    current_chunk_records: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         expected_fields = frozenset({
             "previous_dataset_version", "current_dataset_version", "previous_config_hash",
-            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents", "previous_acl_hashes", "current_acl_hashes",
+            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents", "current_dependents", "previous_acl_hashes", "current_acl_hashes", "previous_acl_records", "current_acl_records", "previous_chunk_records", "current_chunk_records",
         })
         actual_fields = frozenset(vars(self))
-        # previous_dependents was introduced as an optional wire extension;
-        # accept legacy in-memory requests and normalize the absent field.
+        # Delta inventory extensions are optional on legacy in-memory requests;
+        # normalize any absent extension fields before validation.
         missing_optional = expected_fields - actual_fields
-        if (actual_fields - expected_fields) or not missing_optional.issubset({"previous_dependents", "previous_acl_hashes", "current_acl_hashes"}):
+        optional_fields = {"previous_dependents", "current_dependents", "previous_acl_hashes", "current_acl_hashes", "previous_acl_records", "current_acl_records", "previous_chunk_records", "current_chunk_records"}
+        if (actual_fields - expected_fields) or not missing_optional.issubset(optional_fields):
             raise TypeError("model fields are invalid")
         if missing_optional:
             for field in missing_optional:
@@ -183,26 +190,30 @@ class DeltaPropagationRequest:
             seen_inventory.add(entry.document_id)
         if type(self.previous_dependents) is not tuple:
             raise TypeError("previous_dependents is invalid")
-        seen_dependents: set[str] = set()
-        for item in self.previous_dependents:
-            if type(item) is not tuple or len(item) != 2:
-                raise TypeError("previous_dependents entries are invalid")
-            document_id, targets = item
-            if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_dependents:
-                raise ValueError("previous dependent document ID is invalid")
-            seen_dependents.add(document_id)
-            if type(targets) is not tuple or any(type(target) is not TombstoneTarget for target in targets):
-                raise TypeError("previous dependent targets are invalid")
-            target_keys: set[tuple[TombstoneEntityType, str]] = set()
-            for target in targets:
-                TombstoneTarget.__post_init__(target)
-                if target.entity_type is TombstoneEntityType.DOCUMENT:
-                    raise ValueError("document cannot be a dependent target")
-                key = (target.entity_type, target.entity_id)
-                if key in target_keys:
-                    raise ValueError("previous dependent targets contain duplicate IDs")
-                target_keys.add(key)
-        object.__setattr__(self, "previous_dependents", tuple(self.previous_dependents))
+        for field in ("previous_dependents", "current_dependents"):
+            values = getattr(self, field)
+            if type(values) is not tuple:
+                raise TypeError(f"{field} is invalid")
+            seen_dependents: set[str] = set()
+            for item in values:
+                if type(item) is not tuple or len(item) != 2:
+                    raise TypeError(f"{field} entries are invalid")
+                document_id, targets = item
+                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_dependents:
+                    raise ValueError(f"{field} document ID is invalid")
+                seen_dependents.add(document_id)
+                if type(targets) is not tuple or any(type(target) is not TombstoneTarget for target in targets):
+                    raise TypeError(f"{field} targets are invalid")
+                target_keys: set[tuple[TombstoneEntityType, str]] = set()
+                for target in targets:
+                    TombstoneTarget.__post_init__(target)
+                    if target.entity_type is TombstoneEntityType.DOCUMENT:
+                        raise ValueError("document cannot be a dependent target")
+                    key = (target.entity_type, target.entity_id)
+                    if key in target_keys:
+                        raise ValueError(f"{field} targets contain duplicate IDs")
+                    target_keys.add(key)
+            object.__setattr__(self, field, tuple(values))
         for field in ("previous_acl_hashes", "current_acl_hashes"):
             values = getattr(self, field)
             if type(values) is not tuple:
@@ -218,6 +229,26 @@ class DeltaPropagationRequest:
                     raise ValueError(f"{field} fingerprint is invalid")
                 seen_acl.add(document_id)
             object.__setattr__(self, field, tuple(values))
+        for field in ("previous_acl_records", "current_acl_records", "previous_chunk_records", "current_chunk_records"):
+            values = getattr(self, field)
+            if type(values) is not tuple or any(type(record) is not dict for record in values):
+                raise TypeError(f"{field} is invalid")
+            seen_ids: set[str] = set()
+            id_field = "acl_id" if "acl" in field else "chunk_id"
+            for record in values:
+                if id_field not in record or type(record[id_field]) is not str or not record[id_field] or record[id_field] in seen_ids:
+                    raise ValueError(f"{field} record identity is invalid")
+                if id_field == "acl_id" and _ACL_ID.fullmatch(record[id_field]) is None:
+                    raise ValueError(f"{field} record identity is invalid")
+                seen_ids.add(record[id_field])
+                document_id = record.get("document_id")
+                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None:
+                    raise ValueError(f"{field} record document identity is invalid")
+                try:
+                    json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                except (TypeError, ValueError):
+                    raise ValueError(f"{field} record is invalid") from None
+            object.__setattr__(self, field, tuple(copy.deepcopy(record) for record in values))
 
 
 @dataclass(frozen=True, repr=False)
@@ -306,6 +337,8 @@ def _canonical_payload(result: "DeltaPropagationResult") -> dict[str, object]:
         } if metrics is not None else None,
         "document_outcomes": result.document_outcomes,
         "reemit_document_ids": result.reemit_document_ids,
+        "reemit_acl_records": result.reemit_acl_records,
+        "reemit_chunk_records": result.reemit_chunk_records,
         "records": result.records,
         "status": result.status.value,
     }
@@ -323,11 +356,13 @@ class DeltaPropagationResult:
     document_outcomes: tuple[tuple[str, str], ...] = ()
     reemit_document_ids: tuple[str, ...] = ()
     error_category: DeltaPropagationFailureCategory | None = None
+    reemit_acl_records: tuple[dict[str, object], ...] = ()
+    reemit_chunk_records: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _require_exact_fields(
             self,
-            frozenset({"status", "base_dataset_version", "dataset_version", "records", "count", "metrics", "digest", "document_outcomes", "reemit_document_ids", "error_category"}),
+            frozenset({"status", "base_dataset_version", "dataset_version", "records", "count", "metrics", "digest", "document_outcomes", "reemit_document_ids", "reemit_acl_records", "reemit_chunk_records", "error_category"}),
         )
         if type(self.status) is not DeltaPropagationStatus:
             raise TypeError("status is invalid")
@@ -339,6 +374,28 @@ class DeltaPropagationResult:
             raise TypeError("document outcomes are invalid")
         if type(self.reemit_document_ids) is not tuple or any(type(value) is not str or _DOCUMENT_ID.fullmatch(value) is None for value in self.reemit_document_ids) or tuple(sorted(set(self.reemit_document_ids))) != self.reemit_document_ids:
             raise ValueError("reemit document IDs are invalid")
+        for field, id_field in (("reemit_acl_records", "acl_id"), ("reemit_chunk_records", "chunk_id")):
+            values = getattr(self, field)
+            if type(values) is not tuple or any(type(record) is not dict for record in values):
+                raise TypeError(f"{field} are invalid")
+            previous_id: str | None = None
+            seen_ids: set[str] = set()
+            for record in values:
+                identity = record.get(id_field)
+                document_id = record.get("document_id")
+                if type(identity) is not str or not identity or identity in seen_ids or (previous_id is not None and identity <= previous_id):
+                    raise ValueError(f"{field} identity is invalid")
+                if id_field == "acl_id" and _ACL_ID.fullmatch(identity) is None:
+                    raise ValueError(f"{field} identity is invalid")
+                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None:
+                    raise ValueError(f"{field} document identity is invalid")
+                try:
+                    json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                except (TypeError, ValueError):
+                    raise ValueError(f"{field} record is invalid") from None
+                seen_ids.add(identity)
+                previous_id = identity
+            object.__setattr__(self, field, tuple(copy.deepcopy(record) for record in values))
         previous_document_id: str | None = None
         outcome_counts = {state: 0 for state in _OUTCOME_STATES}
         for outcome in self.document_outcomes:
@@ -356,7 +413,7 @@ class DeltaPropagationResult:
         if type(self.count) is not int or self.count < 0 or self.count != len(self.records):
             raise ValueError("count is invalid")
         if self.status is DeltaPropagationStatus.FAILED:
-            if self.records or self.count != 0 or self.metrics is not None or self.digest is not None or self.document_outcomes or self.reemit_document_ids:
+            if self.records or self.count != 0 or self.metrics is not None or self.digest is not None or self.document_outcomes or self.reemit_document_ids or self.reemit_acl_records or self.reemit_chunk_records:
                 raise ValueError("failed result is inconsistent")
             if type(self.error_category) is not DeltaPropagationFailureCategory:
                 raise ValueError("failure category is invalid")

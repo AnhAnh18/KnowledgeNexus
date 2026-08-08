@@ -43,7 +43,7 @@ def _summary(document_id: str, content_hash: str = "a" * 64, entries=()) -> Docu
     )
 
 
-def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=(), previous_acl_hashes=(), current_acl_hashes=()):
+def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=(), current_dependents=(), previous_acl_hashes=(), current_acl_hashes=(), previous_acl_records=(), current_acl_records=(), previous_chunk_records=(), current_chunk_records=()):
     return DeltaPropagationRequest(
         previous_dataset_version="base",
         current_dataset_version="next",
@@ -54,8 +54,13 @@ def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64,
         current_summaries=tuple(current),
         inventory=tuple(inventory),
         previous_dependents=tuple(previous_dependents),
+        current_dependents=tuple(current_dependents),
         previous_acl_hashes=tuple(previous_acl_hashes),
         current_acl_hashes=tuple(current_acl_hashes),
+        previous_acl_records=tuple(previous_acl_records),
+        current_acl_records=tuple(current_acl_records),
+        previous_chunk_records=tuple(previous_chunk_records),
+        current_chunk_records=tuple(current_chunk_records),
     )
 
 
@@ -182,6 +187,73 @@ def test_removed_document_cascades_prior_media_relation_acl_and_symbol_targets()
     assert result.metrics.relation_tombstone_count == 1
     assert result.metrics.acl_tombstone_count == 1
     assert result.metrics.symbol_tombstone_count == 1
+
+
+def test_present_document_tombstones_dependents_missing_from_current_inventory() -> None:
+    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
+    media = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1")
+    relation = TombstoneTarget(TombstoneEntityType.RELATION, "rel:0123456789abcdef")
+    result = PropagateDelta(schema_validator=Validator()).execute(
+        _request(
+            previous=(old,), current=(old,),
+            previous_dependents=((old.document_id, (media, relation)),),
+            current_dependents=((old.document_id, (relation,)),),
+        )
+    )
+    assert result.status is DeltaPropagationStatus.SUCCESS
+    assert result.document_outcomes == ((old.document_id, "changed"),)
+    assert [row["entity_type"] for row in result.records] == ["media"]
+    assert result.records[0]["reason"] == "content_updated"
+
+
+def test_present_document_empty_current_dependent_inventory_tombstones_all_prior_targets() -> None:
+    old = _summary("confluence:page:1")
+    target = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1")
+    result = PropagateDelta(schema_validator=Validator()).execute(
+        _request(
+            previous=(old,), current=(old,),
+            previous_dependents=((old.document_id, (target,)),),
+            current_dependents=((old.document_id, ()),),
+        )
+    )
+    assert result.metrics.media_tombstone_count == 1
+
+
+def test_acl_only_change_emits_current_acl_and_chunks_when_records_are_supplied() -> None:
+    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
+    acl = {"acl_id": "acl:confluence:page:1", "document_id": old.document_id, "acl_tags": ["space:NEW"]}
+    chunk = {"chunk_id": old.entries[0].chunk_id, "document_id": old.document_id, "acl_tags": ["space:NEW"], "content": "x"}
+    result = PropagateDelta(schema_validator=Validator()).execute(
+        _request(
+            previous=(old,), current=(old,),
+            previous_acl_hashes=((old.document_id, "a" * 64),),
+            current_acl_hashes=((old.document_id, "b" * 64),),
+            current_acl_records=(acl,), current_chunk_records=(chunk,),
+        )
+    )
+    assert result.reemit_document_ids == (old.document_id,)
+    assert result.reemit_acl_records == (acl,)
+    assert result.reemit_chunk_records == (chunk,)
+    assert result.records == ()
+
+
+def test_acl_only_reemission_rejects_incomplete_current_chunk_records() -> None:
+    old = _summary(
+        "confluence:page:1",
+        entries=(
+            _entry("chunk:confluence:0123456789abcdef"),
+            _entry("chunk:confluence:fedcba9876543210", "c" * 64),
+        ),
+    )
+    request = _request(
+        previous=(old,), current=(old,),
+        previous_acl_hashes=((old.document_id, "a" * 64),), current_acl_hashes=((old.document_id, "b" * 64),),
+        current_acl_records=({"acl_id": "acl:confluence:page:1", "document_id": old.document_id},),
+        current_chunk_records=({"chunk_id": old.entries[0].chunk_id, "document_id": old.document_id},),
+    )
+    result = PropagateDelta(schema_validator=Validator()).execute(request)
+    assert result.status is DeltaPropagationStatus.FAILED
+    assert result.error_category is DeltaPropagationFailureCategory.INVENTORY_CONFLICT
 
 
 def test_dependents_reject_document_root_and_duplicate_targets() -> None:

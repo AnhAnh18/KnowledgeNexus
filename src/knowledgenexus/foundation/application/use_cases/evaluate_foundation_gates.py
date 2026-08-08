@@ -166,6 +166,14 @@ def _scale_failure_reason(request: ScaleGateRequest) -> str | None:
         first.transport != "production" or second.transport != "production"
     ):
         reasons.append("real_evidence_requires_production_transport")
+    if request.evidence_kind == "sanitized_real_capture":
+        for label, readback in (("first", first), ("second", second)):
+            if readback.rss_baseline_bytes is None:
+                reasons.append(f"{label}_rss_baseline_missing")
+            if readback.rss_peak_bytes is None:
+                reasons.append(f"{label}_rss_peak_missing")
+            if readback.duration_milliseconds is None or readback.duration_milliseconds <= 0:
+                reasons.append(f"{label}_duration_missing_or_invalid")
     if first.observed_pages < request.target_pages or second.observed_pages < request.target_pages:
         reasons.append("target_pages_unmet")
     return ";".join(reasons) if reasons else None

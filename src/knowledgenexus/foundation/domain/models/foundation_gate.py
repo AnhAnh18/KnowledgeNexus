@@ -264,6 +264,13 @@ class ScaleGateEvidence:
                 raise ValueError("scale evidence is incomplete")
             if self.evidence_kind == "sanitized_real_capture" and self.transport != "production":
                 raise ValueError("sanitized real scale evidence requires production transport")
+            if self.evidence_kind == "sanitized_real_capture" and (
+                self.rss_baseline_bytes is None
+                or self.rss_peak_bytes is None
+                or self.duration_milliseconds is None
+                or self.duration_milliseconds <= 0
+            ):
+                raise ValueError("sanitized real scale evidence requires resource measurements")
             if not all((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
                 raise ValueError("scale checks are incomplete")
             if self.evidence_kind is None or self.evidence_digest is None:
