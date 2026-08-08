@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -73,17 +74,21 @@ def _stage_call(stage: object, *, request: M10SnapshotRequest, state: dict[str, 
     method = getattr(stage, "execute", None)
     if callable(method):
         try:
+            parameters = inspect.signature(method).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_kwargs = any(item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values())
+        accepts_request_keyword = "request" in parameters
+        if accepts_kwargs or accepts_request_keyword:
             return method(request=request, **state)
-        except TypeError as first_error:
-            # Existing Foundation use cases commonly expose ``execute`` with a
-            # single request argument.  Retry that narrow, documented shape;
-            # internal TypeErrors are still surfaced by the provider boundary.
-            try:
-                return method(request)
-            except TypeError:
-                raise first_error
+        return method(request)
     if callable(stage):
-        return stage(request, **state)
+        try:
+            parameters = inspect.signature(stage).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_kwargs = any(item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values())
+        return stage(request, **state) if accepts_kwargs or len(parameters) > 1 else stage(request)
     raise TypeError("provider stage is invalid")
 
 
