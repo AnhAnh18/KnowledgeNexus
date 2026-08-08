@@ -122,6 +122,19 @@ def _stage_records(value: object, names: tuple[str, ...], field_name: str) -> tu
     return _records(candidate, field_name)
 
 
+def _merge_records(left: tuple[dict[str, object], ...], right: tuple[dict[str, object], ...], *, identity: str) -> tuple[dict[str, object], ...]:
+    merged: dict[str, dict[str, object]] = {}
+    for record in (*left, *right):
+        key = record.get(identity)
+        if type(key) is not str or not key:
+            raise ValueError(f"invalid {identity}")
+        previous = merged.get(key)
+        if previous is not None and previous != record:
+            raise ValueError(f"conflicting {identity}")
+        merged[key] = record
+    return tuple(merged[key] for key in sorted(merged))
+
+
 class ConfluenceM10MaterializedSource:
     """Compose the approved Confluence producers into an M10 source port.
 
@@ -177,6 +190,9 @@ class ConfluenceM10MaterializedSource:
             elif stage_name == "acl_stage":
                 acl_value = _field(result, "acl") or _field(result, "acl_records") or _field(result, "acl_record")
                 acl = _records(acl_value, "acl") if acl_value is not None else ()
+                acl_relations = _field(result, "relations")
+                if acl_relations is not None:
+                    relations = _merge_records(relations, _records(acl_relations, "relations"), identity="relation_id")
                 docs = _field(result, "documents") or _field(result, "enriched_canonical_document")
                 chunks = _field(result, "chunks") or _field(result, "enriched_chunks")
                 if docs is not None:
