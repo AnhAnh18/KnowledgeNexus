@@ -66,6 +66,10 @@ class FullSnapshotPublisher:
 
 
 def _verify_paths(*, staging_path: Path, dataset_root: Path) -> None:
+    if not dataset_root.is_absolute() or dataset_root.is_symlink():
+        raise ValueError("Dataset root must be an absolute regular directory")
+    if not staging_path.is_absolute():
+        raise ValueError("Staging path must be absolute")
     if not dataset_root.exists():
         raise FileNotFoundError(f"Dataset root does not exist: {dataset_root}")
     if not dataset_root.is_dir():
