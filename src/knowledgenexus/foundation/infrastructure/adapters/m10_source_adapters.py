@@ -96,7 +96,10 @@ def _invoke_stage_callable(callable_stage: object, *, request: M10SnapshotReques
         return callable_stage(request)  # type: ignore[operator]
     accepts_kwargs = any(item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values())
     if accepts_kwargs:
-        return callable_stage(request=request, **state)  # type: ignore[operator]
+        # Stages are trusted seams but remain side-effect constrained: never
+        # expose the adapter's mutable record dictionaries to a provider.
+        isolated_state = {name: copy.deepcopy(value) for name, value in state.items()}
+        return callable_stage(request=request, **isolated_state)  # type: ignore[operator]
 
     positional: list[object] = []
     kwargs: dict[str, object] = {}
@@ -108,9 +111,9 @@ def _invoke_stage_callable(callable_stage: object, *, request: M10SnapshotReques
                 kwargs[name] = request
             continue
         if name in state and parameter.kind is not inspect.Parameter.POSITIONAL_ONLY:
-            kwargs[name] = state[name]
+            kwargs[name] = copy.deepcopy(state[name])
         elif name in state and parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
-            positional.append(state[name])
+            positional.append(copy.deepcopy(state[name]))
     return callable_stage(*positional, **kwargs)  # type: ignore[operator]
 
 

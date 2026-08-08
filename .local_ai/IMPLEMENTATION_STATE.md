@@ -1578,7 +1578,7 @@ are recorded without using repository-local commit SHAs as status.
 ## M8-AC Controlled Mini-Corpus Acceptance (M8-D.5)
 
 - Status: implementation and independent re-review complete `PASS`; real gate
-  remains `pending_external_input`.
+  complete on the operator-supplied bounded corpus.
 - Objective: run two fresh deterministic, aggregate-only passes over an
   operator-approved 10-20 page M7 generation before relying on M10 for the
   first real-corpus signal. The seam is retroactive M8-D.5 evidence and does
@@ -1602,9 +1602,12 @@ are recorded without using repository-local commit SHAs as status.
 - Review artifacts:
   `.codex-workflow/20260805-m8ac/05-review-1.md` (`CHANGES_REQUIRED`),
   `.codex-workflow/20260805-m8ac/08-review-2.md` (`PASS`).
-- Real acceptance is not claimed until the operator supplies a sanitized
-  aggregate report from an approved generation, ordered 10-20 page selection,
-  and pinned tokenizer assets. No raw/runtime artifact is tracked.
+- Real acceptance receipt (2026-08-08, aggregate-only): 10 requested and 10
+  succeeded pages; 401 chunks; 20 reference intents across 7 pages; 8 table
+  pages; content kinds `code_block=143`, `prose=231`, `table=27`; deterministic
+  repeat, source/selection stability, negative probe, and no-write checks all
+  passed. The pinned tokenizer asset digest matched the active profile. Raw
+  pages and runtime artifacts remain outside Git.
 
 ## M9-A1 Metadata-First Media Contract
 
@@ -2013,14 +2016,16 @@ performance gate remain deferred; no 100k scale PASS is claimed.
 
 ## Foundation Goal F4 Progress
 
-- Status: bounded media orchestration implemented; real OCR activation remains
-  an external approval gate.
+- Status: M8-AC real mini-corpus gate complete; bounded media orchestration is
+  implemented; real OCR activation and bounded media corpus acceptance remain
+  external approval gates.
 - Added `ProcessConfluenceMediaBatch` to process materialized attachments
   atomically, sort assets deterministically, preserve extraction-detail groups,
   and report sanitized capability failures without partial output.
-- M8-AC real-corpus status remains owner-supplied/external; no raw corpus or
-  credential evidence was read or copied into the repository. OCR engine
-  activation still requires the approved engine/runtime/model artifact.
+- The M8-AC aggregate receipt above was verified from the operator-supplied
+  corpus without copying raw pages or credential evidence into the repository.
+  OCR engine activation still requires the approved engine/runtime/model
+  artifact.
 - Added a strict sanitized F4/F7 operator CLI for JSON metadata envelopes;
   duplicate keys, raw/extra fields, invalid types, oversized input, and failed
   gate status are rejected without echoing paths or payload values.

@@ -17,6 +17,7 @@ from knowledgenexus.foundation.domain.models import (
     ConfluencePageSetMetrics,
     ConfluencePageSetPageMetrics,
     ConfluencePageSetResult,
+    NormalizationReferenceIntent,
 )
 from knowledgenexus.foundation.domain.records import (
     CanonicalDocumentRecordBuilder,
@@ -384,6 +385,28 @@ def test_page_set_adapter_preserves_document_order_and_allows_empty_document() -
         "confluence:page:2000",
     ]
     assert [summary.chunk_count for summary in summaries] == [1, 0]
+
+
+def test_page_set_adapter_preserves_reference_intents_during_revalidation() -> None:
+    document = _document()
+    intent = NormalizationReferenceIntent(
+        ordinal=1,
+        kind="page_link",
+        status="deferred_mvp",
+        target_identity="confluence:page:2000",
+        placeholder_identity="confluence:page:2000",
+    )
+    result = ConfluencePageSetResult(
+        documents=(document,),
+        chunks=(_chunk(document),),
+        page_metrics=(ConfluencePageSetPageMetrics(1, 1, 0, 1, (("prose", 1),)),),
+        metrics=ConfluencePageSetMetrics(1, 1, 0, 1, 1, 0, 1, (("prose", 1),)),
+        reference_intents_by_page=((document["document_id"], (intent,)),),
+    )
+
+    summaries = ChunkStabilitySummaryBuilder.build_page_set(result=result)
+
+    assert len(summaries) == 1
 
 
 def test_page_set_adapter_rejects_out_of_order_and_interleaved_chunks() -> None:

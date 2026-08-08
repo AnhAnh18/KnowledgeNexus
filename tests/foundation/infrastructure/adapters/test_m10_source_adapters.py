@@ -129,6 +129,35 @@ def test_materialized_sources_compose_injected_foundation_stages(tmp_path) -> No
     assert GitM10Adapter(source=Provider(git_input)).collect(request).documents == git.documents
 
 
+def test_materialized_source_isolates_mutable_stage_state(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+    )
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class MutatingRelationStage:
+        def execute(self, request, **state):
+            # A provider must not be able to mutate the records retained by the
+            # materialized source while inspecting its input.
+            state["documents"][0]["title"] = "provider mutation"
+            state["chunks"][0]["text"] = "provider mutation"
+            return confluence.relations
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), relation_stage=MutatingRelationStage()
+    ).collect(request)
+    assert result.documents == confluence.documents
+    assert result.chunks == confluence.chunks
+
+
 @pytest.mark.parametrize("bad", [None, object(), {"documents": ()}])
 def test_materialized_sources_fail_closed_on_bad_stage_output(tmp_path, bad) -> None:
     request = _request(tmp_path)
@@ -284,7 +313,7 @@ def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_
         def execute(self, *, documents, chunks, media, page_references=(), page_targets=()):
             assert documents == confluence.documents
             assert chunks == confluence.chunks
-            assert media is media_result
+            assert media == media_result
             assert page_references == ()
             assert page_targets == ()
             return _Output(documents=enriched_documents, chunks=enriched_chunks, relations=())
