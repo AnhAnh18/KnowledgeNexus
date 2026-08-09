@@ -11,6 +11,14 @@ $patchDir = (Resolve-Path .\patch-transfer-post-m8).Path
 1..6 | ForEach-Object { $p = Get-ChildItem $patchDir -Filter ("{0:D3}-*.patch" -f $_); git am --no-3way $p.FullName }
 ```
 
+After the focused tests pass, squash the six applied commits into one M9
+milestone commit:
+
+```powershell
+git reset --soft HEAD~6
+git commit -m "feat: complete M9 media, Git, symbols, and delta propagation"
+```
+
 Focused offline verification:
 
 ```powershell

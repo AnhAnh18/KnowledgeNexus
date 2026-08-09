@@ -12,6 +12,14 @@ $patchDir = (Resolve-Path .\patch-transfer-post-m8).Path
 7..39 | ForEach-Object { $p = Get-ChildItem $patchDir -Filter ("{0:D3}-*.patch" -f $_); git am --no-3way $p.FullName }
 ```
 
+After the focused tests pass, squash the 33 applied commits into one M10
+milestone/closeout commit:
+
+```powershell
+git reset --soft HEAD~33
+git commit -m "feat: complete M10 snapshot and Foundation closeout"
+```
+
 Focused offline verification:
 
 ```powershell
