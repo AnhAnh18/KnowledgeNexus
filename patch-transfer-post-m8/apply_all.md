@@ -19,9 +19,9 @@ commit per patch while applying against the target's M9-A1-resolved tree. If
 any patch conflicts, stop and run `git am --abort`; do not force-apply it. Run
 `apply_m9.md` first, then `apply_m10.md`.
 
-The intended final history is two milestone commits: squash patches `001`-`006`
-into M9, then squash patches `007`-`039` into M10/closeout. The milestone guides
-contain the exact `git reset --soft` commands.
+The intended final history is six milestone commits: one M9 commit, then five
+M10 feature commits. `apply_m10.md` defines the five groups and exact squash
+commands.
 
 The series intentionally excludes M8-only commits, M9-A1 (already present),
 and the M8-AC receipt-only documentation patch. It contains no runtime data,
