@@ -1,0 +1,29 @@
+From 2ce45185ae016bd0ec6350a25341b139089a716b Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:19:03 +0700
+Subject: [PATCH] foundation: bind real scale evidence to production transport
+
+---
+ .../application/use_cases/evaluate_foundation_gates.py      | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+index 4438667..25b03b0 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
++++ b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+@@ -130,6 +130,12 @@ def _scale_failure_reason(request: ScaleGateRequest) -> str | None:
+             reasons.append(label)
+     if first.stream_counts != second.stream_counts:
+         reasons.append("stream_counts_differ")
++    if first.transport != second.transport:
++        reasons.append("transport_differs")
++    if request.evidence_kind == "sanitized_real_capture" and (
++        first.transport != "production" or second.transport != "production"
++    ):
++        reasons.append("real_evidence_requires_production_transport")
+     if first.observed_pages < request.target_pages or second.observed_pages < request.target_pages:
+         reasons.append("target_pages_unmet")
+     return ";".join(reasons) if reasons else None
+-- 
+2.45.1.windows.1
+

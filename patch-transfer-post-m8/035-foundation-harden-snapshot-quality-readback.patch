@@ -1,0 +1,93 @@
+From 57aebc15627f9baa484ef3c5424ae8f82eafa8bc Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 17:55:33 +0700
+Subject: [PATCH] foundation: harden snapshot quality readback
+
+---
+ .local_ai/IMPLEMENTATION_STATE.md                |  3 ++-
+ .../exporters/delta_snapshot_reader.py           | 16 ++++++++++++++--
+ .../exporters/test_delta_snapshot_reader.py      | 10 ++++++++++
+ 3 files changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 923233b..ef7ba42 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -2042,7 +2042,8 @@ performance gate remain deferred; no 100k scale PASS is claimed.
+ - Operator evaluation CLI validation: `10 passed` focused; F4/F7 evaluator and
+   CLI suite `16 passed` in the current workspace.
+ - Verification on 2026-08-08: `3199 passed, 40 skipped` with the pinned local
+-  tokenizer bundle; M10 delta/readback focused suite `11 passed`.
++  tokenizer bundle; M10 delta/readback focused suite `12 passed`; published
++  snapshot readback now rejects non-UTF-8 quality sidecars.
+ 
+ ## M11 PLM Read-Only Ingestion (HOLD)
+ 
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+index af3c772..098e3b4 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+@@ -147,7 +147,7 @@ def read_delta_snapshot(
+     if type(manifest) is not dict or manifest.get("export_mode") != "delta":
+         raise ValueError("snapshot is not a delta export")
+     quality_report = path / "quality_report.md"
+-    if not quality_report.is_file() or quality_report.is_symlink() or not quality_report.read_bytes():
++    if not quality_report.is_file() or quality_report.is_symlink() or not _quality_report_bytes(quality_report):
+         raise ValueError("delta quality report is invalid")
+     base = manifest.get("base_dataset_version")
+     dataset = manifest.get("dataset_version")
+@@ -216,7 +216,7 @@ def read_published_snapshot(
+     manifest = _strict_json(path / "manifest.json")
+     if type(manifest) is not dict or manifest.get("export_mode") not in {"full_snapshot", "delta"}:
+         raise ValueError("snapshot mode is invalid")
+-    if not (path / "quality_report.md").read_bytes():
++    if not _quality_report_bytes(path / "quality_report.md"):
+         raise ValueError("snapshot quality report is invalid")
+     dataset_version = manifest.get("dataset_version")
+     if type(dataset_version) is not str or _DATASET_VERSION.fullmatch(dataset_version) is None:
+@@ -287,6 +287,18 @@ def _strict_json_line(line: str) -> object:
+     return json.loads(line, object_pairs_hook=reject_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite JSON")))
+ 
+ 
++def _quality_report_bytes(path: Path) -> bytes:
++    """Require a non-empty UTF-8 quality report while preserving digest bytes."""
++    payload = path.read_bytes()
++    try:
++        decoded = payload.decode("utf-8")
++    except UnicodeDecodeError:
++        raise ValueError("snapshot quality report is invalid") from None
++    if not payload or not decoded:
++        raise ValueError("snapshot quality report is invalid")
++    return payload
++
++
+ __all__ = [
+     "DeltaSnapshotReadback",
+     "PublishedSnapshotReadback",
+diff --git a/tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py b/tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py
+index 915edbf..ff87675 100644
+--- a/tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py
++++ b/tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++import shutil
+ from pathlib import Path
+ 
+ import pytest
+@@ -51,3 +52,12 @@ def test_published_reader_rejects_invalid_version_and_snapshot_path() -> None:
+             validator=FoundationSchemaValidator(),
+             expected_dataset_version="v20260715-000000-000000Z",
+         )
++
++
++def test_published_reader_rejects_non_utf8_quality_report(tmp_path: Path) -> None:
++    snapshot = tmp_path / _VERSION
++    shutil.copytree(_fixture(), snapshot)
++    (snapshot / "quality_report.md").write_bytes(b"\xff")
++
++    with pytest.raises(ValueError, match="quality report"):
++        read_published_snapshot(snapshot, validator=FoundationSchemaValidator())
+-- 
+2.45.1.windows.1
+

@@ -1,0 +1,2303 @@
+From e9cdd93f7a3f5ccc187357ae91191a52e4202179 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 5 Aug 2026 12:23:23 +0700
+Subject: [PATCH] feat(foundation): complete M9-D2 delta propagation
+
+---
+ .../20260805-m9d2/01-plan-review.md           | 150 ++++++++
+ .../20260805-m9d2/02-plan-revised.md          | 146 +++++++
+ .../20260805-m9d2/03-implementation.md        |  16 +
+ .codex-workflow/20260805-m9d2/05-review-1.md  |  52 +++
+ .../20260805-m9d2/06-fix-plan.input.md        |  15 +
+ .../20260805-m9d2/07-fix-plan-review.md       |  67 ++++
+ .../20260805-m9d2/08-fix-implementation.md    |  22 ++
+ .codex-workflow/20260805-m9d2/09-review-2.md  |  20 +
+ .../20260805-m9d2/10-fix2-plan.input.md       |  11 +
+ .../20260805-m9d2/11-fix2-plan-review.md      |  59 +++
+ .../20260805-m9d2/12-review-final.md          |  40 ++
+ .../20260805-m9d2/13-fix3-plan.input.md       |  11 +
+ .../20260805-m9d2/14-fix3-plan-review.md      |  59 +++
+ .../20260805-m9d2/15-fix3-implementation.md   |  18 +
+ .../20260805-m9d2/16-review-final.md          |  36 ++
+ .codex-workflow/20260805-m9d2/PLAN.input.md   |  65 ++++
+ .local_ai/IMPLEMENTATION_STATE.md             |  31 +-
+ .local_ai/ROADMAP.md                          |  10 +-
+ .../application/use_cases/__init__.py         |   2 +
+ .../application/use_cases/propagate_delta.py  | 267 +++++++++++++
+ .../foundation/domain/models/__init__.py      |  16 +
+ .../domain/models/delta_propagation.py        | 362 ++++++++++++++++++
+ .../use_cases/test_propagate_delta.py         | 339 ++++++++++++++++
+ .../domain/models/test_delta_propagation.py   | 237 ++++++++++++
+ 24 files changed, 2041 insertions(+), 10 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m9d2/01-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d2/02-plan-revised.md
+ create mode 100644 .codex-workflow/20260805-m9d2/03-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9d2/05-review-1.md
+ create mode 100644 .codex-workflow/20260805-m9d2/06-fix-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9d2/07-fix-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d2/08-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9d2/09-review-2.md
+ create mode 100644 .codex-workflow/20260805-m9d2/10-fix2-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9d2/11-fix2-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d2/12-review-final.md
+ create mode 100644 .codex-workflow/20260805-m9d2/13-fix3-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9d2/14-fix3-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d2/15-fix3-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9d2/16-review-final.md
+ create mode 100644 .codex-workflow/20260805-m9d2/PLAN.input.md
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/delta_propagation.py
+ create mode 100644 tests/foundation/application/use_cases/test_propagate_delta.py
+ create mode 100644 tests/foundation/domain/models/test_delta_propagation.py
+
+diff --git a/.codex-workflow/20260805-m9d2/01-plan-review.md b/.codex-workflow/20260805-m9d2/01-plan-review.md
+new file mode 100644
+index 0000000..f31d5a5
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/01-plan-review.md
+@@ -0,0 +1,150 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# Plan Critique
++
++The bounded, read-only intent is appropriate and the plan correctly reuses the
++M8-E summaries and M9-D1 tombstone seam. It is not yet execution-ready: several
++public contracts and precedence rules are implicit, and the current Foundation
++contracts impose constraints that are not reflected in the acceptance list.
++
++## Blocking Gaps and Risks
++
++1. **The public model contract is incomplete (P1).** The plan names six models
++   and a use case but does not define their exact fields, defaults, constructor
++   behavior, or success/failure return policy. Specify the request fields at
++   minimum: previous/current dataset versions, previous/current config hashes,
++   an explicit caller-supplied `detected_at` timestamp (the seam must not read a
++   clock), previous/current `tuple[DocumentChunkSetSummary, ...]`, and inventory
++   entries. State that `execute(request: object)` rejects `object()`, `None`,
++   subclasses, and forged instances before field access and returns one typed
++   failed result rather than leaking an exception.
++
++2. **Inventory state precedence is ambiguous (P1).** Define the complete
++   truth table. A previous document missing from current summaries defaults to
++   `source_deleted`; a current summary normally implies `present`; an explicit
++   `present` without a current summary and any non-present state with a current
++   summary must fail atomically. Define whether an inventory entry for a new
++   document is rejected or must be `present`, whether duplicate identical
++   entries collapse, and that conflicting entries fail. Define precedence as
++   specific inventory states (`source_deleted`, `access_revoked`,
++   `moved_out_of_scope`, `config_invalidated`) over request-level config
++   invalidation, with no silent merging of reasons.
++
++3. **Delta request fields and hash policy are underspecified (P1).** Name the
++   config fields and require lowercase 64-hex SHA-256 values (or explicitly
++   document another Foundation-approved grammar). Define changed-config as
++   exact hash inequality, and define what happens when the active profile or
++   chunker version differs. `CHUNKING_SPEC.md` requires the unchanged
++   short-circuit to consider both document content hash and chunker version;
++   M8-E currently accepts only the active Confluence profile/chunker. Either
++   reject stale/unsupported summaries before diffing or specify a reviewed
++   invalidation path; do not accidentally treat a chunker change as ordinary
++   content change.
++
++4. **M8-E identity scope is not stated (P1).** `DocumentChunkSetSummary` and
++   its builder currently enforce `confluence:page:<non-space>` document IDs,
++   `confluence`/`wiki_page` records, and the active profile. M9-B/C introduce
++   Git identities, but they are not representable by the current M8-E summary
++   builder. Explicitly make this stage Confluence-only (reject Git summaries)
++   or add a separately authorized summary contract; do not imply that M9-B/C
++   records are accepted by this API without defining their identity/profile
++   rules. Revalidate every typed summary before accessing fields, including
++   `object.__new__` forged instances and hostile string subclasses.
++
++5. **Tombstone materialization semantics are incomplete (P1).** State that
++   output records are Foundation `TombstoneRecord` dictionaries only: new
++   documents/chunks are not emitted by this tombstone-only seam. For an
++   invalidated/removed document, invoke the existing `ProjectTombstones` once
++   with a document root plus every previous chunk as explicit children; M9-D1
++   applies one reason to root and children. For a changed, present document,
++   invoke chunk-root projections only for disappeared IDs and same-ID hash
++   changes; additions and unchanged IDs produce no tombstones. Define how
++   `detail` and `source_version_last_seen` are sourced (if at all), including
++   omitted versus explicit `null`, and preserve D1's optional-field limits.
++
++6. **Ordering, duplicate, and collision policy is not normative (P1).** Publish
++   the exact aggregate rank already used by M9-D1 (`document=0, chunk=1,
++   media=2, relation=3, acl=4, symbol=5`) and exact Unicode/code-point ID
++   ordering. Define whether duplicate canonical records collapse globally,
++   what constitutes a same-ID canonical conflict, and how a generated
++   tombstone-ID collision is categorized. Input permutation must not affect
++   records, bytes, metrics, or digest. Do not broaden `ProjectTombstones` to a
++   multi-root API; collect per-document/per-chunk projections and aggregate
++   them in this new use case so M9-D1 semantics remain unchanged.
++
++7. **Canonical result and zero-record success are unspecified (P1).** Define
++   the exact result payload and serialization: sorted-key compact UTF-8 JSON,
++   `ensure_ascii=False`, `allow_nan=False`, and SHA-256 digest over those bytes.
++   Say whether bytes cover status/metrics/error fields as M9-D1 does or only
++   records. A valid all-unchanged request must be a successful result with zero
++   records; the result model and metrics must permit that (unlike the D1
++   single-cascade result). A failed result must have no records, count, metrics,
++   bytes-derived digest, or leaked exception text.
++
++8. **Metrics and typed invariants need exact fields (P1).** List the metrics
++   fields and equations, including total record count, document tombstone
++   count, chunk tombstone count, changed-document count, unchanged-document
++   skip count, and (if exposed) new-document count. Require all counters to be
++   exact non-negative `int` (reject `bool`), and cross-check them against the
++   final deduplicated records and document classification. Define whether an
++   empty previous/current set is valid and how `previous_dataset_version !=
++   current_dataset_version` interacts with an otherwise empty result.
++
++9. **Atomic validation and failure taxonomy are underdefined (P1).** Specify
++   the finite sanitized failure categories and mapping for malformed request,
++   summary, inventory, version/hash/timestamp, state conflict, duplicate or
++   tombstone-ID collision, dependency, schema-validator failure, and internal
++   failure. Validate all summaries/inventory entries and config/version fields
++   before any projection; retain all records in local temporaries; if a later
++   document or validator fails, return zero records. Validator construction and
++   attribute lookup must be guarded, and exception messages/raw IDs/content must
++   never cross the boundary.
++
++10. **Purity and integration boundaries need executable scope (P2).** Name the
++    only production files allowed (the two requested modules and additive
++    `__init__` exports) and explicitly prohibit schema, exporter, manifest,
++    checkpoint, metadata-store, raw-store, filesystem, network, environment,
++    clock, embedding, Qdrant, and ACL-resolver wiring. Add architecture/import
++    checks and monkeypatch guards for `open`/`Path`, sockets/HTTP, clocks,
++    exporters, checkpoints, and raw stores. Existing full-snapshot exporters
++    must remain tombstone-empty unless this use case is explicitly called.
++
++## Required Acceptance and Test Additions
++
++- Constructor and boundary probes for `object()`, `None`, wrong container
++  types, subclasses, missing/forbidden fields, wrong enum values, booleans in
++  counters, forged summaries/inventory/metrics/results, cyclic JSON values,
++  hostile attribute access, and mutation after construction.
++- A table-driven inventory matrix covering every state, missing-current default,
++  current-summary/state conflicts, duplicate identical/conflicting entries,
++  new-document entries, config-change precedence, and atomic failure.
++- Happy paths for empty/all-unchanged, new, removed, access-revoked,
++  moved-out-of-scope, config-invalidated, changed-document with disappeared
++  chunks, same-ID hash changes, mixed documents, and added-plus-unchanged
++  chunks (assert additions are omitted from this tombstone-only output).
++- M8-E compatibility tests for active profile/chunker, stale profile/chunker,
++  Confluence versus Git IDs, duplicate summary identities, malformed IDs and
++  hashes, summary permutation, same document hash with differing entries, and
++  exact Unicode ordering.
++- Determinism tests that permute summaries/inventory/children and assert equal
++  records, canonical bytes, digest, and metrics; duplicate identical records
++  collapse, while same-ID canonical conflicts and generated-ID collisions fail.
++- Schema-validator tests for construction/lookup/record rejection failures and
++  a late failure proving no partial records escape. Verify every emitted record
++  with the Foundation tombstone schema and unchanged M9-D1 cascade semantics.
++- Result/metrics forgery tests for impossible status/count/record combinations,
++  zero-record success, and defensive ownership of nested record data.
++- Purity guards plus architecture tests, focused domain/use-case tests,
++  M9-D1/M8-D/E regressions, `compileall`, scoped `git diff --check`, and a
++  fresh independent review in a separate session. Update roadmap/state only
++  after implementation and independent approval; do not claim the M8-AC real
++  corpus gate or wire M10/export behavior.
++
++## Recommended Implementation Shape
++
++Keep M9-D1 unchanged. Build a validated, immutable request and classification
++pass first; resolve inventory/config precedence into explicit document actions;
++materialize each action through `ProjectTombstones`; then globally deduplicate,
++sort, validate, count, canonicalize, and construct the result. This sequencing
++provides the required all-or-nothing behavior and makes every cross-field
++invariant testable without adding any I/O or exporter integration.
+diff --git a/.codex-workflow/20260805-m9d2/02-plan-revised.md b/.codex-workflow/20260805-m9d2/02-plan-revised.md
+new file mode 100644
+index 0000000..cf3712e
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/02-plan-revised.md
+@@ -0,0 +1,146 @@
++# M9-D2 Delta and Inventory Diff Propagation - Revised Plan
++
++## Review disposition
++
++The independent critic classified this stage as `complex`. This revision fixes
++the public-field, precedence, M8-E compatibility, deterministic output,
++metrics, atomicity, and adversarial-test gaps before implementation.
++
++## Public API and exact inputs
++
++### `DeltaInventoryState`
++
++Closed enum values:
++`present`, `source_deleted`, `access_revoked`, `moved_out_of_scope`, and
++`config_invalidated`.
++
++### `DeltaInventoryEntry`
++
++Exact immutable fields:
++
++- `document_id: str` matching the M8-E Confluence document ID grammar;
++- `state: DeltaInventoryState`;
++- `source_version_last_seen: str | None` (non-empty opaque string when set).
++
++Entries are current-observation overrides for a previous document. IDs are
++unique; a duplicate with different state/version is an atomic
++`inventory_conflict`.
++
++### `DeltaPropagationRequest`
++
++Exact immutable fields:
++
++- `previous_dataset_version: str`;
++- `current_dataset_version: str` (must differ from previous);
++- `previous_config_hash: str` and `current_config_hash: str` (lowercase
++  64-hex SHA-256 strings);
++- `detected_at: str` (RFC3339, normalized to UTC microseconds and `Z`);
++- `previous_summaries: tuple[DocumentChunkSetSummary, ...]`;
++- `current_summaries: tuple[DocumentChunkSetSummary, ...]`;
++- `inventory: tuple[DeltaInventoryEntry, ...] = ()`.
++
++Summary IDs are unique in each tuple. M8-E summaries already enforce
++Confluence document identity, active profile identity, active chunker version,
++chunk ID/hash/part/count invariants, and canonical ownership; the request
++revalidates exact types and immutable state before field access. No other
++source-system summary type is accepted in this bounded stage.
++
++### `PropagateDelta`
++
++`PropagateDelta(schema_validator=...).execute(request: object)` is the only
++application boundary. The schema validator is mandatory dependency injection;
++construction performs no filesystem loading. The use case reuses
++`ProjectTombstones` for every document or chunk tombstone and returns an
++aggregate `DeltaPropagationResult`.
++
++## Inventory precedence and diff semantics
++
++For each document in the union of previous/current IDs, apply this exact
++decision table:
++
++1. An inventory entry for a new document (not in previous) is invalid unless
++   its state is `present`; no tombstone is emitted for a new document.
++2. A previous document with an explicit non-`present` inventory state must have
++   no current summary; otherwise return `inventory_conflict`. Emit one
++   document-root cascade with that state mapped to the same `TombstoneReason`.
++3. A previous document absent from current summaries and absent from inventory
++   defaults to `source_deleted`, emitting one document-root cascade.
++4. A current document with no previous summary is new; emit no tombstones.
++5. A document present in both summaries with inventory absent or `present` is
++   eligible for content/config comparison. Any non-present state is invalid.
++6. If config hashes differ, every previous/current document eligible under rule
++   5 emits one `config_invalidated` document-root cascade containing all
++   previous chunk IDs. This global invalidation takes precedence over content
++   chunk diffing, but explicit non-present inventory state takes precedence over
++   global config invalidation.
++7. If config hashes match and document content hashes are equal, emit nothing
++   and increment `unchanged_document_count` (no chunk inspection side effect).
++8. If config hashes match and document content hashes differ, compare previous
++   and current chunk entries. Emit `content_updated` chunk tombstones for every
++   previous chunk ID that disappeared or whose same ID has a different content
++   hash. New-only chunks produce no tombstones. If the document hash changes but
++   no old chunk is removed/changed, emit no record but count the document as
++   changed.
++
++Document cascades use the previous summary's chunk IDs as explicit `chunk`
++children. Changed-document diffing is chunk-only; this stage emits no
++additions/upserts and does not mutate exports or state. `source_version_last_seen`
++is preserved on the document root when supplied by inventory; chunk tombstones
++have no inferred source version.
++
++## Result contract
++
++`DeltaPropagationStatus` is `success` or `failed`. Failure categories are
++exactly `invalid_request`, `invalid_dependency`, `summary_invalid`,
++`inventory_conflict`, `tombstone_failure`, `result_invalid`, and
++`internal_failure`.
++
++`DeltaPropagationMetrics` exact fields:
++
++- `document_count` (union size);
++- `new_document_count`, `unchanged_document_count`, `changed_document_count`,
++  `removed_document_count`;
++- `document_tombstone_count`, `chunk_tombstone_count`, `record_count`.
++
++Invariants: union count equals the four document-state counts; record count
++equals document plus chunk tombstones; document/chunk counts equal the actual
++record entity types; unchanged and new documents have no tombstone records;
++all values are exact non-negative integers. A successful empty delta is valid
++with `count=0` and all metrics zero. Failure always has `records=()`,
++`count=0`, `metrics=None`, and one category.
++
++The result carries `base_dataset_version`, `dataset_version`, ordered immutable
++records, and a SHA-256 digest over compact sorted-key UTF-8 JSON. Records are
++sorted by fixed entity rank (`document`, `chunk`, `media`, `relation`, `acl`,
++`symbol`), Unicode entity ID, then tombstone ID. Identical canonical records
++collapse; same-ID records with different canonical bytes return
++`result_invalid` atomically. Typed result construction validates exact
++tombstone shape/ID preimages through the M9-D1 model boundary, JSON safety,
++forbidden extra fields, and all cross-field metrics.
++
++## Module boundaries and purity
++
++- Add `foundation/domain/models/delta_propagation.py`.
++- Add `foundation/application/use_cases/propagate_delta.py` and additive
++  package exports.
++- Add focused model/use-case tests only; do not alter M8-D/E or M9-D1
++  semantics, schemas, exporters, staging writers, manifest builders, raw
++  stores, checkpoints, ACL/media/Git/symbol processors, or consumer modules.
++- No filesystem, network, environment, clock, exporter, checkpoint, raw-store,
++  metadata-store, embedding, Qdrant, or external resolver calls. The only time
++  operation is parsing the caller-provided timestamp.
++
++## Acceptance and validation
++
++- Happy-path coverage for empty, new, unchanged, changed chunk, same-ID hash
++  change, source deletion, access revocation, out-of-scope, config invalidation,
++  permutation-independent ordering, duplicate collapse, and collision failure.
++- Adversarial coverage for `object()`, `None`, wrong enum/containers, missing
++  and forbidden extra fields, forged summaries/inventory/result/metrics,
++  invalid versions/hashes/timestamps, malformed chunk IDs, impossible counters,
++  conflicting inventory states, validator rejection/mutation, and atomic
++  zero-partial-result behavior.
++- Run focused M9-D2 tests, M9-D1/M8-D/E regressions, M9-A/B/C regressions,
++  architecture, compileall, `git diff --check`, fresh independent review and
++  any bounded fix/re-review. Update roadmap/state only after final PASS, then
++  commit and push.
+diff --git a/.codex-workflow/20260805-m9d2/03-implementation.md b/.codex-workflow/20260805-m9d2/03-implementation.md
+new file mode 100644
+index 0000000..691d12b
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/03-implementation.md
+@@ -0,0 +1,16 @@
++# M9-D2 Implementation Report
++
++Implemented the reviewed read-only delta/inventory propagation seam.
++
++- Added exact/runtime-validated delta request, inventory, metrics, result,
++  status, and failure models over M8-E `DocumentChunkSetSummary` inputs.
++- Added `PropagateDelta` with unchanged-content short-circuit, chunk ID/hash
++  diffing, explicit inventory-state precedence, config invalidation cascades,
++  deterministic aggregate ordering/deduplication, canonical digest, and
++  atomic sanitized failures.
++- Reused injected-validator M9-D1 `ProjectTombstones`; no exporter, raw-store,
++  checkpoint, network, clock, or metadata-store wiring was added.
++- Added focused model/use-case tests, including malformed and impossible
++  runtime boundary cases.
++
++Initial validation: focused M9-D2 suite `20 passed`; compileall passed.
+diff --git a/.codex-workflow/20260805-m9d2/05-review-1.md b/.codex-workflow/20260805-m9d2/05-review-1.md
+new file mode 100644
+index 0000000..5c6dbe8
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/05-review-1.md
+@@ -0,0 +1,52 @@
++# M9-D2 Independent Review 1
++
++Review target: current uncommitted M9-D2 implementation against
++`.codex-workflow/20260805-m9d2/02-plan-revised.md`,
++`.codex-workflow/20260805-m9d2/03-implementation.md`, `AGENTS.md`, and the
++approved M8-E/M9-D1 contracts. This was a fresh independent review. Source and
++test files were not modified.
++
++## Findings
++
++- **P1 - Forged M8-E summaries are accepted at the M9-D2 boundary** -
++  `src/knowledgenexus/foundation/domain/models/delta_propagation.py:68-76`
++  only checks the exact outer `DocumentChunkSetSummary` type and invokes its
++  `__post_init__`. It does not reject extra instance fields and does not invoke
++  `ChunkStabilityEntry.__post_init__` for nested entries. An adversarial frozen
++  summary with `object.__setattr__(summary, "extra", 123)` is accepted by
++  `DeltaPropagationRequest` and produces a successful delta. Likewise, a
++  nested `ChunkStabilityEntry` whose `content_hash` is forged to `"bad"` is
++  accepted and produces a successful result. A forged nested chunk ID reaches
++  tombstone construction and is instead reported as `internal_failure`, not
++  the required sanitized `summary_invalid`. This violates the revised plan's
++  requirement to revalidate exact immutable M8-E state and AGENTS.md's
++  fail-closed adversarial boundary rule; malformed IDs/hashes or forbidden
++  fields can therefore influence propagation or leak the wrong failure
++  category instead of being rejected atomically. Revalidate exact summary
++  fields and every nested entry (including exact entry fields) before any diff
++  or tombstone side effect.
++
++## Validation
++
++- Focused M9-D2 tests:
++  `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m9d2/pytest-review-1-focused`
++  -> **20 passed**.
++- M9-D1 model/builder/use-case regressions:
++  `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py --basetemp=.codex-workflow/20260805-m9d2/pytest-review-1-m9d1`
++  -> **31 passed**.
++- M8-E model regression:
++  `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_chunk_stability.py --basetemp=.codex-workflow/20260805-m9d2/pytest-review-1-m8e`
++  -> **23 passed**.
++- M8-D/E and M9-A/B/C bounded regression slice (chunking, media, attachment,
++  Git, symbols, relations): **147 passed**.
++- Architecture suite:
++  `$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m9d2/pytest-review-1-arch`
++  -> **87 passed**.
++- `python -m compileall -q src tests` -> passed.
++- `git diff --check` -> passed (only existing LF/CRLF normalization warnings).
++- Adversarial probes for `None`, `object()`, list, and dict requests failed
++  closed as `invalid_request`; forged summary extra-field and forged nested
++  entry-hash probes reproduced the P1 finding, while a forged nested chunk ID
++  returned `internal_failure` instead of `summary_invalid`.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9d2/06-fix-plan.input.md b/.codex-workflow/20260805-m9d2/06-fix-plan.input.md
+new file mode 100644
+index 0000000..25103c1
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/06-fix-plan.input.md
+@@ -0,0 +1,15 @@
++# M9-D2 Bounded Fix Plan
++
++Address only the P1 in `05-review-1.md`.
++
++- Harden `_validate_summary` to reject forbidden extra/missing fields on the
++  outer `DocumentChunkSetSummary` and every nested `ChunkStabilityEntry`.
++- Re-run sentinel-safe `__post_init__` on the exact nested entry type before
++  any document diff or tombstone projection; forged IDs, hashes, part metadata,
++  or nested extras must map to `summary_invalid` atomically.
++- Add focused adversarial tests for forged summary extras, missing fields, and
++  nested entry hash/extra-field tampering. Do not alter M8-E models or M9-D1
++  semantics, exporters, stores, or ledgers.
++- Re-run focused M9-D2, M9-D1/M8-D/E/M9-A/B/C regressions, architecture,
++  compileall, diff-check, then obtain a fresh independent re-review before any
++  roadmap/state update or commit.
+diff --git a/.codex-workflow/20260805-m9d2/07-fix-plan-review.md b/.codex-workflow/20260805-m9d2/07-fix-plan-review.md
+new file mode 100644
+index 0000000..3daea2f
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/07-fix-plan-review.md
+@@ -0,0 +1,67 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D2 Bounded Fix Plan - Reviewed
++
++The input plan is correctly scoped to the single confirmed P1 and is
++buildable as a localized validation fix. The implementation must make the
++validation order and boundary mapping explicit so forged nested M8-E state
++cannot be dereferenced or projected.
++
++## Required implementation details
++
++1. In `delta_propagation.py`, define the exact field sets for
++   `DocumentChunkSetSummary` (all eight dataclass fields) and
++   `ChunkStabilityEntry` (all six fields). In `_validate_summary`, first
++   require the exact outer type, then compare its runtime attributes with the
++   outer set. Before calling either model `__post_init__`, iterate the outer
++   `entries` container only after safely obtaining it; require every entry to
++   be the exact `ChunkStabilityEntry` type and to have exactly the nested field
++   set. Re-run `ChunkStabilityEntry.__post_init__` for each entry, then
++   `DocumentChunkSetSummary.__post_init__`. Missing attributes, extra
++   attributes, forged IDs/hashes/part metadata, and any other validation
++   exception must be converted to `_SummaryValidationError` (there must be no
++   leaked `AttributeError`). Do not modify the M8-E model definitions.
++
++2. Keep this validation before building document maps, calculating diffs, or
++   calling `ProjectTombstones`. `DeltaPropagationRequest.__post_init__` must
++   reject invalid summaries, while `PropagateDelta.execute` must map a
++   revalidation failure on an exact but forged request to
++   `DeltaPropagationFailureCategory.SUMMARY_INVALID`, with a failed result
++   containing no records, count, or metrics. The validator and projector must
++   not be called on this path; valid summaries and all existing M9-D2/M9-D1
++   behavior remain unchanged.
++
++## Required adversarial tests
++
++- Forge an outer summary with an extra field and with each required field
++  missing; assert construction/request validation fails closed.
++- Forge an exact nested entry with an extra field, a missing field, a bad
++  `chunk_id`, forged `content_hash`, invalid `part_index`/`part_total`, and
++  wrong field types. Put it in a forged exact-type request (using
++  `object.__new__`/`object.__setattr__`) and assert `execute` returns
++  `SUMMARY_INVALID`, `records == ()`, `count == 0`, and `metrics is None`.
++- Exercise both `previous_summaries` and `current_summaries`, and assert a
++  counting schema validator receives zero calls for every malformed-summary
++  case. Retain the existing `object()`, `None`, wrong-container, and happy
++  path tests.
++
++## Scope and acceptance
++
++Only the M9-D2 summary-validation helper and focused M9-D2 model/use-case
++tests should change. Do not alter M8-E models, M9-D1 semantics, exporters,
++stores, ledgers, or roadmap/state artifacts. Acceptance requires all malformed
++summary cases to fail atomically as `summary_invalid`, valid summaries to
++produce the prior deterministic results, and no side effect before complete
++validation.
++
++Run the focused suite and bounded regressions with exact commands, followed by
++architecture, compile, and diff checks:
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m9d2/pytest-fix-focused`
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_chunk_stability.py --basetemp=.codex-workflow/20260805-m9d2/pytest-fix-m9d1-m8e`
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m9d2/pytest-fix-arch`; `python -m compileall -q src tests`; `git diff --check`
++
++Obtain a fresh independent re-review after these checks and before any
++roadmap/state update or commit.
+diff --git a/.codex-workflow/20260805-m9d2/08-fix-implementation.md b/.codex-workflow/20260805-m9d2/08-fix-implementation.md
+new file mode 100644
+index 0000000..89a6164
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/08-fix-implementation.md
+@@ -0,0 +1,22 @@
++# M9-D2 Fix Implementation Report
++
++Addressed the independent review P1 by revalidating exact M8-E summary fields
++and every nested `ChunkStabilityEntry` before delta comparison or tombstone
++projection. Forged outer extras, missing fields, IDs, hashes, and part metadata
++now fail atomically as `summary_invalid`.
++
++Addressed the independent re-review P2 coverage gap by adding a committed
++adversarial matrix for every outer-summary missing/extra field, every nested
++entry missing/extra field and malformed value, both previous/current summary
++positions, and zero validator/projector calls on malformed inputs. The fixture
++helper now forges malformed nested entries without validating them prematurely.
++
++Validation:
++
++- Focused M9-D2 fix suite: `46 passed`.
++- M9-D1/M8-E regression: `54 passed`.
++- M9-B/C regression: `32 passed`.
++- M9-A regression: `43 passed`.
++- Architecture suite: `87 passed`.
++- `python -m compileall -q src tests`: passed.
++- `git diff --check`: passed (existing line-ending warnings only).
+diff --git a/.codex-workflow/20260805-m9d2/09-review-2.md b/.codex-workflow/20260805-m9d2/09-review-2.md
+new file mode 100644
+index 0000000..7f84565
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/09-review-2.md
+@@ -0,0 +1,20 @@
++# M9-D2 Independent Review 2
++
++Review target: current M9-D2 tree after `.codex-workflow/20260805-m9d2/08-fix-implementation.md`, against the reviewed fix plan, M8-E/M9-D1 contracts, and `AGENTS.md`. Source and test files were not modified.
++
++## Findings
++
++- **P2 - The required adversarial regression matrix is not committed to the focused suite.** The reviewed fix plan requires tests for every outer summary field missing, nested extra/missing fields, forged nested IDs/hashes/part metadata/wrong types, both `previous_summaries` and `current_summaries`, and zero schema-validator/projector calls for every malformed-summary case. The current focused tests cover only one outer extra-field case (`tests/foundation/domain/models/test_delta_propagation.py:113`), one constructor-time nested hash case (`tests/foundation/domain/models/test_delta_propagation.py:128`), and one previous-summary forged hash execution case (`tests/foundation/application/use_cases/test_propagate_delta.py:184`). The implementation passed an independent probe for the missing cases, but without committed regression tests these boundary guarantees can regress unnoticed. Add parametrized focused tests for the full matrix and assert atomic `summary_invalid` results and zero dependency/projector calls.
++
++## Validation
++
++- Focused M9-D2: `python -m pytest -q tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m9d2/pytest-review-2-focused` -> **23 passed**.
++- M9-D1/M8-E: `python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_chunk_stability.py --basetemp=.codex-workflow/20260805-m9d2/pytest-review-2-m9d1-m8e` -> **54 passed**.
++- M9-A/B/C full bounded slice (media, attachment, Git, symbols, Jira relations) -> **194 passed, 2 skipped**.
++- M8-D bounded unit/contract slice (chunking/build/CLI/config/records) -> **121 passed, 1 deselected**; the one deselected test requires an external `--tokenizer-assets-dir` fixture.
++- Architecture suite: `python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m9d2/pytest-review-2-arch` -> **87 passed**.
++- `python -m compileall -q src tests` -> passed.
++- `git diff --check` -> passed (existing LF/CRLF normalization warnings only).
++- Independent adversarial probes covered all eight outer missing fields, outer extras, nested extras/missing fields, bad chunk IDs/hashes/part metadata/types in both summary tuples, wrong request runtime types, atomic zero records/count/metrics, and zero validator calls; all failed closed as required.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9d2/10-fix2-plan.input.md b/.codex-workflow/20260805-m9d2/10-fix2-plan.input.md
+new file mode 100644
+index 0000000..dcae71b
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/10-fix2-plan.input.md
+@@ -0,0 +1,11 @@
++# M9-D2 Bounded Test-Coverage Fix
++
++Address only the P2 coverage finding in `09-review-2.md`.
++
++- Add parameterized model tests for every outer summary missing/extra field.
++- Add nested-entry tests for missing/extra fields, malformed ID/hash,
++  invalid part metadata, and wrong entry runtime type.
++- Add current-summary forged-input coverage and a validator/projector call
++  counter proving malformed summaries fail before side effects.
++- Keep production code unchanged and rerun focused M9-D2, regressions,
++  architecture, compileall, diff-check, then obtain a fresh final review.
+diff --git a/.codex-workflow/20260805-m9d2/11-fix2-plan-review.md b/.codex-workflow/20260805-m9d2/11-fix2-plan-review.md
+new file mode 100644
+index 0000000..afe2f30
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/11-fix2-plan-review.md
+@@ -0,0 +1,59 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D2 Test-Coverage Fix Plan - Reviewed
++
++The input plan is an appropriately bounded, tests-only response to the P2
++finding. It should be implemented with the following exact matrix so the
++already-correct production fix remains protected at both construction and
++application boundaries.
++
++## Required test design
++
++1. Parameterize all eight `DocumentChunkSetSummary` fields for both a missing
++   attribute and a forbidden extra attribute. Build forged exact-type
++   summaries with `object.__new__`/`object.__setattr__`; assert direct request
++   validation fails only with `TypeError`/`ValueError` and does not leak
++   `AttributeError`.
++
++2. Parameterize nested `ChunkStabilityEntry` cases for each missing/extra
++   field, malformed `chunk_id`, malformed `content_hash`, invalid or
++   inconsistent `part_index`/`part_total`, wrong field runtime types, and a
++   non-`ChunkStabilityEntry` object in `entries`. Use a forged exact summary
++   and forged exact `DeltaPropagationRequest` so the application boundary is
++   exercised without the constructor repairing or rejecting the fixture.
++
++3. Run every malformed-summary case in both `previous_summaries` and
++   `current_summaries`. Assert `PropagateDelta.execute` returns
++   `DeltaPropagationStatus.FAILED` with
++   `DeltaPropagationFailureCategory.SUMMARY_INVALID`, `records == ()`,
++   `count == 0`, and `metrics is None`; assert no `internal_failure` or raw
++   exception is exposed.
++
++4. Prove validation precedes all dependencies for every case: inject a
++   counting schema validator and replace the use case's projector with a
++   counting test double/monkeypatch. Assert both call counts remain zero when
++   the malformed summary is encountered, including current-summary cases.
++   Keep existing happy-path and wrong request runtime-type tests intact.
++
++## Scope and acceptance
++
++Only focused tests under
++`tests/foundation/domain/models/test_delta_propagation.py` and
++`tests/foundation/application/use_cases/test_propagate_delta.py` should
++change. Do not modify production code, M8-E/M9-D1 models or semantics,
++exporters, stores, ledgers, or roadmap/state artifacts. Test helpers may forge
++frozen instances solely to exercise runtime revalidation; they must not weaken
++normal constructors or alter shared fixtures.
++
++Acceptance requires the complete outer/nested matrix, both summary tuple
++positions, atomic `summary_invalid` results, and zero validator/projector
++calls. Run:
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m9d2/pytest-fix2-focused`
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_chunk_stability.py --basetemp=.codex-workflow/20260805-m9d2/pytest-fix2-m9d1-m8e`
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m9d2/pytest-fix2-arch`; `python -m compileall -q src tests`; `git diff --check`
++
++Obtain a fresh independent final review after these checks and before any
++roadmap/state update or commit.
+diff --git a/.codex-workflow/20260805-m9d2/12-review-final.md b/.codex-workflow/20260805-m9d2/12-review-final.md
+new file mode 100644
+index 0000000..1b4512f
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/12-review-final.md
+@@ -0,0 +1,40 @@
++# M9-D2 Independent Final Review
++
++Review target: current M9-D2 implementation after `08-fix-implementation.md`
++and the reviewed `11-fix2-plan-review.md`, in a fresh independent review
++session. Source and test files were not modified.
++
++## Findings
++
++- **P2 - The application-boundary adversarial matrix remains incomplete.**
++  `11-fix2-plan-review.md` requires every malformed outer-summary field and
++  nested-entry case (missing/extra fields, malformed IDs/hashes/part metadata,
++  and wrong runtime types) to be exercised through `PropagateDelta.execute` in
++  both `previous_summaries` and `current_summaries`, with atomic
++  `summary_invalid` results and zero validator/projector calls. The current
++  matrix in `tests/foundation/domain/models/test_delta_propagation.py:178`
++  through `:237` checks these cases only through direct
++  `DeltaPropagationRequest` construction. The application suite has only one
++  forged outer-extra case per tuple position at
++  `tests/foundation/application/use_cases/test_propagate_delta.py:215` and one
++  previous-position nested hash case at `:197`; it does not cover the required
++  nested missing/extra/malformed-value cases or outer missing-field cases at
++  the `execute` boundary. A production regression could therefore reintroduce
++  a boundary-specific leak or side effect while the focused suite remains
++  green. Add a parametrized execute-level matrix for both tuple positions and
++  assert `SUMMARY_INVALID`, zero records/count, `metrics is None`, and zero
++  validator/projector calls for every malformed case.
++
++## Validation
++
++- Focused M9-D2: `46 passed`.
++- M9-D1/M8-E regression: `54 passed`.
++- M9-A/B/C bounded regression: `76 passed`.
++- Architecture suite: `87 passed`.
++- `python -m compileall -q src tests`: passed.
++- `git diff --check`: passed (existing line-ending warnings only).
++- Independent malformed-input probes confirmed fail-closed summary handling,
++  atomic failed results, and no dependency calls for representative forged
++  cases.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9d2/13-fix3-plan.input.md b/.codex-workflow/20260805-m9d2/13-fix3-plan.input.md
+new file mode 100644
+index 0000000..5e90122
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/13-fix3-plan.input.md
+@@ -0,0 +1,11 @@
++# M9-D2 Application-Boundary Coverage Fix
++
++Address only the P2 finding in `12-review-final.md`.
++
++- Add execute-level parameterized malformed-summary coverage for every outer
++  summary missing/extra field and every nested entry missing/extra/malformed
++  case in both `previous_summaries` and `current_summaries`.
++- Assert atomic `SUMMARY_INVALID` results and zero schema-validator/projector
++  calls for every malformed case.
++- Keep production code unchanged; update only the focused M9-D2 tests and
++  rerun the bounded validation suite before a fresh independent review.
+diff --git a/.codex-workflow/20260805-m9d2/14-fix3-plan-review.md b/.codex-workflow/20260805-m9d2/14-fix3-plan-review.md
+new file mode 100644
+index 0000000..b2d4d85
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/14-fix3-plan-review.md
+@@ -0,0 +1,59 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D2 Application-Boundary Coverage Fix - Reviewed
++
++This is a correctly bounded tests-only response to the remaining P2 in
++`12-review-final.md`. The missing coverage must be exercised through
++`PropagateDelta.execute`, not only through `DeltaPropagationRequest` construction.
++
++## Required test matrix
++
++1. Build independent forged exact-type `DocumentChunkSetSummary` fixtures for
++   each of its eight required fields missing and for a forbidden extra field.
++   For each fixture, build an exact forged `DeltaPropagationRequest` so the
++   constructor cannot reject the fixture before `execute` is reached.
++
++2. Build independent forged nested-entry fixtures for every
++   `ChunkStabilityEntry` field missing/extra, malformed `chunk_id`, malformed
++   `content_hash`, invalid or inconsistent `part_index`/`part_total`, wrong
++   runtime field types (including `content_kind` and `token_count`), and a
++   non-entry object in the summary `entries` tuple. Preserve a valid outer
++   summary shape except for the targeted mutation so each case identifies the
++   boundary guarantee it covers.
++
++3. Parameterize every malformed fixture over both request positions:
++   `previous_summaries` and `current_summaries`. Do not reuse mutated frozen
++   objects between cases; construct or forge fresh instances so one case
++   cannot mask another.
++
++4. For every execute-level case, assert
++   `DeltaPropagationStatus.FAILED`,
++   `DeltaPropagationFailureCategory.SUMMARY_INVALID`, `records == ()`,
++   `count == 0`, `metrics is None`, and no leaked exception or
++   `internal_failure`. Inject a counting schema validator and replace the
++   use-case projector with a counting test double (or monkeypatch its
++   `execute` method); assert both counters remain zero. Keep the existing
++   direct-constructor/model tests as lower-level coverage and retain wrong
++   request runtime-type tests.
++
++## Scope and verification
++
++Only the focused tests
++`tests/foundation/domain/models/test_delta_propagation.py` and
++`tests/foundation/application/use_cases/test_propagate_delta.py` may change.
++Production code, M8-E/M9-D1 models and semantics, exporters, stores, ledgers,
++roadmap/state files, and unrelated tests remain untouched. The tests must
++prove validation happens before document maps, diffs, validator calls, or
++tombstone projection and that valid/happy-path behavior is unchanged.
++
++Run the focused and bounded suites before the fresh independent review:
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m9d2/pytest-fix3-focused`
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_chunk_stability.py --basetemp=.codex-workflow/20260805-m9d2/pytest-fix3-m9d1-m8e`
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m9d2/pytest-fix3-arch`; `python -m compileall -q src tests`; `git diff --check`
++
++Also rerun the prior bounded M9-A/B/C slices recorded in
++`08-fix-implementation.md`. Obtain a fresh independent review after all
++checks and before any roadmap/state update or commit.
+diff --git a/.codex-workflow/20260805-m9d2/15-fix3-implementation.md b/.codex-workflow/20260805-m9d2/15-fix3-implementation.md
+new file mode 100644
+index 0000000..e7ed44e
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/15-fix3-implementation.md
+@@ -0,0 +1,18 @@
++# M9-D2 Application-Boundary Coverage Fix Implementation
++
++Implemented the reviewed tests-only response to the final independent-review
++P2. Added execute-level forged-summary coverage for every outer summary field,
++nested entry missing/extra field, malformed ID/hash/part/type case, and a wrong
++nested runtime object in both `previous_summaries` and `current_summaries`.
++Each case asserts atomic `SUMMARY_INVALID` output and zero schema-validator and
++projector calls. Production code was unchanged.
++
++Validation:
++
++- Focused M9-D2: `90 passed`.
++- M9-D1/M8-E regression: `54 passed`.
++- M9-A/B/C bounded regression: `284 passed, 2 skipped, 1 deselected`; the
++  deselected case requires unavailable external tokenizer assets.
++- Architecture suite: `87 passed`.
++- `python -m compileall -q src tests`: passed.
++- `git diff --check`: passed with existing line-ending warnings only.
+diff --git a/.codex-workflow/20260805-m9d2/16-review-final.md b/.codex-workflow/20260805-m9d2/16-review-final.md
+new file mode 100644
+index 0000000..bc7895f
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/16-review-final.md
+@@ -0,0 +1,36 @@
++# M9-D2 Independent Final Review
++
++Review target: current M9-D2 snapshot after `15-fix3-implementation.md`,
++using a fresh independent review session. Source and test files were not
++modified.
++
++## Findings
++
++No P0, P1, P2, or P3 findings.
++
++## Verification
++
++- The execute-level malformed-summary matrix covers every outer summary field
++  missing/extra case, every nested entry field missing/extra case, malformed
++  nested IDs/hashes/part metadata/types, and a wrong nested runtime object.
++  Each case is parameterized over both `previous_summaries` and
++  `current_summaries`.
++- Every malformed case returns `FAILED` with `SUMMARY_INVALID`, empty records,
++  `count == 0`, and `metrics is None`; counting validator/projector doubles
++  remain at zero. Validation occurs before summary maps, diffing, or projection.
++- Source inspection confirms inventory precedence, config invalidation,
++  unchanged short-circuit, chunk-only content diffing, deterministic ordering,
++  duplicate/collision handling, canonical digest construction, and atomic
++  failure result semantics remain bounded and read-only.
++
++## Validation Commands
++
++- Focused M9-D2: `90 passed`.
++- M9-D1/M8-E regression: `54 passed`.
++- M9-A/B/C bounded regression: `284 passed, 2 skipped, 1 deselected`; the
++  deselected test requires unavailable external tokenizer assets.
++- Architecture suite: `87 passed`.
++- `python -m compileall -q src tests`: passed.
++- `git diff --check`: passed with existing line-ending warnings only.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m9d2/PLAN.input.md b/.codex-workflow/20260805-m9d2/PLAN.input.md
+new file mode 100644
+index 0000000..6670a24
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d2/PLAN.input.md
+@@ -0,0 +1,65 @@
++# M9-D2 Delta and Inventory Diff Propagation
++
++Implement a bounded, read-only delta seam over approved M8-E document chunk
++summaries and explicit inventory observations. The stage must not wire an
++exporter, raw store, checkpoint, network client, metadata store, embedding
++service, Qdrant, or clock.
++
++## Required behavior
++
++- Compare previous/current `DocumentChunkSetSummary` tuples by exact document
++  identity.
++- Short-circuit unchanged documents when `document_content_hash` is identical.
++- Diff previous/current chunk IDs and content hashes. Emit `chunk` tombstones
++  for disappeared IDs and same-ID content-hash changes with
++  `content_updated`.
++- Accept explicit current inventory state for previous documents:
++  `present`, `source_deleted`, `access_revoked`, `moved_out_of_scope`, or
++  `config_invalidated`. Missing current documents default to
++  `source_deleted`; conflicting inventory/summary states fail atomically.
++- When a document is removed or invalidated, emit one document tombstone with
++  the selected reason and explicit previous chunk children through the M9-D1
++  cascade. A changed document emits only affected chunk tombstones.
++- A changed request-level config hash invalidates all previous documents that
++  remain present, unless a more specific inventory state applies.
++- Produce deterministic aggregate records, canonical bytes/digest, fixed
++  metrics, zero partial records on any failure, and sanitized failure
++  categories. Require `previous_dataset_version != current_dataset_version`.
++
++## Public API and files
++
++- `foundation/domain/models/delta_propagation.py`: runtime-validated
++  `DeltaInventoryState`, `DeltaInventoryEntry`, `DeltaPropagationRequest`,
++  `DeltaPropagationMetrics`, `DeltaPropagationStatus`,
++  `DeltaPropagationFailureCategory`, and `DeltaPropagationResult`.
++- `foundation/application/use_cases/propagate_delta.py`:
++  `PropagateDelta(schema_validator=...).execute(request: object)`.
++- Add additive exports and focused adversarial tests under domain models and
++  application use cases.
++- Reuse `ProjectTombstones` and `TombstoneTarget` for schema-valid record
++  construction; do not change M9-D1 semantics or exporter behavior.
++
++## Determinism and invariants
++
++- Validate exact runtime types, forbidden extra fields, unique summary and
++  inventory identities, profile/chunker consistency, non-empty versions,
++  canonical RFC3339 timestamps, and JSON-safe defensive ownership.
++- Sort documents by Unicode document ID and final records by fixed entity rank,
++  entity ID, then tombstone ID. Identical duplicate records collapse; any
++  same-ID canonical conflict fails atomically.
++- Metrics must cross-check record count, document/chunk tombstone counts,
++  changed-document count, and unchanged-document skip count.
++- Results must reject impossible status/record/count/metrics combinations.
++
++## Acceptance and validation
++
++- Happy-path tests for unchanged, new, removed, access-revoked, out-of-scope,
++  config-invalidated, changed-chunk, same-ID changed-hash, permutation, and
++  duplicate cases.
++- Adversarial tests for `object()`, `None`, wrong enums, missing/extra fields,
++  forged summaries/inventory/result/metrics, invalid versions/hashes/timestamps,
++  conflicting inventory states, impossible counters, malformed chunk IDs,
++  schema-validator failures, and atomic no-partial-result behavior.
++- Purity guards prove no filesystem/network/clock/export/checkpoint calls.
++- Run focused tests, M9-D1/M8-D/E regressions, architecture, compileall,
++  diff-check, fresh independent review, roadmap/state update, commit, push.
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 2161d51..de830e6 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -27,9 +27,9 @@ tokenizer input was supplied. M9-A1 metadata-first media contract is also
+ complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
+ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
+-explicit cascade is independently reviewed `PASS`; M9-D2 delta/inventory
+-diff propagation remains staged under the reviewed M8-M9 goal plan. No M10
+-full-snapshot work has started.
++explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
++reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with
++no export/store/checkpoint side effects. No M10 full-snapshot work has started.
+ 
+ ## Durable State Convention
+ 
+@@ -1723,8 +1723,29 @@ are recorded without using repository-local commit SHAs as status.
+   schema `37 passed`; full architecture `86 passed`; compileall/diff-check
+   passed. Final independent review is `VERDICT: PASS` in
+   `.codex-workflow/20260805-m9d1/19-review-final.md`.
+-- Residual boundary: M9-D2 snapshot diff/delta propagation is not implemented;
+-  M8-AC real mini-corpus gate remains `pending_external_input`.
++- Residual boundary: M8-AC real mini-corpus gate remains
++  `pending_external_input`; M9-D2 is recorded in the next section.
++
++## M9-D2 Delta and Inventory Diff Propagation
++
++- Status: complete and independently reviewed `PASS`.
++- Added immutable/runtime-validated inventory, request, metrics, status, and
++  result models over M8-E `DocumentChunkSetSummary` inputs, including exact
++  nested summary revalidation, outcome/count/digest invariants, and sanitized
++  atomic failures.
++- Added deterministic read-only propagation for unchanged/changed/removed
++  documents, chunk hash/ID diffs, explicit inventory states, and config-hash
++  invalidation cascades through the M9-D1 tombstone projector. No exporter,
++  store, checkpoint, network, clock, metadata, Qdrant, or embedding side
++  effects are present.
++- Validation: focused `90 passed`; M9-D1/M8-E `54 passed`; bounded M9-A/B/C
++  `284 passed, 2 skipped, 1 deselected` (one external tokenizer-asset case);
++  architecture `87 passed`; compileall/diff-check passed.
++- Review artifacts: `.codex-workflow/20260805-m9d2/12-review-final.md`
++  records the pre-fix P2 coverage finding; `.codex-workflow/20260805-m9d2/16-review-final.md`
++  is the fresh final independent review.
++- Residual boundary: M8-AC real mini-corpus acceptance remains
++  `pending_external_input`; M10 full-snapshot work has not started.
+ 
+ ## Current Execution Boundary
+ 
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 15984db..b7cd17e 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -92,7 +92,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+-| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3, M9-B, M9-C, and M9-D1 independently approved; M9-D2 remains pending | Split into independent tracks. |
++| M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
+ | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+@@ -118,9 +118,9 @@ controlled mini-corpus acceptance is implemented and independently re-reviewed
+ and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
+ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are independently approved. M9-D1 tombstone contract and
+-explicit cascade is independently approved; M9-D2 delta/inventory diff
+-propagation remains staged under the reviewed M8-M9 goal plan. No M10
+-full-snapshot work has started.
++explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
++approved. M9-D2 remains read-only and does not perform export/store/checkpoint
++side effects. No M10 full-snapshot work has started.
+ 
+ - M2C1 `CanonicalDocumentRecordBuilder` - done.
+ - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
+@@ -997,7 +997,7 @@ M9A - Media:
+ | M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
+ | M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
+ | M9-D1 tombstone contract and explicit cascade | complete; independently reviewed `PASS` | Added runtime-validated tombstone models, schema-valid deterministic builder, atomic document-root cascade use case, exact-field/JSON/cycle-safe boundaries, and injected schema-validator dependency. Focused `31 passed`; M9/M8 regression `42 passed`; architecture/schema `37 passed`; full architecture `86 passed`; compileall/diff-check passed; final review `VERDICT: PASS` in `.codex-workflow/20260805-m9d1/19-review-final.md`. |
+-| M9-D2 delta/inventory diff propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries; snapshot diff and delta logic remain deferred. |
++| M9-D2 delta/inventory diff propagation | complete; independently reviewed `PASS` | Added deterministic M8-E summary diffing, explicit inventory-state handling, config invalidation cascades, atomic tombstone-only results, canonical digest, and strict malformed-boundary validation. Focused `90 passed`; M9-D1/M8-E `54 passed`; bounded M9-A/B/C `284 passed, 2 skipped, 1 deselected` (external tokenizer asset case); architecture `87 passed`; compileall/diff-check passed; final review in `.codex-workflow/20260805-m9d2/16-review-final.md`. |
+ 
+ M9B - Git repository scan:
+ - Configured repository and branch.
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index 3c43c72..3ed9f7d 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -49,6 +49,7 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
+ )
+ from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
+ from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
++from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
+ 
+ __all__ = [
+     "BuildConfluenceInventory",
+@@ -76,4 +77,5 @@ __all__ = [
+     "BuildGitCodeDocumentsRequest",
+     "BuildGitSymbols",
+     "ProjectTombstones",
++    "PropagateDelta",
+ ]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+new file mode 100644
+index 0000000..4742be5
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+@@ -0,0 +1,267 @@
++from __future__ import annotations
++
++import hashlib
++import json
++
++from knowledgenexus.foundation.domain.models.chunk_stability import DocumentChunkSetSummary
++from knowledgenexus.foundation.domain.models.delta_propagation import (
++    DeltaInventoryEntry,
++    DeltaInventoryState,
++    DeltaPropagationFailureCategory,
++    DeltaPropagationMetrics,
++    DeltaPropagationRequest,
++    DeltaPropagationResult,
++    DeltaPropagationStatus,
++)
++from knowledgenexus.foundation.domain.models.tombstone_propagation import (
++    TombstoneEntityType,
++    TombstoneProjectionRequest,
++    TombstoneProjectionStatus,
++    TombstoneReason,
++    TombstoneTarget,
++)
++from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
++
++from knowledgenexus.foundation.domain.models.delta_propagation import (
++    _InventoryConflictError,
++    _SummaryValidationError,
++)
++
++
++_ENTITY_RANK = {"document": 0, "chunk": 1, "media": 2, "relation": 3, "acl": 4, "symbol": 5}
++_REASON_BY_STATE = {
++    DeltaInventoryState.SOURCE_DELETED: TombstoneReason.SOURCE_DELETED,
++    DeltaInventoryState.ACCESS_REVOKED: TombstoneReason.ACCESS_REVOKED,
++    DeltaInventoryState.MOVED_OUT_OF_SCOPE: TombstoneReason.MOVED_OUT_OF_SCOPE,
++    DeltaInventoryState.CONFIG_INVALIDATED: TombstoneReason.CONFIG_INVALIDATED,
++}
++
++
++class PropagateDelta:
++    """Compute a deterministic, read-only tombstone delta."""
++
++    def __init__(self, *, schema_validator: object) -> None:
++        try:
++            validator = getattr(schema_validator, "validate_record", None)
++        except Exception:
++            raise TypeError("schema_validator is invalid") from None
++        if not callable(validator):
++            raise TypeError("schema_validator is invalid")
++        self._validator = schema_validator
++        self._projector = ProjectTombstones(schema_validator=schema_validator)
++
++    def execute(self, request: object) -> DeltaPropagationResult:
++        try:
++            if type(request) is not DeltaPropagationRequest:
++                raise _Failure(DeltaPropagationFailureCategory.INVALID_REQUEST)
++            try:
++                DeltaPropagationRequest.__post_init__(request)
++            except _InventoryConflictError:
++                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT) from None
++            except _SummaryValidationError:
++                raise _Failure(DeltaPropagationFailureCategory.SUMMARY_INVALID) from None
++            except (TypeError, ValueError):
++                raise _Failure(DeltaPropagationFailureCategory.INVALID_REQUEST) from None
++            try:
++                if not callable(getattr(self._validator, "validate_record", None)):
++                    raise _Failure(DeltaPropagationFailureCategory.INVALID_DEPENDENCY)
++            except Exception:
++                raise _Failure(DeltaPropagationFailureCategory.INVALID_DEPENDENCY) from None
++
++            previous = {summary.document_id: summary for summary in request.previous_summaries}
++            current = {summary.document_id: summary for summary in request.current_summaries}
++            inventory: dict[str, DeltaInventoryEntry] = {}
++            for entry in request.inventory:
++                prior = inventory.get(entry.document_id)
++                if prior is not None and (
++                    prior.state is not entry.state
++                    or prior.source_version_last_seen != entry.source_version_last_seen
++                ):
++                    raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++                inventory[entry.document_id] = entry
++
++            records: list[dict[str, object]] = []
++            document_outcomes: list[tuple[str, str]] = []
++            new_count = unchanged_count = changed_count = removed_count = 0
++            union_ids = set(previous) | set(current)
++            for inventory_id in inventory:
++                if inventory_id not in union_ids:
++                    raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++            for document_id in sorted(union_ids):
++                old = previous.get(document_id)
++                new = current.get(document_id)
++                observation = inventory.get(document_id)
++
++                if old is None:
++                    document_outcomes.append((document_id, "new"))
++                    new_count += 1
++                    if observation is not None and observation.state is not DeltaInventoryState.PRESENT:
++                        raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++                    continue
++
++                if new is None:
++                    if observation is not None and observation.state is DeltaInventoryState.PRESENT:
++                        raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++                    removed_count += 1
++                    document_outcomes.append((document_id, "removed"))
++                    state = observation.state if observation is not None else DeltaInventoryState.SOURCE_DELETED
++                    records.extend(
++                        self._cascade(
++                            old,
++                            _REASON_BY_STATE[state],
++                            request,
++                            source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
++                        )
++                    )
++                    continue
++
++                if observation is not None and observation.state is not DeltaInventoryState.PRESENT:
++                    raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++
++                if request.previous_config_hash != request.current_config_hash:
++                    changed_count += 1
++                    document_outcomes.append((document_id, "changed"))
++                    records.extend(
++                        self._cascade(
++                            old,
++                            TombstoneReason.CONFIG_INVALIDATED,
++                            request,
++                            source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
++                        )
++                    )
++                    continue
++
++                if old.document_content_hash == new.document_content_hash:
++                    unchanged_count += 1
++                    document_outcomes.append((document_id, "unchanged"))
++                    continue
++
++                changed_count += 1
++                document_outcomes.append((document_id, "changed"))
++                current_entries = {entry.chunk_id: entry for entry in new.entries}
++                for entry in sorted(old.entries, key=lambda item: item.chunk_id):
++                    counterpart = current_entries.get(entry.chunk_id)
++                    if counterpart is None or counterpart.content_hash != entry.content_hash:
++                        records.extend(self._chunk_tombstone(entry.chunk_id, request))
++
++            records = self._deduplicate_and_sort(records)
++            document_tombstones = sum(record["entity_type"] == "document" for record in records)
++            chunk_tombstones = sum(record["entity_type"] == "chunk" for record in records)
++            metrics = DeltaPropagationMetrics(
++                document_count=len(union_ids),
++                new_document_count=new_count,
++                unchanged_document_count=unchanged_count,
++                changed_document_count=changed_count,
++                removed_document_count=removed_count,
++                document_tombstone_count=document_tombstones,
++                chunk_tombstone_count=chunk_tombstones,
++                record_count=len(records),
++            )
++            payload = {
++                "base_dataset_version": request.previous_dataset_version,
++                "count": len(records),
++                "dataset_version": request.current_dataset_version,
++                "metrics": {
++                    "changed_document_count": metrics.changed_document_count,
++                    "chunk_tombstone_count": metrics.chunk_tombstone_count,
++                    "document_count": metrics.document_count,
++                    "document_tombstone_count": metrics.document_tombstone_count,
++                    "new_document_count": metrics.new_document_count,
++                    "record_count": metrics.record_count,
++                    "removed_document_count": metrics.removed_document_count,
++                    "unchanged_document_count": metrics.unchanged_document_count,
++                },
++                "document_outcomes": tuple(document_outcomes),
++                "records": tuple(records),
++                "status": DeltaPropagationStatus.SUCCESS.value,
++            }
++            digest = hashlib.sha256(
++                json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
++            ).hexdigest()
++            return DeltaPropagationResult(
++                status=DeltaPropagationStatus.SUCCESS,
++                base_dataset_version=request.previous_dataset_version,
++                dataset_version=request.current_dataset_version,
++                records=tuple(records),
++                count=len(records),
++                metrics=metrics,
++                digest=digest,
++                document_outcomes=tuple(document_outcomes),
++            )
++        except _Failure as exc:
++            return DeltaPropagationResult(
++                status=DeltaPropagationStatus.FAILED,
++                error_category=exc.category,
++            )
++        except Exception:
++            return DeltaPropagationResult(
++                status=DeltaPropagationStatus.FAILED,
++                error_category=DeltaPropagationFailureCategory.INTERNAL_FAILURE,
++            )
++
++    def _cascade(
++        self,
++        summary: DocumentChunkSetSummary,
++        reason: TombstoneReason,
++        request: DeltaPropagationRequest,
++        *,
++        source_version_last_seen: str | None = None,
++    ) -> list[dict[str, object]]:
++        root = TombstoneTarget(
++            TombstoneEntityType.DOCUMENT,
++            summary.document_id,
++            source_version_last_seen=source_version_last_seen,
++        )
++        children = tuple(TombstoneTarget(TombstoneEntityType.CHUNK, entry.chunk_id) for entry in summary.entries)
++        result = self._projector.execute(
++            TombstoneProjectionRequest(
++                root=root,
++                reason=reason,
++                detected_at=request.detected_at,
++                dataset_version=request.current_dataset_version,
++                children=children,
++            )
++        )
++        if result.status is not TombstoneProjectionStatus.SUCCESS:
++            raise _Failure(DeltaPropagationFailureCategory.TOMBSTONE_FAILURE)
++        return list(result.records)
++
++    def _chunk_tombstone(self, chunk_id: str, request: DeltaPropagationRequest) -> list[dict[str, object]]:
++        result = self._projector.execute(
++            TombstoneProjectionRequest(
++                root=TombstoneTarget(TombstoneEntityType.CHUNK, chunk_id),
++                reason=TombstoneReason.CONTENT_UPDATED,
++                detected_at=request.detected_at,
++                dataset_version=request.current_dataset_version,
++            )
++        )
++        if result.status is not TombstoneProjectionStatus.SUCCESS:
++            raise _Failure(DeltaPropagationFailureCategory.TOMBSTONE_FAILURE)
++        return list(result.records)
++
++    @staticmethod
++    def _deduplicate_and_sort(records: list[dict[str, object]]) -> list[dict[str, object]]:
++        by_id: dict[str, tuple[bytes, dict[str, object]]] = {}
++        for record in records:
++            tombstone_id = record.get("tombstone_id")
++            if type(tombstone_id) is not str:
++                raise _Failure(DeltaPropagationFailureCategory.RESULT_INVALID)
++            try:
++                canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
++            except (TypeError, ValueError):
++                raise _Failure(DeltaPropagationFailureCategory.RESULT_INVALID) from None
++            prior = by_id.get(tombstone_id)
++            if prior is not None and prior[0] != canonical:
++                raise _Failure(DeltaPropagationFailureCategory.RESULT_INVALID)
++            by_id[tombstone_id] = (canonical, record)
++        values = [item[1] for item in by_id.values()]
++        values.sort(key=lambda record: (_ENTITY_RANK.get(record.get("entity_type", ""), 99), record.get("entity_id", ""), record.get("tombstone_id", "")))
++        return values
++
++
++class _Failure(Exception):
++    def __init__(self, category: DeltaPropagationFailureCategory) -> None:
++        self.category = category
++
++
++__all__ = ["PropagateDelta"]
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index 9381427..b48d720 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -111,6 +111,15 @@ from knowledgenexus.foundation.domain.models.tombstone_propagation import (
+     TombstoneReason,
+     TombstoneTarget,
+ )
++from knowledgenexus.foundation.domain.models.delta_propagation import (
++    DeltaInventoryEntry,
++    DeltaInventoryState,
++    DeltaPropagationFailureCategory,
++    DeltaPropagationMetrics,
++    DeltaPropagationRequest,
++    DeltaPropagationResult,
++    DeltaPropagationStatus,
++)
+ from knowledgenexus.foundation.domain.models.confluence_chunking import (
+     ChunkingResult,
+     ConfluenceChunkingError,
+@@ -311,6 +320,13 @@ __all__ = [
+     "TombstoneProjectionStatus",
+     "TombstoneReason",
+     "TombstoneTarget",
++    "DeltaInventoryEntry",
++    "DeltaInventoryState",
++    "DeltaPropagationFailureCategory",
++    "DeltaPropagationMetrics",
++    "DeltaPropagationRequest",
++    "DeltaPropagationResult",
++    "DeltaPropagationStatus",
+     "ChunkingResult",
+     "ConfluenceChunkingError",
+     "ConfluenceChunkingFailureCategory",
+diff --git a/src/knowledgenexus/foundation/domain/models/delta_propagation.py b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+new file mode 100644
+index 0000000..dc79056
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+@@ -0,0 +1,362 @@
++"""Runtime-validated models for read-only delta propagation."""
++
++from __future__ import annotations
++
++import copy
++import hashlib
++import json
++import re
++from dataclasses import dataclass
++from datetime import datetime, timezone
++from enum import StrEnum
++
++from knowledgenexus.foundation.domain.models.chunk_stability import (
++    ChunkStabilityEntry,
++    DocumentChunkSetSummary,
++)
++from knowledgenexus.foundation.domain.models.tombstone_propagation import (
++    TombstoneEntityType,
++    TombstoneProjectionMetrics,
++    TombstoneProjectionResult,
++    TombstoneProjectionStatus,
++)
++
++
++_OPAQUE = re.compile(r"^\S+$")
++_SHA256 = re.compile(r"^[0-9a-f]{64}$")
++_DOCUMENT_ID = re.compile(r"^confluence:page:\S+$")
++_MISSING = object()
++_ENTITY_RANK = {"document": 0, "chunk": 1, "media": 2, "relation": 3, "acl": 4, "symbol": 5}
++_OUTCOME_STATES = frozenset({"new", "unchanged", "changed", "removed"})
++
++
++class _SummaryValidationError(ValueError):
++    pass
++
++
++class _InventoryConflictError(ValueError):
++    pass
++
++
++def _require_exact_fields(instance: object, expected: frozenset[str]) -> None:
++    try:
++        actual = frozenset(vars(instance))
++    except TypeError:
++        raise TypeError("model fields are invalid") from None
++    if actual != expected:
++        raise TypeError("model fields are invalid")
++
++
++def _opaque(name: str, value: object) -> str:
++    if type(value) is not str or not value or _OPAQUE.fullmatch(value) is None:
++        raise ValueError(f"{name} is invalid")
++    return value
++
++
++def _timestamp(value: object) -> str:
++    if type(value) is not str or not re.fullmatch(
++        r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$",
++        value,
++    ):
++        raise ValueError("detected_at is invalid")
++    try:
++        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    except ValueError:
++        raise ValueError("detected_at is invalid") from None
++    if parsed.tzinfo is None:
++        raise ValueError("detected_at is invalid")
++    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
++
++
++def _validate_summary(summary: object) -> DocumentChunkSetSummary:
++    if type(summary) is not DocumentChunkSetSummary:
++        raise _SummaryValidationError("summary is invalid")
++    try:
++        _require_exact_fields(
++            summary,
++            frozenset({
++                "format_version", "document_id", "document_content_hash", "chunker_version",
++                "profile_identity", "entries", "chunk_count", "content_kind_counts",
++            }),
++        )
++        if type(summary.entries) is not tuple:
++            raise TypeError("summary entries are invalid")
++        for entry in summary.entries:
++            if type(entry) is not ChunkStabilityEntry:
++                raise TypeError("summary entry is invalid")
++            _require_exact_fields(
++                entry,
++                frozenset({"chunk_id", "content_hash", "content_kind", "token_count", "part_index", "part_total"}),
++            )
++            ChunkStabilityEntry.__post_init__(entry)
++        DocumentChunkSetSummary.__post_init__(summary)
++    except Exception:
++        raise _SummaryValidationError("summary is invalid") from None
++    return summary
++
++
++class DeltaInventoryState(StrEnum):
++    PRESENT = "present"
++    SOURCE_DELETED = "source_deleted"
++    ACCESS_REVOKED = "access_revoked"
++    MOVED_OUT_OF_SCOPE = "moved_out_of_scope"
++    CONFIG_INVALIDATED = "config_invalidated"
++
++
++@dataclass(frozen=True, repr=False)
++class DeltaInventoryEntry:
++    document_id: str
++    state: DeltaInventoryState
++    source_version_last_seen: str | None = None
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(self, frozenset({"document_id", "state", "source_version_last_seen"}))
++        if type(self.document_id) is not str or _DOCUMENT_ID.fullmatch(self.document_id) is None:
++            raise ValueError("document_id is invalid")
++        if type(self.state) is not DeltaInventoryState:
++            raise TypeError("state is invalid")
++        if self.source_version_last_seen is not None:
++            _opaque("source_version_last_seen", self.source_version_last_seen)
++
++
++@dataclass(frozen=True, repr=False)
++class DeltaPropagationRequest:
++    previous_dataset_version: str
++    current_dataset_version: str
++    previous_config_hash: str
++    current_config_hash: str
++    detected_at: str
++    previous_summaries: tuple[DocumentChunkSetSummary, ...]
++    current_summaries: tuple[DocumentChunkSetSummary, ...]
++    inventory: tuple[DeltaInventoryEntry, ...] = ()
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(
++            self,
++            frozenset({
++                "previous_dataset_version", "current_dataset_version", "previous_config_hash",
++                "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory",
++            }),
++        )
++        previous = _opaque("previous_dataset_version", self.previous_dataset_version)
++        current = _opaque("current_dataset_version", self.current_dataset_version)
++        if previous == current:
++            raise ValueError("dataset versions must differ")
++        for name, value in (("previous_config_hash", self.previous_config_hash), ("current_config_hash", self.current_config_hash)):
++            if type(value) is not str or _SHA256.fullmatch(value) is None:
++                raise ValueError(f"{name} is invalid")
++        object.__setattr__(self, "previous_dataset_version", previous)
++        object.__setattr__(self, "current_dataset_version", current)
++        object.__setattr__(self, "detected_at", _timestamp(self.detected_at))
++        for name in ("previous_summaries", "current_summaries"):
++            summaries = getattr(self, name, _MISSING)
++            if type(summaries) is not tuple:
++                raise _SummaryValidationError(f"{name} is invalid")
++            seen: set[str] = set()
++            for summary in summaries:
++                summary = _validate_summary(summary)
++                if summary.document_id in seen:
++                    raise _SummaryValidationError(f"{name} contain duplicate IDs")
++                seen.add(summary.document_id)
++        if type(self.inventory) is not tuple:
++            raise TypeError("inventory is invalid")
++        seen_inventory: set[str] = set()
++        for entry in self.inventory:
++            if type(entry) is not DeltaInventoryEntry:
++                raise TypeError("inventory entries are invalid")
++            try:
++                DeltaInventoryEntry.__post_init__(entry)
++            except Exception:
++                raise TypeError("inventory entries are invalid") from None
++            if entry.document_id in seen_inventory:
++                raise _InventoryConflictError("inventory contains duplicate IDs")
++            seen_inventory.add(entry.document_id)
++
++
++@dataclass(frozen=True, repr=False)
++class DeltaPropagationMetrics:
++    document_count: int
++    new_document_count: int
++    unchanged_document_count: int
++    changed_document_count: int
++    removed_document_count: int
++    document_tombstone_count: int
++    chunk_tombstone_count: int
++    record_count: int
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(
++            self,
++            frozenset({
++                "document_count", "new_document_count", "unchanged_document_count", "changed_document_count",
++                "removed_document_count", "document_tombstone_count", "chunk_tombstone_count", "record_count",
++            }),
++        )
++        values = (
++            self.document_count, self.new_document_count, self.unchanged_document_count,
++            self.changed_document_count, self.removed_document_count, self.document_tombstone_count,
++            self.chunk_tombstone_count, self.record_count,
++        )
++        if any(type(value) is not int or value < 0 for value in values):
++            raise ValueError("metrics are invalid")
++        if self.document_count != self.new_document_count + self.unchanged_document_count + self.changed_document_count + self.removed_document_count:
++            raise ValueError("document metrics are inconsistent")
++        if self.document_tombstone_count > self.document_count:
++            raise ValueError("document metrics are inconsistent")
++        if self.record_count != self.document_tombstone_count + self.chunk_tombstone_count:
++            raise ValueError("record metrics are inconsistent")
++
++
++class DeltaPropagationStatus(StrEnum):
++    SUCCESS = "success"
++    FAILED = "failed"
++
++
++class DeltaPropagationFailureCategory(StrEnum):
++    INVALID_REQUEST = "invalid_request"
++    INVALID_DEPENDENCY = "invalid_dependency"
++    SUMMARY_INVALID = "summary_invalid"
++    INVENTORY_CONFLICT = "inventory_conflict"
++    TOMBSTONE_FAILURE = "tombstone_failure"
++    RESULT_INVALID = "result_invalid"
++    INTERNAL_FAILURE = "internal_failure"
++
++
++def _record_key(record: dict[str, object]) -> tuple[int, str, str]:
++    entity_type = record.get("entity_type")
++    entity_id = record.get("entity_id")
++    tombstone_id = record.get("tombstone_id")
++    if type(entity_type) is not str or type(entity_id) is not str or type(tombstone_id) is not str:
++        raise ValueError("record identity is invalid")
++    return (_ENTITY_RANK.get(entity_type, 99), entity_id, tombstone_id)
++
++
++def _canonical_payload(result: "DeltaPropagationResult") -> dict[str, object]:
++    metrics = result.metrics
++    return {
++        "base_dataset_version": result.base_dataset_version,
++        "count": result.count,
++        "dataset_version": result.dataset_version,
++        "metrics": {
++            "changed_document_count": metrics.changed_document_count,
++            "chunk_tombstone_count": metrics.chunk_tombstone_count,
++            "document_count": metrics.document_count,
++            "document_tombstone_count": metrics.document_tombstone_count,
++            "new_document_count": metrics.new_document_count,
++            "record_count": metrics.record_count,
++            "removed_document_count": metrics.removed_document_count,
++            "unchanged_document_count": metrics.unchanged_document_count,
++        } if metrics is not None else None,
++        "document_outcomes": result.document_outcomes,
++        "records": result.records,
++        "status": result.status.value,
++    }
++
++
++@dataclass(frozen=True, repr=False)
++class DeltaPropagationResult:
++    status: DeltaPropagationStatus
++    base_dataset_version: str = ""
++    dataset_version: str = ""
++    records: tuple[dict[str, object], ...] = ()
++    count: int = 0
++    metrics: DeltaPropagationMetrics | None = None
++    digest: str | None = None
++    document_outcomes: tuple[tuple[str, str], ...] = ()
++    error_category: DeltaPropagationFailureCategory | None = None
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(
++            self,
++            frozenset({"status", "base_dataset_version", "dataset_version", "records", "count", "metrics", "digest", "document_outcomes", "error_category"}),
++        )
++        if type(self.status) is not DeltaPropagationStatus:
++            raise TypeError("status is invalid")
++        if type(self.base_dataset_version) is not str or type(self.dataset_version) is not str:
++            raise TypeError("dataset versions are invalid")
++        if type(self.records) is not tuple or any(type(record) is not dict for record in self.records):
++            raise TypeError("records are invalid")
++        if type(self.document_outcomes) is not tuple:
++            raise TypeError("document outcomes are invalid")
++        previous_document_id: str | None = None
++        outcome_counts = {state: 0 for state in _OUTCOME_STATES}
++        for outcome in self.document_outcomes:
++            if type(outcome) is not tuple or len(outcome) != 2:
++                raise TypeError("document outcomes are invalid")
++            document_id, state = outcome
++            if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None:
++                raise ValueError("document outcome identity is invalid")
++            if type(state) is not str or state not in _OUTCOME_STATES:
++                raise ValueError("document outcome state is invalid")
++            if previous_document_id is not None and document_id <= previous_document_id:
++                raise ValueError("document outcomes are not sorted and unique")
++            previous_document_id = document_id
++            outcome_counts[state] += 1
++        if type(self.count) is not int or self.count < 0 or self.count != len(self.records):
++            raise ValueError("count is invalid")
++        if self.status is DeltaPropagationStatus.FAILED:
++            if self.records or self.count != 0 or self.metrics is not None or self.digest is not None or self.document_outcomes:
++                raise ValueError("failed result is inconsistent")
++            if type(self.error_category) is not DeltaPropagationFailureCategory:
++                raise ValueError("failure category is invalid")
++            return
++        if self.error_category is not None or type(self.metrics) is not DeltaPropagationMetrics:
++            raise ValueError("success result is inconsistent")
++        _opaque("base_dataset_version", self.base_dataset_version)
++        _opaque("dataset_version", self.dataset_version)
++        if self.base_dataset_version == self.dataset_version:
++            raise ValueError("dataset versions must differ")
++        try:
++            copied: list[dict[str, object]] = []
++            for record in self.records:
++                projection = TombstoneProjectionResult(
++                    status=TombstoneProjectionStatus.SUCCESS,
++                    records=(record,),
++                    count=1,
++                    metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++                )
++                copied.append(projection.records[0])
++            ordered = tuple(sorted(copied, key=_record_key))
++            if tuple(_record_key(record) for record in copied) != tuple(_record_key(record) for record in ordered):
++                raise ValueError("records are not ordered")
++            object.__setattr__(self, "records", ordered)
++        except (TypeError, ValueError):
++            raise ValueError("records are invalid") from None
++        self.metrics.__post_init__()
++        if self.metrics.document_count != len(self.document_outcomes):
++            raise ValueError("document metrics are inconsistent")
++        if self.metrics.new_document_count != outcome_counts["new"]:
++            raise ValueError("new document metrics are inconsistent")
++        if self.metrics.unchanged_document_count != outcome_counts["unchanged"]:
++            raise ValueError("unchanged document metrics are inconsistent")
++        if self.metrics.changed_document_count != outcome_counts["changed"]:
++            raise ValueError("changed document metrics are inconsistent")
++        if self.metrics.removed_document_count != outcome_counts["removed"]:
++            raise ValueError("removed document metrics are inconsistent")
++        if self.metrics.record_count != self.count:
++            raise ValueError("record metrics are inconsistent")
++        document_count = sum(record["entity_type"] == "document" for record in self.records)
++        chunk_count = sum(record["entity_type"] == "chunk" for record in self.records)
++        if document_count + chunk_count != self.count:
++            raise ValueError("record entity types are invalid")
++        if self.metrics.document_tombstone_count != document_count or self.metrics.chunk_tombstone_count != chunk_count:
++            raise ValueError("record metrics are inconsistent")
++        if type(self.digest) is not str or _SHA256.fullmatch(self.digest) is None:
++            raise ValueError("digest is invalid")
++        expected = hashlib.sha256(json.dumps(_canonical_payload(self), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
++        if self.digest != expected:
++            raise ValueError("digest is invalid")
++
++    def to_bytes(self) -> bytes:
++        return json.dumps(_canonical_payload(self), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
++
++
++__all__ = [
++    "DeltaInventoryEntry",
++    "DeltaInventoryState",
++    "DeltaPropagationFailureCategory",
++    "DeltaPropagationMetrics",
++    "DeltaPropagationRequest",
++    "DeltaPropagationResult",
++    "DeltaPropagationStatus",
++]
+diff --git a/tests/foundation/application/use_cases/test_propagate_delta.py b/tests/foundation/application/use_cases/test_propagate_delta.py
+new file mode 100644
+index 0000000..f2bec26
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_propagate_delta.py
+@@ -0,0 +1,339 @@
++from __future__ import annotations
++
++import hashlib
++
++import pytest
++
++from knowledgenexus.foundation.application.use_cases import PropagateDelta
++from knowledgenexus.foundation.domain.models import (
++    ACTIVE_CHUNKER_VERSION,
++    ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++    ChunkStabilityEntry,
++    DeltaInventoryEntry,
++    DeltaInventoryState,
++    DeltaPropagationFailureCategory,
++    DeltaPropagationRequest,
++    DeltaPropagationStatus,
++    DocumentChunkSetSummary,
++)
++
++
++class Validator:
++    def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++        assert schema_name == "TombstoneRecord"
++
++
++def _entry(chunk_id: str, content_hash: str = "b" * 64) -> ChunkStabilityEntry:
++    return ChunkStabilityEntry(chunk_id, content_hash, "prose", 1)
++
++
++def _summary(document_id: str, content_hash: str = "a" * 64, entries=()) -> DocumentChunkSetSummary:
++    entries = tuple(entries)
++    return DocumentChunkSetSummary(
++        format_version="1",
++        document_id=document_id,
++        document_content_hash=content_hash,
++        chunker_version=ACTIVE_CHUNKER_VERSION,
++        profile_identity=ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++        entries=entries,
++        chunk_count=len(entries),
++        content_kind_counts=(("prose", len(entries)),) if entries else (),
++    )
++
++
++def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64):
++    return DeltaPropagationRequest(
++        previous_dataset_version="base",
++        current_dataset_version="next",
++        previous_config_hash=previous_config,
++        current_config_hash=current_config,
++        detected_at="2026-08-05T00:00:00Z",
++        previous_summaries=tuple(previous),
++        current_summaries=tuple(current),
++        inventory=tuple(inventory),
++    )
++
++
++def _forged_request(*, previous=(), current=()) -> DeltaPropagationRequest:
++    request = object.__new__(DeltaPropagationRequest)
++    object.__setattr__(request, "previous_dataset_version", "base")
++    object.__setattr__(request, "current_dataset_version", "next")
++    object.__setattr__(request, "previous_config_hash", "a" * 64)
++    object.__setattr__(request, "current_config_hash", "a" * 64)
++    object.__setattr__(request, "detected_at", "2026-08-05T00:00:00.000000Z")
++    object.__setattr__(request, "previous_summaries", tuple(previous))
++    object.__setattr__(request, "current_summaries", tuple(current))
++    object.__setattr__(request, "inventory", ())
++    return request
++
++
++_SUMMARY_FIELDS = (
++    "format_version", "document_id", "document_content_hash", "chunker_version",
++    "profile_identity", "entries", "chunk_count", "content_kind_counts",
++)
++_ENTRY_FIELDS = ("chunk_id", "content_hash", "content_kind", "token_count", "part_index", "part_total")
++
++
++def _forged_entry(*, missing: str | None = None, extra: bool = False, **overrides) -> ChunkStabilityEntry:
++    valid = _entry("chunk:confluence:0123456789abcdef")
++    forged = object.__new__(ChunkStabilityEntry)
++    for field in _ENTRY_FIELDS:
++        if field != missing:
++            object.__setattr__(forged, field, overrides.get(field, getattr(valid, field)))
++    if extra:
++        object.__setattr__(forged, "extra", 1)
++    return forged
++
++
++def _forged_summary(*, missing: str | None = None, extra: bool = False, entries=()) -> DocumentChunkSetSummary:
++    valid = _summary("confluence:page:1")
++    forged = object.__new__(DocumentChunkSetSummary)
++    for field in _SUMMARY_FIELDS:
++        value = tuple(entries) if field == "entries" else getattr(valid, field)
++        if field != missing:
++            object.__setattr__(forged, field, value)
++    if extra:
++        object.__setattr__(forged, "extra", 1)
++    return forged
++
++
++def test_empty_new_and_unchanged_delta_is_success_and_deterministic() -> None:
++    summary = _summary("confluence:page:1")
++    use_case = PropagateDelta(schema_validator=Validator())
++    result = use_case.execute(_request(current=(summary,)))
++    assert result.status is DeltaPropagationStatus.SUCCESS
++    assert result.count == 0
++    assert result.metrics.new_document_count == 1
++    assert result.digest == hashlib.sha256(result.to_bytes()).hexdigest()
++
++    unchanged = use_case.execute(_request(previous=(summary,), current=(summary,)))
++    assert unchanged.count == 0
++    assert unchanged.metrics.unchanged_document_count == 1
++
++
++def test_changed_chunk_emits_only_removed_or_changed_previous_chunks() -> None:
++    old = _summary(
++        "confluence:page:1",
++        entries=(
++            _entry("chunk:confluence:0123456789abcdef", "b" * 64),
++            _entry("chunk:confluence:fedcba9876543210", "c" * 64),
++        ),
++        content_hash="a" * 64,
++    )
++    new = _summary(
++        "confluence:page:1",
++        entries=(_entry("chunk:confluence:0123456789abcdef", "d" * 64),),
++        content_hash="e" * 64,
++    )
++    result = PropagateDelta(schema_validator=Validator()).execute(_request(previous=(old,), current=(new,)))
++    assert result.status is DeltaPropagationStatus.SUCCESS
++    assert result.metrics.changed_document_count == 1
++    assert result.metrics.chunk_tombstone_count == 2
++    assert all(record["entity_type"] == "chunk" for record in result.records)
++
++
++@pytest.mark.parametrize("state", [
++    DeltaInventoryState.SOURCE_DELETED,
++    DeltaInventoryState.ACCESS_REVOKED,
++    DeltaInventoryState.MOVED_OUT_OF_SCOPE,
++    DeltaInventoryState.CONFIG_INVALIDATED,
++])
++def test_inventory_removal_emits_document_cascade(state: DeltaInventoryState) -> None:
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    inventory = (DeltaInventoryEntry("confluence:page:1", state, "v7"),)
++    result = PropagateDelta(schema_validator=Validator()).execute(_request(previous=(old,), inventory=inventory))
++    assert result.status is DeltaPropagationStatus.SUCCESS
++    assert result.metrics.removed_document_count == 1
++    assert result.metrics.document_tombstone_count == 1
++    assert result.metrics.chunk_tombstone_count == 1
++    assert result.records[0]["entity_type"] == "document"
++    assert result.records[0]["reason"] == state.value
++    assert result.records[0]["source_version_last_seen"] == "v7"
++
++
++def test_config_change_invalidates_present_previous_documents() -> None:
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    current = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    result = PropagateDelta(schema_validator=Validator()).execute(
++        _request(previous=(old,), current=(current,), previous_config="a" * 64, current_config="b" * 64)
++    )
++    assert result.metrics.changed_document_count == 1
++    assert result.records[0]["reason"] == "config_invalidated"
++
++
++def test_conflicting_inventory_is_atomic() -> None:
++    old = _summary("confluence:page:1")
++    request = object.__new__(DeltaPropagationRequest)
++    object.__setattr__(request, "previous_dataset_version", "base")
++    object.__setattr__(request, "current_dataset_version", "next")
++    object.__setattr__(request, "previous_config_hash", "a" * 64)
++    object.__setattr__(request, "current_config_hash", "a" * 64)
++    object.__setattr__(request, "detected_at", "2026-08-05T00:00:00.000000Z")
++    object.__setattr__(request, "previous_summaries", (old,))
++    object.__setattr__(request, "current_summaries", ())
++    object.__setattr__(request, "inventory", (DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.PRESENT),))
++    result = PropagateDelta(schema_validator=Validator()).execute(request)
++    assert result.status is DeltaPropagationStatus.FAILED
++    assert result.error_category is DeltaPropagationFailureCategory.INVENTORY_CONFLICT
++    assert result.records == () and result.count == 0 and result.metrics is None
++
++
++def test_invalid_summary_is_sanitized() -> None:
++    request = object.__new__(DeltaPropagationRequest)
++    object.__setattr__(request, "previous_dataset_version", "base")
++    object.__setattr__(request, "current_dataset_version", "next")
++    object.__setattr__(request, "previous_config_hash", "a" * 64)
++    object.__setattr__(request, "current_config_hash", "a" * 64)
++    object.__setattr__(request, "detected_at", "2026-08-05T00:00:00.000000Z")
++    object.__setattr__(request, "previous_summaries", (object(),))
++    object.__setattr__(request, "current_summaries", ())
++    object.__setattr__(request, "inventory", ())
++    result = PropagateDelta(schema_validator=Validator()).execute(request)
++    assert result.error_category is DeltaPropagationFailureCategory.SUMMARY_INVALID
++
++
++def test_duplicate_inventory_conflict_is_atomic() -> None:
++    old = _summary("confluence:page:1")
++    inventory = (
++        DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.SOURCE_DELETED),
++        DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.ACCESS_REVOKED),
++    )
++    with pytest.raises(ValueError):
++        _request(previous=(old,), inventory=inventory)
++
++
++def test_changed_document_without_affected_old_chunks_has_no_records() -> None:
++    old = _summary("confluence:page:1", content_hash="a" * 64)
++    new = _summary("confluence:page:1", content_hash="c" * 64)
++    result = PropagateDelta(schema_validator=Validator()).execute(_request(previous=(old,), current=(new,)))
++    assert result.status is DeltaPropagationStatus.SUCCESS
++    assert result.count == 0
++    assert result.metrics.changed_document_count == 1
++    assert result.document_outcomes == (("confluence:page:1", "changed"),)
++
++
++def test_validator_failure_is_sanitized_and_atomic() -> None:
++    class RejectingValidator:
++        def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++            record.pop("entity_id")
++
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    result = PropagateDelta(schema_validator=RejectingValidator()).execute(_request(previous=(old,)))
++    assert result.status is DeltaPropagationStatus.FAILED
++    assert result.error_category is DeltaPropagationFailureCategory.TOMBSTONE_FAILURE
++    assert result.records == () and result.count == 0 and result.metrics is None
++
++
++def test_forged_nested_summary_is_summary_invalid() -> None:
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    object.__setattr__(old.entries[0], "content_hash", "bad")
++    request = object.__new__(DeltaPropagationRequest)
++    object.__setattr__(request, "previous_dataset_version", "base")
++    object.__setattr__(request, "current_dataset_version", "next")
++    object.__setattr__(request, "previous_config_hash", "a" * 64)
++    object.__setattr__(request, "current_config_hash", "a" * 64)
++    object.__setattr__(request, "detected_at", "2026-08-05T00:00:00.000000Z")
++    object.__setattr__(request, "previous_summaries", (old,))
++    object.__setattr__(request, "current_summaries", ())
++    object.__setattr__(request, "inventory", ())
++    result = PropagateDelta(schema_validator=Validator()).execute(request)
++    assert result.status is DeltaPropagationStatus.FAILED
++    assert result.error_category is DeltaPropagationFailureCategory.SUMMARY_INVALID
++    assert result.records == () and result.count == 0
++
++
++@pytest.mark.parametrize("position", ("previous", "current"))
++def test_malformed_summary_fails_before_validator_or_projector(position: str) -> None:
++    summary = object.__new__(DocumentChunkSetSummary)
++    valid = _summary("confluence:page:1")
++    for field in ("format_version", "document_id", "document_content_hash", "chunker_version", "profile_identity", "entries", "chunk_count", "content_kind_counts"):
++        object.__setattr__(summary, field, getattr(valid, field))
++    object.__setattr__(summary, "extra", 1)
++    request = _forged_request(previous=(summary,) if position == "previous" else (), current=(summary,) if position == "current" else ())
++
++    class CountingValidator(Validator):
++        def __init__(self) -> None:
++            self.calls = 0
++
++        def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++            self.calls += 1
++
++    class CountingProjector:
++        def __init__(self) -> None:
++            self.calls = 0
++
++        def execute(self, request: object) -> object:
++            self.calls += 1
++            raise AssertionError("projector must not run")
++
++    validator = CountingValidator()
++    use_case = PropagateDelta(schema_validator=validator)
++    projector = CountingProjector()
++    use_case._projector = projector
++    result = use_case.execute(request)
++    assert result.status is DeltaPropagationStatus.FAILED
++    assert result.error_category is DeltaPropagationFailureCategory.SUMMARY_INVALID
++    assert result.records == () and result.count == 0 and result.metrics is None
++    assert validator.calls == 0 and projector.calls == 0
++
++
++def _malformed_summary_cases() -> list[tuple[str, DocumentChunkSetSummary]]:
++    cases = [(f"outer-missing-{field}", _forged_summary(missing=field)) for field in _SUMMARY_FIELDS]
++    cases.append(("outer-extra", _forged_summary(extra=True)))
++    cases.extend(
++        (f"nested-missing-{field}", _forged_summary(entries=(_forged_entry(missing=field),)))
++        for field in _ENTRY_FIELDS
++    )
++    cases.append(("nested-extra", _forged_summary(entries=(_forged_entry(extra=True),))))
++    cases.extend(
++        [
++            ("nested-bad-id", _forged_summary(entries=(_forged_entry(chunk_id="chunk:bad"),))),
++            ("nested-bad-hash", _forged_summary(entries=(_forged_entry(content_hash="bad"),))),
++            ("nested-bad-parts", _forged_summary(entries=(_forged_entry(part_index=2, part_total=2),))),
++            ("nested-bad-token-type", _forged_summary(entries=(_forged_entry(token_count=True),))),
++            ("nested-bad-kind-type", _forged_summary(entries=(_forged_entry(content_kind=object()),))),
++            ("nested-wrong-runtime-type", _forged_summary(entries=(object(),))),
++        ]
++    )
++    return cases
++
++
++@pytest.mark.parametrize("position", ("previous", "current"))
++@pytest.mark.parametrize(
++    "case_name,summary",
++    _malformed_summary_cases(),
++    ids=lambda value: value if isinstance(value, str) else None,
++)
++def test_every_malformed_summary_fails_at_execute_boundary(
++    position: str, case_name: str, summary: DocumentChunkSetSummary,
++) -> None:
++    request = _forged_request(
++        previous=(summary,) if position == "previous" else (),
++        current=(summary,) if position == "current" else (),
++    )
++
++    class CountingValidator(Validator):
++        def __init__(self) -> None:
++            self.calls = 0
++
++        def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++            self.calls += 1
++
++    class CountingProjector:
++        def __init__(self) -> None:
++            self.calls = 0
++
++        def execute(self, request: object) -> object:
++            self.calls += 1
++            raise AssertionError(f"projector must not run for {case_name}")
++
++    validator = CountingValidator()
++    use_case = PropagateDelta(schema_validator=validator)
++    projector = CountingProjector()
++    use_case._projector = projector
++    result = use_case.execute(request)
++
++    assert result.status is DeltaPropagationStatus.FAILED
++    assert result.error_category is DeltaPropagationFailureCategory.SUMMARY_INVALID
++    assert result.records == () and result.count == 0 and result.metrics is None
++    assert validator.calls == 0 and projector.calls == 0
+diff --git a/tests/foundation/domain/models/test_delta_propagation.py b/tests/foundation/domain/models/test_delta_propagation.py
+new file mode 100644
+index 0000000..1bd095c
+--- /dev/null
++++ b/tests/foundation/domain/models/test_delta_propagation.py
+@@ -0,0 +1,237 @@
++from dataclasses import FrozenInstanceError
++
++import pytest
++
++from knowledgenexus.foundation.domain.models import (
++    ACTIVE_CHUNKER_VERSION,
++    ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++    ChunkStabilityEntry,
++    DeltaInventoryEntry,
++    DeltaInventoryState,
++    DeltaPropagationFailureCategory,
++    DeltaPropagationMetrics,
++    DeltaPropagationRequest,
++    DeltaPropagationResult,
++    DeltaPropagationStatus,
++    DocumentChunkSetSummary,
++)
++
++
++def _summary(document_id: str, document_hash: str = "a" * 64, entries=()) -> DocumentChunkSetSummary:
++    entries = tuple(entries)
++    counts: dict[str, int] = {}
++    for entry in entries:
++        counts[entry.content_kind] = counts.get(entry.content_kind, 0) + 1
++    return DocumentChunkSetSummary(
++        format_version="1",
++        document_id=document_id,
++        document_content_hash=document_hash,
++        chunker_version=ACTIVE_CHUNKER_VERSION,
++        profile_identity=ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++        entries=entries,
++        chunk_count=len(entries),
++        content_kind_counts=tuple(sorted(counts.items())),
++    )
++
++
++def _entry(chunk_id: str, content_hash: str = "b" * 64) -> ChunkStabilityEntry:
++    return ChunkStabilityEntry(chunk_id, content_hash, "prose", 1)
++
++
++_SUMMARY_FIELDS = (
++    "format_version", "document_id", "document_content_hash", "chunker_version",
++    "profile_identity", "entries", "chunk_count", "content_kind_counts",
++)
++
++
++def _forged_summary(*, missing: str | None = None, extra: bool = False, entries=()) -> DocumentChunkSetSummary:
++    # Keep malformed nested entries out of the baseline constructor so the
++    # application boundary, rather than fixture setup, performs validation.
++    valid = _summary("confluence:page:1")
++    forged = object.__new__(DocumentChunkSetSummary)
++    for field in _SUMMARY_FIELDS:
++        if field == "entries":
++            value = tuple(entries)
++        else:
++            value = getattr(valid, field)
++        if field != missing:
++            object.__setattr__(forged, field, value)
++    if extra:
++        object.__setattr__(forged, "extra", 1)
++    return forged
++
++
++def _forged_entry(*, missing: str | None = None, extra: bool = False, **overrides) -> ChunkStabilityEntry:
++    valid = _entry("chunk:confluence:0123456789abcdef")
++    forged = object.__new__(ChunkStabilityEntry)
++    for field in ("chunk_id", "content_hash", "content_kind", "token_count", "part_index", "part_total"):
++        if field != missing:
++            object.__setattr__(forged, field, overrides.get(field, getattr(valid, field)))
++    if extra:
++        object.__setattr__(forged, "extra", 1)
++    return forged
++
++
++def test_request_validates_versions_hashes_timestamp_and_summary_identity() -> None:
++    request = DeltaPropagationRequest(
++        previous_dataset_version="base",
++        current_dataset_version="next",
++        previous_config_hash="a" * 64,
++        current_config_hash="b" * 64,
++        detected_at="2026-08-05T10:00:00+07:00",
++        previous_summaries=(_summary("confluence:page:1"),),
++        current_summaries=(),
++    )
++    assert request.detected_at == "2026-08-05T03:00:00.000000Z"
++    with pytest.raises(FrozenInstanceError):
++        request.current_dataset_version = "other"  # type: ignore[misc]
++
++    with pytest.raises(ValueError):
++        DeltaPropagationRequest(
++            previous_dataset_version="same", current_dataset_version="same",
++            previous_config_hash="a" * 64, current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z", previous_summaries=(), current_summaries=(),
++        )
++
++
++@pytest.mark.parametrize("value", [None, object(), "bad id"])
++def test_inventory_entry_rejects_bad_document_id(value: object) -> None:
++    with pytest.raises((TypeError, ValueError)):
++        DeltaInventoryEntry(value, DeltaInventoryState.PRESENT)  # type: ignore[arg-type]
++
++
++def test_metrics_reject_impossible_cross_field_counts() -> None:
++    with pytest.raises(ValueError):
++        DeltaPropagationMetrics(1, 1, 1, 0, 0, 0, 0, 0)
++    with pytest.raises(ValueError):
++        DeltaPropagationMetrics(0, 0, 0, 0, 0, 1, 0, 1)
++
++
++def test_failed_result_is_atomic() -> None:
++    result = DeltaPropagationResult(
++        status=DeltaPropagationStatus.FAILED,
++        error_category=DeltaPropagationFailureCategory.INVALID_REQUEST,
++    )
++    assert result.records == () and result.count == 0 and result.metrics is None
++
++
++def test_forged_metrics_do_not_match_document_outcomes() -> None:
++    with pytest.raises(ValueError):
++        DeltaPropagationResult(
++            status=DeltaPropagationStatus.SUCCESS,
++            base_dataset_version="base",
++            dataset_version="next",
++            records=(),
++            count=0,
++            metrics=DeltaPropagationMetrics(
++                document_count=1,
++                new_document_count=1,
++                unchanged_document_count=0,
++                changed_document_count=0,
++                removed_document_count=0,
++                document_tombstone_count=0,
++                chunk_tombstone_count=0,
++                record_count=0,
++            ),
++            digest="0" * 64,
++            document_outcomes=(("confluence:page:1", "unchanged"),),
++        )
++
++
++def test_forged_missing_fields_fail_closed() -> None:
++    forged = object.__new__(DeltaPropagationRequest)
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest.__post_init__(forged)
++
++
++def test_forged_summary_extra_field_is_rejected() -> None:
++    summary = _summary("confluence:page:1")
++    object.__setattr__(summary, "extra", 1)
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest(
++            previous_dataset_version="base",
++            current_dataset_version="next",
++            previous_config_hash="a" * 64,
++            current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z",
++            previous_summaries=(summary,),
++            current_summaries=(),
++        )
++
++
++def test_forged_nested_entry_hash_is_rejected() -> None:
++    entry = _entry("chunk:confluence:0123456789abcdef")
++    object.__setattr__(entry, "content_hash", "bad")
++    summary = _summary("confluence:page:1", entries=(entry,))
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest(
++            previous_dataset_version="base",
++            current_dataset_version="next",
++            previous_config_hash="a" * 64,
++            current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z",
++            previous_summaries=(summary,),
++            current_summaries=(),
++        )
++
++
++@pytest.mark.parametrize("missing", _SUMMARY_FIELDS)
++def test_every_outer_summary_missing_field_is_rejected(missing: str) -> None:
++    summary = _forged_summary(missing=missing)
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest(
++            previous_dataset_version="base", current_dataset_version="next",
++            previous_config_hash="a" * 64, current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(),
++        )
++
++
++def test_outer_summary_forbidden_extra_field_is_rejected() -> None:
++    summary = _forged_summary(extra=True)
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest(
++            previous_dataset_version="base", current_dataset_version="next",
++            previous_config_hash="a" * 64, current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(),
++        )
++
++
++@pytest.mark.parametrize("missing", ("chunk_id", "content_hash", "content_kind", "token_count", "part_index", "part_total"))
++def test_every_nested_entry_missing_field_is_rejected(missing: str) -> None:
++    summary = _forged_summary(entries=(_forged_entry(missing=missing),))
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest(
++            previous_dataset_version="base", current_dataset_version="next",
++            previous_config_hash="a" * 64, current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(),
++        )
++
++
++def test_nested_entry_forbidden_extra_field_is_rejected() -> None:
++    summary = _forged_summary(entries=(_forged_entry(extra=True),))
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest(
++            previous_dataset_version="base", current_dataset_version="next",
++            previous_config_hash="a" * 64, current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(),
++        )
++
++
++@pytest.mark.parametrize(
++    "overrides",
++    [
++        {"chunk_id": "chunk:bad"},
++        {"content_hash": "bad"},
++        {"part_index": 2, "part_total": 2},
++        {"token_count": True},
++        {"content_kind": object()},
++    ],
++)
++def test_nested_entry_malformed_values_are_rejected(overrides: dict[str, object]) -> None:
++    summary = _forged_summary(entries=(_forged_entry(**overrides),))
++    with pytest.raises((TypeError, ValueError)):
++        DeltaPropagationRequest(
++            previous_dataset_version="base", current_dataset_version="next",
++            previous_config_hash="a" * 64, current_config_hash="b" * 64,
++            detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(),
++        )
+-- 
+2.45.1.windows.1
+

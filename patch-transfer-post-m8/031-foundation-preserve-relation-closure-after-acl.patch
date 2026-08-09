@@ -1,0 +1,145 @@
+From fd22159453efe1c39bdcbd48fed7a147db8a821e Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 16:31:08 +0700
+Subject: [PATCH] foundation: preserve relation closure after ACL
+
+---
+ .../domain/models/m10_composition.py          | 11 ++++++
+ .../adapters/m10_source_adapters.py           |  8 ++--
+ .../domain/models/test_m10_composition.py     | 21 ++++++++++
+ .../adapters/test_m10_source_adapters.py      | 39 +++++++++++++++++++
+ 4 files changed, 76 insertions(+), 3 deletions(-)
+
+diff --git a/src/knowledgenexus/foundation/domain/models/m10_composition.py b/src/knowledgenexus/foundation/domain/models/m10_composition.py
+index 1c7fd3c..e699aab 100644
+--- a/src/knowledgenexus/foundation/domain/models/m10_composition.py
++++ b/src/knowledgenexus/foundation/domain/models/m10_composition.py
+@@ -395,6 +395,12 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
+             if target_doc is None or source_doc is None or target_doc.get("source_system") != "confluence" or source_doc.get("source_system") != "confluence":
+                 raise M10SnapshotError("resolved page relation ownership is invalid")
+     relation_ids = {_identity(row, "relation_id") for row in streams["relations"]}
++    relation_owners = {
++        _identity(row, "document_id"): row for row in streams["documents"]
++    }
++    relation_owners.update(
++        {_identity(row, "chunk_id"): row for row in streams["chunks"]}
++    )
+     for stream_name in ("documents", "chunks"):
+         for row in streams[stream_name]:
+             referenced = row.get("relation_ids", [])
+@@ -405,6 +411,11 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
+                 or any(value not in relation_ids for value in referenced)
+             ):
+                 raise M10SnapshotError("relation ID closure is invalid")
++    for record in streams["relations"]:
++        relation_id = _identity(record, "relation_id")
++        owner = relation_owners.get(record.get("source_id"))
++        if owner is None or relation_id not in owner.get("relation_ids", []):
++            raise M10SnapshotError("relation owner linkage is invalid")
+     for record in streams["media_assets"]:
+         if not request.media_policy.include_attachments or len(streams["media_assets"]) > request.media_policy.max_assets:
+             raise M10SnapshotError("media policy or budget is invalid")
+diff --git a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+index c0c12d2..ace67a1 100644
+--- a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
++++ b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+@@ -230,9 +230,11 @@ class ConfluenceM10MaterializedSource:
+             state["media"] = page_media_result
+             media = _records_from_result(page_media_result, ("assets", "media_assets"), "media_assets")
+             state["media_assets"] = media
+-        # Media must run before generic relation materialization so a relation
+-        # stage can resolve attachment intents against the current asset set.
+-        for stage_name, stage in (("media_stage", self._media_stage), ("relation_stage", self._relation_stage), ("acl_stage", self._acl_stage), ("tombstone_stage", self._tombstone_stage)):
++        # Media must run before ACL/relation materialization so relation stages
++        # can resolve attachment intents against the current asset set. Generic
++        # relations intentionally run after ACL so their IDs are appended to
++        # the final ACL-enriched documents and chunks.
++        for stage_name, stage in (("media_stage", self._media_stage), ("acl_stage", self._acl_stage), ("relation_stage", self._relation_stage), ("tombstone_stage", self._tombstone_stage)):
+             if stage is None:
+                 continue
+             result = _stage_call(stage, request=request, state=state)
+diff --git a/tests/foundation/domain/models/test_m10_composition.py b/tests/foundation/domain/models/test_m10_composition.py
+index a227bfe..fa961d5 100644
+--- a/tests/foundation/domain/models/test_m10_composition.py
++++ b/tests/foundation/domain/models/test_m10_composition.py
+@@ -98,6 +98,27 @@ def test_relation_status_and_sync_state_rules(tmp_path):
+         compose_m10_projection(request, M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (), confluence.symbols, ({**sync, "status": "tombstoned"},), confluence.raw_artifact_identity), git, schema_validator=NoopValidator())
+ 
+ 
++def test_relation_must_be_linked_from_its_source_record(tmp_path):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++    unlinked = {**confluence.relations[0], "relation_id": "rel:fedcba9876543210"}
++    handoff = M10ConfluenceHandoff(
++        confluence.run_id,
++        confluence.generation_id,
++        confluence.source_version,
++        confluence.documents,
++        confluence.chunks,
++        (confluence.relations[0], unlinked),
++        confluence.acl,
++        (),
++        confluence.symbols,
++        confluence.sync_state,
++        confluence.raw_artifact_identity,
++    )
++    with pytest.raises(M10SnapshotError, match="relation owner linkage"):
++        compose_m10_projection(request, handoff, git, schema_validator=NoopValidator())
++
++
+ @pytest.mark.parametrize("target", ["unknown", "none", "null", "unresolved", " "])
+ def test_unresolved_relation_placeholders_fail_closed(tmp_path, target):
+     request = _request(tmp_path); confluence, git = _handoffs()
+diff --git a/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py b/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
+index fb52710..5480d80 100644
+--- a/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
++++ b/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
+@@ -188,6 +188,45 @@ def test_confluence_materialized_source_runs_media_before_relation_stage(tmp_pat
+     assert result.relations == confluence.relations
+ 
+ 
++def test_confluence_materialized_source_runs_acl_before_generic_relations(tmp_path) -> None:
++    confluence, _ = _handoffs()
++    request = _request(tmp_path)
++    page = _Output(
++        source_version=confluence.source_version,
++        raw_artifact_identity=confluence.raw_artifact_identity,
++        documents=confluence.documents,
++        chunks=confluence.chunks,
++    )
++    events: list[str] = []
++
++    class PageStage:
++        def execute(self, request):
++            return page
++
++    class AclStage:
++        def execute(self, request, **state):
++            assert state["documents"] == confluence.documents
++            events.append("acl")
++            return _Output(
++                documents=tuple({**row, "acl_tags": ["space:SVMC"]} for row in confluence.documents),
++                chunks=tuple({**row, "acl_tags": ["space:SVMC"]} for row in confluence.chunks),
++                acl=confluence.acl,
++            )
++
++    class RelationStage:
++        def execute(self, request, **state):
++            assert state["documents"][0]["acl_tags"] == ["space:SVMC"]
++            assert state["chunks"][0]["acl_tags"] == ["space:SVMC"]
++            events.append("relation")
++            return confluence.relations
++
++    result = ConfluenceM10MaterializedSource(
++        page_stage=PageStage(), acl_stage=AclStage(), relation_stage=RelationStage()
++    ).collect(request)
++    assert events == ["acl", "relation"]
++    assert result.relations == confluence.relations
++
++
+ def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_and_keeps_enrichment(tmp_path) -> None:
+     confluence, _ = _handoffs()
+     request = _request(tmp_path)
+-- 
+2.45.1.windows.1
+

@@ -1,0 +1,2185 @@
+From 49ee1ade8e36a723463a1bd89ee62c0748263fd9 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 5 Aug 2026 11:22:57 +0700
+Subject: [PATCH] feat(foundation): complete M9-D1 tombstone cascade
+
+---
+ .../20260805-m9d1/01-plan-review.md           |  45 +++
+ .../20260805-m9d1/02-plan-revised.md          | 117 ++++++
+ .../20260805-m9d1/03-implementation.md        |  24 ++
+ .codex-workflow/20260805-m9d1/05-review-1.md  |  23 ++
+ .../20260805-m9d1/06-fix-plan.input.md        |  20 ++
+ .../20260805-m9d1/07-fix-plan-review.md       |  94 +++++
+ .../20260805-m9d1/08-fix-implementation.md    |  43 +++
+ .codex-workflow/20260805-m9d1/09-review-2.md  |  26 ++
+ .../20260805-m9d1/10-fix2-plan.input.md       |  18 +
+ .../20260805-m9d1/11-fix2-plan-review.md      | 103 ++++++
+ .codex-workflow/20260805-m9d1/12-review-3.md  |  22 ++
+ .../20260805-m9d1/13-fix3-plan.input.md       |  15 +
+ .../20260805-m9d1/14-fix3-plan-review.md      |  77 ++++
+ .codex-workflow/20260805-m9d1/15-review-4.md  |  22 ++
+ .../20260805-m9d1/16-fix4-plan.input.md       |  13 +
+ .../20260805-m9d1/17-fix4-plan-review.md      |  62 ++++
+ .../18-fix4-plan-review-amended.md            |  69 ++++
+ .../20260805-m9d1/19-review-final.md          |  25 ++
+ .codex-workflow/20260805-m9d1/PLAN.input.md   |  64 ++++
+ .local_ai/IMPLEMENTATION_STATE.md             |  24 +-
+ .local_ai/ROADMAP.md                          |  11 +-
+ .../application/use_cases/__init__.py         |   2 +
+ .../use_cases/project_tombstones.py           | 115 ++++++
+ .../foundation/domain/models/__init__.py      |  18 +
+ .../domain/models/tombstone_propagation.py    | 333 ++++++++++++++++++
+ .../foundation/domain/rules/__init__.py       |   2 +
+ .../domain/rules/tombstone_record_builder.py  |  83 +++++
+ .../use_cases/test_project_tombstones.py      |  79 +++++
+ .../models/test_tombstone_propagation.py      | 242 +++++++++++++
+ .../rules/test_tombstone_record_builder.py    |  83 +++++
+ 30 files changed, 1868 insertions(+), 6 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m9d1/01-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d1/02-plan-revised.md
+ create mode 100644 .codex-workflow/20260805-m9d1/03-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9d1/05-review-1.md
+ create mode 100644 .codex-workflow/20260805-m9d1/06-fix-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9d1/07-fix-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d1/08-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9d1/09-review-2.md
+ create mode 100644 .codex-workflow/20260805-m9d1/10-fix2-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9d1/11-fix2-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d1/12-review-3.md
+ create mode 100644 .codex-workflow/20260805-m9d1/13-fix3-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9d1/14-fix3-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d1/15-review-4.md
+ create mode 100644 .codex-workflow/20260805-m9d1/16-fix4-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9d1/17-fix4-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9d1/18-fix4-plan-review-amended.md
+ create mode 100644 .codex-workflow/20260805-m9d1/19-review-final.md
+ create mode 100644 .codex-workflow/20260805-m9d1/PLAN.input.md
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/project_tombstones.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/tombstone_propagation.py
+ create mode 100644 src/knowledgenexus/foundation/domain/rules/tombstone_record_builder.py
+ create mode 100644 tests/foundation/application/use_cases/test_project_tombstones.py
+ create mode 100644 tests/foundation/domain/models/test_tombstone_propagation.py
+ create mode 100644 tests/foundation/domain/rules/test_tombstone_record_builder.py
+
+diff --git a/.codex-workflow/20260805-m9d1/01-plan-review.md b/.codex-workflow/20260805-m9d1/01-plan-review.md
+new file mode 100644
+index 0000000..dc7b779
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/01-plan-review.md
+@@ -0,0 +1,45 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# Plan Critique
++
++The objective and non-goals are useful, but the implementation contract is not yet actionable enough for a safe build. The main risks are undefined public APIs, ambiguous cascade input, and invariants that cannot be tested from the current wording.
++
++## Concrete gaps and risks
++
++1. **Public API is unspecified (P1).** The plan names `TombstoneRequest`, `TombstoneProjectionResult`, `TombstoneRecordBuilder`, and `ProjectTombstones` but does not specify module paths, constructor/execute signatures, status and failure enums, or whether invalid input raises or returns a failed result. Define the exact importable API and error/status vocabulary before implementation.
++
++2. **Cascade input shape is ambiguous (P1).** "Source-cascade tuple" and "explicitly supplied child IDs" do not say whether a child is `(entity_type, entity_id)`, a typed collection per entity type, or an untyped ID. Untyped IDs cannot validate the different chunk/relation/ACL grammars. Specify the canonical representation, whether empty child collections are allowed, and that only a document root expands; non-document roots must not accept or expand children.
++
++3. **Entity-ID validation is underdefined (P1).** The schema only applies `opaqueId` to `entity_id`, while the acceptance criteria require malformed IDs to fail. State whether validation is schema-only (non-empty/no whitespace) or adds per-entity grammars (`chunk:`, `rel:`, `acl:`, etc.), and document valid document/media/symbol ID forms so the builder does not invent stricter rules than the contract.
++
++4. **Optional-field semantics are missing (P1).** `detail` and `source_version_last_seen` are nullable but optional. Specify whether omitted values are omitted from the dictionary or emitted as `null`, and whether root detail/source-version metadata propagates to children. Also define any detail length/content limit; the current schema has no `maxLength` despite "forbidden detail sizes" in acceptance.
++
++5. **Deterministic bytes are not defined (P1).** A plain dictionary has no byte representation. Specify the canonical serialization used by tests (key order, separators, Unicode handling, and whether `sort_keys` is required), and whether deterministic output means equal dictionaries or equal serialized JSON. Clarify whether timestamps are preserved verbatim or canonicalized.
++
++6. **Timestamp and version rules need precision (P1).** `format: date-time` is only enforced when the validator uses a format checker. Define the validator convention, accepted UTC/offset forms, and rejection of naive/non-string values. Define dataset/source-version grammar and whitespace handling; only dataset `minLength: 1` is currently supplied by the schema.
++
++7. **Duplicate policy is internally unclear (P1).** The plan says duplicate IDs are rejected unless the "exact entity/reason tuple is byte-identical," but a tuple of entity/reason is not a byte-identical record and the generator excludes detail, timestamp, and source version from the ID. Define the deduplication key and behavior for same key with differing metadata, duplicate generated IDs from a hash collision, and duplicate root/child entries. Require deterministic first/last handling or unconditional failure.
++
++8. **Ordering rank is not normative (P1).** "Entity-type rank" has no listed order, and ID ordering is not defined for non-ASCII values. Publish the exact rank (for example, document/chunk/media/relation/acl/symbol) and byte/code-point ordering. Add a test proving output is independent of input tuple order.
++
++9. **Atomic result contract is incomplete (P1).** "Failure has no records and one sanitized category" and "exact count" lack field names and invariants. Specify status, records, count, and error-category types; require `count == len(records)` on success, `count == 0` on failure, and forbid error fields on success/records on failure. Define the allowed sanitized categories and the exception boundary (catch `Exception`, not process-control exceptions).
++
++10. **Immutability is not enforceable as written (P1).** Frozen dataclasses do not freeze nested tuples of mutable dictionaries, and "forged frozen objects" needs a boundary rule. Require exact runtime type checks and revalidation at the use-case boundary, defensive copies or immutable record storage, and mutation tests for request child collections, result records, and objects built via `object.__new__`/`object.__setattr__`.
++
++11. **Schema-validator integration is underspecified (P2).** Identify the existing validator helper, reference resolution setup, and whether validation occurs before and after any normalization. Add tests for validator exceptions and mutated/partial dictionaries to prove no partial output escapes.
++
++12. **Integration/export boundaries are not named (P2).** "Activate the deferred builder" does not say which package `__init__` exports change or whether `ProjectTombstones` is intentionally not wired into the existing full-snapshot exporters. State the exact files/modules allowed to change and add a regression test that current full-snapshot output remains tombstone-empty unless explicitly invoked by this seam.
++
++13. **Purity acceptance needs executable checks (P2).** "No I/O" should include no clock or environment access and no implicit network/filesystem calls. Add monkeypatch guards for `open`, `Path`, `datetime.now/utcnow`, network clients, export writers, checkpoints, raw stores, ACL resolvers, and Qdrant; assert the use case still works with all guards failing.
++
++14. **Cascade semantics need reason coverage detail (P2).** The normative rule says a document tombstone cascades to chunks, media, relations, ACL, and symbols, but the plan does not state whether every reason cascades identically (especially `content_updated`, `config_invalidated`, and `access_revoked`) or how an explicitly supplied child with a conflicting reason is handled. Define this and test all five reasons, all six entity types, empty and maximal child sets, and child IDs repeated across categories.
++
++## Required acceptance/test additions
++
++- Constructor and use-case boundary tests for `object()`, `None`, subclasses/wrong container types, missing fields, forbidden fields, booleans where integers are expected, invalid enums, whitespace IDs, malformed timestamps, and malformed child tuples; assert failure occurs before field access or side effects.
++- Golden schema tests for every optional-field combination, exact key set, `SCHEMA_VERSION`, per-entity ID policy, validator format checking, and canonical serialized bytes.
++- Property/table tests covering every reason, root entity type, cascade category, duplicate/conflict case, permutation of input order, and deterministic IDs.
++- Atomicity tests where a later child fails, the builder raises, or schema validation raises; assert no records/count leak and only one sanitized error category is returned.
++- Mutation/forgery tests for frozen requests/results and nested records, plus architecture tests proving the seam remains pure and existing exporters are unchanged.
++
++Until these contracts are made explicit, two conforming implementations could differ on child representation, null/omitted fields, duplicate handling, ordering, and failure behavior.
+diff --git a/.codex-workflow/20260805-m9d1/02-plan-revised.md b/.codex-workflow/20260805-m9d1/02-plan-revised.md
+new file mode 100644
+index 0000000..55de3c7
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/02-plan-revised.md
+@@ -0,0 +1,117 @@
++# M9-D1 Tombstone Contract and Cascade - Revised Plan
++
++## Review disposition
++
++The independent critic classified the stage as `complex`. This revision makes
++the public API, ID policy, optional fields, canonical ordering, duplicate
++handling, timestamp normalization, and atomic failure contract explicit.
++
++## Public API and module boundaries
++
++- `foundation/domain/models/tombstone_propagation.py`: enums
++  `TombstoneEntityType`, `TombstoneReason`, `TombstoneProjectionStatus`,
++  `TombstoneProjectionFailureCategory`; immutable `TombstoneTarget`,
++  `TombstoneProjectionRequest`, `TombstoneProjectionMetrics`, and
++  `TombstoneProjectionResult`.
++- `foundation/domain/rules/tombstone_record_builder.py`:
++  `TombstoneRecordBuilder.build(...) -> dict[str, object]`.
++- `foundation/application/use_cases/project_tombstones.py`:
++  `ProjectTombstones.execute(request: object) -> TombstoneProjectionResult`.
++- Exports are additive under existing Foundation `models`, `rules`, and
++  `application.use_cases`; no exporter is wired to this seam in M9-D1.
++
++Invalid public requests return a sanitized failed result from `execute`; direct
++model/builder constructors raise `TypeError`/`ValueError` before field access.
++Unexpected dependency exceptions are converted to `internal_failure` and no
++partial records escape.
++
++## Target and ID contract
++
++`TombstoneTarget` fields are exactly:
++
++- `entity_type: TombstoneEntityType`;
++- `entity_id: str`;
++- `detail: str | None` (NFC, one-line, maximum 1024 UTF-8 bytes);
++- `source_version_last_seen: str | None` (non-empty, no whitespace).
++
++Entity ID validation follows the schema's opaque-ID rule (non-empty, no
++whitespace) for `document`, `media`, and `symbol`; it uses the authoritative
++shared grammars for `chunk`, `relation`, and `acl`:
++
++- chunk: `chunk:(confluence|git):[0-9a-f]{16}(-[0-9]+)?`;
++- relation: `rel:[0-9a-f]{16}`;
++- acl: `acl:\S+`.
++
++The existing `TombstoneIdGenerator` remains the sole ID algorithm. Its input is
++`entity_type.value`, `entity_id`, `reason.value`, and `dataset_version`; detail,
++timestamp, and source version never affect the tombstone ID.
++
++## Request/result semantics
++
++`TombstoneProjectionRequest` fields are exactly `root: TombstoneTarget`,
++`reason: TombstoneReason`, `detected_at: str`, `dataset_version: str`, and
++`children: tuple[TombstoneTarget, ...]`.
++
++- `detected_at` is a required RFC3339 timestamp; normalize it to UTC with
++  microseconds and `Z` once at construction. Naive/invalid timestamps fail.
++- `dataset_version` is a non-empty, no-whitespace string; source versions are
++  non-empty, no-whitespace strings when present.
++- A document root may have zero or more explicitly supplied children. Every
++  other root must have an empty child tuple; no child is inferred and no
++  child-to-parent cascade exists.
++- All children receive the same reason, dataset version, and detected time as
++  the request. Root/child detail and source-version metadata remain local to
++  each target; they are not copied implicitly.
++- Duplicate key `(entity_type, entity_id, reason, dataset_version)` collapses
++  only when all target metadata is byte-identical. Any metadata conflict fails
++  atomically; duplicate IDs caused by distinct preimages fail closed.
++
++`TombstoneProjectionResult` fields are exactly `status`, `records`, `count`,
++`metrics`, and `error_category`. Success requires `status=success`, a tuple of
++  schema-shaped dicts, `count == len(records)`, matching metrics, and no error;
++failure requires `status=failed`, `records=()`, `count=0`, `metrics=None`, and
++exactly one `TombstoneProjectionFailureCategory`.
++
++## Record shape and ordering
++
++`TombstoneRecordBuilder` creates exactly the schema fields:
++`schema_version`, `tombstone_id`, `entity_type`, `entity_id`, `reason`,
++`detected_at`, `dataset_version`; it adds `detail` and
++`source_version_last_seen` only when non-null. It invokes
++`FoundationSchemaValidator.validate_record("TombstoneRecord", record)` before
++returning a defensive plain dict.
++
++Records are sorted by fixed rank then Unicode code-point entity ID:
++`document=0`, `chunk=1`, `media=2`, `relation=3`, `acl=4`, `symbol=5`.
++Canonical bytes use `json.dumps(..., ensure_ascii=False, sort_keys=True,
++separators=(",", ":"), allow_nan=False).encode("utf-8")`.
++
++## Cascade and purity
++
++The normative document cascade is explicit only: document root, then supplied
++chunks, media, relations, ACL, and symbols. Every one of the five reasons uses
++the same cascade shape; the caller chooses which children are present. Child
++targets with a different entity type or repeated ID are validated using the
++same rules. No filesystem, clock, environment, network, exporter, checkpoint,
++raw-store, ACL resolver, Qdrant, or metadata-store call is allowed; the only
++time operation is parsing the caller-provided timestamp.
++
++## Acceptance tests
++
++- Schema golden tests for required/optional fields, exact key set, all enums,
++  IDs, canonical timestamps, canonical bytes, and validator exceptions.
++- Adversarial constructors/use case: `object()`, `None`, wrong enum values,
++  missing/extra fields, wrong containers/subclasses, bool counters, malformed
++  IDs, invalid/naive timestamps, oversized/newline detail, and forged frozen
++  objects; fail before dependency calls.
++- Cascade table for every reason, document/non-document roots, all entity
++  types, empty/maximal children, permutation-independent ordering, duplicate
++  identical/conflicting targets, and no inferred children.
++- Atomic rollback when a later child, builder, or schema validator fails;
++  result has no records/count leakage and only a sanitized category.
++- Purity guards for file/network/clock/export/checkpoint/raw/ACL/Qdrant calls;
++  current full-snapshot/export tests remain unchanged and tombstone-empty unless
++  this seam is explicitly invoked.
++- Focused tests, relevant M9 regressions, architecture, compileall,
++  `git diff --check`, fresh independent review, ledger update, commit/push.
++
+diff --git a/.codex-workflow/20260805-m9d1/03-implementation.md b/.codex-workflow/20260805-m9d1/03-implementation.md
+new file mode 100644
+index 0000000..a1e4f84
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/03-implementation.md
+@@ -0,0 +1,24 @@
++# M9-D1 Implementation Report
++
++Implemented the reviewed M9-D1 tombstone contract and explicit document
++cascade without wiring exporters, stores, checkpoints, clocks, or network I/O.
++
++## Changes
++
++- Added runtime-validated tombstone target/request/result models with immutable
++  metadata, canonical timestamps, entity-ID grammars, duplicate policy, JSON
++  safety, and cross-field metric/status invariants.
++- Added schema-valid deterministic `TombstoneRecordBuilder` and additive
++  Foundation exports.
++- Added atomic `ProjectTombstones` application use case with fixed ordering,
++  canonical JSON collision comparison, sanitized failure categories, and no
++  partial records.
++- Added focused adversarial model, builder, and use-case tests.
++
++## Validation
++
++- `python -m pytest -q --basetemp=.pytest-m9d1-focused3 tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py` - 14 passed.
++- `python -m pytest -q --basetemp=.pytest-m9d1-reg tests/foundation/domain/rules/test_tombstone_id_generator.py tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py` - 32 passed.
++- `python -m pytest -q --basetemp=.pytest-m9d1-arch tests/architecture` - 86 passed.
++- `python -m compileall -q src tests` - passed.
++- `git diff --check` - passed (only existing line-ending normalization warnings).
+diff --git a/.codex-workflow/20260805-m9d1/05-review-1.md b/.codex-workflow/20260805-m9d1/05-review-1.md
+new file mode 100644
+index 0000000..94b0f08
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/05-review-1.md
+@@ -0,0 +1,23 @@
++# M9-D1 Independent Review
++
++Review target: current uncommitted M9-D1 implementation against `02-plan-revised.md` and `AGENTS.md`.
++
++## Findings
++
++- **P1 - Validator mutation can produce a successful malformed record** — `src/knowledgenexus/foundation/application/use_cases/project_tombstones.py:60-90` trusts the dictionary after `TombstoneRecordBuilder.build()` and only checks that `tombstone_id` is a string. A dependency validator that removes `entity_id` (or otherwise mutates a record) returns `SUCCESS` with a record that is not `TombstoneRecord`-shaped. The revised plan explicitly requires mutated/partial validator output to fail atomically; revalidate the returned record (or validate an immutable copy) before appending it.
++
++- **P1 - Public success results accept non-schema records** — `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:164-187` checks only JSON safety and count arithmetic. It accepts `TombstoneProjectionResult(status=SUCCESS, records=({'foo': 1},), count=1, metrics=TombstoneProjectionMetrics(1, 1, 0))`, despite the contract requiring schema-shaped tombstone dictionaries. This allows callers to forge a typed success result that downstream code may trust; enforce the exact TombstoneRecord key/field contract (including optional-field rules) at this boundary.
++
++- **P1 - Forged frozen targets are not revalidated by the request model** — `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:121-138` verifies only that `root`/children have the exact dataclass type, then reads their fields without invoking `TombstoneTarget.__post_init__`. A forged `TombstoneTarget` created with `object.__new__` and `entity_id='bad id'` is accepted by `TombstoneProjectionRequest`, so the supposedly runtime-validated request can contain invalid IDs. An uninitialized forged target instead raises `AttributeError` during request/build construction, violating the required TypeError/ValueError fail-closed boundary. Revalidate root and every child before field access; the use case should classify such requests as invalid rather than `internal_failure`.
++
++- **P1 - Default construction performs filesystem I/O in a pure seam** — `src/knowledgenexus/foundation/application/use_cases/project_tombstones.py:33-35` constructs `FoundationSchemaValidator()` when no dependency is supplied. That constructor loads every contract schema from disk, so `ProjectTombstones()` performs filesystem reads before `execute`; a guard replacing `Path.read_text` with an exception fails at construction. The revised plan forbids filesystem calls for this pure projection seam. Require an already-created validator/dependency, or otherwise move schema loading outside the pure boundary.
++
++## Validation performed
++
++- `python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py` — 14 passed.
++- `python -m pytest -q tests/architecture/test_application_import_boundary.py tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py tests/shared/contracts/foundation/test_schema_validator.py` — 48 passed; 3 schema-validator tests could not set up `tmp_path` because the host pytest temp root returned `PermissionError`.
++- `python -m compileall -q` on the three M9-D1 modules — passed.
++- `git diff --check` — passed (only line-ending warnings on existing modified export files).
++- Manual adversarial probes reproduced the malformed-success validator case, arbitrary success records, forged-target acceptance/`AttributeError`, and default-constructor filesystem access described above.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9d1/06-fix-plan.input.md b/.codex-workflow/20260805-m9d1/06-fix-plan.input.md
+new file mode 100644
+index 0000000..d2a53f4
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/06-fix-plan.input.md
+@@ -0,0 +1,20 @@
++# M9-D1 Bounded Fix Plan
++
++Address only the four confirmed findings from the fresh independent review.
++
++1. Make `TombstoneRecordBuilder` detect any validator mutation or field-set
++   drift after validation and fail closed.
++2. Make `TombstoneProjectionResult` validate the exact tombstone record shape,
++   required/optional keys, enum values, IDs, schema version, and success root
++   metrics; keep failure payloads empty.
++3. Make model `__post_init__` methods use sentinel-safe attribute reads so
++   forged frozen instances fail with `TypeError`/`ValueError`; the use case
++   maps forged requests to `invalid_request`.
++4. Remove implicit filesystem schema loading from `ProjectTombstones` by
++   requiring an injected validator dependency; update focused callers/tests
++   without wiring this seam into exporters.
++
++Acceptance: focused adversarial tests cover mutating validators, malformed
++record shapes, forged objects, and missing dependencies; prior M9-D1,
++M9-A/B/C, M8-D/E, architecture, compileall, and diff-check regressions pass.
++No exporter, store, checkpoint, network, or roadmap behavior changes.
+diff --git a/.codex-workflow/20260805-m9d1/07-fix-plan-review.md b/.codex-workflow/20260805-m9d1/07-fix-plan-review.md
+new file mode 100644
+index 0000000..82fd58b
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/07-fix-plan-review.md
+@@ -0,0 +1,94 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D1 Bounded Fix Plan - Reviewed
++
++## Objective
++
++Address exactly the four confirmed independent-review findings in the existing
++M9-D1 tombstone seam. Preserve the public behavior and scope from
++`02-plan-revised.md`; do not add exporter wiring, persistence, roadmap work, or
++new tombstone policy.
++
++## Findings mapped to changes
++
++1. **Validator mutation/field drift:** harden
++   `foundation/domain/rules/tombstone_record_builder.py` so the record is
++   snapshotted before `validate_record`, then compared after validation using
++   canonical JSON bytes and the exact expected key set. Any validator mutation,
++   optional-key insertion/removal, value change, or non-JSON-safe mutation must
++   raise a sanitized-safe `ValueError`/schema-validation exception and return
++   no record. Return a fresh plain dictionary only after the post-validation
++   comparison; do not trust a validator return value.
++
++2. **Result record contract:** strengthen
++   `foundation/domain/models/tombstone_propagation.py` so
++   `TombstoneProjectionResult.__post_init__` validates every record against the
++   tombstone schema shape without loading files: exact required keys, optional
++   key/null semantics, `SCHEMA_VERSION`, all enum strings, tombstone ID grammar
++   and deterministic preimage, per-entity ID grammar, canonical timestamp,
++   non-empty/no-whitespace dataset version, detail/source-version types, and
++   JSON-safe values. Reject extra/missing keys and malformed values before any
++   field-dependent access. Preserve the existing success/failure invariants:
++   success has metrics, no error, and `count == len(records) == metrics.record_count`
++   with root/child counts consistent; failure has `records == ()`, `count == 0`,
++   `metrics is None`, and exactly one failure category.
++
++3. **Forged frozen models:** make every affected model `__post_init__`
++   (`TombstoneTarget`, `TombstoneProjectionRequest`,
++   `TombstoneProjectionMetrics`, and `TombstoneProjectionResult`) use a shared
++   sentinel-safe attribute reader. Missing or forged attributes must raise only
++   `TypeError` or `ValueError`, never leak `AttributeError`. Revalidate nested
++   forged targets/metrics/results explicitly before dereferencing their fields.
++   In `ProjectTombstones.execute`, revalidation failures for an exact-type
++   `TombstoneProjectionRequest` map to `invalid_request`; validator calls must
++   not occur for such requests.
++
++4. **Injected validator dependency:** change
++   `ProjectTombstones.__init__` to require a `schema_validator` argument with a
++   callable `validate_record`; remove the `FoundationSchemaValidator()` default
++   and any construction that can load schemas from the filesystem. Keep the
++   injected object as the only validator dependency. Update focused callers and
++   tests to inject a real validator or a test double explicitly. A missing,
++   `None`, or non-callable dependency fails at construction with `TypeError`;
++   no exporter or application composition root is wired in this stage.
++
++## File and scope boundary
++
++Expected implementation files are the existing tombstone model, builder, use
++case, and their focused tests. Additive package exports may remain as already
++implemented. Do not modify JSON schemas, exporters, stores, checkpoint code,
++network clients, roadmap/state files, or unrelated M9/M8 modules.
++
++## Required tests
++
++- **Builder mutation tests:** validators that mutate a value, add/remove a key,
++  mutate optional fields, return a replacement value, or raise after mutation;
++  assert the builder fails closed and no mutated/partial dictionary is returned.
++- **Exact result-shape tests:** valid records for every entity type/reason and
++  optional-field combination; reject `object()`, `None`, wrong enum strings,
++  missing required keys, forbidden extra keys, wrong field types, malformed
++  IDs, wrong schema version, non-canonical/invalid timestamps, whitespace or
++  empty versions, invalid detail/source-version values, non-finite numbers, and
++  deterministic-ID mismatches.
++- **Forged-object tests:** create each model with `object.__new__`, omit fields,
++  inject wrong field types, forge nested targets/metrics, and call
++  `__post_init__`; assert only `TypeError`/`ValueError`. Exercise forged request
++  execution and verify `invalid_request`, zero records/count, and zero validator
++  calls. Include constructor missing/extra-field cases and wrong runtime
++  containers/subclasses.
++- **Dependency tests:** `ProjectTombstones()` (missing argument), `None`, and a
++  non-callable validator fail at construction; an injected validator is used
++  without filesystem access. Keep the existing schema-rejection sanitization
++  and atomic rollback tests.
++- **Adversarial application-boundary pass:** `execute(object())`, `execute(None)`,
++  malformed requests, impossible result/metric counters, and dependency
++  failures must fail closed before field access or side effects, with one
++  sanitized category and no partial records.
++
++## Verification and acceptance
++
++Run the focused tombstone model/builder/use-case tests, then the prior M9-D1,
++M9-A/B/C, M8-D/E, architecture, and integration regressions. Also run
++`python -m compileall -q src tests` and `git diff --check`. Acceptance requires
++all tests pass, no exporter output changes, no implicit schema/filesystem access
++from `ProjectTombstones`, and a fresh independent review in a new session.
+diff --git a/.codex-workflow/20260805-m9d1/08-fix-implementation.md b/.codex-workflow/20260805-m9d1/08-fix-implementation.md
+new file mode 100644
+index 0000000..9a5cb1e
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/08-fix-implementation.md
+@@ -0,0 +1,43 @@
++# M9-D1 Fix Implementation Report
++
++Applied only the reviewed fixes for the four independent-review findings.
++
++- Validator mutation is detected before a tombstone record is returned.
++- Results require exact schema-shaped tombstone dictionaries, canonical IDs,
++  timestamps, enums, optional fields, JSON-safe values, and root metrics.
++- Sentinel-safe model validation rejects forged frozen instances with typed
++  errors; forged requests return `invalid_request`.
++- `ProjectTombstones` now requires an injected schema validator, removing
++  implicit filesystem contract loading from the pure application seam.
++
++Validation:
++
++- Focused M9-D1 fix suite: `19 passed`.
++- Tombstone/export regression selection: `32 passed`.
++- Architecture suite: `86 passed`.
++- `python -m compileall -q src tests`: passed.
++- `git diff --check`: passed (line-ending normalization warnings only).
++
++Second bounded fix pass:
++
++- Result models now recompute deterministic tombstone IDs, revalidate nested
++  metrics, and accept schema-permitted explicit null optionals.
++- Requests revalidate root/child targets before field access.
++- Builder mutation checks use exact key/value types plus canonical JSON bytes.
++- Focused M9-D1 suite after the second pass: `23 passed`.
++
++Third bounded fix pass:
++
++- Model field sets are exact and reject forged extras.
++- Result records are validated before defensive copying, preventing custom
++  copy-hook execution or exception leakage.
++- Focused M9-D1 suite: `28 passed`; M9/M8 boundary regression: `42 passed`;
++  architecture/schema slice: `37 passed`; compileall and diff-check passed.
++
++Fourth bounded fix pass:
++
++- JSON-safe traversal now detects cycles/depth overflow before copying.
++- Defensive-copy failures are sanitized without catching process-control
++  exceptions.
++- Focused M9-D1 suite: `31 passed`; M9/M8 regression: `42 passed`;
++  architecture/schema: `37 passed`; compileall and diff-check passed.
+diff --git a/.codex-workflow/20260805-m9d1/09-review-2.md b/.codex-workflow/20260805-m9d1/09-review-2.md
+new file mode 100644
+index 0000000..9e151dc
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/09-review-2.md
+@@ -0,0 +1,26 @@
++# M9-D1 Independent Re-review
++
++Review target: current M9-D1 working tree after the changes described in
++`07-fix-plan-review.md`, against `02-plan-revised.md` and `AGENTS.md`.
++
++## Findings
++
++- **P1 - Result records do not enforce the deterministic tombstone preimage** — `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:263-275` checks only the `tomb:[0-9a-f]{16}` grammar. A success result accepts a record whose ID is unrelated to `(entity_type, entity_id, reason, dataset_version)` (for example, an all-zero ID), so callers can forge a typed result with an ID that the builder would never generate. Recompute the ID with `TombstoneIdGenerator` and reject mismatches before accepting the record.
++
++- **P1 - Forged metrics bypass nested invariants and can leak `AttributeError`** — `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:202-207` checks the nested object’s exact type but never re-runs `TombstoneProjectionMetrics.__post_init__`. An `object.__new__` metrics instance with `record_count=1`, `root_count=1`, and `child_count=999` is accepted in a successful result; a forged instance missing one of these fields raises `AttributeError` while result construction reads it. Revalidate nested metrics with the sentinel-safe path before dereferencing and preserve only `TypeError`/`ValueError` at this boundary.
++
++- **P1 - Forged targets inside requests are not revalidated and are misclassified** — `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:137-155` verifies only exact dataclass types, then reads target fields without calling `TombstoneTarget.__post_init__`. A forged root with `entity_id='bad id'` is accepted by the request model. `ProjectTombstones.execute` then reaches the builder and returns `schema_validation_failed` (with zero validator calls) instead of the required `invalid_request`; a missing-field forged target makes direct request validation leak `AttributeError` and makes `execute` return `internal_failure`. Revalidate root and every child before field access, and classify all such request failures as `invalid_request`.
++
++- **P1 - Schema-valid null optional fields are rejected at the result boundary** — `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:276-281` requires `detail` and `source_version_last_seen` to be strings whenever their keys are present, but `contracts/foundation/schemas/tombstone_record.schema.json` explicitly permits either string or `null` for both optional properties. A schema-shaped success record carrying `detail: None` or `source_version_last_seen: None` is rejected, contrary to the public schema contract. Accept explicit nulls (while retaining string validation for non-null values).
++
++- **P2 - Builder mutation guard relies on equality instead of canonical bytes/exact key comparison** — `src/knowledgenexus/foundation/domain/rules/tombstone_record_builder.py:55-59` compares the post-validator dictionary to a deep-copied dictionary with `==`. A validator can replace a field with a custom `str` subclass that compares equal to the original; the builder returns the mutated value (`entity_id='evil'`) successfully. The reviewed fix plan requires canonical JSON bytes and the exact expected key set so equal-but-noncanonical/non-JSON-safe mutations fail closed.
++
++## Validation performed
++
++- `python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py` — **19 passed**.
++- Adversarial probes reproduced all findings above: mismatched deterministic ID accepted; explicit null optionals rejected; forged metrics with impossible child count accepted; forged target accepted by request and mapped to `schema_validation_failed`; equality-forging validator mutation returned a changed record.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/architecture/test_application_import_boundary.py tests/shared/contracts/foundation/test_schema_validator.py` — **34 passed, 3 errors** during `tmp_path` setup because the host pytest temp root denied `C:\Users\ADMIN\AppData\Local\Temp\pytest-of-ADMIN` access; rerunning with `--basetemp=.codex-workflow/20260805-m9d1/pytest-rereview` produced **37 passed**.
++- `$env:PYTHONPATH='src'; python -m compileall -q src tests` — passed.
++- `git diff --check` — passed; only existing line-ending warnings were emitted.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9d1/10-fix2-plan.input.md b/.codex-workflow/20260805-m9d1/10-fix2-plan.input.md
+new file mode 100644
+index 0000000..a5a2d7a
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/10-fix2-plan.input.md
+@@ -0,0 +1,18 @@
++# M9-D1 Fix Plan 2
++
++Address only the five findings in `09-review-2.md`.
++
++1. Recompute each result record's tombstone ID through
++   `TombstoneIdGenerator` and reject mismatched preimages.
++2. Re-run sentinel-safe `TombstoneProjectionMetrics.__post_init__` on nested
++   metrics before reading cross-field values; forged metrics must raise typed
++   errors.
++3. Re-run `TombstoneTarget.__post_init__` for request root and every child
++   before entity-field access so forged targets classify as `invalid_request`.
++4. Permit explicit `null` for schema-optional `detail` and
++   `source_version_last_seen`, while validating non-null values.
++5. Strengthen builder post-validator integrity checks with exact key/value
++   types, canonical JSON bytes, and no equality-only mutation acceptance.
++
++Add focused adversarial tests for each finding. Preserve dependency
++injection/purity, atomicity, no-I/O scope, and all prior regression commands.
+diff --git a/.codex-workflow/20260805-m9d1/11-fix2-plan-review.md b/.codex-workflow/20260805-m9d1/11-fix2-plan-review.md
+new file mode 100644
+index 0000000..9d22b03
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/11-fix2-plan-review.md
+@@ -0,0 +1,103 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D1 Fix Plan 2 - Reviewed
++
++## Objective
++
++Address only the five confirmed findings in `09-review-2.md` while preserving
++the injected-validator, no-I/O, atomicity, ordering, and exporter-boundary
++contracts already established by M9-D1. Do not change schemas, cascade policy,
++exporters, stores, checkpoints, roadmap state, or unrelated modules.
++
++## Implementation steps
++
++1. **Deterministic result IDs**
++
++   In `foundation/domain/models/tombstone_propagation.py`, after validating the
++   record fields and dataset version, recompute the expected ID with
++   `TombstoneIdGenerator.generate_tombstone_id(entity_type, entity_id, reason,
++   dataset_version)`. Reject any mismatch, including a grammatically valid
++   all-zero or otherwise forged ID, before accepting a success result. Keep the
++   existing ID grammar check and add a focused mismatch test.
++
++2. **Nested metrics revalidation**
++
++   In `TombstoneProjectionResult.__post_init__`, use sentinel-safe reads and
++   exact-type checks for `metrics`, then explicitly invoke
++   `TombstoneProjectionMetrics.__post_init__(metrics)` before reading
++   `record_count`, `root_count`, or `child_count`. A forged metrics object with
++   impossible counts or missing fields must raise only `TypeError`/`ValueError`,
++   never leak `AttributeError`, and cannot produce a successful result. Retain
++   the result-level count and status invariants after nested validation.
++
++3. **Nested target revalidation and classification**
++
++   In `TombstoneProjectionRequest.__post_init__`, after exact-type checks and
++   before reading entity fields, call `TombstoneTarget.__post_init__` for the
++   root and every child. Use the existing sentinel-safe model validation so
++   missing or forged target attributes become typed errors. In
++   `ProjectTombstones.execute`, map all request/target revalidation
++   `TypeError`/`ValueError` failures to `invalid_request`; do not call the
++   injected validator for these failures. Preserve duplicate and cascade
++   validation behavior after all targets are valid.
++
++4. **Schema-compatible nullable optionals**
++
++   Update the result record validator to accept an explicitly present
++   `detail: None` or `source_version_last_seen: None`, matching
++   `tombstone_record.schema.json`. For non-null values retain the current
++   string, one-line/size, and non-empty/no-whitespace checks. Continue rejecting
++   wrong types, extra keys, missing required keys, and non-JSON-safe values.
++
++5. **Canonical builder mutation guard**
++
++   In `TombstoneRecordBuilder.build`, define the expected key set and exact
++   value-type/JSON shape before validation. Capture canonical JSON bytes of the
++   pre-validation record (with the established sorted-key, compact UTF-8
++   serialization), call the injected validator, then compare both the exact key
++   set and canonical post-validation bytes. Reject equal-but-different values
++   such as `str` subclasses, non-canonical replacements, optional-key drift,
++   and any mutation that makes serialization fail. Ignore any return value from
++   `validate_record`; return a fresh plain dictionary only after all checks pass.
++
++## Files and scope
++
++Modify only the existing tombstone model, builder, use case if needed for
++classification, and focused tests. Keep additive exports and the required
++validator injection unchanged. Do not restore a default `FoundationSchemaValidator`,
++perform schema filesystem loading in `ProjectTombstones`, or wire this seam into
++exporters.
++
++## Required adversarial tests
++
++- **Result ID:** valid records for every entity/reason combination plus a valid
++  grammar with a mismatched deterministic preimage; assert construction fails.
++- **Forged metrics:** `object.__new__(TombstoneProjectionMetrics)` with missing
++  fields, impossible cross-field counts, wrong types, and forged values nested
++  in a success result; assert only `TypeError`/`ValueError` and no success.
++- **Forged targets:** forged root and child targets with missing fields, wrong
++  enum, malformed IDs, and invalid optional metadata; direct request validation
++  and `execute` must produce typed invalid-request failures, zero records/count,
++  one sanitized category, and zero validator calls. Include `object()`, `None`,
++  wrong containers/subclasses, missing required fields, and forbidden extra
++  fields at each public/application boundary.
++- **Nullable optionals:** schema-shaped records with each optional key absent,
++  string, and explicit `None`; reject wrong types, newline/oversized detail,
++  and invalid source versions.
++- **Builder integrity:** validators that mutate a value, add/remove keys,
++  replace a value with an equal-comparing `str` subclass, mutate then raise, or
++  return a replacement; assert fail-closed behavior and no partial output.
++- **Atomicity/regressions:** a malformed later child, builder failure, validator
++  failure, or result validation failure returns no records and count zero;
++  preserve deterministic ordering, purity guards, dependency-injection tests,
++  and unchanged exporter behavior.
++
++## Verification
++
++Run the focused tombstone model/builder/use-case tests, then the prior M9-D1,
++M9-A/B/C, M8-D/E, architecture, and integration regression commands. Run
++`python -m compileall -q src tests` and `git diff --check`. If pytest temp-root
++permissions reproduce the review environment error, rerun with an explicit
++workspace-local `--basetemp` and report the exact command/result. Acceptance
++requires all relevant tests to pass, no filesystem/network/clock side effects,
++and a fresh independent review in a new CLI session.
+diff --git a/.codex-workflow/20260805-m9d1/12-review-3.md b/.codex-workflow/20260805-m9d1/12-review-3.md
+new file mode 100644
+index 0000000..d82821f
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/12-review-3.md
+@@ -0,0 +1,22 @@
++# M9-D1 Final Independent Re-review
++
++Review target: current M9-D1 working tree after the second fixes described in
++`11-fix2-plan-review.md`, against `02-plan-revised.md` and `AGENTS.md`.
++
++## Findings
++
++- **P1 - Result validation deep-copies untrusted values before rejecting them** - `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:197-203` calls `copy.deepcopy` before `_validate_json_object`. A record containing a wrong-type value with a custom `__deepcopy__` can execute arbitrary side effects and leak an arbitrary exception (for example, `RuntimeError`) instead of failing closed with `TypeError`/`ValueError`. Validate the original record's JSON shape before copying, or otherwise avoid invoking user-controlled copy hooks at this boundary.
++
++- **P1 - Forged frozen model instances with extra attributes are accepted** - `TombstoneTarget.__post_init__`, `TombstoneProjectionRequest.__post_init__`, `TombstoneProjectionMetrics.__post_init__`, and `TombstoneProjectionResult.__post_init__` validate required attributes but never reject extra instance attributes. `object.__new__` plus `object.__setattr__` can add an `extra` field; target/request/result revalidation still succeeds, and a target with extra state can be projected successfully. This violates the exact-field and forbidden-extra-field boundary contract; validate the exact `vars(self)` key set for each model before field use.
++
++## Validation performed
++
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py --basetemp=.codex-workflow/20260805-m9d1/pytest-rereview3-focused` - **23 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/architecture/test_application_import_boundary.py tests/shared/contracts/foundation/test_schema_validator.py --basetemp=.codex-workflow/20260805-m9d1/pytest-rereview3-arch` - **37 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/rules/test_tombstone_id_generator.py tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py --basetemp=.codex-workflow/20260805-m9d1/pytest-rereview3-reg` - **32 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/architecture/test_m9a2_attachment_body_boundary.py tests/architecture/test_m9a3_media_processing_boundary.py tests/architecture/test_m9b_git_boundary.py tests/architecture/test_m8ac_acceptance_boundary.py tests/foundation/integration/test_golden_full_snapshot_export.py --basetemp=.codex-workflow/20260805-m9d1/pytest-rereview3-m9reg` - **17 passed**.
++- `$env:PYTHONPATH='src'; python -m compileall -q src tests` - passed.
++- `git diff --check` - passed (only existing line-ending warnings).
++- Adversarial probes confirmed a custom `__deepcopy__` side effect/`RuntimeError` leak and acceptance of forged extra attributes on target, request, metrics, and result instances.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9d1/13-fix3-plan.input.md b/.codex-workflow/20260805-m9d1/13-fix3-plan.input.md
+new file mode 100644
+index 0000000..475f519
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/13-fix3-plan.input.md
+@@ -0,0 +1,15 @@
++# M9-D1 Fix Plan 3
++
++Address only the two findings in `12-review-3.md`.
++
++1. Validate result records for exact JSON-safe/tombstone shape before any
++   `deepcopy`, then perform a defensive copy inside a typed exception boundary
++   so custom copy hooks cannot cause side effects or leak arbitrary exceptions.
++2. Reject forbidden extra instance attributes in every tombstone model by
++   checking the exact dataclass field set before field access; forged frozen
++   instances must fail with `TypeError`/`ValueError` and the use case must
++   return `invalid_request` for forged requests.
++
++Add focused adversarial tests for custom `__deepcopy__` and extra attributes.
++Preserve all prior contracts and rerun focused, M9/M8, architecture/schema,
++compileall, diff-check, fresh independent review, ledger, commit, and push.
+diff --git a/.codex-workflow/20260805-m9d1/14-fix3-plan-review.md b/.codex-workflow/20260805-m9d1/14-fix3-plan-review.md
+new file mode 100644
+index 0000000..60ae051
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/14-fix3-plan-review.md
+@@ -0,0 +1,77 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D1 Fix Plan 3 - Reviewed
++
++## Objective
++
++Address only the two confirmed findings in `12-review-3.md`. Preserve all
++earlier M9-D1 contracts: injected validator dependency, deterministic IDs,
++schema-compatible nullable optionals, atomic failed results, pure/no-I/O
++projection, fixed ordering, and no exporter wiring.
++
++## Implementation steps
++
++1. **Safe result-record validation and copying**
++
++   In `foundation/domain/models/tombstone_propagation.py`, validate each input
++   record's exact container type, JSON-safe value tree, exact tombstone key set,
++   field types, enums, IDs, deterministic preimage, timestamp, versions, and
++   nullable optional fields before invoking any copy operation. The JSON walker
++   must accept only builtin JSON primitives/containers (reject subclasses and
++   arbitrary objects), so a hostile value with `__deepcopy__` is rejected before
++   its hook can run. After validation, perform the defensive `deepcopy` inside a
++   `try/except Exception` boundary and convert any copy failure to a typed
++   `TypeError`/`ValueError`; no arbitrary exception or partially copied record
++   may escape. Revalidate the copied value if the implementation changes it or
++   if that is needed to preserve the exact boundary contract.
++
++2. **Exact forged-model field sets**
++
++   Add a shared helper that checks `vars(instance)` against the exact dataclass
++   field-name set before reading any model field. Apply it to
++   `TombstoneTarget`, `TombstoneProjectionRequest`,
++   `TombstoneProjectionMetrics`, and `TombstoneProjectionResult`, alongside
++   the existing sentinel-safe reads and exact runtime-type checks. Missing or
++   extra attributes, including an `extra` attribute injected with
++   `object.__setattr__`, must raise only `TypeError`/`ValueError`. Request
++   validation must continue to revalidate root and child targets, and
++   `ProjectTombstones.execute` must map these forged-request failures to
++   `invalid_request` with zero validator calls and no records/count leakage.
++
++## Scope and files
++
++Modify only the tombstone model, and focused tests (plus the use case only if
++needed to preserve invalid-request classification). Do not restore implicit
++`FoundationSchemaValidator` construction, add filesystem/network/clock calls,
++change schemas or exporters, alter cascade policy, or touch unrelated M9/M8
++modules. Keep existing additive exports and dependency injection intact.
++
++## Required adversarial tests
++
++- A record containing a custom object whose `__deepcopy__` increments a flag or
++  raises `RuntimeError`: result construction must reject it before the hook is
++  called and expose only `TypeError`/`ValueError`.
++- A validator/result record using dict or primitive subclasses, custom keys, and
++  malformed nested containers: reject before copying or side effects.
++- For each tombstone model, forge an instance with `object.__new__`, omit a
++  required field, add an `extra` field, or set a wrong runtime type; direct
++  `__post_init__` calls must fail with typed errors and never `AttributeError`.
++- Forge a root and child target inside a request, execute it through
++  `ProjectTombstones`, and assert `INVALID_REQUEST`, `records == ()`,
++  `count == 0`, one sanitized category, and zero calls to the injected
++  validator. Cover `object()`, `None`, wrong enum values, missing fields,
++  forbidden extras, malformed IDs, and impossible metrics at public/application
++  boundaries as required by `AGENTS.md`.
++- Retain prior tests for deterministic ID preimages, nullable optionals,
++  validator mutation, atomic later-child failure, status/count invariants,
++  dependency injection, purity guards, ordering, and unchanged exporters.
++
++## Verification and acceptance
++
++Run the focused tombstone tests, then the M9-D1/M9-A/B/C/M8-D/E regression,
++architecture, schema-validator, and integration suites. Use workspace-local
++`--basetemp` if host pytest temp permissions fail. Also run
++`python -m compileall -q src tests` and `git diff --check`. Acceptance requires
++all relevant tests pass, no side effects from hostile inputs or implicit schema
++loading, and a fresh independent review in a new CLI session before ledger,
++commit, or push actions.
+diff --git a/.codex-workflow/20260805-m9d1/15-review-4.md b/.codex-workflow/20260805-m9d1/15-review-4.md
+new file mode 100644
+index 0000000..8a0c801
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/15-review-4.md
+@@ -0,0 +1,22 @@
++# M9-D1 Independent Closeout Review
++
++Review target: current M9-D1 tree after the bounded fixes in
++`14-fix3-plan-review.md`, checked against `12-review-3.md` and `AGENTS.md`.
++This review did not modify source or tests.
++
++## Findings
++
++- **P1 - Cyclic/malformed builtin containers leak `RecursionError` at the result boundary** - `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:208-213` invokes `_validate_json_object`, whose recursive traversal at lines 255/259 has no cycle/depth guard. A plain builtin record containing a self-referential list or dict (for example, an extra field such as `record["detail"] = cycle`, or any malformed nested value) raises `RecursionError` instead of the required typed `TypeError`/`ValueError`. This violates the adversarial malformed-container/fail-closed contract and lets a non-sanitized exception escape `TombstoneProjectionResult` construction. The traversal must detect cycles (or otherwise bound recursion) and convert malformed nesting to a typed validation error before copying.
++- **P1 - Defensive-copy exception boundary is narrower than the reviewed contract** - `src/knowledgenexus/foundation/domain/models/tombstone_propagation.py:214-217` catches only `TypeError` and `ValueError` from `copy.deepcopy`, while Fix Plan 3 requires an `Exception` boundary that converts any copy failure to a typed error. A copy failure outside those two classes (for example, a `RuntimeError` from a patched/delegated copy implementation) escapes result construction unchanged. Catch `Exception` and sanitize it to `TypeError`/`ValueError` after the pre-copy validation.
++
++## Validation performed
++
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py --basetemp=.codex-workflow/20260805-m9d1/pytest-review4-focused` - **28 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/rules/test_tombstone_id_generator.py tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/architecture/test_m9a2_attachment_body_boundary.py tests/architecture/test_m9a3_media_processing_boundary.py tests/architecture/test_m9b_git_boundary.py tests/architecture/test_m8ac_acceptance_boundary.py --basetemp=.codex-workflow/20260805-m9d1/pytest-review4-reg` - **42 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/architecture/test_application_import_boundary.py tests/shared/contracts/foundation/test_schema_validator.py --basetemp=.codex-workflow/20260805-m9d1/pytest-review4-arch` - **37 passed**.
++- `python -m compileall -q src tests` - passed.
++- `git diff --check` - passed (only existing LF/CRLF warnings).
++- Adversarial probe: a schema-shaped record with a self-referential list or dict reaches `_validate_json_object` and leaks `RecursionError: maximum recursion depth exceeded`.
++- Adversarial probe: replacing the module's `copy.deepcopy` with a function that raises `RuntimeError` leaks that runtime exception from result construction.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9d1/16-fix4-plan.input.md b/.codex-workflow/20260805-m9d1/16-fix4-plan.input.md
+new file mode 100644
+index 0000000..58e2f42
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/16-fix4-plan.input.md
+@@ -0,0 +1,13 @@
++# M9-D1 Fix Plan 4
++
++Address only the closeout finding in `15-review-4.md`.
++
++- Add cycle detection to recursive JSON-safe validation for builtin dict/list/
++  tuple containers, using an active-object identity set and typed
++  `TypeError`/`ValueError` rejection rather than recursion leakage.
++- Convert any unexpected defensive-copy exception after validation into the
++  same typed result-boundary rejection; no arbitrary exception may leak.
++- Add a focused adversarial cyclic-container test.
++- Preserve all schema-shape, defensive-copy, purity, and result invariants;
++  rerun focused/regression/architecture, compileall, diff-check, and a fresh
++  independent closeout review.
+diff --git a/.codex-workflow/20260805-m9d1/17-fix4-plan-review.md b/.codex-workflow/20260805-m9d1/17-fix4-plan-review.md
+new file mode 100644
+index 0000000..c2918f9
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/17-fix4-plan-review.md
+@@ -0,0 +1,62 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D1 Fix Plan 4 - Reviewed
++
++## Objective
++
++Address only the cyclic-container closeout finding in `15-review-4.md` while
++preserving the existing tombstone schema checks, deterministic IDs, defensive
++copy behavior, injected validator dependency, atomic failure contract, and
++no-I/O/exporter boundary.
++
++## Implementation
++
++1. In `foundation/domain/models/tombstone_propagation.py`, harden the internal
++   JSON-safe traversal used by `TombstoneProjectionResult` before any
++   `deepcopy`. Track the identities of builtin `dict`, `list`, and `tuple`
++   containers currently on the recursion path (`active_ids`), reject an ID that
++   is encountered again as a cycle, and remove each ID in a `finally` block so
++   shared but acyclic containers are not mistaken for cycles. Keep exact builtin
++   type checks so subclasses and arbitrary objects fail closed without invoking
++   user hooks.
++2. Add a bounded-depth guard (or an equivalent `RecursionError` conversion) so
++   pathological deeply nested builtin containers also become typed
++   `TypeError`/`ValueError` failures rather than leaking `RecursionError`.
++   Do not alter the accepted flat TombstoneRecord shape.
++3. Keep the result boundary order: reject wrong outer record/container types,
++   run cycle/depth-safe JSON validation and exact tombstone-shape validation,
++   then perform the defensive copy inside its existing typed exception
++   boundary. No partial copied record may be stored in a result.
++
++## Scope
++
++Modify only the JSON traversal/model implementation and focused model tests.
++Do not change schemas, builders, use cases, exports, cascade rules, exporters,
++stores, checkpoints, network code, clocks, or roadmap/state files.
++
++## Required adversarial tests
++
++- A schema-shaped result record containing a self-referential list in an extra
++  field must raise `TypeError`/`ValueError`, not `RecursionError`, and must not
++  invoke any copy hook.
++- A self-referential dict and a mutually recursive dict/list pair must fail with
++  the same typed boundary error.
++- A deeply nested builtin container beyond the chosen depth bound must fail
++  closed with `TypeError`/`ValueError`.
++- A container graph that shares an acyclic child in two branches should be
++  traversed without false cycle detection (it will still be rejected later if
++  the TombstoneRecord schema shape is invalid).
++- Preserve prior malformed-input coverage: `object()`, `None`, wrong runtime
++  container/subclass types, missing required fields, forbidden extra fields,
++  invalid enums/IDs/timestamps, nullable optionals, impossible metrics, forged
++  models, validator mutation, and atomic zero-record failures.
++
++## Verification and acceptance
++
++Run the focused tombstone model/builder/use-case tests and all previously
++required M9-D1, M9-A/B/C, M8-D/E, architecture, schema, and integration
++regressions with a workspace-local pytest `--basetemp`. Also run
++`python -m compileall -q src tests` and `git diff --check`. Acceptance requires
++no recursion or arbitrary exception leakage, no I/O or validator dependency
++changes, all tests passing, and a fresh independent closeout review in a new
++CLI session before ledger, commit, or push.
+diff --git a/.codex-workflow/20260805-m9d1/18-fix4-plan-review-amended.md b/.codex-workflow/20260805-m9d1/18-fix4-plan-review-amended.md
+new file mode 100644
+index 0000000..905dbeb
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/18-fix4-plan-review-amended.md
+@@ -0,0 +1,69 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-D1 Fix Plan 4 - Reviewed and Amended
++
++## Objective
++
++Address both confirmed closeout findings in the updated `16-fix4-plan.input.md`:
++cyclic builtin-container traversal and arbitrary defensive-copy exceptions.
++Preserve the existing schema-shape validation, deterministic IDs, nullable
++optionals, injected validator dependency, atomic result contract, purity, and
++no-exporter-wiring scope.
++
++## Implementation
++
++1. **Cycle-safe JSON validation before copying**
++
++   In `foundation/domain/models/tombstone_propagation.py`, harden the internal
++   JSON-safe traversal used by `TombstoneProjectionResult` before any
++   `deepcopy`. Track identities of builtin `dict`, `list`, and `tuple`
++   containers currently on the recursion path (`active_ids`), reject a repeated
++   active identity as a cycle, and remove identities in a `finally` block so
++   shared but acyclic children are not false positives. Keep exact builtin type
++   checks so subclasses and arbitrary objects fail without invoking user hooks.
++   Add a bounded-depth guard or equivalent `RecursionError` conversion so
++   pathological nesting also becomes typed `TypeError`/`ValueError`.
++
++2. **Contain every unexpected defensive-copy exception**
++
++   Preserve the boundary order: reject wrong outer types, run cycle/depth-safe
++   JSON and exact tombstone-shape validation on the original record, then copy.
++   Wrap `copy.deepcopy` in `try/except Exception` (not only `TypeError` and
++   `ValueError`) and convert any `RuntimeError` or other ordinary exception to a
++   sanitized typed `TypeError`/`ValueError`. Do not catch process-control
++   `BaseException` subclasses. No partially copied record or original exception
++   detail may escape, and no copy hook may run for values rejected by the
++   pre-copy validator.
++
++## Scope
++
++Modify only the JSON traversal/result model implementation and focused tests.
++Do not change schemas, builders, use cases, exports, cascade policy, exporters,
++stores, checkpoints, network code, clocks, or roadmap/state files.
++
++## Required adversarial tests
++
++- Self-referential list, self-referential dict, and mutually recursive
++  dict/list values in a result record must fail with `TypeError`/`ValueError`,
++  never `RecursionError`; verify no custom `__deepcopy__` hook is invoked.
++- A deeply nested builtin container beyond the chosen depth bound must fail
++  closed with a typed error; an acyclic shared child must not be identified as a
++  cycle (it may still fail the flat TombstoneRecord shape afterward).
++- Monkeypatch the module's `copy.deepcopy` to raise `RuntimeError` after
++  pre-copy validation; result construction must convert it to `TypeError` or
++  `ValueError` with no arbitrary exception leakage or partial record.
++- Retain the custom-value `__deepcopy__` side-effect test, proving malformed
++  values are rejected before copy, plus all prior malformed boundary cases:
++  `object()`, `None`, wrong container/subclass types, missing/extra fields,
++  invalid enums/IDs/timestamps, nullable optionals, impossible metrics, forged
++  models, validator mutation, and atomic zero-record failures.
++
++## Verification and acceptance
++
++Run focused tombstone model/builder/use-case tests and all existing M9-D1,
++M9-A/B/C, M8-D/E, architecture, schema, and integration regressions with a
++workspace-local pytest `--basetemp`. Also run `python -m compileall -q src
++tests` and `git diff --check`. Acceptance requires typed fail-closed behavior
++for cycles and copy failures, no I/O or dependency changes, all tests passing,
++and a fresh independent closeout review in a new CLI session before ledger,
++commit, or push.
+diff --git a/.codex-workflow/20260805-m9d1/19-review-final.md b/.codex-workflow/20260805-m9d1/19-review-final.md
+new file mode 100644
+index 0000000..27e4696
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/19-review-final.md
+@@ -0,0 +1,25 @@
++# M9-D1 Final Independent Closeout Review
++
++Review target: current M9-D1 tree after fix4, checked against
++`18-fix4-plan-review-amended.md`, `15-review-4.md`, and `AGENTS.md`.
++This review was performed independently and did not modify source or tests.
++
++## Findings
++
++No P0, P1, P2, or P3 findings. The two prior closeout findings are addressed:
++cyclic builtin containers and excessive nesting fail with typed validation
++errors before copying, shared acyclic containers are not falsely classified as
++cycles, and unexpected `copy.deepcopy` exceptions are sanitized without
++catching `BaseException`.
++
++## Validation performed
++
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_tombstone_propagation.py tests/foundation/domain/rules/test_tombstone_record_builder.py tests/foundation/application/use_cases/test_project_tombstones.py --basetemp=.codex-workflow/20260805-m9d1/pytest-review-final-focused` - **31 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/rules/test_tombstone_id_generator.py tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/architecture/test_m9a2_attachment_body_boundary.py tests/architecture/test_m9a3_media_processing_boundary.py tests/architecture/test_m9b_git_boundary.py tests/architecture/test_m8ac_acceptance_boundary.py --basetemp=.codex-workflow/20260805-m9d1/pytest-review-final-reg` - **42 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/architecture/test_application_import_boundary.py tests/shared/contracts/foundation/test_schema_validator.py --basetemp=.codex-workflow/20260805-m9d1/pytest-review-final-arch` - **37 passed**.
++- `$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m9d1/pytest-review-final-architecture-all` - **86 passed**.
++- `python -m compileall -q src tests` - passed.
++- `git diff --check` - passed (only existing LF/CRLF normalization warnings).
++- Adversarial probes passed for self-referential list/dict, mutually recursive dict/list, deeply nested builtin containers, shared acyclic children, patched `RuntimeError` from `copy.deepcopy`, and a custom `__deepcopy__` hook; all malformed cases failed closed with typed errors and no hook invocation.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m9d1/PLAN.input.md b/.codex-workflow/20260805-m9d1/PLAN.input.md
+new file mode 100644
+index 0000000..bb9e61a
+--- /dev/null
++++ b/.codex-workflow/20260805-m9d1/PLAN.input.md
+@@ -0,0 +1,64 @@
++# M9-D1 Tombstone Contract and Cascade Plan
++
++## Objective
++
++Activate the deferred `TombstoneRecordBuilder` and a pure, atomic tombstone
++projection seam for M9-D update propagation. This stage defines schema-valid
++tombstone records, deterministic IDs, reason/entity validation, and explicit
++cascade expansion. It does not diff snapshots or publish deltas; that is M9-D2.
++
++## Normative inputs
++
++- `contracts/foundation/schemas/tombstone_record.schema.json` and `defs.schema.json`.
++- `contracts/foundation/decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` §§16.2, 18.2-18.3.
++- `contracts/foundation/CHUNKING_SPEC.md` §7.
++- Existing `TombstoneIdGenerator`, `SCHEMA_VERSION`, and Foundation schema
++  validator conventions.
++
++## Bounded scope
++
++1. Add exact enums for tombstone entity types (`document`, `chunk`, `relation`,
++   `acl`, `media`, `symbol`) and reasons (`source_deleted`, `access_revoked`,
++   `moved_out_of_scope`, `content_updated`, `config_invalidated`).
++2. Add immutable runtime-validated `TombstoneRequest` and
++   `TombstoneProjectionResult` models. Requests require exact non-empty entity
++   ID, reason, dataset version, detected timestamp, optional detail/source
++   version, and a source-cascade tuple. Results are atomic: success has ordered
++   schema-shaped records and exact count; failure has no records and one
++   sanitized category.
++3. Add `TombstoneRecordBuilder` returning a plain JSON-compatible dictionary
++   with exactly the schema fields, deterministic `tombstone_id` from the
++   existing generator, optional `detail` and `source_version_last_seen`, and
++   schema validation before return.
++4. Add a pure `ProjectTombstones` use case that materializes one root entity
++   plus explicitly supplied child IDs according to the normative cascade rule:
++   document -> chunks, media, relations, ACL, symbols; no invented children.
++   Every child receives the same reason/dataset/detected timestamp and its own
++   deterministic tombstone ID. Duplicate IDs are rejected unless the exact
++   entity/reason tuple is byte-identical, in which case only one record remains.
++5. Enforce deterministic ordering by entity-type rank then entity ID; no wall
++   clock, filesystem, network, export, checkpoint, raw-store, ACL resolver, or
++   Qdrant side effect.
++
++## Explicit non-goals
++
++- No inventory/snapshot diff, changed-content detection, delta manifest, JSONL
++  publication, sync database, connector behavior, or full M10 export.
++- No automatic inference of access revocation or out-of-scope status.
++- No cascade from a child back to its parent; callers provide the root/children.
++
++## Adversarial acceptance
++
++- Schema validation with `additionalProperties: false`, nullable optional
++  fields, exact IDs/enums/timestamps, and deterministic byte output.
++- Wrong runtime values: `object()`, `None`, wrong enum, missing/extra fields,
++  malformed IDs, whitespace IDs, invalid timestamps, forbidden detail sizes,
++  impossible count/result combinations, forged frozen objects, duplicate or
++  conflicting child tuples.
++- Atomicity: malformed later child yields failed result with zero records;
++  builder/schema/token exceptions leak no partial output.
++- Cascade matrix tests for every reason and document/child entity type; verify
++  exact ordering, same reason/timestamp, no duplicate IDs, and no I/O.
++- Focused tests, schema/architecture regression, compileall, diff-check, fresh
++  independent review, then roadmap/state update and commit/push.
++
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 199918a..2161d51 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -26,8 +26,10 @@ implemented and independently re-reviewed `PASS`, but the real gate remains
+ tokenizer input was supplied. M9-A1 metadata-first media contract is also
+ complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
+ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+-M9-B and M9-C are now independently approved; M9-D remains staged under the
+-reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
++M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
++explicit cascade is independently reviewed `PASS`; M9-D2 delta/inventory
++diff propagation remains staged under the reviewed M8-M9 goal plan. No M10
++full-snapshot work has started.
+ 
+ ## Durable State Convention
+ 
+@@ -1706,6 +1708,24 @@ are recorded without using repository-local commit SHAs as status.
+   `06-fix-plan.input.md` and `07-fix-plan-review.md`; fresh
+   `.codex-workflow/20260805-m9c/09-review-2.md` records final `VERDICT: PASS`.
+ 
++## M9-D1 Tombstone Contract and Explicit Cascade
++
++- Status: complete and independently reviewed `PASS`.
++- Added immutable/runtime-validated `TombstoneTarget`, request, metrics, and
++  result models with exact field sets, schema-shaped record validation,
++  deterministic ID preimage checks, nullable optional fields, cycle-safe JSON
++  validation, and sanitized impossible-counter/forged-input failures.
++- Added schema-valid `TombstoneRecordBuilder` with validator mutation guards
++  and atomic `ProjectTombstones` document-root cascade with fixed ordering,
++  injected validator dependency, canonical bytes, duplicate/collision policy,
++  and no filesystem/network/export/checkpoint side effects.
++- Validation: focused `31 passed`; M9/M8 regression `42 passed`; architecture/
++  schema `37 passed`; full architecture `86 passed`; compileall/diff-check
++  passed. Final independent review is `VERDICT: PASS` in
++  `.codex-workflow/20260805-m9d1/19-review-final.md`.
++- Residual boundary: M9-D2 snapshot diff/delta propagation is not implemented;
++  M8-AC real mini-corpus gate remains `pending_external_input`.
++
+ ## Current Execution Boundary
+ 
+ The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 0d2ab4b..15984db 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -92,7 +92,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+-| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3, M9-B, and M9-C independently approved; M9-D remains pending | Split into independent tracks. |
++| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3, M9-B, M9-C, and M9-D1 independently approved; M9-D2 remains pending | Split into independent tracks. |
+ | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+@@ -117,8 +117,10 @@ controlled mini-corpus acceptance is implemented and independently re-reviewed
+ 10-20 page generation/selection/tokenizer input is supplied. M9-A1 is complete
+ and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
+ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+-M9-B and M9-C are independently approved; M9-D remains staged under the
+-reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
++M9-B and M9-C are independently approved. M9-D1 tombstone contract and
++explicit cascade is independently approved; M9-D2 delta/inventory diff
++propagation remains staged under the reviewed M8-M9 goal plan. No M10
++full-snapshot work has started.
+ 
+ - M2C1 `CanonicalDocumentRecordBuilder` - done.
+ - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
+@@ -994,7 +996,8 @@ M9A - Media:
+ | M9-A3 offline draw.io/PDF/OCR processors | complete; independently reviewed `PASS` | Added bounded stdlib draw.io XML parsing, pinned digital-PDF text and image-OCR capability ports/processors, strict schema/status/detail binding, and MIME/filename dispatch over the M9-A2 envelope; focused `30 passed`, architecture `80 passed`, M9-A1/A2 regression `48 passed, 2 skipped`, compileall and diff-check passed. No engine/network/file side effects, attachment-text chunks, schema changes, or raw writes. |
+ | M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
+ | M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
+-| M9-D1/D2 tombstone/delta propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries. |
++| M9-D1 tombstone contract and explicit cascade | complete; independently reviewed `PASS` | Added runtime-validated tombstone models, schema-valid deterministic builder, atomic document-root cascade use case, exact-field/JSON/cycle-safe boundaries, and injected schema-validator dependency. Focused `31 passed`; M9/M8 regression `42 passed`; architecture/schema `37 passed`; full architecture `86 passed`; compileall/diff-check passed; final review `VERDICT: PASS` in `.codex-workflow/20260805-m9d1/19-review-final.md`. |
++| M9-D2 delta/inventory diff propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries; snapshot diff and delta logic remain deferred. |
+ 
+ M9B - Git repository scan:
+ - Configured repository and branch.
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index c2a7793..3c43c72 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -48,6 +48,7 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
+     BuildGitCodeDocumentsRequest,
+ )
+ from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
++from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
+ 
+ __all__ = [
+     "BuildConfluenceInventory",
+@@ -74,4 +75,5 @@ __all__ = [
+     "BuildGitCodeDocuments",
+     "BuildGitCodeDocumentsRequest",
+     "BuildGitSymbols",
++    "ProjectTombstones",
+ ]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/project_tombstones.py b/src/knowledgenexus/foundation/application/use_cases/project_tombstones.py
+new file mode 100644
+index 0000000..0ed4dac
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/project_tombstones.py
+@@ -0,0 +1,115 @@
++from __future__ import annotations
++
++import json
++
++from knowledgenexus.foundation.domain.models.tombstone_propagation import (
++    TombstoneProjectionFailureCategory,
++    TombstoneProjectionMetrics,
++    TombstoneProjectionRequest,
++    TombstoneProjectionResult,
++    TombstoneProjectionStatus,
++    TombstoneTarget,
++)
++from knowledgenexus.foundation.domain.rules.tombstone_record_builder import TombstoneRecordBuilder
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationValidationError
++
++
++_ENTITY_RANK = {
++    "document": 0,
++    "chunk": 1,
++    "media": 2,
++    "relation": 3,
++    "acl": 4,
++    "symbol": 5,
++}
++
++
++class ProjectTombstones:
++    """Materialize explicit tombstone targets atomically and deterministically."""
++
++    def __init__(self, *, schema_validator: object) -> None:
++        if not callable(getattr(schema_validator, "validate_record", None)):
++            raise TypeError("schema_validator is invalid")
++        self._validator = schema_validator
++
++    def execute(self, request: object) -> TombstoneProjectionResult:
++        try:
++            if type(request) is not TombstoneProjectionRequest:
++                raise _Failure(TombstoneProjectionFailureCategory.INVALID_REQUEST)
++            try:
++                TombstoneProjectionRequest.__post_init__(request)
++            except (TypeError, ValueError):
++                raise _Failure(TombstoneProjectionFailureCategory.INVALID_REQUEST) from None
++            if not callable(getattr(self._validator, "validate_record", None)):
++                raise _Failure(TombstoneProjectionFailureCategory.INVALID_DEPENDENCY)
++            targets = (request.root, *request.children)
++            unique: dict[tuple[str, str], TombstoneTarget] = {}
++            for target in targets:
++                key = (target.entity_type.value, target.entity_id)
++                previous = unique.get(key)
++                if previous is not None and previous != target:
++                    raise _Failure(TombstoneProjectionFailureCategory.DUPLICATE_CONFLICT)
++                unique[key] = target
++            ordered = tuple(sorted(unique.values(), key=lambda target: (_ENTITY_RANK[target.entity_type.value], target.entity_id)))
++            records: list[dict[str, object]] = []
++            id_preimages: dict[str, bytes] = {}
++            for target in ordered:
++                try:
++                    record = TombstoneRecordBuilder.build(
++                        target=target,
++                        reason=request.reason,
++                        detected_at=request.detected_at,
++                        dataset_version=request.dataset_version,
++                        schema_validator=self._validator,
++                    )
++                except (FoundationValidationError, ValueError):
++                    raise _Failure(
++                        TombstoneProjectionFailureCategory.SCHEMA_VALIDATION_FAILED
++                    ) from None
++                tombstone_id = record.get("tombstone_id")
++                if type(tombstone_id) is not str:
++                    raise _Failure(TombstoneProjectionFailureCategory.RESULT_INVALID)
++                try:
++                    canonical = json.dumps(
++                        record,
++                        ensure_ascii=False,
++                        sort_keys=True,
++                        separators=(",", ":"),
++                        allow_nan=False,
++                    ).encode("utf-8")
++                except (TypeError, ValueError):
++                    raise _Failure(TombstoneProjectionFailureCategory.RESULT_INVALID) from None
++                previous = id_preimages.get(tombstone_id)
++                if previous is not None and previous != canonical:
++                    raise _Failure(TombstoneProjectionFailureCategory.TOMBSTONE_ID_COLLISION)
++                id_preimages[tombstone_id] = canonical
++                records.append(record)
++            metrics = TombstoneProjectionMetrics(
++                record_count=len(records),
++                root_count=1,
++                child_count=len(records) - 1,
++            )
++            return TombstoneProjectionResult(
++                status=TombstoneProjectionStatus.SUCCESS,
++                records=tuple(records),
++                count=len(records),
++                metrics=metrics,
++            )
++        except _Failure as exc:
++            return TombstoneProjectionResult(
++                status=TombstoneProjectionStatus.FAILED,
++                error_category=exc.category,
++            )
++        except Exception:
++            return TombstoneProjectionResult(
++                status=TombstoneProjectionStatus.FAILED,
++                error_category=TombstoneProjectionFailureCategory.INTERNAL_FAILURE,
++            )
++
++
++class _Failure(Exception):
++    def __init__(self, category: TombstoneProjectionFailureCategory) -> None:
++        self.category = category
++
++
++__all__ = ["ProjectTombstones"]
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index 083f7de..9381427 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -101,6 +101,16 @@ from knowledgenexus.foundation.domain.models.symbol_index import (
+     SymbolParseResult,
+     SymbolParseStatus,
+ )
++from knowledgenexus.foundation.domain.models.tombstone_propagation import (
++    TombstoneEntityType,
++    TombstoneProjectionFailureCategory,
++    TombstoneProjectionMetrics,
++    TombstoneProjectionRequest,
++    TombstoneProjectionResult,
++    TombstoneProjectionStatus,
++    TombstoneReason,
++    TombstoneTarget,
++)
+ from knowledgenexus.foundation.domain.models.confluence_chunking import (
+     ChunkingResult,
+     ConfluenceChunkingError,
+@@ -293,6 +303,14 @@ __all__ = [
+     "ParsedSymbol",
+     "SymbolParseResult",
+     "SymbolParseStatus",
++    "TombstoneEntityType",
++    "TombstoneProjectionFailureCategory",
++    "TombstoneProjectionMetrics",
++    "TombstoneProjectionRequest",
++    "TombstoneProjectionResult",
++    "TombstoneProjectionStatus",
++    "TombstoneReason",
++    "TombstoneTarget",
+     "ChunkingResult",
+     "ConfluenceChunkingError",
+     "ConfluenceChunkingFailureCategory",
+diff --git a/src/knowledgenexus/foundation/domain/models/tombstone_propagation.py b/src/knowledgenexus/foundation/domain/models/tombstone_propagation.py
+new file mode 100644
+index 0000000..b2e506a
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/tombstone_propagation.py
+@@ -0,0 +1,333 @@
++"""Runtime-validated models for bounded tombstone projection."""
++
++from __future__ import annotations
++
++import copy
++import json
++import re
++from dataclasses import dataclass
++from datetime import datetime, timezone
++from enum import StrEnum
++import unicodedata
++
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
++from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
++
++
++_OPAQUE = re.compile(r"^\S+$")
++_CHUNK = re.compile(r"^chunk:(?:confluence|git):[0-9a-f]{16}(?:-[0-9]+)?$")
++_RELATION = re.compile(r"^rel:[0-9a-f]{16}$")
++_ACL = re.compile(r"^acl:\S+$")
++_RFC3339 = re.compile(
++    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:"
++    r"[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
++)
++_TOMBSTONE_ID = re.compile(r"^tomb:[0-9a-f]{16}$")
++_MISSING = object()
++
++
++def _require_exact_fields(instance: object, expected: frozenset[str]) -> None:
++    try:
++        actual = frozenset(vars(instance))
++    except TypeError:
++        raise TypeError("model fields are invalid") from None
++    if actual != expected:
++        raise TypeError("model fields are invalid")
++
++
++class TombstoneEntityType(StrEnum):
++    DOCUMENT = "document"
++    CHUNK = "chunk"
++    RELATION = "relation"
++    ACL = "acl"
++    MEDIA = "media"
++    SYMBOL = "symbol"
++
++
++class TombstoneReason(StrEnum):
++    SOURCE_DELETED = "source_deleted"
++    ACCESS_REVOKED = "access_revoked"
++    MOVED_OUT_OF_SCOPE = "moved_out_of_scope"
++    CONTENT_UPDATED = "content_updated"
++    CONFIG_INVALIDATED = "config_invalidated"
++
++
++class TombstoneProjectionStatus(StrEnum):
++    SUCCESS = "success"
++    FAILED = "failed"
++
++
++class TombstoneProjectionFailureCategory(StrEnum):
++    INVALID_REQUEST = "invalid_request"
++    INVALID_DEPENDENCY = "invalid_dependency"
++    CASCADE_INVALID = "cascade_invalid"
++    DUPLICATE_CONFLICT = "duplicate_conflict"
++    SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
++    TOMBSTONE_ID_COLLISION = "tombstone_id_collision"
++    RESULT_INVALID = "result_invalid"
++    INTERNAL_FAILURE = "internal_failure"
++
++
++def _non_empty_opaque(name: str, value: object) -> str:
++    if type(value) is not str or not value or _OPAQUE.fullmatch(value) is None:
++        raise ValueError(f"{name} is invalid")
++    return unicodedata.normalize("NFC", value)
++
++
++def _timestamp(value: object) -> str:
++    if type(value) is not str or _RFC3339.fullmatch(value) is None:
++        raise ValueError("detected_at is invalid")
++    try:
++        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    except ValueError:
++        raise ValueError("detected_at is invalid") from None
++    if parsed.tzinfo is None:
++        raise ValueError("detected_at is invalid")
++    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
++
++
++def _validate_entity_id(entity_type: TombstoneEntityType, entity_id: str) -> str:
++    value = _non_empty_opaque("entity_id", entity_id)
++    pattern = {
++        TombstoneEntityType.CHUNK: _CHUNK,
++        TombstoneEntityType.RELATION: _RELATION,
++        TombstoneEntityType.ACL: _ACL,
++    }.get(entity_type)
++    if pattern is not None and pattern.fullmatch(value) is None:
++        raise ValueError("entity_id is invalid")
++    return value
++
++
++@dataclass(frozen=True)
++class TombstoneTarget:
++    entity_type: TombstoneEntityType
++    entity_id: str
++    detail: str | None = None
++    source_version_last_seen: str | None = None
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(self, frozenset({"entity_type", "entity_id", "detail", "source_version_last_seen"}))
++        entity_type = getattr(self, "entity_type", _MISSING)
++        entity_id = getattr(self, "entity_id", _MISSING)
++        detail = getattr(self, "detail", _MISSING)
++        source_version = getattr(self, "source_version_last_seen", _MISSING)
++        if type(entity_type) is not TombstoneEntityType:
++            raise TypeError("entity_type is invalid")
++        if entity_id is _MISSING or detail is _MISSING or source_version is _MISSING:
++            raise TypeError("target fields are invalid")
++        object.__setattr__(self, "entity_id", _validate_entity_id(entity_type, entity_id))
++        if detail is not None:
++            if type(detail) is not str:
++                raise TypeError("detail is invalid")
++            normalized = unicodedata.normalize("NFC", detail)
++            if "\n" in normalized or "\r" in normalized or len(normalized.encode("utf-8")) > 1024:
++                raise ValueError("detail is invalid")
++            object.__setattr__(self, "detail", normalized)
++        if source_version is not None:
++            object.__setattr__(
++                self,
++                "source_version_last_seen",
++                _non_empty_opaque("source_version_last_seen", source_version),
++            )
++
++
++@dataclass(frozen=True)
++class TombstoneProjectionRequest:
++    root: TombstoneTarget
++    reason: TombstoneReason
++    detected_at: str
++    dataset_version: str
++    children: tuple[TombstoneTarget, ...] = ()
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(self, frozenset({"root", "reason", "detected_at", "dataset_version", "children"}))
++        root = getattr(self, "root", _MISSING)
++        reason = getattr(self, "reason", _MISSING)
++        detected_at = getattr(self, "detected_at", _MISSING)
++        dataset_version = getattr(self, "dataset_version", _MISSING)
++        children = getattr(self, "children", _MISSING)
++        if type(root) is not TombstoneTarget:
++            raise TypeError("root is invalid")
++        if type(reason) is not TombstoneReason:
++            raise TypeError("reason is invalid")
++        if type(children) is not tuple or any(type(item) is not TombstoneTarget for item in children):
++            raise TypeError("children are invalid")
++        if detected_at is _MISSING or dataset_version is _MISSING:
++            raise TypeError("request fields are invalid")
++        TombstoneTarget.__post_init__(root)
++        for child in children:
++            TombstoneTarget.__post_init__(child)
++        if root.entity_type is not TombstoneEntityType.DOCUMENT and children:
++            raise ValueError("only document roots may cascade")
++        object.__setattr__(self, "detected_at", _timestamp(detected_at))
++        object.__setattr__(self, "dataset_version", _non_empty_opaque("dataset_version", dataset_version))
++        keys: dict[tuple[TombstoneEntityType, str], TombstoneTarget] = {}
++        for child in children:
++            key = (child.entity_type, child.entity_id)
++            previous = keys.get(key)
++            if previous is not None and previous != child:
++                raise ValueError("conflicting duplicate child")
++            keys[key] = child
++
++
++@dataclass(frozen=True)
++class TombstoneProjectionMetrics:
++    record_count: int
++    root_count: int
++    child_count: int
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(self, frozenset({"record_count", "root_count", "child_count"}))
++        record_count = getattr(self, "record_count", _MISSING)
++        root_count = getattr(self, "root_count", _MISSING)
++        child_count = getattr(self, "child_count", _MISSING)
++        if any(type(value) is not int or value < 0 for value in (record_count, root_count, child_count)):
++            raise ValueError("metrics are invalid")
++        if root_count not in {0, 1} or record_count != root_count + child_count:
++            raise ValueError("metrics are inconsistent")
++        if root_count == 0 and child_count != 0:
++            raise ValueError("metrics are inconsistent")
++
++
++@dataclass(frozen=True, repr=False)
++class TombstoneProjectionResult:
++    status: TombstoneProjectionStatus
++    records: tuple[dict[str, object], ...] = ()
++    count: int = 0
++    metrics: TombstoneProjectionMetrics | None = None
++    error_category: TombstoneProjectionFailureCategory | None = None
++
++    def __post_init__(self) -> None:
++        _require_exact_fields(self, frozenset({"status", "records", "count", "metrics", "error_category"}))
++        if type(self.status) is not TombstoneProjectionStatus:
++            raise TypeError("status is invalid")
++        if type(self.records) is not tuple or any(type(record) is not dict for record in self.records):
++            raise TypeError("records are invalid")
++        if type(self.count) is not int or self.count < 0:
++            raise ValueError("count is invalid")
++        for record in self.records:
++            try:
++                _validate_json_object(record)
++                _validate_tombstone_record(record)
++            except (TypeError, ValueError):
++                raise ValueError("records are invalid") from None
++        try:
++            copied = tuple(copy.deepcopy(record) for record in self.records)
++        except Exception:
++            raise ValueError("records are invalid") from None
++        object.__setattr__(self, "records", copied)
++        if self.status is TombstoneProjectionStatus.SUCCESS:
++            if type(self.metrics) is not TombstoneProjectionMetrics or self.error_category is not None:
++                raise ValueError("success result is inconsistent")
++            TombstoneProjectionMetrics.__post_init__(self.metrics)
++            if self.count < 1 or self.metrics.root_count != 1:
++                raise ValueError("success metrics are inconsistent")
++            if self.count != len(self.records) or self.metrics.record_count != self.count:
++                raise ValueError("success counts are inconsistent")
++        else:
++            if self.records or self.count != 0 or self.metrics is not None:
++                raise ValueError("failed result is inconsistent")
++            if type(self.error_category) is not TombstoneProjectionFailureCategory:
++                raise ValueError("failure category is invalid")
++
++    def to_bytes(self) -> bytes:
++        return json.dumps(
++            {
++                "count": self.count,
++                "error_category": self.error_category.value if self.error_category else None,
++                "metrics": self.metrics.__dict__ if self.metrics else None,
++                "records": self.records,
++                "status": self.status.value,
++            },
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        ).encode("utf-8")
++
++
++def _validate_json_object(value: object, *, _active_ids: set[int] | None = None, _depth: int = 0) -> None:
++    """Reject non-canonical JSON values before they cross the result boundary."""
++    if _depth > 64:
++        raise ValueError("record nesting is too deep")
++    if _active_ids is None:
++        _active_ids = set()
++    if type(value) is dict or type(value) in (list, tuple):
++        identity = id(value)
++        if identity in _active_ids:
++            raise ValueError("record contains a cycle")
++        _active_ids.add(identity)
++        try:
++            if type(value) is dict:
++                for key, item in value.items():
++                    if type(key) is not str:
++                        raise TypeError("record keys are invalid")
++                    _validate_json_object(item, _active_ids=_active_ids, _depth=_depth + 1)
++            else:
++                for item in value:
++                    _validate_json_object(item, _active_ids=_active_ids, _depth=_depth + 1)
++        finally:
++            _active_ids.remove(identity)
++        return
++    if value is None or type(value) in (str, bool, int):
++        return
++    if type(value) is float:
++        import math
++
++        if math.isfinite(value):
++            return
++    raise TypeError("record value is not JSON-safe")
++
++
++def _validate_tombstone_record(record: dict[str, object]) -> None:
++    required = {
++        "schema_version", "tombstone_id", "entity_type", "entity_id",
++        "reason", "detected_at", "dataset_version",
++    }
++    optional = {"detail", "source_version_last_seen"}
++    keys = set(record)
++    if not required.issubset(keys) or not keys.issubset(required | optional):
++        raise ValueError("record shape is invalid")
++    if type(record["schema_version"]) is not str or record["schema_version"] != SCHEMA_VERSION:
++        raise ValueError("record schema version is invalid")
++    tombstone_id = record["tombstone_id"]
++    if type(tombstone_id) is not str or _TOMBSTONE_ID.fullmatch(tombstone_id) is None:
++        raise ValueError("record tombstone ID is invalid")
++    try:
++        entity_type = TombstoneEntityType(record["entity_type"])
++        TombstoneReason(record["reason"])
++    except (TypeError, ValueError):
++        raise ValueError("record enum is invalid") from None
++    _validate_entity_id(entity_type, record["entity_id"])
++    expected_id = TombstoneIdGenerator.generate_tombstone_id(
++        entity_type=entity_type.value,
++        entity_id=record["entity_id"],
++        reason=TombstoneReason(record["reason"]).value,
++        dataset_version=record["dataset_version"],
++    )
++    if record["tombstone_id"] != expected_id:
++        raise ValueError("record tombstone ID preimage is invalid")
++    detected_at = record["detected_at"]
++    if type(detected_at) is not str or _timestamp(detected_at) != detected_at:
++        raise ValueError("record timestamp is invalid")
++    _non_empty_opaque("dataset_version", record["dataset_version"])
++    if "detail" in record:
++        detail = record["detail"]
++        if detail is not None and (type(detail) is not str or "\n" in detail or "\r" in detail or len(detail.encode("utf-8")) > 1024):
++            raise ValueError("record detail is invalid")
++    if "source_version_last_seen" in record:
++        source_version = record["source_version_last_seen"]
++        if source_version is not None:
++            _non_empty_opaque("source_version_last_seen", source_version)
++
++
++__all__ = [
++    "TombstoneEntityType",
++    "TombstoneProjectionFailureCategory",
++    "TombstoneProjectionMetrics",
++    "TombstoneProjectionRequest",
++    "TombstoneProjectionResult",
++    "TombstoneProjectionStatus",
++    "TombstoneReason",
++    "TombstoneTarget",
++]
+diff --git a/src/knowledgenexus/foundation/domain/rules/__init__.py b/src/knowledgenexus/foundation/domain/rules/__init__.py
+index 7f0a5ad..3d13bd6 100644
+--- a/src/knowledgenexus/foundation/domain/rules/__init__.py
++++ b/src/knowledgenexus/foundation/domain/rules/__init__.py
+@@ -16,6 +16,7 @@ from knowledgenexus.foundation.domain.rules.media_asset_record_builder import (
+ from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
+ from knowledgenexus.foundation.domain.rules.symbol_id_generator import SymbolIdGenerator
+ from knowledgenexus.foundation.domain.rules.symbol_record_builder import SymbolRecordBuilder
++from knowledgenexus.foundation.domain.rules.tombstone_record_builder import TombstoneRecordBuilder
+ from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
+     WikiStructureParseError,
+     WikiStructureParser,
+@@ -34,6 +35,7 @@ __all__ = [
+     "TombstoneIdGenerator",
+     "SymbolIdGenerator",
+     "SymbolRecordBuilder",
++    "TombstoneRecordBuilder",
+     "WikiStructureParseError",
+     "WikiStructureParser",
+     "OccurrenceResolutionConflict",
+diff --git a/src/knowledgenexus/foundation/domain/rules/tombstone_record_builder.py b/src/knowledgenexus/foundation/domain/rules/tombstone_record_builder.py
+new file mode 100644
+index 0000000..5d6b799
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/rules/tombstone_record_builder.py
+@@ -0,0 +1,83 @@
++from __future__ import annotations
++
++import copy
++import json
++
++from knowledgenexus.foundation.domain.models.tombstone_propagation import (
++    TombstoneReason,
++    TombstoneTarget,
++)
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
++from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
++
++
++class TombstoneRecordBuilder:
++    """Build a schema-shaped TombstoneRecord with no I/O or policy inference."""
++
++    @classmethod
++    def build(
++        cls,
++        *,
++        target: TombstoneTarget,
++        reason: TombstoneReason,
++        detected_at: str,
++        dataset_version: str,
++        schema_validator: object,
++    ) -> dict[str, object]:
++        if type(target) is not TombstoneTarget:
++            raise TypeError("target is invalid")
++        TombstoneTarget.__post_init__(target)
++        if type(reason) is not TombstoneReason:
++            raise TypeError("reason is invalid")
++        if type(detected_at) is not str or not detected_at:
++            raise ValueError("detected_at is invalid")
++        if type(dataset_version) is not str or not dataset_version or any(char.isspace() for char in dataset_version):
++            raise ValueError("dataset_version is invalid")
++        if not callable(getattr(schema_validator, "validate_record", None)):
++            raise TypeError("schema_validator is invalid")
++        record: dict[str, object] = {
++            "schema_version": SCHEMA_VERSION,
++            "tombstone_id": TombstoneIdGenerator.generate_tombstone_id(
++                entity_type=target.entity_type.value,
++                entity_id=target.entity_id,
++                reason=reason.value,
++                dataset_version=dataset_version,
++            ),
++            "entity_type": target.entity_type.value,
++            "entity_id": target.entity_id,
++            "reason": reason.value,
++            "detected_at": detected_at,
++            "dataset_version": dataset_version,
++        }
++        if target.detail is not None:
++            record["detail"] = target.detail
++        if target.source_version_last_seen is not None:
++            record["source_version_last_seen"] = target.source_version_last_seen
++        before_validation = copy.deepcopy(record)
++        before_bytes = json.dumps(
++            before_validation,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        ).encode("utf-8")
++        schema_validator.validate_record("TombstoneRecord", record)
++        if type(record) is not dict or set(record) != set(before_validation):
++            raise ValueError("schema validator mutated record")
++        for key, expected in before_validation.items():
++            actual = record[key]
++            if type(actual) is not type(expected) or actual != expected:
++                raise ValueError("schema validator mutated record")
++        after_bytes = json.dumps(
++            record,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        ).encode("utf-8")
++        if after_bytes != before_bytes:
++            raise ValueError("schema validator mutated record")
++        return dict(record)
++
++
++__all__ = ["TombstoneRecordBuilder"]
+diff --git a/tests/foundation/application/use_cases/test_project_tombstones.py b/tests/foundation/application/use_cases/test_project_tombstones.py
+new file mode 100644
+index 0000000..045b730
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_project_tombstones.py
+@@ -0,0 +1,79 @@
++from knowledgenexus.foundation.application.use_cases import ProjectTombstones
++from knowledgenexus.foundation.domain.models import TombstoneProjectionFailureCategory
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++from knowledgenexus.foundation.domain.models import (
++    TombstoneEntityType,
++    TombstoneProjectionRequest,
++    TombstoneProjectionStatus,
++    TombstoneReason,
++    TombstoneTarget,
++)
++
++
++def _request() -> TombstoneProjectionRequest:
++    return TombstoneProjectionRequest(
++        root=TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:1"),
++        reason=TombstoneReason.ACCESS_REVOKED,
++        detected_at="2026-08-05T00:00:00Z",
++        dataset_version="v1",
++        children=(
++            TombstoneTarget(TombstoneEntityType.SYMBOL, "sym:1"),
++            TombstoneTarget(TombstoneEntityType.CHUNK, "chunk:git:" + "a" * 16),
++            TombstoneTarget(TombstoneEntityType.ACL, "acl:repo:x"),
++            TombstoneTarget(TombstoneEntityType.MEDIA, "media:1"),
++            TombstoneTarget(TombstoneEntityType.RELATION, "rel:" + "b" * 16),
++        ),
++    )
++
++
++def _project() -> ProjectTombstones:
++    return ProjectTombstones(schema_validator=FoundationSchemaValidator())
++
++
++def test_projects_document_cascade_in_deterministic_order() -> None:
++    result = _project().execute(_request())
++    assert result.status is TombstoneProjectionStatus.SUCCESS
++    assert result.count == 6
++    assert [record["entity_type"] for record in result.records] == [
++        "document", "chunk", "media", "relation", "acl", "symbol"
++    ]
++    assert {record["reason"] for record in result.records} == {"access_revoked"}
++    assert {record["detected_at"] for record in result.records} == {"2026-08-05T00:00:00.000000Z"}
++
++
++def test_invalid_runtime_request_fails_before_side_effects() -> None:
++    result = _project().execute(object())
++    assert result.status is TombstoneProjectionStatus.FAILED
++    assert result.count == 0
++    assert result.records == ()
++
++
++def test_forged_request_returns_invalid_request() -> None:
++    forged = object.__new__(TombstoneProjectionRequest)
++    result = _project().execute(forged)
++    assert result.status is TombstoneProjectionStatus.FAILED
++    assert result.error_category is TombstoneProjectionFailureCategory.INVALID_REQUEST
++
++
++def test_child_order_does_not_change_result_bytes() -> None:
++    request = _request()
++    reversed_request = TombstoneProjectionRequest(
++        root=request.root,
++        reason=request.reason,
++        detected_at=request.detected_at,
++        dataset_version=request.dataset_version,
++        children=tuple(reversed(request.children)),
++    )
++    assert _project().execute(request).to_bytes() == _project().execute(reversed_request).to_bytes()
++
++
++def test_schema_validator_failure_is_sanitized_and_atomic() -> None:
++    class _RejectingValidator:
++        def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++            raise ValueError("private validator detail")
++
++    result = ProjectTombstones(schema_validator=_RejectingValidator()).execute(_request())
++    assert result.status is TombstoneProjectionStatus.FAILED
++    assert result.error_category is TombstoneProjectionFailureCategory.SCHEMA_VALIDATION_FAILED
++    assert result.records == ()
++    assert result.count == 0
+diff --git a/tests/foundation/domain/models/test_tombstone_propagation.py b/tests/foundation/domain/models/test_tombstone_propagation.py
+new file mode 100644
+index 0000000..cbc733d
+--- /dev/null
++++ b/tests/foundation/domain/models/test_tombstone_propagation.py
+@@ -0,0 +1,242 @@
++import pytest
++import knowledgenexus.foundation.domain.models.tombstone_propagation as tombstone_module
++
++from knowledgenexus.foundation.domain.models import (
++    TombstoneEntityType,
++    TombstoneProjectionFailureCategory,
++    TombstoneProjectionMetrics,
++    TombstoneProjectionRequest,
++    TombstoneProjectionResult,
++    TombstoneProjectionStatus,
++    TombstoneReason,
++    TombstoneTarget,
++)
++from knowledgenexus.foundation.domain.rules import TombstoneIdGenerator
++
++
++def test_request_normalizes_timestamp_and_validates_target() -> None:
++    request = TombstoneProjectionRequest(
++        root=TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:1", detail="café"),
++        reason=TombstoneReason.SOURCE_DELETED,
++        detected_at="2026-08-05T10:00:00+07:00",
++        dataset_version="v1",
++    )
++    assert request.detected_at == "2026-08-05T03:00:00.000000Z"
++
++
++@pytest.mark.parametrize("value", [None, object(), "chunk:bad"])
++def test_invalid_chunk_target_fails_closed(value: object) -> None:
++    with pytest.raises((TypeError, ValueError)):
++        TombstoneTarget(TombstoneEntityType.CHUNK, value)  # type: ignore[arg-type]
++
++
++def test_non_document_root_cannot_cascade() -> None:
++    with pytest.raises(ValueError):
++        TombstoneProjectionRequest(
++            root=TombstoneTarget(TombstoneEntityType.CHUNK, "chunk:git:" + "a" * 16),
++            reason=TombstoneReason.CONTENT_UPDATED,
++            detected_at="2026-08-05T00:00:00Z",
++            dataset_version="v1",
++            children=(TombstoneTarget(TombstoneEntityType.SYMBOL, "sym:1"),),
++        )
++
++
++def test_failed_result_rejects_impossible_payload() -> None:
++    with pytest.raises(ValueError):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.FAILED,
++            records=({"x": 1},),
++            count=1,
++            error_category=None,
++        )
++
++
++def test_metrics_reject_cross_field_count() -> None:
++    with pytest.raises(ValueError):
++        TombstoneProjectionMetrics(record_count=2, root_count=1, child_count=0)
++
++    with pytest.raises(ValueError):
++        TombstoneProjectionMetrics(record_count=1, root_count=0, child_count=1)
++
++
++def test_result_rejects_non_json_safe_nested_values() -> None:
++    with pytest.raises(ValueError):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.SUCCESS,
++            records=(({"value": object()},)),  # type: ignore[arg-type]
++            count=1,
++            metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++        )
++
++
++def test_result_rejects_non_tombstone_shape() -> None:
++    with pytest.raises(ValueError):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.SUCCESS,
++            records=(({"foo": "bar"},)),  # type: ignore[arg-type]
++            count=1,
++            metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++        )
++
++
++def test_result_rejects_forged_tombstone_id() -> None:
++    record = {
++        "schema_version": "1.0",
++        "tombstone_id": "tomb:0000000000000000",
++        "entity_type": "document",
++        "entity_id": "confluence:page:1",
++        "reason": "source_deleted",
++        "detected_at": "2026-08-05T00:00:00.000000Z",
++        "dataset_version": "v1",
++    }
++    with pytest.raises(ValueError):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.SUCCESS,
++            records=(record,),
++            count=1,
++            metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++        )
++
++
++def test_result_revalidates_forged_metrics() -> None:
++    forged = object.__new__(TombstoneProjectionMetrics)
++    object.__setattr__(forged, "record_count", 1)
++    object.__setattr__(forged, "root_count", 1)
++    object.__setattr__(forged, "child_count", 999)
++    record = {
++        "schema_version": "1.0",
++        "tombstone_id": "tomb:0000000000000000",
++        "entity_type": "document",
++        "entity_id": "confluence:page:1",
++        "reason": "source_deleted",
++        "detected_at": "2026-08-05T00:00:00.000000Z",
++        "dataset_version": "v1",
++    }
++    with pytest.raises(ValueError):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.SUCCESS,
++            records=(record,),
++            count=1,
++            metrics=forged,
++        )
++
++
++def test_result_accepts_explicit_null_optional_fields() -> None:
++    record = {
++        "schema_version": "1.0",
++        "tombstone_id": "tomb:0000000000000000",
++        "entity_type": "document",
++        "entity_id": "confluence:page:1",
++        "reason": "source_deleted",
++        "detected_at": "2026-08-05T00:00:00.000000Z",
++        "dataset_version": "v1",
++        "detail": None,
++        "source_version_last_seen": None,
++    }
++    record["tombstone_id"] = TombstoneIdGenerator.generate_tombstone_id(
++        entity_type="document",
++        entity_id="confluence:page:1",
++        reason="source_deleted",
++        dataset_version="v1",
++    )
++    result = TombstoneProjectionResult(
++        status=TombstoneProjectionStatus.SUCCESS,
++        records=(record,),
++        count=1,
++        metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++    )
++    assert result.records[0]["detail"] is None
++
++
++def test_forged_request_fails_with_typed_error() -> None:
++    forged = object.__new__(TombstoneProjectionRequest)
++    with pytest.raises((TypeError, ValueError)):
++        TombstoneProjectionRequest.__post_init__(forged)
++
++
++@pytest.mark.parametrize(
++    "model",
++    [
++        TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:1"),
++        TombstoneProjectionRequest(
++            root=TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:1"),
++            reason=TombstoneReason.SOURCE_DELETED,
++            detected_at="2026-08-05T00:00:00Z",
++            dataset_version="v1",
++        ),
++        TombstoneProjectionMetrics(record_count=0, root_count=0, child_count=0),
++    ],
++)
++def test_model_rejects_forged_extra_attributes(model: object) -> None:
++    object.__setattr__(model, "extra", 1)
++    with pytest.raises((TypeError, ValueError)):
++        type(model).__post_init__(model)  # type: ignore[attr-defined]
++
++
++def test_result_rejects_custom_deepcopy_before_invocation() -> None:
++    class _Evil:
++        def __deepcopy__(self, memo: dict[int, object]) -> object:
++            raise AssertionError("deepcopy must not run")
++
++    with pytest.raises(ValueError):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.SUCCESS,
++            records=(({"value": _Evil()},)),  # type: ignore[arg-type]
++            count=1,
++            metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++        )
++
++
++def test_result_rejects_forged_extra_attributes() -> None:
++    result = TombstoneProjectionResult(
++        status=TombstoneProjectionStatus.FAILED,
++        error_category=TombstoneProjectionFailureCategory.INVALID_REQUEST,
++    )
++    object.__setattr__(result, "extra", 1)
++    with pytest.raises((TypeError, ValueError)):
++        TombstoneProjectionResult.__post_init__(result)
++
++
++@pytest.mark.parametrize("make_cycle", [lambda: _self_list(), lambda: _self_dict()])
++def test_result_rejects_cyclic_containers(make_cycle) -> None:
++    with pytest.raises((TypeError, ValueError)):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.SUCCESS,
++            records=(make_cycle(),),  # type: ignore[arg-type]
++            count=1,
++            metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++        )
++
++
++def test_result_contains_unexpected_copy_exception(monkeypatch: pytest.MonkeyPatch) -> None:
++    record = {
++        "schema_version": "1.0",
++        "tombstone_id": TombstoneIdGenerator.generate_tombstone_id(
++            entity_type="document", entity_id="confluence:page:1", reason="source_deleted", dataset_version="v1"
++        ),
++        "entity_type": "document",
++        "entity_id": "confluence:page:1",
++        "reason": "source_deleted",
++        "detected_at": "2026-08-05T00:00:00.000000Z",
++        "dataset_version": "v1",
++    }
++    monkeypatch.setattr(tombstone_module.copy, "deepcopy", lambda value: (_ for _ in ()).throw(RuntimeError("private")))
++    with pytest.raises(ValueError):
++        TombstoneProjectionResult(
++            status=TombstoneProjectionStatus.SUCCESS,
++            records=(record,),
++            count=1,
++            metrics=TombstoneProjectionMetrics(record_count=1, root_count=1, child_count=0),
++        )
++
++
++def _self_list() -> list[object]:
++    value: list[object] = []
++    value.append(value)
++    return value
++
++
++def _self_dict() -> dict[str, object]:
++    value: dict[str, object] = {}
++    value["self"] = value
++    return value
+diff --git a/tests/foundation/domain/rules/test_tombstone_record_builder.py b/tests/foundation/domain/rules/test_tombstone_record_builder.py
+new file mode 100644
+index 0000000..5453d95
+--- /dev/null
++++ b/tests/foundation/domain/rules/test_tombstone_record_builder.py
+@@ -0,0 +1,83 @@
++import pytest
++
++from knowledgenexus.foundation.domain.models import TombstoneEntityType, TombstoneReason, TombstoneTarget
++from knowledgenexus.foundation.domain.rules import TombstoneRecordBuilder
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++
++
++def test_builds_schema_valid_record_with_optional_fields() -> None:
++    record = TombstoneRecordBuilder.build(
++        target=TombstoneTarget(
++            TombstoneEntityType.CHUNK,
++            "chunk:git:" + "a" * 16,
++            detail="updated",
++            source_version_last_seen="a" * 40,
++        ),
++        reason=TombstoneReason.CONTENT_UPDATED,
++        detected_at="2026-08-05T00:00:00.000000Z",
++        dataset_version="v1",
++        schema_validator=FoundationSchemaValidator(),
++    )
++    assert record["schema_version"] == "1.0"
++    assert record["entity_type"] == "chunk"
++    assert record["detail"] == "updated"
++
++
++def test_schema_validator_failure_is_not_silently_ignored() -> None:
++    class _Validator:
++        def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++            raise ValueError("reject")
++
++    with pytest.raises(ValueError):
++        TombstoneRecordBuilder.build(
++            target=TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:1"),
++            reason=TombstoneReason.SOURCE_DELETED,
++            detected_at="2026-08-05T00:00:00.000000Z",
++            dataset_version="v1",
++            schema_validator=_Validator(),
++        )
++
++
++def test_mutating_validator_is_rejected() -> None:
++    class _MutatingValidator:
++        def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++            record.pop("entity_id")
++
++    with pytest.raises(ValueError):
++        TombstoneRecordBuilder.build(
++            target=TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:1"),
++            reason=TombstoneReason.SOURCE_DELETED,
++            detected_at="2026-08-05T00:00:00.000000Z",
++            dataset_version="v1",
++            schema_validator=_MutatingValidator(),
++        )
++
++
++def test_equal_string_subclass_mutation_is_rejected() -> None:
++    class _EqualString(str):
++        pass
++
++    class _MutatingValidator:
++        def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++            record["entity_id"] = _EqualString(record["entity_id"])  # type: ignore[arg-type]
++
++    with pytest.raises(ValueError):
++        TombstoneRecordBuilder.build(
++            target=TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:1"),
++            reason=TombstoneReason.SOURCE_DELETED,
++            detected_at="2026-08-05T00:00:00.000000Z",
++            dataset_version="v1",
++            schema_validator=_MutatingValidator(),
++        )
++
++
++def test_forged_target_fails_with_typed_error() -> None:
++    forged = object.__new__(TombstoneTarget)
++    with pytest.raises((TypeError, ValueError)):
++        TombstoneRecordBuilder.build(
++            target=forged,
++            reason=TombstoneReason.SOURCE_DELETED,
++            detected_at="2026-08-05T00:00:00.000000Z",
++            dataset_version="v1",
++            schema_validator=FoundationSchemaValidator(),
++        )
+-- 
+2.45.1.windows.1
+

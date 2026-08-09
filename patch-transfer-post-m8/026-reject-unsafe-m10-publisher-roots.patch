@@ -1,0 +1,27 @@
+From 54af5d16ee435443a7632b4119e600695e264797 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:18:20 +0700
+Subject: [PATCH] Reject unsafe M10 publisher roots
+
+---
+ .../infrastructure/exporters/full_snapshot_publisher.py       | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
+index 346bf98..7d8db40 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
+@@ -66,6 +66,10 @@ class FullSnapshotPublisher:
+ 
+ 
+ def _verify_paths(*, staging_path: Path, dataset_root: Path) -> None:
++    if not dataset_root.is_absolute() or dataset_root.is_symlink():
++        raise ValueError("Dataset root must be an absolute regular directory")
++    if not staging_path.is_absolute():
++        raise ValueError("Staging path must be absolute")
+     if not dataset_root.exists():
+         raise FileNotFoundError(f"Dataset root does not exist: {dataset_root}")
+     if not dataset_root.is_dir():
+-- 
+2.45.1.windows.1
+

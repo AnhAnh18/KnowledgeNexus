@@ -1,0 +1,1915 @@
+From 2816e1f0414de9af6e83bfd908ca54969bcbac3f Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 5 Aug 2026 14:01:54 +0700
+Subject: [PATCH] feat(foundation): add M10 snapshot wire models
+
+---
+ .../20260805-m10/01-plan-review.md            | 131 ++++++++
+ .../20260805-m10/02-plan-revised.md           | 123 ++++++++
+ .../20260805-m10/03-plan-revised-review.md    | 106 +++++++
+ .codex-workflow/20260805-m10/04-plan-final.md | 135 +++++++++
+ .../20260805-m10/05-plan-final-review.md      |  85 ++++++
+ .../20260805-m10/06-plan-approved.md          | 193 ++++++++++++
+ .../20260805-m10/07-plan-approval.md          |  42 +++
+ .../20260805-m10/08-m10a-implementation.md    |  31 ++
+ .../20260805-m10/09-m10a-review-1.md          |  44 +++
+ .../20260805-m10/10-m10a-fix-plan.input.md    |  20 ++
+ .../20260805-m10/11-m10a-fix-plan-review.md   |  72 +++++
+ .../12-m10a-fix-implementation.md             |  34 +++
+ .../20260805-m10/13-m10a-review-2.md          |  31 ++
+ .../20260805-m10/14-m10a-fix2-plan.input.md   |  17 ++
+ .../20260805-m10/15-m10a-fix2-plan-review.md  |  51 ++++
+ .../16-m10a-fix2-implementation.md            |  31 ++
+ .../20260805-m10/17-m10a-review-3.md          |  26 ++
+ .codex-workflow/20260805-m10/PLAN.input.md    |  96 ++++++
+ .local_ai/IMPLEMENTATION_STATE.md             |  23 +-
+ .local_ai/ROADMAP.md                          |  12 +-
+ .../foundation/domain/models/__init__.py      |  12 +
+ .../foundation/domain/models/m10_snapshot.py  | 284 ++++++++++++++++++
+ .../domain/models/test_m10_snapshot.py        |  93 ++++++
+ 23 files changed, 1689 insertions(+), 3 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m10/01-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/02-plan-revised.md
+ create mode 100644 .codex-workflow/20260805-m10/03-plan-revised-review.md
+ create mode 100644 .codex-workflow/20260805-m10/04-plan-final.md
+ create mode 100644 .codex-workflow/20260805-m10/05-plan-final-review.md
+ create mode 100644 .codex-workflow/20260805-m10/06-plan-approved.md
+ create mode 100644 .codex-workflow/20260805-m10/07-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/08-m10a-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/09-m10a-review-1.md
+ create mode 100644 .codex-workflow/20260805-m10/10-m10a-fix-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/11-m10a-fix-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/12-m10a-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/13-m10a-review-2.md
+ create mode 100644 .codex-workflow/20260805-m10/14-m10a-fix2-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/15-m10a-fix2-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/16-m10a-fix2-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/17-m10a-review-3.md
+ create mode 100644 .codex-workflow/20260805-m10/PLAN.input.md
+ create mode 100644 src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+ create mode 100644 tests/foundation/domain/models/test_m10_snapshot.py
+
+diff --git a/.codex-workflow/20260805-m10/01-plan-review.md b/.codex-workflow/20260805-m10/01-plan-review.md
+new file mode 100644
+index 0000000..d30ed69
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/01-plan-review.md
+@@ -0,0 +1,131 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10 Plan Review
++
++M10 is a legitimate next milestone, but the input is not yet an actionable
++implementation plan. It spans a new multi-source trust boundary, graph
++projection, and publication orchestration, and it conflicts with existing
++active M6G/ M3 assumptions unless those differences are explicitly resolved.
++
++## Contract and gate blockers
++
++1. Define the normative M10 contract (or an approved extension to
++   `ONE_PAGE_EXPORT_SPEC.md`) before production implementation. The active
++   contract is one trusted Confluence page with fixed `dataset_name`,
++   `source_id`, `export_mode`, `schemas_version`, source-scope shape, profile
++   and config-hash derivation, and empty media/symbol/sync/tombstone streams.
++   M10 instead proposes an approved Confluence scope plus Git, populated media
++   and symbols, and cross-stream sync/tombstone checks. State exactly which
++   rules remain locked, which are generalized, and how compatibility with the
++   M6G golden export is preserved. Do not silently widen the one-page public
++   contract.
++
++2. The roadmap says M8-AC's real gate is still `pending_external_input` and
++   M10 requires real operator inputs. Separate synthetic implementation,
++   source-review approval, and the operator-approved real run. M10 may be
++   developed offline, but it must not claim a real full-snapshot PASS or update
++   roadmap state without approved generation/scope, pinned tokenizer assets,
++   credentials handled outside evidence, and sanitized aggregate acceptance.
++
++3. Resolve the stream/deferred contradiction. The current
++   `FullSnapshotStagingCompleter` extended path enforces empty
++   `media_assets`, `symbols`, `sync_state`, and `tombstones`, while M10-B/C
++   proposes composing media and symbols and validating those streams. Specify
++   whether M10 keeps all four empty, or add a backward-compatible, independently
++   contracted quality/completion mode that permits populated media/symbols
++   without changing M6G behavior or creating a parallel completer/exporter.
++
++4. Clarify artifact counting: a published version directory contains exactly
++   ten files (eight JSONL streams, `manifest.json`, and `quality_report.md`);
++   `LATEST.txt` is a separate dataset-root pointer and must not be counted as a
++   version artifact. Manifest `counts` must contain exactly the eight stream
++   keys and equal records actually emitted.
++
++## Required design detail
++
++- Specify exact immutable runtime-validated fields, field sets, enums, limits,
++  and status/result invariants for M10-A. Include run/generation identity,
++  scope and exclusion grammar, source provenance, Git repository/branch/commit,
++  media policy, profile/config identity, `generated_at` preservation and
++  dataset-root rules. Require exact-type checks, missing/extra-field rejection,
++  forged frozen-object revalidation, no secret/raw-content fields, and
++  impossible-counter rejection before any dependency or filesystem call.
++- Reuse the approved M6G profile bundle derivation: hash the exact normalized
++  bytes of the loaded embedding and Jira profiles with the code-owned
++  normalization-policy identity. Do not accept an arbitrary operator
++  `config_hash`, independently loaded text/object pairs, or a second
++  chunker/profile identity. Preserve the caller's valid RFC3339
++  `generated_at` representation while using the existing deterministic
++  `DatasetVersionGenerator`; define `dataset_version`/folder/`LATEST.txt`
++  equality.
++- Define trusted adapter ports and handoff models for M7 raw generations,
++  M8-D/E page sets, ACL materialization, Jira relations, M9-A media, M9-B Git,
++  and M9-C symbols. Each handoff must bind generation, source, document, commit,
++  path, and profile identity; validate exact provenance before field access;
++  use deterministic source ordering; and return sanitized category-only
++  failures. State which adapters may read/write raw evidence and where all
++  outputs remain in-memory until M3 staging.
++- Pin Git by repository, branch, and immutable commit. Define path containment,
++  POSIX/casefold policy, generated/vendor/binary exclusions, and how Git chunks
++  receive deny-safe ACL tags. A branch name alone must never select mutable
++  source bytes.
++- Define Confluence scope/exclusion semantics, page ordering, source-version
++  and raw-generation checks, restriction/attachment observation provenance,
++  and all-or-nothing behavior across mixed Confluence/Git/media/symbol
++  failures. Do not refetch or reinterpret M8/M9-owned policy in the M10
++  orchestrator.
++- Make every cross-stream rule executable: document/chunk identity and source
++  ownership, non-empty deny-safe ACL tags, ACL/document cardinality, relation
++  source/target resolution and unresolved-reference policy, media parent and
++  ACL inheritance, symbol-to-chunk linkage, and sync/tombstone entity/version
++  consistency. State whether invalid references fail the whole run or are
++  dropped/quarantined; no silent loss or fabricated deletion evidence.
++- Reuse `FullSnapshotStagingWriter`, `FullSnapshotStagingCompleter`,
++  `FullSnapshotPublisher`, and `DatasetVersionGenerator`. If their current
++  one-page-only assumptions require extension, specify an additive API and
++  preserve old arguments, report bytes, file-set checks, cleanup, no-clobber,
++  and golden output. Do not import private M6G CLI state or create a parallel
++  writer/completer/publisher.
++- Preserve the existing CLI's arguments, exit mappings 1-13, reserved M6G
++  categories 14-19, structured configuration-failure stderr vocabulary, and
++  sanitized output. Define M10 error-stage/category mapping for adapter,
++  projection, staging, completion, publication, and post-publication
++  acceptance failures; never print exception text, paths, IDs, URLs,
++  principals, content, or hashes.
++
++## Required tests and acceptance criteria
++
++- Model and boundary adversarial tests for `object()`, `None`, wrong runtime
++  containers/types/enums, missing and forbidden extra fields, forged frozen
++  inputs/results, invalid provenance/paths/timestamps, secret/raw-content
++  attempts, and impossible cross-field counters. Assert fail-closed categories,
++  no dependency calls, and zero partial records/files.
++- Synthetic end-to-end fixtures must include both non-empty Confluence and Git
++  streams, media and symbols where the selected policy permits them, and the
++  explicit empty initial tombstone/sync behavior. Verify all eight JSONL files,
++  manifest schema/counts, deterministic ordering, canonical IDs, ACL/relation/
++  media/symbol graph invariants, source/profile/config provenance, and exact
++  ten-file publication layout.
++- Negative orchestration tests must cover malformed adapter results, identity
++  drift, unresolved relations/symbols, ACL gaps, duplicate/collision IDs,
++  schema-validator rejection or mutation, count mismatch, pre-existing
++  staging/final paths, symlinks/reparse points, unsafe roots, publication and
++  completion failures, `LATEST.txt` corruption, and failed-run atomicity with
++  the prior pointer unchanged.
++- Determinism tests must run the same immutable inputs twice (including source
++  ordering permutations and equivalent timestamp offsets where permitted),
++  compare canonical stream bytes/manifest/report, and define no-clobber
++  behavior for an already published version.
++- Run focused M10 tests, all affected M7/M8/M9/M3/M6G regressions, architecture
++  checks, `python -m compileall -q src tests`, and scoped `git diff --check`.
++  Perform a fresh independent review in a new session; only after `PASS` may
++  roadmap/state be updated and changes committed/pushed. Real-run evidence
++  must be aggregate-only and remain outside Git.
++
++## Scope decision
++
++The plan must be revised into separately reviewable seams (at minimum:
++trusted composition/projection, generic-compatible export completion, CLI
++publication boundary, and synthetic acceptance) with explicit approval gates.
++No embedding, Qdrant, indexing, retrieval, chat, delta export, or redesign of
++M8/M9 contracts is authorized by this review.
+diff --git a/.codex-workflow/20260805-m10/02-plan-revised.md b/.codex-workflow/20260805-m10/02-plan-revised.md
+new file mode 100644
+index 0000000..8969f14
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/02-plan-revised.md
+@@ -0,0 +1,123 @@
++# M10 First Full POC Foundation Snapshot - Revised Plan
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Goal and gate posture
++
++M10 will add a bounded, multi-source Foundation full-snapshot composition
++seam. It will reuse the existing M3 writer/completer/publisher and preserve
++the approved M6G one-page contract and golden export unchanged. M8-AC's real
++10-20 page gate remains an external acceptance input: it is not required to
++start M10 or to produce the synthetic contract proof, but no real-corpus or
++real-POC PASS may be claimed without the approved generation, ordered scope,
++pinned tokenizer assets, credentials handling, and sanitized aggregate report.
++
++The initial snapshot has exactly ten files in its version directory (eight
++JSONL streams, `manifest.json`, `quality_report.md`); `LATEST.txt` is a
++separate dataset-root pointer. Initial `tombstones.jsonl` is empty unless an
++explicit normative exception is approved. Real deletion/delta behavior is a
++precondition only for the second sync or first delta export.
++
++## Contract decision (M10-A)
++
++Add a new additive M10 POC contract/model layer rather than widening the M6G
++one-page public models in place:
++
++- `M10SnapshotRequest` binds an exact crawl run/generation, approved
++  Confluence scope/exclusions and ordered page selection, raw-generation
++  provenance, restriction/attachment observation provenance, pinned Git
++  repository/branch/commit, media policy, normalized profile bundle/config
++  identity, `generated_at`, dataset root, and explicit `full_snapshot` mode.
++- `M10SnapshotProjection` owns immutable copies of the eight streams, source
++  scopes, profile/config identity, and metrics. It enforces exact fields,
++  schema-valid records, deterministic stream ordering, graph/count invariants,
++  and sanitized failure categories.
++- `M10SnapshotResult` binds staging/publication status, dataset version,
++  counts, digest, and error category with impossible-combination checks.
++- A dedicated `M10QualityReportInput` and generic quality-report renderer
++  support populated media/symbol/sync streams while leaving the existing
++  `one_page_quality` completer path and its deferred-stream assumptions intact.
++
++All public models revalidate forged frozen instances and reject `None`,
++`object()`, wrong containers/types/enums, missing/extra fields, unsafe roots,
++secrets/raw-content fields, invalid paths/timestamps/provenance, and impossible
++counters before dependency calls or filesystem side effects. Config hash is
++derived only from the approved normalized profile bytes and code-owned policy;
++callers cannot provide an arbitrary hash or second profile identity.
++
++## Trusted composition seams (M10-B)
++
++Create injected adapter protocols and bounded application composition, with
++no direct connector or exporter internals:
++
++1. **Confluence adapter:** consume M7 raw generation envelopes and M8-D page
++   set processing; enforce run/generation/source-version/page ordering, raw
++   provenance, scope/exclusion policy, M8-E summary identity, ACL materialized
++   records, Jira relation records, and M9-A media outputs. Fail atomically on
++   any page or dependency result; do not reinterpret M8/M9 policy.
++2. **Git adapter:** consume M9-B/M9-C authority observations over the pinned
++   repository/branch/commit; enforce POSIX path containment, exclusions,
++   commit-bound bytes/spans, deterministic ordering, and deny-safe ACL tags.
++3. **Cross-source graph validator:** enforce document/chunk identity and
++   source ownership, ACL/document cardinality, non-empty deny-safe chunk ACL,
++   relation source/target policy (external Jira targets must carry explicit
++   unresolved status), media parent/ACL inheritance, symbol-to-chunk linkage,
++   and sync/tombstone entity/version consistency. Invalid references are
++   explicit failures or quarantined only through a typed contract; never silent
++   drops or fabricated evidence.
++
++The composition result remains in memory until the M3 staging writer begins.
++No Qdrant, embedding, retrieval, chat, checkpoint, or unapproved raw-store
++side effects are introduced.
++
++## Generic export boundary (M10-C/D)
++
++- Extend `FullSnapshotStagingCompleter` additively with a generic quality input
++  and report mode; preserve old call signatures, one-page report bytes, file
++  set checks, cleanup, and golden fixture behavior.
++- Reuse `FullSnapshotStagingWriter`, `FullSnapshotStagingCompleter`,
++  `FullSnapshotPublisher`, and `DatasetVersionGenerator`; do not add a second
++  writer/completer/publisher.
++- Add one M10 application/CLI boundary that accepts sanitized configuration and
++  injected adapters, preserves existing CLI exit mappings 1-13 and reserved
++  M6G categories 14-19, and introduces only typed M10 categories for adapter,
++  projection, staging, completion, publication, and post-publication failures.
++- Enforce output-root containment, no symlinks/reparse points, no-clobber and
++  failed-run atomicity, exact dataset-version/folder/manifest/LATEST equality,
++  ten-file version layout, and no secret/path/content/ID/hash leakage in
++  reports or stderr.
++
++## Synthetic acceptance and external gate (M10-E)
++
++Synthetic fixtures must include non-empty Confluence and Git streams, media
++and symbols where policy permits, explicit empty initial tombstones, and
++diagnostic sync state. Run twice over immutable inputs and compare canonical
++stream bytes, manifest, quality report, counts, and publication behavior.
++Negative tests must cover malformed adapter results, identity drift, unresolved
++relations/symbols, ACL gaps, duplicate/collision IDs, validator mutation,
++count mismatch, unsafe/pre-existing paths, symlinks/reparse points,
++publication/completion failure, corrupted `LATEST.txt`, and unchanged prior
++pointer after failure.
++
++The real M10 run is a separate operator gate. It requires approved Confluence
++scope/generation and raw provenance, pinned Git commit, tokenizer/assets,
++credential handling outside Git/evidence, and a sanitized aggregate report.
++Until supplied, roadmap/state must say `pending_external_input` rather than
++claiming a real full-snapshot PASS.
++
++## Validation and review sequence
++
++1. Implement only the approved M10-A/B/C/D/E bounded slice.
++2. Run focused M10 tests, affected M3/M6G/M7/M8/M9 regressions,
++   architecture checks, `python -m compileall -q src tests`, and scoped
++   `git diff --check`.
++3. Obtain a fresh independent review in a new session; address every confirmed
++   P0-P3 finding with a bounded fix plan/review and revalidation.
++4. Update `.local_ai/ROADMAP.md` and `.local_ai/IMPLEMENTATION_STATE.md` only
++   after review approval, recording the external real-run gate explicitly.
++5. Stage only intended files, commit, and push `codex/m8-m9`.
++
++## Non-goals
++
++No Indexing/Qdrant import, embedding, retrieval, chat, UI, 100k optimization,
++delta export, M8/M9 contract redesign, or fabricated real operator evidence.
+diff --git a/.codex-workflow/20260805-m10/03-plan-revised-review.md b/.codex-workflow/20260805-m10/03-plan-revised-review.md
+new file mode 100644
+index 0000000..e158b6d
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/03-plan-revised-review.md
+@@ -0,0 +1,106 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10 Revised Plan Review
++
++The revision resolves the major architectural blockers and is directionally
++ready, but it still needs a few contract-level clarifications before
++implementation is authorized. Keep the `complex` profile: this remains a
++multi-boundary composition and publication change, not a local build task.
++
++## Confirmed corrections
++
++- M6G remains unchanged: the plan adds M10 models and a generic completion
++  mode instead of widening the one-page models, and explicitly preserves the
++  existing report bytes, file checks, cleanup, and golden export.
++- The artifact count is correct: exactly ten files inside the published version
++  directory (eight JSONL streams, `manifest.json`, `quality_report.md`), with
++  `LATEST.txt` counted separately at the dataset root.
++- The M8-AC real gate is correctly external and remains
++  `pending_external_input`; synthetic proof is not presented as a real-corpus
++  or real-POC PASS.
++- The plan includes typed adapter seams, graph validation, no partial output,
++  adversarial input classes, publication-failure atomicity, deterministic
++  reruns, independent review, and staged roadmap/state updates.
++
++## Required final clarifications
++
++1. Lock the M10 wire contract before coding. State exact constants and shapes
++   inherited from M6G/M3 (`dataset_name`, source IDs, `export_mode`,
++   `schemas_version`, manifest `source_scopes`, eight exact count keys), and
++   identify any new M10 source-scope representation. Define exact field sets,
++   enum values, result/status combinations, and failure categories for
++   `M10SnapshotRequest`, `M10SnapshotProjection`, `M10SnapshotResult`, and
++   `M10QualityReportInput`; typed construction must reject impossible
++   combinations and forged/missing/extra fields.
++
++2. Make profile/config derivation executable rather than descriptive. Reuse
++   the M6G canonical JSON inputs, normalization-policy identity, strict UTF-8
++   profile bytes, loaded profile/chunker version, and lowercase SHA-256 rules.
++   The plan must state that `chunker_version` comes from the loaded embedding
++   profile and equals every emitted chunk, and that `generated_at` is preserved
++   exactly in the manifest while `DatasetVersionGenerator` derives the folder
++   and `LATEST.txt` value. No arbitrary config hash or independently loaded
++   profile text/object is allowed.
++
++3. Define stream semantics for the new generic completion mode. The synthetic
++   plan mentions populated media/symbol streams and diagnostic sync state but
++   only says initial tombstones are empty. Specify whether `sync_state` may be
++   populated, its exact schema/version consistency rules, and the required
++   empty/non-empty policy for media, symbols, sync state, and tombstones. The
++   generic report must have a locked deterministic section/field order and
++   must never claim post-publication checks before publication; add a test that
++   the existing M6G one-page report remains byte-identical.
++
++4. Complete adapter contracts and ACL policy. For every Confluence/Git/media/
++   symbol/relation handoff, name the exact trusted result type, provenance
++   fields, ordering, sanitized error mapping, and all-or-nothing behavior.
++   Explicitly define how Git chunks obtain non-empty deny-safe `acl_tags` and
++   how external Jira relations with `resolution_status` unresolved are
++   represented without inventing targets. Wrong runtime types must fail before
++   field access or side effects.
++
++5. Close the CLI/path contract. Enumerate the closed M10 category vocabulary
++   and map each to an existing reserved exit code (or obtain approval for new
++   codes); preserve M6G exit mappings 1-19 and structured configuration stderr.
++   Specify dataset-root derivation, plain-directory/symlink/reparse checks,
++   staging/final no-clobber behavior, prior `LATEST.txt` preservation, and
++   sanitized stdout/stderr fields. Do not accept a caller-supplied dataset
++   subdirectory that bypasses the M6G containment rules.
++
++6. Split the implementation into independently reviewable gates: (a) models
++   and trusted composition, (b) pure cross-stream projection, (c) additive
++   generic completion and M3 publication, (d) CLI boundary, and (e) synthetic
++   acceptance. Each gate must have its own focused tests and must not perform
++   the real operator run or update roadmap/state before final independent PASS.
++
++## Required adversarial and regression tests
++
++- Exercise `object()`, `None`, wrong containers/types/enums, missing/extra
++  fields, forged frozen objects, invalid paths/provenance/timestamps, secrets
++  or raw-content injection, and impossible counters at every public model and
++  application boundary. Assert sanitized failure category, no dependency
++  calls, and zero partial records/files.
++- Use fixtures with both Confluence and Git documents, non-empty media/symbol
++  streams where policy permits, explicitly specified sync/tombstone behavior,
++  relation resolution/unresolved cases, ACL inheritance, duplicate/collision
++  IDs, validator mutation, and source/profile/config drift.
++- Verify exactly ten files in the version directory, eight manifest count keys,
++  schema validation and byte-level deterministic stream/report output, exact
++  manifest/directory/LATEST equality, no symlinks/unexpected files, failed-run
++  atomicity, publication/completion failure cleanup, and unchanged prior
++  pointer. Test M6G one-page golden output through the generic completer path.
++
++## Acceptance commands
++
++The final revised plan must name the exact focused commands and basetemp paths,
++not only the phrase "run regressions." At minimum run the M10 model/composition,
++projection/completion, CLI/publication, and architecture suites, then the
++affected M3/M6G/M7/M8/M9 regressions, for example:
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation --basetemp=.codex-workflow/20260805-m10/pytest-m10-foundation`
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10-arch`; `python -m compileall -q src tests`; `git diff --check`
++
++Use the repository's bounded M7/M8/M9 regression selections with explicit
++basetemps and record exact results. Obtain a fresh independent review in a new
++session before roadmap/state update, staging, commit, or push.
+diff --git a/.codex-workflow/20260805-m10/04-plan-final.md b/.codex-workflow/20260805-m10/04-plan-final.md
+new file mode 100644
+index 0000000..a3dce6b
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/04-plan-final.md
+@@ -0,0 +1,135 @@
++# M10 First Full POC Foundation Snapshot - Final Approved Plan
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Scope and compatibility
++
++Implement a new additive M10 multi-source snapshot seam. Preserve the existing
++M6G one-page models, CLI, quality-report bytes, and golden fixture unchanged;
++M10 must not widen `OnePageExportProjection` or its deferred-stream semantics.
++M10 may reuse the generic M3 writer/publisher and adds a separate generic
++completion/report input path only where needed for populated streams.
++
++M8-AC remains `pending_external_input`: its real 10-20 page result is not
++needed to start M10 or to prove synthetic contract behavior, but no real M10
++POC PASS may be claimed without approved generation/scope, pinned tokenizer
++assets, credentials handled outside Git/evidence, and a sanitized aggregate
++report. Tombstones are empty for the initial `full_snapshot`; M9-D behavior is
++required before a second sync or first delta export.
++
++## M10-A - Wire contract and trusted inputs
++
++Add exact runtime-validated immutable models with these fields and policies:
++
++- `M10SnapshotRequest`: `run_id`, `generation_id`, `confluence_scope`,
++  `confluence_exclusions`, `ordered_page_ids`, `raw_generation_id`,
++  `git_repository`, `git_branch`, `git_commit`, `media_policy`,
++  `profile_bundle`, `generated_at`, `dataset_root`, `export_mode`.
++  `run_id == generation_id`; `export_mode == "full_snapshot"`; page IDs are
++  unique, ordered, and scope-valid; Git commit is a 40-lowercase-hex SHA;
++  `generated_at` is strict RFC3339; dataset root is absolute, existing,
++  non-symlink/reparse, and contains no secrets/raw content in the model.
++- `M10SnapshotProjection`: `dataset_name`, `schemas_version`, `source_scopes`,
++  `generated_at`, `config_hash`, `chunker_version`, the eight ordered stream
++  tuples (`documents`, `chunks`, `relations`, `acl`, `media_assets`, `symbols`,
++  `sync_state`, `tombstones`), and typed aggregate metrics. The inherited wire
++  constants are `dataset_name="spen_knowledge_poc"`, `export_mode` is fixed to
++  `full_snapshot`, `schemas_version="1.0"`, and the manifest has exactly the
++  eight count keys. `source_scopes` is canonicalized as sorted `confluence`
++  and optional `git` objects containing only approved IDs/space/page or
++  repo/branch/commit fields.
++- `M10SnapshotResult`: `status` in `composed|staged|published|failed`, optional
++  `dataset_version`/`final_path` only for successful states, typed
++  `failure_category` in `invalid_request|adapter|projection|staging|
++  completion|publication|acceptance`, counts/digest only when consistent.
++  Impossible status/field combinations fail closed.
++- `M10QualityReportInput`: exact deterministic fields for profile identity,
++  eight counts, source-quality observations, ACL/relation/media/symbol checks,
++  completion checks, publication state (`PENDING_AT_REPORT_COMPLETION` before
++  publication), and source scopes; field/section order is fixed and it never
++  carries record text or secrets.
++
++Profile/config derivation reuses the approved M6G normalized embedding/Jira
++profile bytes, `ONE_PAGE_NORMALIZATION_POLICY_ID`, `OnePageExportProfileBundle`,
++lowercase SHA-256 config hash, and loaded `ChunkingProfile.chunker_version`.
++Every emitted chunk must carry that chunker version. `generated_at` is preserved
++exactly in the manifest; `DatasetVersionGenerator` alone derives the dataset
++version, folder name, and `LATEST.txt` value.
++
++Every public boundary has adversarial tests for `None`, `object()`, wrong
++containers/types/enums, missing/extra fields, forged frozen objects, invalid
++paths/provenance/timestamps, secret/raw-content injection, impossible counters,
++and zero dependency calls before failure.
++
++## M10-B - Trusted source composition
++
++Use injected, typed adapters and all-or-nothing composition:
++
++- Confluence consumes M7 raw-generation envelopes and M8-D/E page-set output;
++  validates generation/source-version/page order, ACL materialization, Jira
++  relations, attachment observations, and M9-A media results without
++  reinterpreting their policies.
++- Git consumes M9-B/M9-C commit-bound observations; enforces path exclusions,
++  deterministic ordering, and `acl_tags=["repo:<repository>"]` (or an explicit
++  deny-safe `restricted:unresolved` result) for every Git document/chunk.
++- Media records require existing parent documents and inherited deny-safe ACL;
++  symbols require exact repo/branch/commit/file/line provenance and resolve to
++  an emitted chunk when `chunk_id` is non-null.
++- Relations retain external Jira targets only with explicit unresolved status;
++  no fabricated target IDs. Sync state is diagnostic only: each record is
++  schema-valid, source/entity/version-consistent, and initial-run statuses are
++  `active` (source errors fail the run). Tombstones must be exactly empty.
++
++## M10-C - Cross-stream projection and generic completion
++
++- Validate every record against its schema and enforce document/chunk/ACL
++  identity, non-empty ACL tags, relation source/target policy, media parent,
++  symbol linkage, sync consistency, deterministic ordering, exact counts, and
++  no collisions.
++- Extend `FullSnapshotStagingCompleter.complete` additively with a generic
++  quality input/report mode; old `one_page_quality=None|OnePageExportQualityInput`
++  behavior, report bytes, cleanup, and golden output remain byte-identical.
++- Use existing `FullSnapshotStagingWriter` and `ManifestRecordBuilder`; no
++  parallel writer or private M6G CLI state.
++
++## M10-D - CLI/publication boundary
++
++- Add one M10 application/CLI entry point over sanitized config and injected
++  adapters. Preserve M6G exit mappings 1-19; map M10 failures to existing
++  reserved export codes (projection 15, staging 16, completion 17,
++  publication 18, acceptance 19) and keep configuration failures in the
++  existing structured vocabulary.
++- Enforce output-root containment, plain directory/no symlink or reparse,
++  staging/final no-clobber, prior `LATEST.txt` preservation on failure, exact
++  ten-file version layout, and sanitized stdout/stderr with no paths, IDs,
++  URLs, principals, content, hashes, or exception text.
++
++## M10-E - Validation, independent review, and external gate
++
++Synthetic fixtures include non-empty Confluence and Git, media/symbol records,
++diagnostic sync state, and empty initial tombstones. Run twice and compare
++canonical stream bytes, manifest, report, counts, and pointer behavior. Cover
++malformed adapters, identity drift, unresolved references, ACL gaps,
++duplicates, validator mutation, unsafe paths, symlinks, publication failures,
++LATEST corruption, and atomic rollback.
++
++Validation commands (explicit basetemps):
++
++```text
++python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/application/use_cases/test_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-models
++python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py tests/foundation/infrastructure/exporters/test_one_page_full_snapshot_exporter.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-export
++python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10-arch
++python -m compileall -q src tests
++git diff --check
++```
++
++Also rerun the bounded M3/M6G, M7 raw-generation, M8-D/E, and M9-A/B/C/D
++regressions with explicit basetemps. Only after a fresh independent review
++`PASS` may roadmap/state be updated and changes committed/pushed. The real
++operator full-POC invocation remains an aggregate-only external gate and must
++not be represented as complete until its inputs/evidence exist.
++
++## Non-goals
++
++No embedding, Qdrant/indexing import, retrieval, chat, UI, 100k optimization,
++delta export, M8/M9 contract redesign, or fabricated real-run evidence.
+diff --git a/.codex-workflow/20260805-m10/05-plan-final-review.md b/.codex-workflow/20260805-m10/05-plan-final-review.md
+new file mode 100644
+index 0000000..45ab551
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/05-plan-final-review.md
+@@ -0,0 +1,85 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10 Final Plan Review
++
++The final plan resolves the major M6G compatibility, populated-stream,
++artifact-count, external-gate, and security concerns. It is suitable for a
++complex implementation only after the remaining contract omissions below are
++closed; this is a conditional approval, not authorization to improvise during
++implementation.
++
++## Confirmed requirements
++
++- M6G one-page models, CLI behavior, deferred-stream semantics, report bytes,
++  and golden output remain unchanged. M10 uses an additive generic completion
++  path and does not create a parallel writer/publisher or import private CLI
++  state.
++- The version directory count is exactly ten files: eight JSONL streams,
++  `manifest.json`, and `quality_report.md`. `LATEST.txt` is a separate
++  dataset-root pointer, with manifest counts limited to the eight stream keys.
++- M8-AC remains `pending_external_input`; synthetic tests cannot be presented
++  as the real full-POC gate. Tombstones are explicitly empty for the initial
++  full snapshot.
++- The plan specifies profile/config derivation, populated-stream graph rules,
++  Git ACL handling, sanitized CLI output, no-clobber/path checks, adversarial
++  tests, explicit focused commands, and fresh independent review before
++  roadmap/state or Git updates.
++
++## Blockers to close before implementation
++
++1. **Complete exact model contracts.** The plan lists fields but does not give
++   the runtime types/grammars for `confluence_scope`, exclusions, page IDs,
++   `media_policy`, and `profile_bundle`, nor the exact aggregate metric fields
++   and cross-field invariants. Define these, plus exact field sets and
++   missing/extra-field behavior, in the revised contract. For
++   `M10SnapshotResult`, specify the allowed fields for each status:
++   `composed`, `staged`, `published`, and `failed` (including when counts,
++   digest, `dataset_version`, `final_path`, and `failure_category` are present
++   or forbidden). Include `export_mode` in the wire projection or explicitly
++   state why it is a code-owned constant rather than a model field.
++
++2. **Close the error mapping.** The failure vocabulary includes `invalid_request`
++   and `adapter`, but M10-D maps only projection/staging/completion/publication/
++   acceptance to exit codes. State the exact mapping for every category,
++   preserve the M6G structured configuration stderr shape, and ensure malformed
++   dependencies fail closed before adapter/projector or filesystem side
++   effects.
++
++3. **Specify sync/report semantics.** The synthetic fixture intentionally emits
++   diagnostic `sync_state`, while the initial tombstone stream is empty. State
++   the exact allowed sync-state cardinality/status/version policy and whether
++   any media/symbol stream may be empty or populated under each media policy.
++   Lock the generic quality-report fields, section order, deterministic
++   rendering, and pre-publication `PENDING_AT_REPORT_COMPLETION` wording. The
++   existing M6G path must continue using the actual
++   `OnePageExportQualityReportInput` API and remain byte-identical.
++
++4. **Make adapter provenance executable.** Name the exact trusted result types,
++   source/run/generation/version fields, ordering rules, sanitized category
++   mapping, and rollback behavior for each Confluence, Git, media, symbol, and
++   relation handoff. Define the accepted `repo:<repository>` grammar and the
++   `restricted:unresolved` fallback as a closed ACL policy, and require
++   source-version/commit/path/line binding before record projection. Define
++   how an unresolved Jira relation is represented and counted without a
++   fabricated target or silent drop.
++
++5. **Make publication acceptance explicit.** In addition to staging checks,
++   require post-publication readback of all ten files, schema/count equality,
++   manifest/directory/LATEST equality, unchanged quality-report bytes, and
++   prior-pointer preservation after any failure. State exact dataset-root
++   derivation and containment so a caller cannot bypass the M6G path policy.
++
++6. **Name all regression commands.** The focused commands are explicit, but
++   the bounded M3/M6G, M7, M8-D/E, and M9-A/B/C/D regressions still need the
++   concrete test paths and basetemp directories in the implementation plan.
++   Implementers must report exact commands and results; no broad unscoped
++   suite or real operator invocation belongs in the synthetic gate.
++
++## Acceptance gate
++
++After those clarifications, acceptance requires the listed M10 model/use-case,
++exporter, and architecture commands; exact bounded upstream regressions;
++`compileall`; `git diff --check`; a fresh independent review with `VERDICT:
++PASS`; and only then roadmap/state update, staging, commit, and push. Real
++operator evidence remains sanitized aggregate data outside Git and cannot be
++claimed until the external inputs exist.
+diff --git a/.codex-workflow/20260805-m10/06-plan-approved.md b/.codex-workflow/20260805-m10/06-plan-approved.md
+new file mode 100644
+index 0000000..8b79448
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/06-plan-approved.md
+@@ -0,0 +1,193 @@
++# M10 First Full POC Foundation Snapshot - Implementation Plan
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## 1. Scope and compatibility lock
++
++Add a multi-source M10 seam without widening the approved M6G one-page public
++models or changing their CLI, quality-report bytes, deferred-stream policy, or
++golden fixture. Reuse M3 writer/publisher APIs; add only an additive generic
++completion/report mode. M8-AC real evidence remains external and
++`pending_external_input`; the initial snapshot has empty tombstones, while
++M9-D is required before a second sync or first delta export.
++
++The published version directory has exactly ten files: the eight JSONL streams,
++`manifest.json`, and `quality_report.md`. `LATEST.txt` is a separate pointer at
++the dataset root. Manifest `counts` has exactly the eight stream keys.
++
++## 2. Exact M10 wire models and constants
++
++Add frozen exact-field models with `type(...)` checks, no missing/extra fields,
++defensive copies, and forged-instance revalidation:
++
++### `M10ConfluenceScope`
++
++Fields: `source_id: str`, `space_keys: tuple[str, ...]`,
++`root_page_ids: tuple[str, ...]`, `page_ids: tuple[str, ...]`.
++All strings are NFC one-line non-empty identifiers; tuples are non-empty,
++sorted where set-like, unique; every page ID is in the approved roots/scope.
++
++### `M10ConfluenceExclusion`
++
++Fields: `page_id: str`, `reason: str`; exact reason enum is
++`exclude_subtree|exclude_page`; page ID is canonical and exclusion tuples are
++ordinally deterministic with no duplicates.
++
++### `M10MediaPolicy`
++
++Fields: `include_attachments: bool`, `allow_download: bool`,
++`allowed_processing_statuses: tuple[str, ...]`, `max_assets: int`.
++Allowed processing values are the schema enum
++`parsed|ocr|summarized|not_processed|failed`; the tuple is sorted/unique,
++`max_assets` is non-negative, and `allow_download` cannot be true when
++`include_attachments` is false.
++
++### `M10SnapshotRequest`
++
++Fields: `run_id: CrawlRunId`, `generation_id: CrawlRunId`,
++`confluence_scope: M10ConfluenceScope`,
++`confluence_exclusions: tuple[M10ConfluenceExclusion, ...]`,
++`ordered_page_ids: tuple[str, ...]`, `raw_generation_id: str`,
++`git_repository: str`, `git_branch: str`, `git_commit: str`,
++`media_policy: M10MediaPolicy`, `profile_bundle: OnePageExportProfileBundle`,
++`generated_at: str`, `dataset_root: Path`, `export_mode: str`.
++`run_id == generation_id`; ordered pages are unique/scope-valid;
++`raw_generation_id` is non-empty; repo/branch use the approved POSIX grammar;
++commit is exactly 40 lowercase hex; `generated_at` is strict RFC3339;
++dataset root is absolute, a plain directory, and not a symlink/reparse point;
++`export_mode == "full_snapshot"`.
++
++### `M10SnapshotMetrics`
++
++Exact integer fields:
++`documents`, `chunks`, `relations`, `acl`, `media_assets`, `symbols`,
++`sync_state`, `tombstones`, `confluence_documents`, `git_documents`,
++`unresolved_relations`, `media_processed`, `media_failed`,
++`symbols_resolved`, `default_deny_chunks`.
++All are non-negative; first eight equal stream lengths;
++`confluence_documents + git_documents == documents`;
++`unresolved_relations <= relations`; `media_processed + media_failed <= media_assets`;
++`symbols_resolved <= symbols`; `default_deny_chunks <= chunks`.
++
++### `M10SnapshotProjection`
++
++Fields: `dataset_name: str`, `schemas_version: str`,
++`source_scopes: dict[str, object]`, `generated_at: str`, `config_hash: str`,
++`chunker_version: str`, `export_mode: str`, the eight ordered tuple streams,
++and `metrics: M10SnapshotMetrics`.
++Code-owned constants are `dataset_name="spen_knowledge_poc"`,
++`schemas_version="1.0"`, and `export_mode="full_snapshot"`; `source_scopes`
++has only sorted `confluence` and optional `git` entries with approved fields.
++
++### `M10SnapshotResult`
++
++Fields: `status: Literal["composed", "staged", "published", "failed"]`,
++`metrics: M10SnapshotMetrics | None`, `digest: str | None`,
++`dataset_version: str | None`, `final_path: Path | None`,
++`failure_category: Literal["invalid_request", "adapter", "projection",
++"staging", "completion", "publication", "acceptance"] | None`.
++`composed` requires metrics/digest and forbids final path/failure;
++`staged` additionally requires dataset version and forbids final path/failure;
++`published` additionally requires final path and forbids failure;
++`failed` requires failure category and forbids metrics/digest/version/path.
++Digest is lowercase SHA-256 of canonical projection bytes.
++
++### `M10QualityReportInput`
++
++Exact fields: `active_profile`, `profile_status`, `chunker_version`,
++`expected_counts: dict[str, int]`, `source_scopes`,
++`jira_metrics`, `acl_metrics`, `media_metrics`, `symbol_metrics`,
++`sync_metrics`, `tombstone_metrics`, `completion_checks`.
++Report sections and field order are fixed: `Snapshot`, `Active Profiles`,
++`Record Counts`, `Jira Relation Quality`, `ACL Quality`, `Media Quality`,
++`Symbol Quality`, `Sync State`, `Tombstones`, `Completion Checks`,
++`Publication State`, `Scope`. Before publication it must say exactly
++`PENDING_AT_REPORT_COMPLETION`; it never contains record text/secrets.
++
++Config derivation reuses M6G's normalized embedding/Jira profile bytes,
++`ONE_PAGE_NORMALIZATION_POLICY_ID`, `OnePageExportProfileBundle`, lowercase
++SHA-256, and the loaded `ChunkingProfile.chunker_version`. No arbitrary hash,
++independent profile text, or caller-supplied chunker version is accepted.
++`generated_at` is copied byte-for-byte into the manifest; only
++`DatasetVersionGenerator` derives dataset version/folder/LATEST.
++
++## 3. Trusted adapter contracts
++
++Define injected protocols and exact handoff validation:
++
++- Confluence adapter returns a typed generation-bound result containing
++  `run_id`, `generation_id`, `source_version`, ordered page results, raw
++  artifact identity, ACL/relation/media results, and sanitized category errors.
++  Any page/dependency failure aborts the whole projection before staging.
++- Git adapter returns a typed commit-bound result containing repository, branch,
++  commit, ordered documents/symbols, POSIX paths and line spans. Every Git
++  chunk has `acl_tags=["repo:<repository>"]`; if policy cannot establish that,
++  it emits `restricted:unresolved` and the run fails the deny-safe gate.
++- Media handoffs carry parent document ID and content/raw provenance; allowed
++  processing statuses follow `M10MediaPolicy`. Symbols carry exact
++  repo/branch/commit/file/line identity and resolve to an emitted chunk when
++  `chunk_id` is non-null.
++- Relations use schema `resolution_status` values
++  `resolved|unresolved_without_jira_api|deferred_mvp|unresolved_target`; an
++  unresolved external Jira target remains explicit and is counted, never
++  fabricated or silently dropped.
++- Sync state is diagnostic only. It may be empty or contain exactly one
++  schema-valid `active` record per selected page/file/repo/attachment entity;
++  source/entity/version fields must match emitted records, schema version must
++  match, and `error`/`tombstoned` statuses are forbidden for initial success.
++- Initial `tombstones` is exactly empty. Media and symbols may be empty only
++  when their policy/eligible source set is empty; populated records must pass
++  all parent/provenance/ACL/linkage checks.
++
++All adapters reject wrong runtime types before field access and return atomic,
++sanitized results. No output is written until projection validation completes.
++
++## 4. Projection, generic completion, and publication
++
++- Validate every stream against its JSON Schema and enforce document/chunk
++  identity, non-empty deny-safe ACL tags, source ownership, relation policy,
++  media parent/ACL inheritance, symbol linkage, sync consistency, deterministic
++  ordering, exact counts, and collision-free IDs.
++- Additive generic completer API must preserve the existing one-page API,
++  output bytes, deferred checks, cleanup, and golden fixture byte-for-byte.
++- Reuse `FullSnapshotStagingWriter`, `FullSnapshotStagingCompleter`,
++  `FullSnapshotPublisher`, and `DatasetVersionGenerator` only.
++- CLI mapping is closed: `invalid_request -> 2`, `adapter/projection -> 15`,
++  `staging -> 16`, `completion -> 17`, `publication -> 18`,
++  `acceptance -> 19`; existing M6G codes 1-19 and structured configuration
++  stderr remain unchanged.
++- Enforce dataset-root containment, plain-directory/no symlink/reparse,
++  staging/final no-clobber, prior LATEST preservation on failure, exact ten-file
++  version layout, and sanitized stdout/stderr with no paths/IDs/URLs/principals/
++  content/hashes/exception text.
++- After publication, read back all ten files and verify schemas, counts,
++  manifest/version-directory/LATEST equality, unchanged report bytes, and
++  pointer preservation after any failed run.
++
++## 5. Implementation gates and exact validation
++
++Implement in independently reviewable gates: (a) models/adapters, (b) pure
++cross-stream projection, (c) generic completion/M3 publication, (d) CLI, (e)
++synthetic acceptance. Each gate gets focused adversarial tests and no roadmap/
++state update occurs before final independent PASS.
++
++```text
++python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/application/use_cases/test_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-models
++python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py tests/foundation/infrastructure/exporters/test_one_page_full_snapshot_exporter.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-export
++python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10-arch
++python -m pytest -q tests/foundation/domain/models/test_confluence_page_set.py tests/foundation/application/use_cases/test_process_confluence_page_set.py tests/foundation/domain/models/test_chunk_stability.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-m8
++python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-m9
++python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-m3-m6g
++python -m compileall -q src tests
++git diff --check
++```
++
++Obtain a fresh independent review in a new session; fix every P0-P3 finding,
++rerun these commands, then update roadmap/state, commit, and push. Real
++operator full-POC evidence remains aggregate-only and `pending_external_input`
++until supplied; no synthetic result may be promoted to real PASS.
++
++## Non-goals
++
++No embedding, Qdrant/indexing import, retrieval, chat, UI, 100k optimization,
++delta export, M8/M9 contract redesign, or fabricated real-run evidence.
+diff --git a/.codex-workflow/20260805-m10/07-plan-approval.md b/.codex-workflow/20260805-m10/07-plan-approval.md
+new file mode 100644
+index 0000000..cc8366d
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/07-plan-approval.md
+@@ -0,0 +1,42 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10 Plan Approval
++
++APPROVED
++
++The final plan closes the prior review blockers and is ready for implementation
++under the complex profile. No plan-level blocker remains.
++
++## Confirmed contract and compatibility
++
++- Exact immutable wire models, field sets, runtime validation, status/category
++  combinations, metric invariants, constants, profile/config derivation, and
++  deterministic dataset-version rules are specified.
++- M6G one-page models, CLI mappings, report bytes, deferred-stream behavior,
++  and golden output remain unchanged. M10 uses only additive generic
++  completion behavior and existing M3 writer/publisher/version APIs.
++- Stream policy is explicit: media/symbol streams depend on policy and
++  eligibility, diagnostic sync state is constrained and schema-valid, and
++  initial tombstones are exactly empty.
++- Adapter provenance, commit/path/line binding, Git ACL fallback, relation
++  unresolved status, parent/ACL inheritance, and all-or-nothing projection are
++  defined. Malformed runtime inputs fail before dependency or filesystem side
++  effects.
++- CLI categories map to closed exit codes, path/symlink/reparse/no-clobber
++  rules are explicit, publication reads back all ten files, and `LATEST.txt`
++  remains a separate pointer from the ten-file version directory.
++
++## Acceptance gate
++
++The listed focused M10 model/use-case, exporter, architecture, M8, M9, M3/M6G,
++compileall, and diff-check commands provide the required validation sequence.
++Implementation must preserve their explicit basetemps and report exact command
++results. A fresh independent review must pass before roadmap/state updates,
++staging, commit, or push. Real operator evidence remains aggregate-only and
++`pending_external_input`; synthetic results cannot be promoted to a real POC
++PASS.
++
++Residual implementation risks (canonical digest serialization, exact source-ID
++allowlists, and report rendering details) are covered by the locked model,
++schema, determinism, compatibility, and adversarial tests in the plan and do
++not block approval.
+diff --git a/.codex-workflow/20260805-m10/08-m10a-implementation.md b/.codex-workflow/20260805-m10/08-m10a-implementation.md
+new file mode 100644
+index 0000000..e651db2
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/08-m10a-implementation.md
+@@ -0,0 +1,31 @@
++# M10-A Implementation Report
++
++Implemented the additive M10 snapshot wire-model layer only.
++
++## Changes
++
++- Added runtime-validated frozen models in `m10_snapshot.py`:
++  `M10ConfluenceScope`, `M10ConfluenceExclusion`, `M10MediaPolicy`,
++  `M10SnapshotRequest`, `M10SnapshotMetrics`, `M10SnapshotProjection`,
++  `M10SnapshotResult`, and `M10QualityReportInput`.
++- Added exact M10 dataset/schema/mode constants and public exports.
++- Enforced identity, scope/exclusion/media policy, RFC3339/Git/path checks,
++  immutable defensive stream copies, source-scope field validation, exact
++  metric algebra, status/result combinations, and forged-instance revalidation.
++- Added focused adversarial tests in `tests/foundation/domain/models/test_m10_snapshot.py`.
++
++## Validation
++
++```text
++python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-models
++9 passed
++
++python -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warning only)
++```
++
++No exporter, CLI, orchestration, M6G model, roadmap, or implementation-state
++changes were made. No commit or push performed.
+diff --git a/.codex-workflow/20260805-m10/09-m10a-review-1.md b/.codex-workflow/20260805-m10/09-m10a-review-1.md
+new file mode 100644
+index 0000000..61263b0
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/09-m10a-review-1.md
+@@ -0,0 +1,44 @@
++# M10-A Independent Review
++
++Review target: current M10-A snapshot after `08-m10a-implementation.md`,
++against `06-plan-approved.md` and `AGENTS.md`. Source and test files were not
++modified.
++
++## Findings
++
++- **P1 - Exact-field and forged-instance validation is incomplete across the
++  public models.** `M10ConfluenceScope.__post_init__`,
++  `M10ConfluenceExclusion.__post_init__`, and `M10MediaPolicy.__post_init__`
++  accept forged instances with forbidden `extra` fields (direct probes call
++  `__post_init__` successfully). `M10SnapshotMetrics.__post_init__` likewise
++  accepts an extra field, while missing fields leak `AttributeError` rather
++  than a model validation error. `M10SnapshotRequest`,
++  `M10SnapshotProjection`, and `M10QualityReportInput` have no exact-field
++  checks and missing/extra forged fields can therefore be accepted or leak
++  raw attribute exceptions. This violates the plan's exact immutable fields,
++  wrong-runtime-type fail-closed boundary, and forged-instance revalidation
++  requirements.
++
++- **P1 - Timestamp validation is not strict RFC3339.** Both
++  `M10SnapshotRequest` and `M10SnapshotProjection` only call
++  `datetime.fromisoformat`; naive timestamps (`2026-01-01T00:00:00`) and
++  date-only values (`2026-01-01`) are accepted, despite the approved plan
++  requiring strict RFC3339 timestamps (including timezone). These values can
++  cross the snapshot wire-model boundary and produce non-canonical manifest
++  metadata.
++
++- **P2 - Dataset-root reparse-point protection is missing.** Request validation
++  checks `Path.is_symlink()` but does not reject Windows junctions/other
++  reparse points, although the plan explicitly requires a plain directory with
++  no symlink/reparse point. The path-safety gate is therefore incomplete on
++  Windows.
++
++## Validation
++
++- Focused M10-A tests: `9 passed`.
++- Adversarial probes confirmed the exact-field acceptance and timestamp
++  acceptance described above.
++- No production side-effect calls are present in the reviewed model layer;
++  validation is local apart from read-only dataset-root path checks.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/10-m10a-fix-plan.input.md b/.codex-workflow/20260805-m10/10-m10a-fix-plan.input.md
+new file mode 100644
+index 0000000..35b215d
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/10-m10a-fix-plan.input.md
+@@ -0,0 +1,20 @@
++# M10-A Boundary Validation Fix
++
++Address only the P1/P2 findings in `.codex-workflow/20260805-m10/09-m10a-review-1.md`.
++
++- Add exact-field and forged-instance revalidation for every public M10-A
++  model: nested scope/exclusion/media policy, request, metrics, projection,
++  result, and quality input. Missing attributes, forbidden extras, wrong
++  runtime types, and impossible combinations must fail with sanitized typed
++  errors before field access or side effects.
++- Replace permissive `datetime.fromisoformat` checks with the approved strict
++  RFC3339 grammar: timezone required, date-only and naive values rejected,
++  canonical value preserved.
++- Reject Windows reparse-point dataset roots in addition to symlinks, while
++  keeping the fix bounded to the public request boundary and testable without
++  filesystem mutation outside temporary fixtures.
++- Add adversarial focused tests for every model and rerun M10-A focused tests,
++  compileall, and diff-check before a fresh independent re-review.
++
++Production scope remains limited to M10-A models/tests; no exporter, CLI,
++orchestration, roadmap/state, or unrelated M8/M9 changes.
+diff --git a/.codex-workflow/20260805-m10/11-m10a-fix-plan-review.md b/.codex-workflow/20260805-m10/11-m10a-fix-plan-review.md
+new file mode 100644
+index 0000000..ab272ed
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/11-m10a-fix-plan-review.md
+@@ -0,0 +1,72 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M10-A Boundary Validation Fix - Reviewed
++
++The fix plan is correctly scoped to the confirmed P1/P2 findings and is
++buildable as a localized model-validation change. The following details are
++required for an implementation and re-review to verify the boundary rather
++than only the reported examples.
++
++## Required implementation
++
++1. Add exact expected runtime field sets and a sentinel-safe helper for every
++   public model: `M10ConfluenceScope`, `M10ConfluenceExclusion`,
++   `M10MediaPolicy`, `M10SnapshotRequest`, `M10SnapshotMetrics`,
++   `M10SnapshotProjection`, `M10SnapshotResult`, and `M10QualityReportInput`.
++   Check the exact concrete type and field set before reading any attribute;
++   missing fields, forbidden extras, and forged nested models must raise only
++   sanitized `TypeError`/`ValueError`. Revalidate nested models explicitly
++   before dereferencing their fields, and preserve defensive-copy and frozen
++   semantics.
++
++2. Replace all timestamp checks at the M10-A model boundary with one strict
++   RFC3339 grammar: `YYYY-MM-DDTHH:MM:SS`, optional fractional seconds, and a
++   required `Z` or numeric `+/-HH:MM` offset. Reject date-only, naive,
++   whitespace, lowercase/invalid zones, invalid calendar values, and wrong
++   runtime types before `datetime` access. Preserve the caller's canonical
++   timestamp string byte-for-byte; do not normalize it in the model.
++
++3. Make dataset-root validation reject symlinks and Windows reparse points
++   while retaining absolute plain-directory and containment checks. Use a
++   platform-safe attribute check (`FILE_ATTRIBUTE_REPARSE_POINT` when
++   available) and sanitize all filesystem errors to the model's typed
++   validation error. Tests must use temporary fixtures or a mocked file-attribute
++   result; never mutate arbitrary workspace paths.
++
++## Required adversarial tests
++
++- Parameterize every required field as missing and a forbidden extra field for
++  all eight models. Include `object()`, `None`, wrong containers/types/enums,
++  forged frozen instances, and malformed nested model instances; assert only
++  `TypeError`/`ValueError` and no leaked `AttributeError`.
++- Cover impossible cross-field combinations: scope membership/order and
++  duplicate IDs, exclusion ordering/duplicates, media-policy enum/budget
++  combinations, request run/generation and page-scope identity, metrics
++  counters, projection stream/count/config/chunker invariants, result
++  status-field combinations and digest, and quality-input count/section
++  mappings. Assert malformed inputs fail before any dependency or filesystem
++  side effect.
++- Add a timestamp matrix for valid `Z` and offset forms (including fractional
++  seconds) and invalid naive/date-only/zone/calendar/string-subclass values;
++  assert accepted strings are preserved exactly.
++- Add Windows reparse-point coverage by simulating the reparse attribute on a
++  temporary dataset root (with a non-Windows skip only when the platform API
++  cannot be exercised), plus symlink and non-directory roots. Assert fail
++  closed without creating, deleting, or mutating files.
++
++## Scope and verification
++
++Production changes are limited to M10-A model validation and its focused tests;
++do not touch exporters, CLI, orchestration, roadmap/state, or M8/M9 code.
++Run the focused suite with an explicit artifact basetemp, then compile and
++diff checks, and obtain a fresh independent re-review before any broader M10
++stage:
++
++`$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10a-fix`
++
++`python -m compileall -q src tests`; `git diff --check`
++
++Acceptance requires all malformed model probes to fail with sanitized typed
++errors, strict timezone-aware RFC3339 preservation, Windows reparse/symlink
++rejection, and no out-of-scope source changes. A fresh independent review must
++report `VERDICT: PASS` before roadmap/state updates or commit.
+diff --git a/.codex-workflow/20260805-m10/12-m10a-fix-implementation.md b/.codex-workflow/20260805-m10/12-m10a-fix-implementation.md
+new file mode 100644
+index 0000000..3478973
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/12-m10a-fix-implementation.md
+@@ -0,0 +1,34 @@
++# M10-A Boundary Validation Fix Implementation
++
++Implemented only the reviewed M10-A model/test hardening scope.
++
++## Changes
++
++- Added exact dataclass-field guards to every public M10-A model, rejecting
++  forged frozen instances, missing fields, forbidden extras, and wrong exact
++  runtime types before attribute access.
++- Revalidated nested scope, exclusion, media, run, profile, metrics, and
++  result values at public boundaries.
++- Centralized strict RFC3339 validation requiring timezone (`Z` or numeric
++  offset), rejecting naive/date-only/invalid-calendar values while preserving
++  the original timestamp bytes.
++- Rejected Windows reparse-point dataset roots via `st_file_attributes`, in
++  addition to symlink/non-directory/unsafe-root checks.
++- Expanded focused adversarial tests with forged nested models and timestamp
++  acceptance/rejection matrices.
++
++## Validation
++
++```text
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10a-fix
++22 passed
++
++python -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warning only)
++```
++
++No exporter, CLI, orchestration, roadmap/state, or M8/M9 files were changed.
++No commit or push performed.
+diff --git a/.codex-workflow/20260805-m10/13-m10a-review-2.md b/.codex-workflow/20260805-m10/13-m10a-review-2.md
+new file mode 100644
+index 0000000..eac3953
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/13-m10a-review-2.md
+@@ -0,0 +1,31 @@
++# M10-A Independent Re-Review
++
++Review target: current M10-A snapshot after `12-m10a-fix-implementation.md`.
++Source and test files were not modified.
++
++## Findings
++
++- **P1 - Profile/config derivation is not revalidated at the M10 boundary.**
++  `M10SnapshotRequest.__post_init__` checks that `profile_bundle.config_hash`
++  is a lowercase 64-hex string but does not invoke the bundle's derivation
++  contract or compare the hash to the normalized embedding/Jira profile
++  inputs. A forged `OnePageExportProfileBundle` with valid nested profile
++  objects and an arbitrary hash can therefore pass. This violates the plan's
++  prohibition on arbitrary caller-supplied config hashes.
++
++- **P1 - Projection accepts an arbitrary/empty chunker version.**
++  `M10SnapshotProjection.__post_init__` only checks `chunker_version` is a
++  string; `""` and unrelated values are accepted. The approved contract
++  requires the loaded `ChunkingProfile.chunker_version`, with no independent
++  caller-supplied chunker version.
++
++## Verification
++
++- Focused M10-A tests: `22 passed`.
++- M6G compatibility slice: `37 passed`.
++- `python -m compileall -q src tests`: passed.
++- `git diff --check`: passed with existing line-ending warning.
++- Prior exact-field, strict-RFC3339, result/status, and reparse-point fixes are
++  present and covered by the updated adversarial tests.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/14-m10a-fix2-plan.input.md b/.codex-workflow/20260805-m10/14-m10a-fix2-plan.input.md
+new file mode 100644
+index 0000000..f200ed9
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/14-m10a-fix2-plan.input.md
+@@ -0,0 +1,17 @@
++# M10-A Profile Provenance Fix
++
++Address only the two P1 findings in `13-m10a-review-2.md`.
++
++- Revalidate `OnePageExportProfileBundle` at the M10 request boundary,
++  including exact nested `ChunkingProfile`/`JiraRelationProfile` fields and
++  recomputation of `config_hash` from the bundle's canonical normalized profile
++  inputs. A forged bundle with an arbitrary hash must fail closed before any
++  adapter or filesystem dependency call.
++- Bind `M10SnapshotProjection.chunker_version` to the loaded request/profile
++  identity (`ChunkingProfile.chunker_version`) rather than accepting an
++  arbitrary or empty caller value. Reject forged profile/projection instances
++  and mismatched chunker versions.
++- Add focused adversarial tests for forged profile hash, missing/extra profile
++  fields, wrong profile types, empty/mismatched projection chunker version, and
++  zero dependency calls. Keep production scope limited to M10-A models/tests;
++  do not modify exporter, CLI, orchestration, roadmap, or state.
+diff --git a/.codex-workflow/20260805-m10/15-m10a-fix2-plan-review.md b/.codex-workflow/20260805-m10/15-m10a-fix2-plan-review.md
+new file mode 100644
+index 0000000..516deb4
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/15-m10a-fix2-plan-review.md
+@@ -0,0 +1,51 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M10-A Profile Provenance Fix - Reviewed
++
++The fix is bounded to M10-A models/tests and should use the `build` profile,
++but one contract issue must be resolved before implementation: an existing
++`OnePageExportProfileBundle` does not retain its normalized profile text
++(`InitVar` values are discarded), so its `config_hash` cannot be recomputed
++from the bundle alone.
++
++## Required implementation clarification
++
++- Preserve the M6G profile model and loader unchanged. Add an M10-owned trusted
++  profile-identity/preimage value at the request boundary (for example, the
++  two canonical normalized profile strings or an immutable identity object
++  carrying them) and validate its exact fields/types. Recompute the approved
++  canonical hash from those bytes and the code-owned constants, then require
++  equality with `profile_bundle.config_hash`. Do not accept an arbitrary hash
++  or an independently supplied text/object pair; the identity must be produced
++  by the approved bundle-loading path and be revalidated before adapters or
++  filesystem access.
++- Revalidate the exact `OnePageExportProfileBundle` field set and both nested
++  `ChunkingProfile`/`JiraRelationProfile` field sets before dereferencing them,
++  including forged missing/extra attributes. Re-run their post-init checks and
++  fail with sanitized `TypeError`/`ValueError` (never `AttributeError`).
++- Bind `M10SnapshotProjection.chunker_version` to the request's exact loaded
++  `ChunkingProfile.chunker_version` at the composition boundary. Reject empty,
++  malformed, or mismatched projection values before any adapter/dependency
++  call; do not add an independent caller-controlled chunker version.
++
++## Required adversarial tests
++
++- Forge the bundle, each nested profile, and the new profile-preimage identity
++  with `object.__new__`/`object.__setattr__`; cover missing/extra fields, wrong
++  runtime types, forged config hash, non-normalized or tampered profile text,
++  and nested profile identity drift. Assert only sanitized typed errors and
++  zero adapter/filesystem calls.
++- Parameterize projection chunker versions as empty, malformed, wrong active
++  version, and exact profile version. Exercise the real request-to-projection
++  composition boundary and assert mismatches fail atomically before adapters;
++  retain valid profile/hash and deterministic happy-path tests.
++- Assert no M8/M9/exporter/CLI/roadmap/state files change. Run the focused
++  M10-A test module with an explicit basetemp, `python -m compileall -q src
++  tests`, `git diff --check`, and obtain a fresh independent re-review before
++  any broader M10 stage.
++
++## Scope decision
++
++After the profile-preimage ownership is made explicit, this remains a
++tests-plus-M10-A-model fix only. Do not modify M6G profile classes/loaders,
++exporters, CLI, orchestration, or M8/M9 seams.
+diff --git a/.codex-workflow/20260805-m10/16-m10a-fix2-implementation.md b/.codex-workflow/20260805-m10/16-m10a-fix2-implementation.md
+new file mode 100644
+index 0000000..194125d
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/16-m10a-fix2-implementation.md
+@@ -0,0 +1,31 @@
++# M10-A Profile Provenance Fix Implementation
++
++Implemented the reviewed M10-owned profile-preimage and chunker binding fix.
++
++## Changes
++
++- Added immutable `M10ProfileIdentity` carrying the canonical normalized
++  embedding/Jira profile preimage and deriving the approved M6G config hash.
++- Required and validated that identity on `M10SnapshotRequest`; revalidated
++  the exact profile bundle and nested M6G profile fields without modifying M6G
++  classes/loaders, and rejected config-hash drift.
++- Bound projection chunker versions to `ACTIVE_CHUNKER_VERSION`; added
++  `M10SnapshotProjection.from_request` to derive config/generation/chunker
++  identity from a validated request and reject mismatches atomically.
++- Added forged identity/profile and chunker/tamper tests.
++
++## Validation
++
++```text
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10a-fix2
++23 passed
++
++python -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warning only)
++```
++
++No M6G classes/loaders, exporter, CLI, orchestration, roadmap/state, or M8/M9
++files were changed. No commit or push performed.
+diff --git a/.codex-workflow/20260805-m10/17-m10a-review-3.md b/.codex-workflow/20260805-m10/17-m10a-review-3.md
+new file mode 100644
+index 0000000..d864c72
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/17-m10a-review-3.md
+@@ -0,0 +1,26 @@
++# M10-A Independent Re-Review
++
++Review target: current M10-A snapshot after `16-m10a-fix2-implementation.md`.
++Source and test files were not modified.
++
++## Findings
++
++No P0, P1, P2, or P3 findings.
++
++## Verification
++
++- `M10ProfileIdentity` now validates exact fields and canonical normalized
++  preimages; request validation requires it and rejects profile-bundle hash
++  drift after revalidating nested M6G profile fields.
++- Projection enforces `ACTIVE_CHUNKER_VERSION`; `from_request` revalidates the
++  request and derives config hash, generated timestamp, and chunker identity,
++  rejecting mismatches.
++- Prior exact-field/forged-instance guards, strict RFC3339 timezone/calendar
++  validation, closed result/status combinations, defensive copies, and
++  Windows reparse-point checks remain present.
++- Focused M10-A tests: `23 passed`.
++- M6G compatibility slice: `37 passed`.
++- `python -m compileall -q src tests`: passed.
++- `git diff --check`: passed with existing line-ending warning only.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/PLAN.input.md b/.codex-workflow/20260805-m10/PLAN.input.md
+new file mode 100644
+index 0000000..1fbaae9
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/PLAN.input.md
+@@ -0,0 +1,96 @@
++# M10 First Full POC Foundation Snapshot
++
++## Objective
++
++Build the bounded Foundation-side composition/orchestration needed to produce
++the first contract-valid `full_snapshot` for an approved Confluence scope and
++configured local Git branch. Reuse the existing M3 staging, completion, and
++publication APIs; do not create a parallel exporter. M8-AC's real mini-corpus
++report is useful acceptance evidence but is not a prerequisite for starting
++M10 or for the initial full snapshot. Real delta/deletion behavior remains
++required before a second sync or first delta export, not before this initial
++snapshot.
++
++## Stages
++
++### M10-A - Approved run input and snapshot envelope
++
++- Define immutable, runtime-validated input/result/metrics models for one
++  generation-bound POC run: Confluence generation/scope/exclusions, raw-page
++  provenance, restriction/attachment observations, approved Git repository/
++  branch/commit, media policy, generated-at, dataset root, and profile/config
++  identity.
++- Require exact field sets, approved enum/status combinations, canonical source
++  identities, non-empty scope, bounded paths/budgets, timezone-aware timestamp,
++  and no secrets or raw-content leakage.
++- Fail closed on `None`, `object()`, wrong containers/types/enums, missing or
++  extra fields, forged frozen objects, invalid provenance, and impossible
++  counters before any I/O or dependency calls.
++
++### M10-B - Confluence and Git bounded composition
++
++- Compose M7 raw-generation/page selection with M8-D page-set processing,
++  M8-E summaries, existing ACL materialization, Jira relation mapping, and
++  M9-A media policy/processing seams for the approved Confluence scope.
++- Compose M9-B Git code documents and M9-C symbols over the pinned local
++  repository commit/branch; preserve exact commit/path/line provenance and
++  deterministic fallback behavior.
++- Keep source ownership and generation identity bound across all records;
++  produce all-or-nothing in-memory stream projections with no partial export.
++- Do not add embedding, Qdrant, retrieval, chat, raw-store mutation beyond
++  explicitly approved input seams, or network behavior outside injected ports.
++
++### M10-C - Cross-stream graph and export projection
++
++- Aggregate `documents`, `chunks`, `relations`, `acl`, `media_assets`,
++  `symbols`, `sync_state`, and `tombstones` deterministically.
++- Enforce schema validation for every record, non-empty deny-safe `acl_tags`
++  on every chunk, document/chunk identity binding, relation source/target
++  resolution policy, media parent/ACL inheritance, symbol-to-chunk resolution,
++  and sync/tombstone entity/version consistency.
++- Require empty tombstones for the initial `full_snapshot` unless an explicit
++  contract exception is approved; no fabricated deletion evidence.
++- Validate exact stream counts and cross-field metrics, then adapt the trusted
++  projection to existing `FullSnapshotStagingWriter`,
++  `FullSnapshotStagingCompleter`, and `FullSnapshotPublisher`.
++
++### M10-D - CLI/run boundary and deterministic publication
++
++- Add one bounded application/CLI orchestration boundary that accepts only
++  sanitized configuration and injected source adapters, stages atomically,
++  completes the quality report, publishes the version directory, and updates
++  `LATEST.txt` only after all contract checks pass.
++- Enforce no-clobber/failed-run atomicity, explicit `full_snapshot` mode,
++  manifest/count/folder handshake, output-root containment, no symlinks or
++  unexpected files, no secrets in logs/reports, and deterministic reruns.
++
++### M10-E - Acceptance and closeout
++
++- Add synthetic/fixture-backed end-to-end acceptance for all ten published
++  artifacts and a negative matrix for malformed streams, identity drift,
++  ACL gaps, unresolved relations/symbols, count mismatches, publication
++  failures, forbidden side effects, and secret leakage.
++- Run relevant M8/M9/export regressions, architecture tests, compileall, and
++  scoped diff checks.
++- After implementation, obtain a fresh independent review in a new session;
++  fix every confirmed P0-P3 finding in scope, then update roadmap/state and
++  commit/push.
++- Treat the real Confluence/Git full POC invocation as an external acceptance
++  gate requiring operator-approved scope, generation, credentials/assets, and
++  sanitized aggregate evidence; never fabricate a real PASS.
++
++## Non-goals
++
++- No Indexing/Qdrant embedding/import, retrieval, chat, Gauss, or UI work.
++- No redesign of M8/M9 contracts or existing M3 writer/completer/publisher.
++- No broad performance/100k scale work and no delta export implementation in
++  the initial snapshot stage.
++
++## Acceptance
++
++The bounded implementation is complete only when synthetic/fixture-backed
++validation proves schema-valid deterministic output for all ten expected files,
++correct counts and `LATEST.txt`, provenance/ACL/relation/media/symbol graph
++invariants, atomic failure behavior, and no forbidden side effects; an
++independent review is `PASS`; roadmap/state record any remaining external gate;
++and the approved changes are committed and pushed.
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 8f7bfa3..3ae1fda 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -28,8 +28,10 @@ complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
+ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
+ explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+-reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with
+-no export/store/checkpoint side effects. No M10 full-snapshot work has started.
++reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
++export/store/checkpoint side effects. M10-A wire models are complete and
++independently reviewed `PASS`; M10-B is the next bounded stage. No M10
++exporter/CLI or real full-snapshot run has started.
+ 
+ ## Durable State Convention
+ 
+@@ -1759,3 +1761,20 @@ The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
+ replay/checkpoint stages are complete with their independent gates and are
+ owner-accepted as the roadmap closeout. The 100k performance gate remains a
+ separate deferred follow-up; no 100k scale PASS is claimed.
++
++## M10-A Wire Contract and Trusted Input Models
++
++- Status: complete and independently reviewed `PASS`.
++- Added additive runtime-validated M10 models for approved Confluence scope/
++  exclusions, media policy, trusted normalized profile identity, request,
++  metrics, projection, result status matrix, and generic quality-report input.
++- Bound config hash to the M6G canonical normalized profile preimage and
++  `ChunkingProfile.chunker_version`; rejected forged fields, strict-RFC3339
++  violations, unsafe/reparse dataset roots, impossible counters, and malformed
++  stream/source-scope values before dependencies.
++- Validation: focused `23 passed`; M6G compatibility `37 passed`; compileall/
++  diff-check passed. Final independent review is `VERDICT: PASS` in
++  `.codex-workflow/20260805-m10/17-m10a-review-3.md`.
++- Residual boundary: no exporter, CLI, orchestration, or real full-snapshot
++  invocation is included; M10-B is next and M8-AC remains
++  `pending_external_input`.
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 8a708b7..72575d7 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -93,7 +93,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+ | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
+-| M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
++| M10 - First full POC Foundation snapshot | in progress; M10-A complete | M10-A wire models independently reviewed `PASS`; M10-B/C/D/E remain pending; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+ 
+@@ -1069,6 +1069,16 @@ Acceptance categories:
+ - Security: no PAT/token values in config, logs, reports, or exports.
+ - Boundary: no embedding, no Qdrant, no retrieval, no chat, no Gauss.
+ 
++### M10 Execution Ledger
++
++| Stage | Status | Review / gate outcome |
++|---|---|---|
++| M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
++| M10-B trusted multi-source composition | pending | Next bounded stage; consumes M7/M8/M9 handoffs without exporter or CLI work. |
++| M10-C cross-stream projection and generic completion | pending | Requires M10-B approved output; must preserve M6G one-page behavior. |
++| M10-D CLI and publication boundary | pending | Requires M10-C approved generic projection/completion path. |
++| M10-E synthetic acceptance and external real-run gate | pending_external_input | Synthetic acceptance follows M10-D; real operator evidence requires approved inputs and remains separate. |
++
+ ## 13. Current Execution Boundary
+ 
+ - Preserve the completed, owner-accepted bounded M7 durability/replay stages;
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index b48d720..0dd4cc0 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -237,6 +237,13 @@ from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence imp
+     InventoryOccurrence, InventoryWindowCommit, InventoryReplayConflict,
+     replay_equivalent, InventoryFact,
+ )
++from knowledgenexus.foundation.domain.models.m10_snapshot import (
++    M10_DATASET_NAME, M10_SCHEMAS_VERSION, M10_EXPORT_MODE, M10SnapshotError,
++    M10ConfluenceScope, M10ConfluenceExclusion, M10MediaPolicy,
++    M10ProfileIdentity,
++    M10SnapshotRequest, M10SnapshotMetrics, M10SnapshotProjection,
++    M10SnapshotResult, M10QualityReportInput,
++)
+ 
+ __all__ = [
+     "ConfluenceExcludeSubtree",
+@@ -408,4 +415,9 @@ __all__ = [
+     "CommittedCheckpointTransition", "CrawlRunSnapshot", "CrawlRunOperation",
+     "InventoryOccurrence", "InventoryWindowCommit", "InventoryReplayConflict",
+     "replay_equivalent", "InventoryFact",
++    "M10_DATASET_NAME", "M10_SCHEMAS_VERSION", "M10_EXPORT_MODE", "M10SnapshotError",
++    "M10ConfluenceScope", "M10ConfluenceExclusion", "M10MediaPolicy",
++    "M10ProfileIdentity",
++    "M10SnapshotRequest", "M10SnapshotMetrics", "M10SnapshotProjection",
++    "M10SnapshotResult", "M10QualityReportInput",
+ ]
+diff --git a/src/knowledgenexus/foundation/domain/models/m10_snapshot.py b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+new file mode 100644
+index 0000000..a4d66b7
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+@@ -0,0 +1,284 @@
++"""Runtime-validated wire models for the M10 full-snapshot seam."""
++from __future__ import annotations
++
++import re
++import unicodedata
++import copy
++import os
++from dataclasses import dataclass
++from datetime import datetime
++from pathlib import Path
++from typing import Literal
++
++from .confluence_crawl_run import CrawlRunId
++from .one_page_export import OnePageExportProfileBundle, _canonical_config_hash
++from knowledgenexus.foundation.domain.rules.text_normalization import TextNormalizationRules
++from .chunk_stability import ACTIVE_CHUNKER_VERSION
++from .chunking_profile import ChunkingProfile
++from .jira_relation_profile import JiraRelationProfile
++
++M10_DATASET_NAME = "spen_knowledge_poc"
++M10_SCHEMAS_VERSION = "1.0"
++M10_EXPORT_MODE = "full_snapshot"
++M10_COUNT_KEYS = ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")
++_HEX40 = re.compile(r"^[0-9a-f]{40}$")
++_HEX64 = re.compile(r"^[0-9a-f]{64}$")
++_POSIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
++_PROCESSING = ("failed", "not_processed", "ocr", "parsed", "summarized")
++_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
++
++class M10SnapshotError(ValueError):
++    pass
++
++def _identifier(name: str, value: object) -> str:
++    if type(value) is not str or not value or "\n" in value or "\r" in value or unicodedata.normalize("NFC", value) != value:
++        raise M10SnapshotError(f"{name} must be a canonical one-line identifier")
++    return value
++
++def _tuple(name: str, value: object, *, nonempty: bool = False) -> tuple:
++    if type(value) is not tuple or (nonempty and not value):
++        raise M10SnapshotError(f"{name} expects tuple")
++    return tuple(value)
++
++def _counts(value: object, name: str = "metrics") -> dict[str, int]:
++    if type(value) is not dict or set(value) != set(M10_COUNT_KEYS):
++        raise M10SnapshotError(f"{name} has wrong fields")
++    out = {}
++    for key in M10_COUNT_KEYS:
++        v = value[key]
++        if type(v) is not int or v < 0:
++            raise M10SnapshotError(f"{name}[{key}] must be non-negative int")
++        out[key] = v
++    return out
++
++def _guard(value: object, cls: type) -> None:
++    if type(value) is not cls:
++        raise TypeError(f"{cls.__name__} expects exact type")
++    try:
++        expected = set(cls.__dataclass_fields__)
++        actual = set(vars(value))
++    except Exception:
++        raise TypeError(f"{cls.__name__} has invalid fields") from None
++    if actual != expected:
++        raise ValueError(f"{cls.__name__} has invalid fields")
++
++def _timestamp(value: object) -> str:
++    if type(value) is not str or not _RFC3339.fullmatch(value):
++        raise M10SnapshotError("generated_at must be strict RFC3339")
++    try:
++        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    except (TypeError, ValueError):
++        raise M10SnapshotError("generated_at must be strict RFC3339") from None
++    if parsed.tzinfo is None or parsed.utcoffset() is None:
++        raise M10SnapshotError("generated_at requires timezone")
++    return value
++
++def _is_reparse_point(path: Path) -> bool:
++    try:
++        return bool(getattr(os.stat(path), "st_file_attributes", 0) & 0x40000000)
++    except (OSError, ValueError, TypeError):
++        raise M10SnapshotError("unsafe dataset_root") from None
++
++@dataclass(frozen=True)
++class M10ProfileIdentity:
++    normalized_embedding_profile_text: str
++    normalized_jira_relation_profile_text: str
++    def __post_init__(self):
++        _guard(self, M10ProfileIdentity)
++        for name in ("normalized_embedding_profile_text", "normalized_jira_relation_profile_text"):
++            value = getattr(self, name)
++            if type(value) is not str or TextNormalizationRules.normalize_text(value) != value:
++                raise M10SnapshotError(f"{name} must be canonical-normalized text")
++
++    @property
++    def config_hash(self) -> str:
++        return _canonical_config_hash(
++            embedding_profile_text=self.normalized_embedding_profile_text,
++            jira_relation_profile_text=self.normalized_jira_relation_profile_text,
++        )
++
++@dataclass(frozen=True)
++class M10ConfluenceScope:
++    source_id: str
++    space_keys: tuple[str, ...]
++    root_page_ids: tuple[str, ...]
++    page_ids: tuple[str, ...]
++    def __post_init__(self):
++        _guard(self, M10ConfluenceScope)
++        _identifier("source_id", self.source_id)
++        for n, val in (("space_keys", self.space_keys), ("root_page_ids", self.root_page_ids), ("page_ids", self.page_ids)):
++            vals = _tuple(n, val, nonempty=True)
++            if any(type(x) is not str or not x or unicodedata.normalize("NFC", x) != x for x in vals) or len(set(vals)) != len(vals) or tuple(sorted(vals)) != vals:
++                raise M10SnapshotError(f"{n} must be sorted unique identifiers")
++            object.__setattr__(self, n, vals)
++        if not set(self.root_page_ids).issubset(self.page_ids):
++            raise M10SnapshotError("roots must be in page scope")
++
++@dataclass(frozen=True)
++class M10ConfluenceExclusion:
++    page_id: str
++    reason: Literal["exclude_subtree", "exclude_page"]
++    def __post_init__(self):
++        _guard(self, M10ConfluenceExclusion)
++        _identifier("page_id", self.page_id)
++        if type(self.reason) is not str or self.reason not in ("exclude_subtree", "exclude_page"):
++            raise M10SnapshotError("invalid exclusion reason")
++
++@dataclass(frozen=True)
++class M10MediaPolicy:
++    include_attachments: bool
++    allow_download: bool
++    allowed_processing_statuses: tuple[str, ...]
++    max_assets: int
++    def __post_init__(self):
++        _guard(self, M10MediaPolicy)
++        if type(self.include_attachments) is not bool or type(self.allow_download) is not bool:
++            raise M10SnapshotError("media flags must be bool")
++        vals = _tuple("allowed_processing_statuses", self.allowed_processing_statuses)
++        if any(type(x) is not str or x not in _PROCESSING for x in vals) or len(set(vals)) != len(vals) or tuple(sorted(vals)) != vals:
++            raise M10SnapshotError("invalid processing statuses")
++        if type(self.max_assets) is not int or self.max_assets < 0:
++            raise M10SnapshotError("max_assets must be non-negative int")
++        if self.allow_download and not self.include_attachments:
++            raise M10SnapshotError("download requires attachments")
++        object.__setattr__(self, "allowed_processing_statuses", vals)
++
++@dataclass(frozen=True)
++class M10SnapshotRequest:
++    run_id: CrawlRunId; generation_id: CrawlRunId; confluence_scope: M10ConfluenceScope
++    confluence_exclusions: tuple[M10ConfluenceExclusion, ...]; ordered_page_ids: tuple[str, ...]
++    raw_generation_id: str; git_repository: str; git_branch: str; git_commit: str
++    media_policy: M10MediaPolicy; profile_bundle: OnePageExportProfileBundle; generated_at: str
++    dataset_root: Path; export_mode: str
++    profile_identity: M10ProfileIdentity | None = None
++    def __post_init__(self):
++        _guard(self, M10SnapshotRequest)
++        if type(self.profile_identity) is not M10ProfileIdentity:
++            raise M10SnapshotError("profile_identity is required")
++        M10ProfileIdentity.__post_init__(self.profile_identity)
++        if type(self.run_id) is not CrawlRunId or type(self.generation_id) is not CrawlRunId or self.run_id != self.generation_id:
++            raise M10SnapshotError("run/generation identity mismatch")
++        if type(self.confluence_scope) is not M10ConfluenceScope or type(self.media_policy) is not M10MediaPolicy or type(self.profile_bundle) is not OnePageExportProfileBundle:
++            raise M10SnapshotError("invalid nested request model")
++        try:
++            M10ConfluenceScope.__post_init__(self.confluence_scope)
++            M10MediaPolicy.__post_init__(self.media_policy)
++        except (TypeError, ValueError):
++            raise M10SnapshotError("invalid nested request model") from None
++        if set(vars(self.profile_bundle)) != {"chunking_profile", "jira_relation_profile", "config_hash"} or type(self.profile_bundle.chunking_profile) is not ChunkingProfile or type(self.profile_bundle.jira_relation_profile) is not JiraRelationProfile or type(self.profile_bundle.config_hash) is not str or not _HEX64.fullmatch(self.profile_bundle.config_hash):
++            raise M10SnapshotError("invalid profile bundle")
++        try:
++            _guard(self.profile_bundle.chunking_profile, ChunkingProfile)
++            ChunkingProfile.__post_init__(self.profile_bundle.chunking_profile)
++            _guard(self.profile_bundle.jira_relation_profile, JiraRelationProfile)
++            JiraRelationProfile.__post_init__(self.profile_bundle.jira_relation_profile)
++        except (TypeError, ValueError):
++            raise M10SnapshotError("invalid profile bundle") from None
++        if self.profile_bundle.config_hash != self.profile_identity.config_hash:
++            raise M10SnapshotError("profile config hash mismatch")
++        ex = _tuple("confluence_exclusions", self.confluence_exclusions)
++        if any(type(x) is not M10ConfluenceExclusion for x in ex) or len({x.page_id for x in ex}) != len(ex): raise M10SnapshotError("invalid exclusions")
++        for item in ex:
++            try: M10ConfluenceExclusion.__post_init__(item)
++            except (TypeError, ValueError): raise M10SnapshotError("invalid exclusions") from None
++        pages = _tuple("ordered_page_ids", self.ordered_page_ids)
++        if any(type(x) is not str for x in pages) or len(set(pages)) != len(pages) or not set(pages).issubset(self.confluence_scope.page_ids): raise M10SnapshotError("invalid ordered pages")
++        _identifier("raw_generation_id", self.raw_generation_id)
++        for n in ("git_repository", "git_branch"):
++            if type(getattr(self, n)) is not str or not _POSIX.fullmatch(getattr(self, n)): raise M10SnapshotError(f"invalid {n}")
++        if type(self.git_commit) is not str or not _HEX40.fullmatch(self.git_commit): raise M10SnapshotError("invalid git_commit")
++        _timestamp(self.generated_at)
++        if type(self.dataset_root) is not Path or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
++        if self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid export_mode")
++        object.__setattr__(self, "confluence_exclusions", ex); object.__setattr__(self, "ordered_page_ids", pages)
++
++@dataclass(frozen=True)
++class M10SnapshotMetrics:
++    documents: int; chunks: int; relations: int; acl: int; media_assets: int; symbols: int; sync_state: int; tombstones: int
++    confluence_documents: int; git_documents: int; unresolved_relations: int; media_processed: int; media_failed: int; symbols_resolved: int; default_deny_chunks: int
++    def __post_init__(self):
++        _guard(self, M10SnapshotMetrics)
++        vals = {k: getattr(self, k) for k in M10_COUNT_KEYS + ("confluence_documents", "git_documents", "unresolved_relations", "media_processed", "media_failed", "symbols_resolved", "default_deny_chunks")}
++        for k, v in vals.items():
++            if type(v) is not int or v < 0: raise M10SnapshotError(f"{k} must be non-negative int")
++        if self.confluence_documents + self.git_documents != self.documents or self.unresolved_relations > self.relations or self.media_processed + self.media_failed > self.media_assets or self.symbols_resolved > self.symbols or self.default_deny_chunks > self.chunks: raise M10SnapshotError("inconsistent snapshot metrics")
++
++def _validated_metrics(value: object) -> M10SnapshotMetrics:
++    if type(value) is not M10SnapshotMetrics or set(vars(value)) != set(M10SnapshotMetrics.__dataclass_fields__):
++        raise M10SnapshotError("invalid snapshot metrics")
++    try: rebuilt = M10SnapshotMetrics(**{k: getattr(value, k) for k in M10SnapshotMetrics.__dataclass_fields__})
++    except Exception: raise M10SnapshotError("invalid snapshot metrics") from None
++    if value != rebuilt: raise M10SnapshotError("invalid snapshot metrics")
++    return rebuilt
++
++@dataclass(frozen=True)
++class M10SnapshotProjection:
++    dataset_name: str; schemas_version: str; source_scopes: dict[str, object]; generated_at: str; config_hash: str; chunker_version: str; documents: tuple; chunks: tuple; relations: tuple; acl: tuple; media_assets: tuple; symbols: tuple; sync_state: tuple; tombstones: tuple; metrics: M10SnapshotMetrics
++    export_mode: str = M10_EXPORT_MODE
++    def __post_init__(self):
++        _guard(self, M10SnapshotProjection)
++        if self.dataset_name != M10_DATASET_NAME or self.schemas_version != M10_SCHEMAS_VERSION or type(self.source_scopes) is not dict: raise M10SnapshotError("invalid projection identity")
++        _validated_metrics(self.metrics)
++        if type(self.generated_at) is not str or type(self.config_hash) is not str or not _HEX64.fullmatch(self.config_hash) or self.chunker_version != ACTIVE_CHUNKER_VERSION or self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid projection metadata")
++        _timestamp(self.generated_at)
++        scopes = self.source_scopes
++        if set(scopes) - {"confluence", "git"} or "confluence" not in scopes or tuple(scopes) != tuple(sorted(scopes)):
++            raise M10SnapshotError("invalid source scopes")
++        for key, value in scopes.items():
++            if type(value) is not dict:
++                raise M10SnapshotError("source scope expects object")
++            if key == "confluence":
++                if set(value) != {"source_id", "space_keys", "root_page_ids", "page_ids"}:
++                    raise M10SnapshotError("invalid confluence scope fields")
++                M10ConfluenceScope(value["source_id"], tuple(value["space_keys"]), tuple(value["root_page_ids"]), tuple(value["page_ids"]))
++            else:
++                if set(value) != {"repository", "branch", "commit"} or type(value["repository"]) is not str or type(value["branch"]) is not str or type(value["commit"]) is not str or not _POSIX.fullmatch(value["repository"]) or not _POSIX.fullmatch(value["branch"]) or not _HEX40.fullmatch(value["commit"]):
++                    raise M10SnapshotError("invalid git scope")
++        for n in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones"):
++            val = _tuple(n, getattr(self, n));
++            if any(type(x) is not dict for x in val): raise M10SnapshotError(f"{n} contains invalid record")
++            object.__setattr__(self, n, tuple(copy.deepcopy(x) for x in val))
++        object.__setattr__(self, "source_scopes", copy.deepcopy(self.source_scopes))
++
++    @classmethod
++    def from_request(cls, request: M10SnapshotRequest, **kwargs):
++        if type(request) is not M10SnapshotRequest:
++            raise TypeError("request expects M10SnapshotRequest")
++        M10SnapshotRequest.__post_init__(request)
++        supplied = kwargs.pop("chunker_version", request.profile_bundle.chunking_profile.chunker_version)
++        if supplied != request.profile_bundle.chunking_profile.chunker_version:
++            raise M10SnapshotError("chunker version mismatch")
++        return cls(chunker_version=supplied, config_hash=request.profile_bundle.config_hash, generated_at=request.generated_at, **kwargs)
++
++@dataclass(frozen=True)
++class M10SnapshotResult:
++    status: Literal["composed", "staged", "published", "failed"]
++    metrics: M10SnapshotMetrics | None = None; digest: str | None = None; dataset_version: str | None = None; final_path: Path | None = None
++    failure_category: Literal["invalid_request", "adapter", "projection", "staging", "completion", "publication", "acceptance"] | None = None
++    def __post_init__(self):
++        _guard(self, M10SnapshotResult)
++        if type(self.status) is not str or self.status not in ("composed", "staged", "published", "failed"): raise M10SnapshotError("invalid result status")
++        if self.status == "failed":
++            if type(self.failure_category) is not str or self.failure_category not in ("invalid_request", "adapter", "projection", "staging", "completion", "publication", "acceptance") or any(x is not None for x in (self.metrics, self.digest, self.dataset_version, self.final_path)): raise M10SnapshotError("invalid failed result")
++        else:
++            _validated_metrics(self.metrics)
++            if type(self.digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", self.digest) or self.failure_category is not None: raise M10SnapshotError("invalid successful result")
++            if self.status == "composed" and self.dataset_version is not None: raise M10SnapshotError("composed result cannot have dataset version")
++            if self.status in ("staged", "published") and (type(self.dataset_version) is not str or not self.dataset_version): raise M10SnapshotError("missing dataset version")
++            if self.status == "published" and (type(self.final_path) is not Path or not self.final_path.is_absolute()): raise M10SnapshotError("missing final path")
++            if self.status != "published" and self.final_path is not None: raise M10SnapshotError("unexpected final path")
++
++@dataclass(frozen=True)
++class M10QualityReportInput:
++    active_profile: str; profile_status: str; chunker_version: str; expected_counts: dict[str, int]; source_scopes: dict[str, object]; jira_metrics: dict[str, object]; acl_metrics: dict[str, object]; media_metrics: dict[str, object]; symbol_metrics: dict[str, object]; sync_metrics: dict[str, object]; tombstone_metrics: dict[str, object]; completion_checks: dict[str, object]
++    def __post_init__(self):
++        _guard(self, M10QualityReportInput)
++        for n in ("active_profile", "profile_status", "chunker_version"):
++            if type(getattr(self, n)) is not str or not getattr(self, n): raise M10SnapshotError(f"{n} invalid")
++        object.__setattr__(self, "expected_counts", _counts(self.expected_counts, "expected_counts"))
++        for n in ("source_scopes", "jira_metrics", "acl_metrics", "media_metrics", "symbol_metrics", "sync_metrics", "tombstone_metrics", "completion_checks"):
++            v = getattr(self, n)
++            if type(v) is not dict or any(type(k) is not str for k in v): raise M10SnapshotError(f"{n} expects dict")
++            object.__setattr__(self, n, dict(v))
++
++__all__ = ["M10_DATASET_NAME", "M10_SCHEMAS_VERSION", "M10_EXPORT_MODE", "M10ConfluenceScope", "M10ConfluenceExclusion", "M10MediaPolicy", "M10SnapshotRequest", "M10SnapshotMetrics", "M10SnapshotProjection", "M10SnapshotResult", "M10QualityReportInput", "M10SnapshotError"]
+diff --git a/tests/foundation/domain/models/test_m10_snapshot.py b/tests/foundation/domain/models/test_m10_snapshot.py
+new file mode 100644
+index 0000000..287085f
+--- /dev/null
++++ b/tests/foundation/domain/models/test_m10_snapshot.py
+@@ -0,0 +1,93 @@
++import pytest
++from pathlib import Path
++
++from knowledgenexus.foundation.domain.models.m10_snapshot import (
++    M10ConfluenceExclusion, M10ConfluenceScope, M10MediaPolicy,
++    M10SnapshotError, M10SnapshotMetrics, M10SnapshotProjection,
++    M10SnapshotResult, M10QualityReportInput, M10ProfileIdentity,
++)
++from knowledgenexus.foundation.domain.models.chunk_stability import ACTIVE_CHUNKER_VERSION
++
++def scope():
++    return M10ConfluenceScope("src", ("A",), ("1",), ("1", "2"))
++
++def metrics():
++    return M10SnapshotMetrics(2, 2, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0)
++
++def test_scope_and_policy_are_canonical():
++    assert scope().page_ids == ("1", "2")
++    assert M10MediaPolicy(False, False, (), 0).max_assets == 0
++    with pytest.raises(M10SnapshotError): M10ConfluenceScope("src", ("B", "A"), ("1",), ("1",))
++    with pytest.raises(M10SnapshotError): M10MediaPolicy(False, True, (), 1)
++
++def test_profile_identity_is_immutable_and_hashes_canonical_preimage():
++    identity = M10ProfileIdentity("embedding", "jira")
++    assert len(identity.config_hash) == 64
++    forged = object.__new__(M10ProfileIdentity)
++    object.__setattr__(forged, "normalized_embedding_profile_text", "embedding")
++    with pytest.raises((TypeError, ValueError)):
++        M10ProfileIdentity.__post_init__(forged)
++    with pytest.raises(M10SnapshotError): M10ProfileIdentity("embedding\r\n", "jira")
++
++@pytest.mark.parametrize("value", [None, object(), ["1"], ("2", "1")])
++def test_scope_rejects_wrong_or_noncanonical_pages(value):
++    with pytest.raises((TypeError, M10SnapshotError, ValueError)):
++        M10ConfluenceScope("src", ("A",), ("1",), value)
++
++def test_metrics_reject_impossible_cross_field_counts():
++    with pytest.raises(M10SnapshotError): M10SnapshotMetrics(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
++
++def test_projection_owns_stream_tuples_and_checks_identity():
++    p = M10SnapshotProjection(dataset_name="spen_knowledge_poc", schemas_version="1.0", source_scopes={"confluence": {"source_id": "src", "space_keys": ("A",), "root_page_ids": ("1",), "page_ids": ("1",)}}, generated_at="2026-01-01T00:00:00Z", config_hash="a" * 64, chunker_version=ACTIVE_CHUNKER_VERSION, documents=({"id": "1"},), chunks=(), relations=(), acl=(), media_assets=(), symbols=(), sync_state=(), tombstones=(), metrics=metrics())
++    with pytest.raises(AttributeError): p.documents += (2,)
++    with pytest.raises(M10SnapshotError): M10SnapshotProjection(dataset_name="bad", schemas_version="1.0", source_scopes={}, generated_at="x", config_hash="a" * 64, chunker_version="v", documents=(), chunks=(), relations=(), acl=(), media_assets=(), symbols=(), sync_state=(), tombstones=(), metrics=metrics())
++
++def test_result_status_matrix_is_closed():
++    with pytest.raises(M10SnapshotError): M10SnapshotResult("failed", metrics=metrics())
++    with pytest.raises(M10SnapshotError): M10SnapshotResult("composed", metrics=metrics(), digest="a")
++    with pytest.raises(M10SnapshotError): M10SnapshotResult("published", metrics=metrics(), digest="a" * 64, dataset_version="v")
++
++def test_quality_input_has_exact_count_algebra():
++    q = M10QualityReportInput("p", "active", "v1", {k: 0 for k in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")}, {}, {}, {}, {}, {}, {}, {}, {})
++    assert q.expected_counts["documents"] == 0
++    with pytest.raises(M10SnapshotError):
++        M10QualityReportInput("p", "active", "v1", {"documents": 0}, {}, {}, {}, {}, {}, {}, {}, {})
++
++@pytest.mark.parametrize("cls,kwargs,missing", [
++    (M10ConfluenceScope, {"source_id": "src", "space_keys": ("A",), "root_page_ids": ("1",), "page_ids": ("1",)}, "page_ids"),
++    (M10ConfluenceExclusion, {"page_id": "1", "reason": "exclude_page"}, "reason"),
++    (M10MediaPolicy, {"include_attachments": False, "allow_download": False, "allowed_processing_statuses": (), "max_assets": 0}, "max_assets"),
++])
++def test_nested_forged_models_reject_missing_and_extra_fields(cls, kwargs, missing):
++    forged = object.__new__(cls)
++    for key, value in kwargs.items():
++        if key != missing: object.__setattr__(forged, key, value)
++    with pytest.raises((TypeError, ValueError)):
++        cls.__post_init__(forged)
++    object.__setattr__(forged, missing, kwargs[missing]); object.__setattr__(forged, "extra", 1)
++    with pytest.raises((TypeError, ValueError)):
++        cls.__post_init__(forged)
++
++@pytest.mark.parametrize("stamp", [
++    "2026-01-01T00:00:00Z", "2026-01-01T00:00:00.123Z", "2026-01-01T00:00:00+07:00", "2026-01-01T00:00:00.1-04:30",
++])
++def test_projection_timestamp_accepts_timezone_forms_and_preserves_bytes(stamp):
++    p = M10SnapshotProjection(dataset_name="spen_knowledge_poc", schemas_version="1.0", source_scopes={"confluence": {"source_id": "src", "space_keys": ("A",), "root_page_ids": ("1",), "page_ids": ("1",)}}, generated_at=stamp, config_hash="a" * 64, chunker_version=ACTIVE_CHUNKER_VERSION, documents=(), chunks=(), relations=(), acl=(), media_assets=(), symbols=(), sync_state=(), tombstones=(), metrics=M10SnapshotMetrics(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
++    assert p.generated_at == stamp
++
++@pytest.mark.parametrize("stamp", ["2026-01-01", "2026-01-01T00:00:00", "2026-01-01T00:00:00 utc", "2026-02-30T00:00:00Z", "2026-01-01T00:00:00+0700"])
++def test_projection_timestamp_rejects_non_rfc3339(stamp):
++    with pytest.raises((TypeError, ValueError)):
++        M10SnapshotProjection(dataset_name="spen_knowledge_poc", schemas_version="1.0", source_scopes={"confluence": {"source_id": "src", "space_keys": ("A",), "root_page_ids": ("1",), "page_ids": ("1",)}}, generated_at=stamp, config_hash="a" * 64, chunker_version="v1", documents=(), chunks=(), relations=(), acl=(), media_assets=(), symbols=(), sync_state=(), tombstones=(), metrics=M10SnapshotMetrics(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
++
++def test_metrics_result_quality_and_projection_forged_shapes_fail_closed():
++    metric = M10SnapshotMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
++    quality = M10QualityReportInput("p", "active", "v1", {k: 0 for k in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")}, {}, {}, {}, {}, {}, {}, {}, {})
++    result = M10SnapshotResult("composed", metric, "a" * 64)
++    projection = M10SnapshotProjection(dataset_name="spen_knowledge_poc", schemas_version="1.0", source_scopes={"confluence": {"source_id": "src", "space_keys": ("A",), "root_page_ids": ("1",), "page_ids": ("1",)}}, generated_at="2026-01-01T00:00:00Z", config_hash="a" * 64, chunker_version=ACTIVE_CHUNKER_VERSION, documents=(), chunks=(), relations=(), acl=(), media_assets=(), symbols=(), sync_state=(), tombstones=(), metrics=metric)
++    for instance, cls in ((metric, M10SnapshotMetrics), (quality, M10QualityReportInput), (result, M10SnapshotResult), (projection, M10SnapshotProjection)):
++        forged = object.__new__(cls)
++        for key, value in vars(instance).items(): object.__setattr__(forged, key, value)
++        object.__setattr__(forged, "forbidden", True)
++        with pytest.raises((TypeError, ValueError)):
++            cls.__post_init__(forged)
+-- 
+2.45.1.windows.1
+

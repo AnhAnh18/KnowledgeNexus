@@ -1,0 +1,544 @@
+From 96f68983b82ee63847b523b0347d8c94d5a1f82a Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:02:40 +0700
+Subject: [PATCH] foundation: close delta tombstone lifecycle
+
+---
+ .../application/use_cases/propagate_delta.py  | 18 +++-
+ .../domain/models/delta_propagation.py        | 63 +++++++++---
+ .../foundation/domain/models/m10_snapshot.py  |  8 +-
+ .../infrastructure/exporters/__init__.py      |  6 ++
+ .../exporters/delta_snapshot_reader.py        | 95 +++++++++++++++++++
+ .../full_snapshot_staging_completer.py        | 26 +++--
+ .../exporters/full_snapshot_staging_writer.py | 11 ++-
+ .../use_cases/test_propagate_delta.py         | 29 +++++-
+ 8 files changed, 229 insertions(+), 27 deletions(-)
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+
+diff --git a/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+index 4742be5..a21ab81 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
++++ b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+@@ -79,6 +79,7 @@ class PropagateDelta:
+                 ):
+                     raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+                 inventory[entry.document_id] = entry
++            dependents = {document_id: targets for document_id, targets in request.previous_dependents}
+ 
+             records: list[dict[str, object]] = []
+             document_outcomes: list[tuple[str, str]] = []
+@@ -110,6 +111,7 @@ class PropagateDelta:
+                             old,
+                             _REASON_BY_STATE[state],
+                             request,
++                            dependents=dependents.get(document_id, ()),
+                             source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
+                         )
+                     )
+@@ -126,6 +128,7 @@ class PropagateDelta:
+                             old,
+                             TombstoneReason.CONFIG_INVALIDATED,
+                             request,
++                            dependents=dependents.get(document_id, ()),
+                             source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
+                         )
+                     )
+@@ -147,6 +150,10 @@ class PropagateDelta:
+             records = self._deduplicate_and_sort(records)
+             document_tombstones = sum(record["entity_type"] == "document" for record in records)
+             chunk_tombstones = sum(record["entity_type"] == "chunk" for record in records)
++            media_tombstones = sum(record["entity_type"] == "media" for record in records)
++            relation_tombstones = sum(record["entity_type"] == "relation" for record in records)
++            acl_tombstones = sum(record["entity_type"] == "acl" for record in records)
++            symbol_tombstones = sum(record["entity_type"] == "symbol" for record in records)
+             metrics = DeltaPropagationMetrics(
+                 document_count=len(union_ids),
+                 new_document_count=new_count,
+@@ -156,6 +163,10 @@ class PropagateDelta:
+                 document_tombstone_count=document_tombstones,
+                 chunk_tombstone_count=chunk_tombstones,
+                 record_count=len(records),
++                media_tombstone_count=media_tombstones,
++                relation_tombstone_count=relation_tombstones,
++                acl_tombstone_count=acl_tombstones,
++                symbol_tombstone_count=symbol_tombstones,
+             )
+             payload = {
+                 "base_dataset_version": request.previous_dataset_version,
+@@ -170,6 +181,10 @@ class PropagateDelta:
+                     "record_count": metrics.record_count,
+                     "removed_document_count": metrics.removed_document_count,
+                     "unchanged_document_count": metrics.unchanged_document_count,
++                    "media_tombstone_count": metrics.media_tombstone_count,
++                    "relation_tombstone_count": metrics.relation_tombstone_count,
++                    "acl_tombstone_count": metrics.acl_tombstone_count,
++                    "symbol_tombstone_count": metrics.symbol_tombstone_count,
+                 },
+                 "document_outcomes": tuple(document_outcomes),
+                 "records": tuple(records),
+@@ -206,13 +221,14 @@ class PropagateDelta:
+         request: DeltaPropagationRequest,
+         *,
+         source_version_last_seen: str | None = None,
++        dependents: tuple[TombstoneTarget, ...] = (),
+     ) -> list[dict[str, object]]:
+         root = TombstoneTarget(
+             TombstoneEntityType.DOCUMENT,
+             summary.document_id,
+             source_version_last_seen=source_version_last_seen,
+         )
+-        children = tuple(TombstoneTarget(TombstoneEntityType.CHUNK, entry.chunk_id) for entry in summary.entries)
++        children = tuple(TombstoneTarget(TombstoneEntityType.CHUNK, entry.chunk_id) for entry in summary.entries) + tuple(dependents)
+         result = self._projector.execute(
+             TombstoneProjectionRequest(
+                 root=root,
+diff --git a/src/knowledgenexus/foundation/domain/models/delta_propagation.py b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+index dc79056..dc2eb96 100644
+--- a/src/knowledgenexus/foundation/domain/models/delta_propagation.py
++++ b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+@@ -16,6 +16,7 @@ from knowledgenexus.foundation.domain.models.chunk_stability import (
+ )
+ from knowledgenexus.foundation.domain.models.tombstone_propagation import (
+     TombstoneEntityType,
++    TombstoneTarget,
+     TombstoneProjectionMetrics,
+     TombstoneProjectionResult,
+     TombstoneProjectionStatus,
+@@ -129,15 +130,20 @@ class DeltaPropagationRequest:
+     previous_summaries: tuple[DocumentChunkSetSummary, ...]
+     current_summaries: tuple[DocumentChunkSetSummary, ...]
+     inventory: tuple[DeltaInventoryEntry, ...] = ()
++    previous_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
+ 
+     def __post_init__(self) -> None:
+-        _require_exact_fields(
+-            self,
+-            frozenset({
+-                "previous_dataset_version", "current_dataset_version", "previous_config_hash",
+-                "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory",
+-            }),
+-        )
++        expected_fields = frozenset({
++            "previous_dataset_version", "current_dataset_version", "previous_config_hash",
++            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents",
++        })
++        actual_fields = frozenset(vars(self))
++        # previous_dependents was introduced as an optional wire extension;
++        # accept legacy in-memory requests and normalize the absent field.
++        if actual_fields == expected_fields - {"previous_dependents"}:
++            object.__setattr__(self, "previous_dependents", ())
++        elif actual_fields != expected_fields:
++            raise TypeError("model fields are invalid")
+         previous = _opaque("previous_dataset_version", self.previous_dataset_version)
+         current = _opaque("current_dataset_version", self.current_dataset_version)
+         if previous == current:
+@@ -171,6 +177,28 @@ class DeltaPropagationRequest:
+             if entry.document_id in seen_inventory:
+                 raise _InventoryConflictError("inventory contains duplicate IDs")
+             seen_inventory.add(entry.document_id)
++        if type(self.previous_dependents) is not tuple:
++            raise TypeError("previous_dependents is invalid")
++        seen_dependents: set[str] = set()
++        for item in self.previous_dependents:
++            if type(item) is not tuple or len(item) != 2:
++                raise TypeError("previous_dependents entries are invalid")
++            document_id, targets = item
++            if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_dependents:
++                raise ValueError("previous dependent document ID is invalid")
++            seen_dependents.add(document_id)
++            if type(targets) is not tuple or any(type(target) is not TombstoneTarget for target in targets):
++                raise TypeError("previous dependent targets are invalid")
++            target_keys: set[tuple[TombstoneEntityType, str]] = set()
++            for target in targets:
++                TombstoneTarget.__post_init__(target)
++                if target.entity_type is TombstoneEntityType.DOCUMENT:
++                    raise ValueError("document cannot be a dependent target")
++                key = (target.entity_type, target.entity_id)
++                if key in target_keys:
++                    raise ValueError("previous dependent targets contain duplicate IDs")
++                target_keys.add(key)
++        object.__setattr__(self, "previous_dependents", tuple(self.previous_dependents))
+ 
+ 
+ @dataclass(frozen=True, repr=False)
+@@ -183,6 +211,10 @@ class DeltaPropagationMetrics:
+     document_tombstone_count: int
+     chunk_tombstone_count: int
+     record_count: int
++    media_tombstone_count: int = 0
++    relation_tombstone_count: int = 0
++    acl_tombstone_count: int = 0
++    symbol_tombstone_count: int = 0
+ 
+     def __post_init__(self) -> None:
+         _require_exact_fields(
+@@ -190,12 +222,14 @@ class DeltaPropagationMetrics:
+             frozenset({
+                 "document_count", "new_document_count", "unchanged_document_count", "changed_document_count",
+                 "removed_document_count", "document_tombstone_count", "chunk_tombstone_count", "record_count",
++                "media_tombstone_count", "relation_tombstone_count", "acl_tombstone_count", "symbol_tombstone_count",
+             }),
+         )
+         values = (
+             self.document_count, self.new_document_count, self.unchanged_document_count,
+             self.changed_document_count, self.removed_document_count, self.document_tombstone_count,
+-            self.chunk_tombstone_count, self.record_count,
++            self.chunk_tombstone_count, self.record_count, self.media_tombstone_count,
++            self.relation_tombstone_count, self.acl_tombstone_count, self.symbol_tombstone_count,
+         )
+         if any(type(value) is not int or value < 0 for value in values):
+             raise ValueError("metrics are invalid")
+@@ -203,7 +237,7 @@ class DeltaPropagationMetrics:
+             raise ValueError("document metrics are inconsistent")
+         if self.document_tombstone_count > self.document_count:
+             raise ValueError("document metrics are inconsistent")
+-        if self.record_count != self.document_tombstone_count + self.chunk_tombstone_count:
++        if self.record_count != self.document_tombstone_count + self.chunk_tombstone_count + self.media_tombstone_count + self.relation_tombstone_count + self.acl_tombstone_count + self.symbol_tombstone_count:
+             raise ValueError("record metrics are inconsistent")
+ 
+ 
+@@ -246,6 +280,10 @@ def _canonical_payload(result: "DeltaPropagationResult") -> dict[str, object]:
+             "record_count": metrics.record_count,
+             "removed_document_count": metrics.removed_document_count,
+             "unchanged_document_count": metrics.unchanged_document_count,
++            "media_tombstone_count": metrics.media_tombstone_count,
++            "relation_tombstone_count": metrics.relation_tombstone_count,
++            "acl_tombstone_count": metrics.acl_tombstone_count,
++            "symbol_tombstone_count": metrics.symbol_tombstone_count,
+         } if metrics is not None else None,
+         "document_outcomes": result.document_outcomes,
+         "records": result.records,
+@@ -335,11 +373,10 @@ class DeltaPropagationResult:
+             raise ValueError("removed document metrics are inconsistent")
+         if self.metrics.record_count != self.count:
+             raise ValueError("record metrics are inconsistent")
+-        document_count = sum(record["entity_type"] == "document" for record in self.records)
+-        chunk_count = sum(record["entity_type"] == "chunk" for record in self.records)
+-        if document_count + chunk_count != self.count:
++        counts = {kind: sum(record["entity_type"] == kind for record in self.records) for kind in ("document", "chunk", "media", "relation", "acl", "symbol")}
++        if sum(counts.values()) != self.count:
+             raise ValueError("record entity types are invalid")
+-        if self.metrics.document_tombstone_count != document_count or self.metrics.chunk_tombstone_count != chunk_count:
++        if (self.metrics.document_tombstone_count != counts["document"] or self.metrics.chunk_tombstone_count != counts["chunk"] or self.metrics.media_tombstone_count != counts["media"] or self.metrics.relation_tombstone_count != counts["relation"] or self.metrics.acl_tombstone_count != counts["acl"] or self.metrics.symbol_tombstone_count != counts["symbol"]):
+             raise ValueError("record metrics are inconsistent")
+         if type(self.digest) is not str or _SHA256.fullmatch(self.digest) is None:
+             raise ValueError("digest is invalid")
+diff --git a/src/knowledgenexus/foundation/domain/models/m10_snapshot.py b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+index fd16f62..8b57e4b 100644
+--- a/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
++++ b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+@@ -152,6 +152,7 @@ class M10SnapshotRequest:
+     media_policy: M10MediaPolicy; profile_bundle: OnePageExportProfileBundle; generated_at: str
+     dataset_root: Path; export_mode: str
+     profile_identity: M10ProfileIdentity | None = None
++    base_dataset_version: str | None = None
+     def __post_init__(self):
+         _guard(self, M10SnapshotRequest)
+         if type(self.profile_identity) is not M10ProfileIdentity:
+@@ -190,7 +191,9 @@ class M10SnapshotRequest:
+         if type(self.git_commit) is not str or not _HEX40.fullmatch(self.git_commit): raise M10SnapshotError("invalid git_commit")
+         _timestamp(self.generated_at)
+         if not isinstance(self.dataset_root, Path) or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
+-        if self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid export_mode")
++        if self.export_mode not in {"full_snapshot", "delta"}: raise M10SnapshotError("invalid export_mode")
++        if self.export_mode == "delta" and (type(self.base_dataset_version) is not str or not self.base_dataset_version): raise M10SnapshotError("delta export requires base_dataset_version")
++        if self.export_mode == M10_EXPORT_MODE and self.base_dataset_version is not None: raise M10SnapshotError("full snapshot cannot declare base_dataset_version")
+         object.__setattr__(self, "confluence_exclusions", ex); object.__setattr__(self, "ordered_page_ids", pages)
+ 
+ @dataclass(frozen=True)
+@@ -220,7 +223,7 @@ class M10SnapshotProjection:
+         _guard(self, M10SnapshotProjection)
+         if self.dataset_name != M10_DATASET_NAME or self.schemas_version != M10_SCHEMAS_VERSION or type(self.source_scopes) is not dict: raise M10SnapshotError("invalid projection identity")
+         _validated_metrics(self.metrics)
+-        if type(self.generated_at) is not str or type(self.config_hash) is not str or not _HEX64.fullmatch(self.config_hash) or self.chunker_version != ACTIVE_CHUNKER_VERSION or self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid projection metadata")
++        if type(self.generated_at) is not str or type(self.config_hash) is not str or not _HEX64.fullmatch(self.config_hash) or self.chunker_version != ACTIVE_CHUNKER_VERSION or self.export_mode not in {"full_snapshot", "delta"}: raise M10SnapshotError("invalid projection metadata")
+         _timestamp(self.generated_at)
+         scopes = self.source_scopes
+         if set(scopes) - {"confluence", "git"} or "confluence" not in scopes or tuple(scopes) != tuple(sorted(scopes)):
+@@ -249,6 +252,7 @@ class M10SnapshotProjection:
+         supplied = kwargs.pop("chunker_version", request.profile_bundle.chunking_profile.chunker_version)
+         if supplied != request.profile_bundle.chunking_profile.chunker_version:
+             raise M10SnapshotError("chunker version mismatch")
++        kwargs.setdefault("export_mode", request.export_mode)
+         return cls(chunker_version=supplied, config_hash=request.profile_bundle.config_hash, generated_at=request.generated_at, **kwargs)
+ 
+ @dataclass(frozen=True)
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+index 2cdb4c4..edae1c7 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+@@ -13,6 +13,10 @@ from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer impo
+ from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import (
+     M10FullSnapshotExporter,
+ )
++from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import (
++    DeltaSnapshotReadback,
++    read_delta_snapshot,
++)
+ 
+ __all__ = [
+     "FullSnapshotPublisher",
+@@ -20,4 +24,6 @@ __all__ = [
+     "FullSnapshotStagingWriter",
+     "JsonlRecordWriter",
+     "M10FullSnapshotExporter",
++    "DeltaSnapshotReadback",
++    "read_delta_snapshot",
+ ]
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+new file mode 100644
+index 0000000..be26008
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+@@ -0,0 +1,95 @@
++"""Strict readback for published delta snapshots.
++
++The reader validates bytes without mutating records and returns an immutable
++in-memory view suitable for a downstream publication gate.
++"""
++from __future__ import annotations
++
++import hashlib
++import json
++from copy import deepcopy
++from dataclasses import dataclass
++from pathlib import Path
++
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++from .full_snapshot_staging_writer import JSONL_FILE_SCHEMA_PAIRS
++
++
++@dataclass(frozen=True)
++class DeltaSnapshotReadback:
++    manifest: dict[str, object]
++    streams: dict[str, tuple[dict[str, object], ...]]
++    digest: str
++
++
++def _strict_json(path: Path) -> object:
++    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
++        result: dict[str, object] = {}
++        for key, value in pairs:
++            if key in result:
++                raise ValueError("duplicate JSON object key")
++            result[key] = value
++        return result
++
++    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite JSON")))
++
++
++def read_delta_snapshot(path: object, *, validator: FoundationSchemaValidator) -> DeltaSnapshotReadback:
++    if type(path) is not Path or not path.is_absolute() or not path.is_dir() or path.is_symlink():
++        raise ValueError("invalid snapshot path")
++    if type(validator) is not FoundationSchemaValidator:
++        raise TypeError("invalid validator")
++    manifest = _strict_json(path / "manifest.json")
++    if type(manifest) is not dict or manifest.get("export_mode") != "delta":
++        raise ValueError("snapshot is not a delta export")
++    base = manifest.get("base_dataset_version")
++    dataset = manifest.get("dataset_version")
++    if type(base) is not str or not base or type(dataset) is not str or not dataset or base == dataset:
++        raise ValueError("delta manifest version chain is invalid")
++    validator_copy = deepcopy(manifest)
++    validator.validate_record("Manifest", validator_copy)
++    if validator_copy != manifest:
++        raise ValueError("validator mutated manifest")
++    counts = manifest.get("counts")
++    if type(counts) is not dict or set(counts) != {key for _, key, _ in JSONL_FILE_SCHEMA_PAIRS} or any(type(value) is not int or value < 0 for value in counts.values()):
++        raise ValueError("delta counts are invalid")
++    streams: dict[str, tuple[dict[str, object], ...]] = {}
++    digest = hashlib.sha256()
++    digest.update(b"manifest.json\0")
++    digest.update((path / "manifest.json").read_bytes())
++    for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
++        stream_path = path / file_name
++        records: list[dict[str, object]] = []
++        for line in stream_path.read_text(encoding="utf-8").splitlines():
++            if not line:
++                continue
++            value = _strict_json_line(line)
++            if type(value) is not dict:
++                raise ValueError("stream record is invalid")
++            checked = deepcopy(value)
++            validator.validate_record(schema_name, checked)
++            if checked != value:
++                raise ValueError("validator mutated stream record")
++            records.append(deepcopy(value))
++        if len(records) != counts[count_key]:
++            raise ValueError("stream count mismatch")
++        streams[count_key] = tuple(records)
++        digest.update(file_name.encode("utf-8"))
++        digest.update(b"\0")
++        digest.update(stream_path.read_bytes())
++    return DeltaSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
++
++
++def _strict_json_line(line: str) -> object:
++    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
++        result: dict[str, object] = {}
++        for key, value in pairs:
++            if key in result:
++                raise ValueError("duplicate JSON object key")
++            result[key] = value
++        return result
++
++    return json.loads(line, object_pairs_hook=reject_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite JSON")))
++
++
++__all__ = ["DeltaSnapshotReadback", "read_delta_snapshot"]
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py
+index 6a2730a..5d9ac13 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py
+@@ -144,8 +144,15 @@ def _validate_m10_streams(*, staging_path: Path, manifest: dict[str, object], va
+     for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
+         records = _read_strict_jsonl_records(staging_path / file_name)
+         if count_key == "tombstones":
+-            if records:
+-                raise ValueError("initial tombstones must be empty")
++            if manifest.get("export_mode") == "full_snapshot" and records:
++                raise ValueError("full snapshots must not contain tombstones")
++            if manifest.get("export_mode") == "delta":
++                for record in records:
++                    before = deepcopy(record)
++                    isolated = deepcopy(record)
++                    validator.validate_record("TombstoneRecord", isolated)
++                    if isolated != before:
++                        raise ValueError("canonical validator mutated a tombstone")
+             streams[count_key] = records
+             continue
+         if len(records) != manifest["counts"][count_key]:
+@@ -219,7 +226,7 @@ def _verify_m10_metric_counts(quality: M10QualityReportInput, streams: dict[str,
+ 
+ def _render_m10_quality_report(manifest: Mapping[str, object], quality: M10QualityReportInput) -> str:
+     counts = quality.expected_counts
+-    lines = ["# Foundation Export Quality Report", "", "## Snapshot", "", "- Export mode: `full_snapshot`", f"- Dataset version: `{manifest['dataset_version']}`", f"- Generated at: `{manifest['generated_at']}`", f"- Schemas version: `{manifest['schemas_version']}`", "", "## Active Profiles", "", f"- Active profile: `{quality.active_profile}`", f"- Profile status: `{quality.profile_status}`", f"- Chunker version: `{quality.chunker_version}`", "", "## Record Counts", "", "| Record type | Count |", "|---|---:|"]
++    lines = ["# Foundation Export Quality Report", "", "## Snapshot", "", f"- Export mode: `{manifest['export_mode']}`", f"- Dataset version: `{manifest['dataset_version']}`", f"- Generated at: `{manifest['generated_at']}`", f"- Schemas version: `{manifest['schemas_version']}`", "", "## Active Profiles", "", f"- Active profile: `{quality.active_profile}`", f"- Profile status: `{quality.profile_status}`", f"- Chunker version: `{quality.chunker_version}`", "", "## Record Counts", "", "| Record type | Count |", "|---|---:|"]
+     lines.extend(f"| {key} | {counts[key]} |" for key in COUNT_KEYS)
+     for title, field in (("Jira Relation Quality", "jira_metrics"), ("ACL Quality", "acl_metrics"), ("Media Quality", "media_metrics"), ("Symbol Quality", "symbol_metrics"), ("Sync State", "sync_metrics"), ("Tombstones", "tombstone_metrics"), ("Completion Checks", "completion_checks")):
+         lines.extend(["", f"## {title}", ""])
+@@ -299,12 +306,13 @@ def _load_manifest(path: Path) -> dict[str, object]:
+ 
+ 
+ def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
+-    if manifest.get("export_mode") != "full_snapshot":
+-        raise ValueError("Manifest export_mode must be 'full_snapshot'")
+-    if "base_dataset_version" in manifest:
+-        raise ValueError(
+-            "Full-snapshot Manifest must not contain base_dataset_version"
+-        )
++    mode = manifest.get("export_mode")
++    if mode not in {"full_snapshot", "delta"}:
++        raise ValueError("Manifest export_mode is invalid")
++    if mode == "full_snapshot" and "base_dataset_version" in manifest:
++        raise ValueError("Full-snapshot Manifest must not contain base_dataset_version")
++    if mode == "delta" and (type(manifest.get("base_dataset_version")) is not str or not manifest.get("base_dataset_version") or manifest.get("base_dataset_version") == manifest.get("dataset_version")):
++        raise ValueError("Delta Manifest requires a distinct base_dataset_version")
+ 
+     counts = manifest.get("counts")
+     if not isinstance(counts, Mapping):
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_writer.py b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_writer.py
+index 66133ff..fe2df89 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_writer.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_writer.py
+@@ -55,6 +55,8 @@ class FullSnapshotStagingWriter:
+         sync_state: Iterable[Mapping[str, object]],
+         tombstones: Iterable[Mapping[str, object]],
+         source_scopes: Mapping[str, object] | None = None,
++        export_mode: str = "full_snapshot",
++        base_dataset_version: str | None = None,
+     ) -> dict[str, object]:
+         if staging_path.exists():
+             raise FileExistsError(f"Staging path already exists: {staging_path}")
+@@ -62,6 +64,12 @@ class FullSnapshotStagingWriter:
+             raise FileNotFoundError(
+                 f"Staging parent directory does not exist: {staging_path.parent}"
+             )
++        if export_mode not in {"full_snapshot", "delta"}:
++            raise ValueError("unsupported export mode")
++        if export_mode == "delta" and (type(base_dataset_version) is not str or not base_dataset_version):
++            raise ValueError("delta export requires base dataset version")
++        if export_mode == "full_snapshot" and base_dataset_version is not None:
++            raise ValueError("full snapshot cannot declare base dataset version")
+ 
+         staging_path.mkdir()
+         try:
+@@ -79,12 +87,13 @@ class FullSnapshotStagingWriter:
+             )
+             manifest = ManifestRecordBuilder.build(
+                 dataset_version=dataset_version,
+-                export_mode="full_snapshot",
++                export_mode=export_mode,
+                 generated_at=generated_at,
+                 config_hash=config_hash,
+                 chunker_version=chunker_version,
+                 schemas_version=schemas_version,
+                 counts=counts,
++                base_dataset_version=base_dataset_version,
+                 source_scopes=source_scopes,
+             )
+             validator.validate_record("Manifest", manifest)
+diff --git a/tests/foundation/application/use_cases/test_propagate_delta.py b/tests/foundation/application/use_cases/test_propagate_delta.py
+index f2bec26..04188fe 100644
+--- a/tests/foundation/application/use_cases/test_propagate_delta.py
++++ b/tests/foundation/application/use_cases/test_propagate_delta.py
+@@ -15,6 +15,8 @@ from knowledgenexus.foundation.domain.models import (
+     DeltaPropagationRequest,
+     DeltaPropagationStatus,
+     DocumentChunkSetSummary,
++    TombstoneEntityType,
++    TombstoneTarget,
+ )
+ 
+ 
+@@ -41,7 +43,7 @@ def _summary(document_id: str, content_hash: str = "a" * 64, entries=()) -> Docu
+     )
+ 
+ 
+-def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64):
++def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=()):
+     return DeltaPropagationRequest(
+         previous_dataset_version="base",
+         current_dataset_version="next",
+@@ -51,6 +53,7 @@ def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64,
+         previous_summaries=tuple(previous),
+         current_summaries=tuple(current),
+         inventory=tuple(inventory),
++        previous_dependents=tuple(previous_dependents),
+     )
+ 
+ 
+@@ -161,6 +164,30 @@ def test_config_change_invalidates_present_previous_documents() -> None:
+     assert result.records[0]["reason"] == "config_invalidated"
+ 
+ 
++def test_removed_document_cascades_prior_media_relation_acl_and_symbol_targets() -> None:
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    dependents = (
++        TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1"),
++        TombstoneTarget(TombstoneEntityType.RELATION, "rel:0123456789abcdef"),
++        TombstoneTarget(TombstoneEntityType.ACL, "acl:confluence:page:1"),
++        TombstoneTarget(TombstoneEntityType.SYMBOL, "symbol:git:file:1"),
++    )
++    request = _request(previous=(old,), previous_dependents=((old.document_id, dependents),))
++    result = PropagateDelta(schema_validator=Validator()).execute(request)
++    assert result.status is DeltaPropagationStatus.SUCCESS
++    assert {record["entity_type"] for record in result.records} == {"document", "chunk", "media", "relation", "acl", "symbol"}
++    assert result.metrics.media_tombstone_count == 1
++    assert result.metrics.relation_tombstone_count == 1
++    assert result.metrics.acl_tombstone_count == 1
++    assert result.metrics.symbol_tombstone_count == 1
++
++
++def test_dependents_reject_document_root_and_duplicate_targets() -> None:
++    old = _summary("confluence:page:1")
++    with pytest.raises(ValueError):
++        _request(previous=(old,), previous_dependents=((old.document_id, (TombstoneTarget(TombstoneEntityType.DOCUMENT, old.document_id),)),))
++
++
+ def test_conflicting_inventory_is_atomic() -> None:
+     old = _summary("confluence:page:1")
+     request = object.__new__(DeltaPropagationRequest)
+-- 
+2.45.1.windows.1
+
