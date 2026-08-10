@@ -12,6 +12,7 @@ import pytest
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     ActivateRawGeneration,
+    CrawlRunId,
     InventoryRootCommit,
     ResumeExplicitRunId,
     ResumeUniqueIncompleteRun,
@@ -316,6 +317,70 @@ def test_inventory_complete_resume_does_not_create_a_session(tmp_path) -> None:
         facts = tuple(activation.stream_inventory_occurrences(batch_size=1))
         assert [fact.metadata.page_id for fact in facts] == ["a", "b"]
         activation.pause_session()
+
+
+def test_activate_raw_generation_rejected_before_inventory_completion(tmp_path) -> None:
+    started = _start(tmp_path)
+
+    outcome = _register_checkpoint_run(
+        _request(tmp_path, ActivateRawGeneration(started.snapshot.run_id)),
+        uuid4=_ids("123e4567-e89b-42d3-a456-426614174002"),
+        utc_now=_clock,
+    )
+
+    assert isinstance(outcome, _RunRegistryFailure)
+    assert outcome.category is _RunRegistryFailureCategory.RUN_NOT_RESUMABLE
+
+
+def test_activate_raw_generation_rejected_for_unknown_run(tmp_path) -> None:
+    _start(tmp_path)
+    unknown_run_id = CrawlRunId("223e4567-e89b-42d3-a456-426614174000")
+
+    outcome = _register_checkpoint_run(
+        _request(tmp_path, ActivateRawGeneration(unknown_run_id)),
+        uuid4=_ids("123e4567-e89b-42d3-a456-426614174002"),
+        utc_now=_clock,
+    )
+
+    assert isinstance(outcome, _RunRegistryFailure)
+    assert outcome.category is _RunRegistryFailureCategory.RUN_NOT_FOUND
+
+
+def test_activate_raw_generation_rejected_on_fingerprint_mismatch(tmp_path) -> None:
+    started = _start(tmp_path)
+
+    outcome = _register_checkpoint_run(
+        _request(
+            tmp_path,
+            ActivateRawGeneration(started.snapshot.run_id),
+            endpoint_url="https://other.example.invalid/confluence",
+        ),
+        uuid4=_ids("123e4567-e89b-42d3-a456-426614174002"),
+        utc_now=_clock,
+    )
+
+    assert isinstance(outcome, _RunRegistryFailure)
+    assert outcome.category is _RunRegistryFailureCategory.RUN_NOT_RESUMABLE
+
+
+def test_activate_raw_generation_rejected_on_include_root_mismatch(tmp_path) -> None:
+    started = _start(tmp_path)
+
+    outcome = _register_checkpoint_run(
+        _request(
+            tmp_path,
+            ActivateRawGeneration(started.snapshot.run_id),
+            root_ids=("x", "y"),
+        ),
+        uuid4=_ids("123e4567-e89b-42d3-a456-426614174002"),
+        utc_now=_clock,
+    )
+
+    assert isinstance(outcome, _RunRegistryFailure)
+    assert outcome.category in (
+        _RunRegistryFailureCategory.RUN_NOT_RESUMABLE,
+        _RunRegistryFailureCategory.RUN_NOT_FOUND,
+    )
 
 
 def test_start_conflicts_on_same_fingerprint_even_when_durable_roots_differ(tmp_path) -> None:

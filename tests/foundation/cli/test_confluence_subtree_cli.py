@@ -1,4 +1,7 @@
 import argparse
+from pathlib import Path
+
+import pytest
 
 from knowledgenexus.foundation.cli import confluence_subtree_corpus as cli
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
@@ -8,6 +11,20 @@ from knowledgenexus.foundation.domain.models.confluence_page_set import (
     ConfluencePageSetPageMetrics,
     ConfluencePageSetResult,
 )
+from knowledgenexus.foundation.domain.models.confluence_source_config import (
+    ConfluenceIncludeRoot,
+    ConfluenceSourceConfig,
+)
+from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+    ActivateRawGenerationRequest,
+    ResumeExplicitRunRequest,
+    ResumeUniqueIncompleteRunRequest,
+    StartNewRunRequest,
+)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+APPROVED_PROFILE_PATH = REPO_ROOT / "contracts" / "foundation" / "crawl_reliability_profile.yaml"
 
 
 main = cli.main
@@ -173,11 +190,47 @@ def test_parser_keeps_reliability_and_chunking_profiles_distinct():
     assert parsed.chunking_profile_path == "embedding.yaml"
 
 
-def test_operator_page_cap_is_bound_into_durable_profile():
+def test_operator_page_cap_is_validated_without_mutating_the_reliability_profile():
     profile = {"max_pages_per_run": 10_000, "profile_id": "profile"}
-    bounded = cli._bounded_reliability_profile(_args(max_pages=5_000), profile)
-    assert bounded["max_pages_per_run"] == 5_000
-    assert profile["max_pages_per_run"] == 10_000
+    validated = cli._validated_page_bound(_args(max_pages=5_000), profile)
+    assert validated["max_pages_per_run"] == 10_000
+    assert validated is profile
+
+
+def test_operator_page_cap_exceeding_the_profile_is_rejected():
+    profile = {"max_pages_per_run": 10_000, "profile_id": "profile"}
+    with pytest.raises(ValueError):
+        cli._validated_page_bound(_args(max_pages=10_001), profile)
+
+
+def test_validated_page_bound_output_still_satisfies_every_checkpoint_request():
+    """Regression test: a real approved profile, once passed through
+    ``_validated_page_bound``, must still be accepted by every checkpoint
+    request type and by live composition's profile validation. Rewriting
+    ``max_pages_per_run`` in place previously broke every live phase because
+    the fingerprint/profile contract only accepts two closed, approved
+    profiles (see ``_validate_profile``).
+    """
+    profile = cli._load_reliability_profile(str(APPROVED_PROFILE_PATH))
+    args = _args(max_pages=10, space_key="SPACE", root_page_id="1000")
+    validated = cli._validated_page_bound(args, profile)
+    source_config = ConfluenceSourceConfig(
+        source_id="confluence-root1",
+        space_key="SPACE",
+        include_roots=(ConfluenceIncludeRoot(page_id="1000"),),
+        page_size=validated["inventory_page_size"],
+    )
+    common = dict(
+        workspace=Path("C:/tmp/review-probe"),
+        endpoint_url="https://example.invalid/wiki",
+        source_config=source_config,
+        reliability_profile=validated,
+    )
+    run_id = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
+    StartNewRunRequest(**common)
+    ResumeUniqueIncompleteRunRequest(**common)
+    ResumeExplicitRunRequest(run_id=run_id, **common)
+    ActivateRawGenerationRequest(run_id=run_id, **common)
 
 
 def test_state_path_rejects_traversal_run_and_unknown_artifact(tmp_path):

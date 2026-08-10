@@ -9,6 +9,7 @@ import sys
 import time
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+from itertools import islice
 from pathlib import Path
 
 from knowledgenexus.foundation.application.use_cases.confluence_subtree_corpus import (
@@ -378,18 +379,25 @@ def _corpus_config(args: argparse.Namespace, profile: Mapping[str, object]) -> C
     )
 
 
-def _bounded_reliability_profile(
+def _validated_page_bound(
     args: argparse.Namespace, profile: Mapping[str, object]
-) -> dict[str, object]:
-    """Bind the operator's smaller page cap into the durable run identity."""
+) -> Mapping[str, object]:
+    """Reject an operator page cap that exceeds the approved reliability profile.
+
+    The reliability profile is a closed, fingerprinted contract: only its
+    approved values may reach the checkpoint registry or live composition
+    (``_validate_profile`` rejects anything else). The operator's smaller
+    ``--max-pages`` is therefore enforced separately, by
+    ``ConfluenceSubtreeCorpusConfig`` and by the inventory-selection bound,
+    against this unmodified profile -- it must never be written back into
+    the profile mapping itself.
+    """
     if type(args.max_pages) is not int or args.max_pages <= 0:
         raise ValueError("page bound is invalid")
     configured = profile.get("max_pages_per_run")
     if type(configured) is not int or args.max_pages > configured:
         raise ValueError("page bound exceeds reliability profile")
-    bounded = dict(profile)
-    bounded["max_pages_per_run"] = args.max_pages
-    return bounded
+    return profile
 
 
 def _drawio_config(
@@ -455,7 +463,7 @@ def _compose_page_processor(args: argparse.Namespace, *, run_id: CrawlRunId, ite
 def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     if not args.raw_root:
         raise ValueError("raw root is required")
-    profile = _bounded_reliability_profile(
+    profile = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     _corpus_config(args, profile)
@@ -486,7 +494,10 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
     with composition.checkpoint_run_port.activate_raw_generation(activation_request) as session:
         if not callable(getattr(session, "stream_inventory_occurrences", None)):
             raise ValueError("raw generation activation failed")
-        facts = tuple(session.stream_inventory_occurrences(batch_size=args.batch_size))
+        # Stop reading the durable stream one item past the operator's cap
+        # instead of draining a larger approved-profile inventory in full;
+        # the identical overflow is still rejected below.
+        facts = tuple(islice(session.stream_inventory_occurrences(batch_size=args.batch_size), args.max_pages + 1))
         session.pause_session()
     selection_path = _state_path(state, str(snapshot.run_id), "inventory-selection.json")
     if selection_path.exists():
@@ -509,7 +520,7 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
     if not args.raw_root or not args.run_id:
         raise ValueError("live page capture inputs are required")
     run_id = _require_run_id(args.run_id)
-    profile = _bounded_reliability_profile(
+    profile = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     _corpus_config(args, profile)
@@ -527,7 +538,7 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
     with composition.checkpoint_run_port.activate_raw_generation(request) as session:
         if not callable(getattr(session, "stream_inventory_occurrences", None)):
             raise ValueError("raw generation activation failed")
-        facts = tuple(session.stream_inventory_occurrences(batch_size=args.batch_size))
+        facts = tuple(islice(session.stream_inventory_occurrences(batch_size=args.batch_size), args.max_pages + 1))
         candidate = _selection_payload_from_inventory(run_id=run_id, facts=facts, max_pages=args.max_pages, crawled_at=selection_items[0].crawled_at)
         if candidate != selection_payload:
             raise ValueError("selection binding mismatch")
@@ -579,7 +590,7 @@ def _capture_drawio_phase(args: argparse.Namespace, state: Path) -> dict[str, ob
     if not args.run_id or not args.raw_root:
         raise ValueError("Draw.io capture inputs are required")
     run_id = _require_run_id(args.run_id)
-    profile = _bounded_reliability_profile(
+    profile = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     base_config = _corpus_config(args, profile)
@@ -645,7 +656,7 @@ def _export_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     if not args.run_id or not args.output_dir or not args.raw_root:
         raise ValueError("export inputs are required")
     run_id = _require_run_id(args.run_id)
-    reliability = _bounded_reliability_profile(
+    reliability = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     config = _corpus_config(args, reliability)
