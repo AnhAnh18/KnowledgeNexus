@@ -67,8 +67,6 @@ class _BoundedWindowPort:
     def fetch_descendants_window(self, *, space_key: str, root_page_id: str, start: int, page_size: int) -> ConfluenceInventoryWindow:
         if type(space_key) is not str or not space_key or type(root_page_id) is not str or not root_page_id or type(start) is not int or start < 0 or type(page_size) is not int or page_size <= 0:
             raise CheckpointStateError()
-        if self._selected + page_size > self._max_pages:
-            raise CheckpointStateError()
         value = self._inner.fetch_descendants_window(space_key=space_key, root_page_id=root_page_id, start=start, page_size=page_size)
         if type(value) is not ConfluenceInventoryWindow:
             raise CheckpointStateError()
@@ -96,6 +94,20 @@ class ExecuteBoundedConfluenceInventory:
             raise TypeError("invalid subtree inventory request")
         if type(request.source_config) is not ConfluenceSourceConfig or len(request.source_config.include_roots) != 1:
             raise ValueError("subtree inventory requires exactly one include root")
+        configured_limit = request.reliability_profile.get("max_pages_per_run")
+        if type(configured_limit) is not int or configured_limit <= 0:
+            raise ValueError("reliability profile page limit is invalid")
+        # Bind the hard subtree cap into the durable request/profile rather
+        # than keeping it only in this process-local wrapper.
+        if configured_limit != self._max_pages:
+            profile = dict(request.reliability_profile)
+            profile["max_pages_per_run"] = min(configured_limit, self._max_pages)
+            if type(request) is StartNewRunRequest:
+                request = StartNewRunRequest(workspace=request.workspace, endpoint_url=request.endpoint_url, source_config=request.source_config, reliability_profile=profile)
+            elif type(request) is ResumeExplicitRunRequest:
+                request = ResumeExplicitRunRequest(workspace=request.workspace, run_id=request.run_id, endpoint_url=request.endpoint_url, source_config=request.source_config, reliability_profile=profile)
+            else:
+                request = ResumeUniqueIncompleteRunRequest(workspace=request.workspace, endpoint_url=request.endpoint_url, source_config=request.source_config, reliability_profile=profile)
         holder: dict[str, _BoundedWindowPort] = {}
 
         def factory(transport: object) -> _BoundedWindowPort:
