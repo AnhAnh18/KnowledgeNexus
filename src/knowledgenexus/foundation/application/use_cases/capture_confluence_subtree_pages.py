@@ -8,6 +8,7 @@ from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_
     FetchAndStoreConfluenceRawPageGeneration, GenerationRawPageFetchError,
 )
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import InventoryRootCommit
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
 from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspection import ConfluenceRawPageOrphanInspectionRequest
 from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
@@ -59,13 +60,16 @@ class CaptureConfluenceSubtreePages:
             page_fetcher=page_fetcher, raw_page_store=raw_page_store
         )
 
-    def run(self, *, run_id: CrawlRunId, occurrences: Iterable[InventoryOccurrence],
+    def run(self, *, run_id: CrawlRunId, occurrences: Iterable[InventoryRootCommit | InventoryOccurrence],
             stop_after: int | None = None, stop_after_batches: int | None = None) -> PageCaptureResult:
         if type(run_id) is not CrawlRunId:
             raise TypeError("run_id is invalid")
         items = tuple(occurrences)
-        if any(type(item) is not InventoryOccurrence for item in items):
+        if any(type(item) not in (InventoryRootCommit, InventoryOccurrence) for item in items):
             raise TypeError("occurrences are invalid")
+        page_ids = tuple(item.metadata.page_id for item in items)
+        if len(set(page_ids)) != len(page_ids):
+            raise ValueError("occurrences contain duplicate pages")
         if stop_after is not None and (type(stop_after) is not int or stop_after < 0):
             raise ValueError("stop_after is invalid")
         if stop_after_batches is not None and (type(stop_after_batches) is not int or stop_after_batches < 0):
@@ -81,9 +85,10 @@ class CaptureConfluenceSubtreePages:
             batch_pending = False
             batch_failed = False
             for occurrence in items[batch_start:batch_start + 100]:
+                page_id = occurrence.metadata.page_id
                 request = ConfluenceRawPageOrphanInspectionRequest.capture(
                     run_id=run_id, generation_id=run_id,
-                    page_id=occurrence.page_id, source_version=occurrence.metadata.source_version,
+                    page_id=page_id, source_version=occurrence.metadata.source_version,
                 )
                 outcome = self._state.replay_raw_page(RawPageReplayCommand(request), self._inspector)
                 if isinstance(outcome, RawPageReplayFailure):
@@ -94,8 +99,8 @@ class CaptureConfluenceSubtreePages:
                     failed += 1; batch_failed = True; continue
                 batch_pending = True
                 try:
-                    result = self._fetch.execute(run_id=run_id, page_id=occurrence.page_id)
-                    envelope = self._raw_store.read_page(run_id=run_id, page_id=occurrence.page_id)
+                    result = self._fetch.execute(run_id=run_id, page_id=page_id)
+                    envelope = self._raw_store.read_page(run_id=run_id, page_id=page_id)
                     ack = self._state.acknowledge_raw_page(RawPageAcknowledgement(envelope=envelope, artifact=result.artifact))
                     if isinstance(ack, RawPageReplayFailure) or ack.decision not in (RawPageReplayDecision.COMMITTED, RawPageReplayDecision.REPLAYED):
                         failed += 1; batch_failed = True
