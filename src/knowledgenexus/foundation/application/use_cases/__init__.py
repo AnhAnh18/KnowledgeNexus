@@ -54,6 +54,15 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop 
 from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
     FetchAndStoreConfluenceAttachmentBody,
 )
+from knowledgenexus.foundation.application.use_cases.execute_bounded_confluence_inventory import (
+    BoundedInventoryResult,
+    ExecuteBoundedConfluenceInventory,
+    MAX_SUBTREE_PAGES,
+)
+from knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages import (
+    CaptureConfluenceSubtreePages,
+    PageCaptureResult,
+)
 from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_raw_page_generation import (
     FetchAndStoreConfluenceRawPageGeneration,
     GenerationRawPageFetchError,
@@ -123,6 +132,11 @@ __all__ = [
     "DurableInventoryTransport",
     "DurableInventoryTransportFactory",
     "ExecuteDurableConfluenceInventory",
+    "BoundedInventoryResult",
+    "ExecuteBoundedConfluenceInventory",
+    "MAX_SUBTREE_PAGES",
+    "CaptureConfluenceSubtreePages",
+    "PageCaptureResult",
     "ControlledStopController",
     "ControlledStopDecision",
     "ControlledStopPolicy",

@@ -121,9 +121,14 @@ class SubtreePacketExporter:
     def publish(self, *, output_dir: Path, documents: Iterable[Mapping[str, object]], chunks: Iterable[Mapping[str, object]], media_assets: Iterable[Mapping[str, object]], summary: Mapping[str, object] | None = None) -> dict[str, object]:
         if not isinstance(output_dir, Path) or not output_dir.is_absolute() or output_dir.exists():
             raise ValueError("output directory must be an absolute new directory")
+        parent = output_dir.parent
+        if any(part.is_symlink() for part in (parent, *parent.parents) if part.exists()):
+            raise ValueError("output path contains a symlink")
         docs = tuple(sorted((dict(x) for x in documents), key=lambda x: str(x.get("document_id", ""))))
         chks = tuple(sorted((dict(x) for x in chunks), key=lambda x: str(x.get("chunk_id", ""))))
         media = tuple(sorted((dict(x) for x in media_assets), key=lambda x: str(x.get("media_id", ""))))
+        if not docs or not chks:
+            raise ValueError("packet records must be non-empty")
         doc_ids: set[str] = set()
         for row in docs:
             self._validator.validate_record("CanonicalDocument", row)
@@ -145,7 +150,6 @@ class SubtreePacketExporter:
             mids.add(ident)
         payload = dict(summary or {})
         payload.update({"format_version": PACKET_FORMAT_VERSION, "document_count": len(docs), "chunk_count": len(chks), "media_asset_count": len(media), "acl_mode": "restricted_unresolved"})
-        parent = output_dir.parent
         parent.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=str(parent)))
         try:
@@ -158,6 +162,64 @@ class SubtreePacketExporter:
             shutil.rmtree(staging, ignore_errors=True)
             raise
         return {"format_version": PACKET_FORMAT_VERSION, "files_written": list(_FILES), "document_count": len(docs), "chunk_count": len(chks), "media_asset_count": len(media)}
+
+
+def process_preserved_pages(*, processor: object, request: object) -> dict[str, object]:
+    """Run the approved offline page-set pipeline over preserved generations.
+
+    The processor is deliberately injected: this boundary cannot acquire a
+    transport or silently substitute a different chunking profile.
+    """
+    execute = getattr(processor, "execute", None)
+    if not callable(execute) or request is None:
+        raise TypeError("processor/request is invalid")
+    result = execute(request=request)
+    for name in ("documents", "chunks", "metrics", "reference_intents_by_page"):
+        if not hasattr(result, name):
+            raise ValueError("page processing result is invalid")
+    documents = tuple(dict(row) for row in result.documents)
+    chunks = tuple(dict(row) for row in result.chunks)
+    if not documents or not chunks:
+        raise ValueError("page processing produced no records")
+    return {"documents": documents, "chunks": chunks, "metrics": result.metrics, "reference_intents_by_page": result.reference_intents_by_page}
+
+
+def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachments: Callable[[str], Iterable[AttachmentMetadata]], fetch_body: Callable[[AttachmentMetadata], bytes], process_body: Callable[[AttachmentMetadata, bytes], Mapping[str, object]], schema_validator: object | None = None,) -> dict[str, object]:
+    """Resolve and process only exact Draw.io references.
+
+    Metadata listing and body fetching are injected production seams.  The
+    function never requests unrelated attachment bodies and reports failures
+    without discarding the parent page records.
+    """
+    if not callable(list_attachments) or not callable(fetch_body) or not callable(process_body):
+        raise TypeError("drawio callbacks are invalid")
+    validate = getattr(schema_validator, "validate_record", None) if schema_validator is not None else None
+    if schema_validator is not None and not callable(validate):
+        raise TypeError("schema validator is invalid")
+    assets: list[dict[str, object]] = []
+    failures = 0
+    observed = 0
+    resolved = 0
+    for ref in references:
+        if type(ref) is not DrawioReference:
+            raise TypeError("drawio reference is invalid")
+        observed += 1
+        try:
+            match = match_drawio_attachment(ref, tuple(list_attachments(ref.parent_page_id)))
+            if match is None:
+                failures += 1
+                continue
+            body = fetch_body(match)
+            if type(body) is not bytes:
+                raise ValueError("drawio body is invalid")
+            asset = dict(process_body(match, body))
+            if validate is not None:
+                validate("MediaAsset", asset)
+            assets.append(asset)
+            resolved += 1
+        except Exception:
+            failures += 1
+    return {"media_assets": tuple(assets), "drawio_references_observed": observed, "drawio_references_resolved": resolved, "drawio_assets_failed": failures}
 
 
 class ConfluenceSubtreeCorpusHarness:
@@ -200,4 +262,4 @@ class ConfluenceSubtreeCorpusHarness:
         return {"status": "complete" if complete else "stopped", "batches": len(selected), "captured_pages": captured}
 
 
-__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "match_drawio_attachment", "partition_page_ids", "PACKET_FORMAT_VERSION"]
+__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "capture_drawio_assets", "match_drawio_attachment", "partition_page_ids", "process_preserved_pages", "PACKET_FORMAT_VERSION"]
