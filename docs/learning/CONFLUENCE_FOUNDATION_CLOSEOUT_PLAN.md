@@ -114,9 +114,17 @@ this, W3 becomes blocking and the decision escalates to the operator.
 
 ## 3. Work packages
 
-### W0 - Close the Gate A harness review findings and land it
+### W0 - Close the Gate A harness review findings and land it — DONE (`d25ea42`)
 
-**Prompt for codex:**
+All four findings closed. The forcing end-to-end test also caught a real
+production defect it was written to catch: `activate_raw_generation`'s session
+never exposed `acknowledge_raw_page`, so `capture-pages` could not durably
+complete a single page in production. Fixed by adding the missing delegation
+on `_RunActivated` and `_PublicActivation`.
+
+Still open from W0: the branch is **not yet merged into `main`**.
+
+**Prompt for codex (historical):**
 
 > Branch `review/confluence-root1-h1-h4` at `7eedef9`. Close these findings from
 > the independent CORPUS-H7-FIX review. Do not broaden scope.
@@ -231,12 +239,17 @@ manual translation step.
 
 ---
 
-### W3 - Confluence-only scope resolution
+### W3 - Confluence-only scope resolution — RESOLVED, no work needed
 
-Only if W1 reports that a zero-record Git handoff is rejected. Decide with the
-operator whether to (a) include the real Git source in the first snapshot, or
-(b) make the exporter explicitly support a single-source snapshot through a
-reviewed contract change. Do not weaken validation to force (b).
+**verified.** A Confluence-only snapshot already works. Running the real
+`M10FullSnapshotExporter` over `_handoffs()` with an all-empty `M10GitHandoff`
+carrying a valid pinned identity published successfully: `status ==
+"published"`, counts `{documents: 1, chunks: 1, relations: 1, acl: 1,
+media_assets: 0, symbols: 0, sync_state: 1, tombstones: 0}`.
+
+So the first snapshot may pin a real repository/branch/commit and emit zero
+Git rows. No contract change and no operator decision is required. W1 carries
+this as a settled input.
 
 ---
 
