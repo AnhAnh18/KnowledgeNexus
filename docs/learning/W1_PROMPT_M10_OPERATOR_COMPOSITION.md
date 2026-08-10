@@ -2,7 +2,10 @@
 
 Hand this file to a codex implementer as one task. It is W1 of
 `docs/learning/CONFLUENCE_FOUNDATION_CLOSEOUT_PLAN.md`. Do not also hand W0
-(already done, commit `d25ea42`) or W2.
+(already done, merged in `764efa3`), W2, or W4.
+
+Scope note: this task covers `export_mode="full_snapshot"` only. The
+second-sync delta path is W4 and has its own prompt.
 
 ---
 
@@ -169,10 +172,10 @@ Run and report exact commands and results for:
 python -m pytest tests/foundation tests/shared tests/architecture -q
 ```
 
-Expected pre-existing baseline at `d25ea42`: **3264 passed, 40 skipped,
-9 errors** in `tests/foundation` (all nine errors are the asset-backed BGE-M3
-tests described above), plus **117 passed** in `tests/shared tests/architecture`.
-Any new failure is yours.
+Expected pre-existing baseline at `764efa3` (current `main`): **3264 passed,
+40 skipped, 9 errors** in `tests/foundation` (all nine errors are the
+asset-backed BGE-M3 tests described above), plus **117 passed** in
+`tests/shared tests/architecture`. Any new failure is yours.
 
 ## Definition of done
 
