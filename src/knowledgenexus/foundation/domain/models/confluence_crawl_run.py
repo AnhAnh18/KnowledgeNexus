@@ -63,7 +63,12 @@ class ResumeExplicitRunId:
         _validated_run_id(self.run_id)
 @dataclass(frozen=True)
 class ResumeUniqueIncompleteRun: pass
-CrawlRunOperation = Union[StartNewRun, ResumeExplicitRunId, ResumeUniqueIncompleteRun]
+@dataclass(frozen=True)
+class ActivateRawGeneration:
+    run_id: CrawlRunId
+    def __post_init__(self):
+        _validated_run_id(self.run_id)
+CrawlRunOperation = Union[StartNewRun, ResumeExplicitRunId, ResumeUniqueIncompleteRun, ActivateRawGeneration]
 
 @dataclass(frozen=True)
 class CanonicalIncludeRoots:
