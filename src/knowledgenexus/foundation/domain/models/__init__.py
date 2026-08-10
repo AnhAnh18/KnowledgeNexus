@@ -237,6 +237,13 @@ from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence imp
     InventoryOccurrence, InventoryWindowCommit, InventoryReplayConflict,
     replay_equivalent, InventoryFact,
 )
+from knowledgenexus.foundation.domain.models.m10_snapshot import (
+    M10_DATASET_NAME, M10_SCHEMAS_VERSION, M10_EXPORT_MODE, M10SnapshotError,
+    M10ConfluenceScope, M10ConfluenceExclusion, M10MediaPolicy,
+    M10ProfileIdentity,
+    M10SnapshotRequest, M10SnapshotMetrics, M10SnapshotProjection,
+    M10SnapshotResult, M10QualityReportInput,
+)
 
 __all__ = [
     "ConfluenceExcludeSubtree",
@@ -408,4 +415,23 @@ __all__ = [
     "CommittedCheckpointTransition", "CrawlRunSnapshot", "CrawlRunOperation",
     "InventoryOccurrence", "InventoryWindowCommit", "InventoryReplayConflict",
     "replay_equivalent", "InventoryFact",
+    "M10_DATASET_NAME", "M10_SCHEMAS_VERSION", "M10_EXPORT_MODE", "M10SnapshotError",
+    "M10ConfluenceScope", "M10ConfluenceExclusion", "M10MediaPolicy",
+    "M10ProfileIdentity",
+    "M10SnapshotRequest", "M10SnapshotMetrics", "M10SnapshotProjection",
+    "M10SnapshotResult", "M10QualityReportInput",
+]
+
+from knowledgenexus.foundation.domain.models.m10_composition import (
+    M10SchemaValidator,
+    M10ConfluenceAdapter,
+    M10ConfluenceHandoff,
+    M10GitAdapter,
+    M10GitHandoff,
+    compose_m10_projection,
+)
+
+__all__ += [
+    "M10SchemaValidator", "M10ConfluenceAdapter", "M10ConfluenceHandoff", "M10GitAdapter",
+    "M10GitHandoff", "compose_m10_projection",
 ]

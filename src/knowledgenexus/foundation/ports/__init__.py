@@ -116,6 +116,11 @@ from knowledgenexus.foundation.ports.media_processing_port import (
     ImageOcrPort,
     PdfTextExtractionPort,
 )
+from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
+    M10PublisherPort,
+    M10StagingCompleterPort,
+    M10StagingWriterPort,
+)
 
 __all__ = [
     "ConfluenceInventoryPort",
@@ -198,4 +203,7 @@ __all__ = [
     "StartNewRunRequest",
     "ImageOcrPort",
     "PdfTextExtractionPort",
+    "M10PublisherPort",
+    "M10StagingCompleterPort",
+    "M10StagingWriterPort",
 ]
