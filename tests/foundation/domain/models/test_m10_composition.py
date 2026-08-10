@@ -9,6 +9,8 @@ from knowledgenexus.foundation.domain.models.m10_snapshot import M10ConfluenceSc
 from knowledgenexus.foundation.domain.models.chunking_profile import ChunkingProfile, TokenizerAsset
 from knowledgenexus.foundation.domain.models.jira_relation_profile import JIRA_EXTRACTION_MODE, JIRA_KEY_PATTERN, JiraRelationProfile
 from knowledgenexus.foundation.domain.models.one_page_export import OnePageExportProfileBundle
+from knowledgenexus.foundation.domain.models.tombstone_propagation import TombstoneEntityType, TombstoneReason, TombstoneTarget
+from knowledgenexus.foundation.domain.rules.tombstone_record_builder import TombstoneRecordBuilder
 from tests.fixtures.foundation.record_factories import build_sample_acl_record, build_sample_chunk_record, build_sample_document_record, build_sample_relation_record
 
 RUN = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
@@ -81,7 +83,9 @@ def test_media_policy_provenance_and_metrics(tmp_path):
 def test_relation_status_and_sync_state_rules(tmp_path):
     request = _request(tmp_path); confluence, git = _handoffs()
     unresolved = {"schema_version": "1.0", "relation_id": "rel:1234567890abcdef", "source_id": "confluence:page:123", "target_id": "jira:issue:SPEN-9999", "relation_type": "mentions_jira_key", "resolution_status": "unresolved_target", "created_at": "2026-08-05T00:00:00Z"}
-    enriched = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, (unresolved,), confluence.acl, (), confluence.symbols, confluence.sync_state, confluence.raw_artifact_identity)
+    documents = ({**confluence.documents[0], "relation_ids": [unresolved["relation_id"]]},)
+    chunks = ({**confluence.chunks[0], "relation_ids": [unresolved["relation_id"]]},)
+    enriched = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, documents, chunks, (unresolved,), confluence.acl, (), confluence.symbols, confluence.sync_state, confluence.raw_artifact_identity)
     projection = compose_m10_projection(request, enriched, git, schema_validator=NoopValidator())
     assert projection.metrics.unresolved_relations == 1
     bad_relation = {**unresolved, "target_id": "confluence:page:123"}
@@ -110,3 +114,83 @@ def test_git_handoff_rejects_cross_source_and_chunk_path_traversal(tmp_path):
     with pytest.raises(M10SnapshotError): compose_m10_projection(request, confluence, traversal, schema_validator=NoopValidator())
     backslash = M10GitHandoff(git.repository, git.branch, git.commit, git.documents, ({**git.chunks[0], "file_path": "src\\escape.cpp"},), (), git.acl, (), (), ())
     with pytest.raises(M10SnapshotError): compose_m10_projection(request, confluence, backslash, schema_validator=NoopValidator())
+
+
+def test_relation_id_closure_rejects_unknown_ids_without_generic_relations(tmp_path):
+    request = _request(tmp_path)
+    confluence, git = _handoffs()
+    # The only relation is a Jira mention, so the old conditional closure
+    # check skipped this forged document reference.
+    forged_document = {**confluence.documents[0], "relation_ids": ["rel:deadbeefdeadbeef"]}
+    forged = M10ConfluenceHandoff(
+        confluence.run_id,
+        confluence.generation_id,
+        confluence.source_version,
+        (forged_document,),
+        confluence.chunks,
+        confluence.relations,
+        confluence.acl,
+        confluence.media_assets,
+        confluence.symbols,
+        confluence.sync_state,
+        confluence.raw_artifact_identity,
+    )
+    with pytest.raises(M10SnapshotError):
+        compose_m10_projection(request, forged, git, schema_validator=NoopValidator())
+
+
+def test_tombstone_ownership_requires_git_source_grammar(tmp_path):
+    request = replace(_request(tmp_path), export_mode="delta", base_dataset_version="base-1")
+    confluence, git = _handoffs()
+    schema_validator = NoopValidator()
+    wrong_chunk = TombstoneRecordBuilder.build(
+        target=TombstoneTarget(TombstoneEntityType.CHUNK, "chunk:confluence:" + "0" * 16),
+        reason=TombstoneReason.SOURCE_DELETED,
+        detected_at="2026-08-05T00:00:00Z",
+        dataset_version="delta-1",
+        schema_validator=schema_validator,
+    )
+    handoff = M10GitHandoff(
+        git.repository,
+        git.branch,
+        git.commit,
+        git.documents,
+        git.chunks,
+        git.relations,
+        git.acl,
+        git.media_assets,
+        git.symbols,
+        git.sync_state,
+        git.errors,
+        (wrong_chunk,),
+    )
+    with pytest.raises(M10SnapshotError):
+        compose_m10_projection(request, confluence, handoff, schema_validator=schema_validator)
+
+
+def test_git_symbol_tombstone_is_bound_to_repository_and_branch(tmp_path):
+    request = replace(_request(tmp_path), export_mode="delta", base_dataset_version="base-1")
+    confluence, git = _handoffs()
+    wrong_symbol = TombstoneRecordBuilder.build(
+        target=TombstoneTarget(TombstoneEntityType.SYMBOL, "other-repo:main:src/a.py:f"),
+        reason=TombstoneReason.SOURCE_DELETED,
+        detected_at="2026-08-05T00:00:00Z",
+        dataset_version="delta-1",
+        schema_validator=NoopValidator(),
+    )
+    handoff = M10GitHandoff(
+        git.repository,
+        git.branch,
+        git.commit,
+        git.documents,
+        git.chunks,
+        git.relations,
+        git.acl,
+        git.media_assets,
+        git.symbols,
+        git.sync_state,
+        git.errors,
+        (wrong_symbol,),
+    )
+    with pytest.raises(M10SnapshotError):
+        compose_m10_projection(request, confluence, handoff, schema_validator=NoopValidator())

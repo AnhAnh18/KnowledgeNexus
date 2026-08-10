@@ -49,6 +49,7 @@ _ADMONITION_LABELS = {
 _DRAWIO_MACROS = {"drawio", "drawio-sketch", "drawio-board"}
 _TABLE_CELL_TAGS = {"th", "td"}
 _TABLE_SPAN_VALUE = re.compile(r"^[1-9][0-9]*$")
+_CONFLUENCE_PAGE_ID = re.compile(r"(?:[?&]pageId=|/pages/(?:viewpage\.action/?)?)([0-9]+)(?:[/?&#]|$)", re.IGNORECASE)
 
 # Complex tables are untrusted input. Keep grid allocation and recursive
 # rendering bounded before any large integer or nested structure is expanded.
@@ -233,6 +234,9 @@ class _Renderer:
         if not _is_safe_link_target(href):
             self.warn("link_target_omitted", "a")
             return label
+        page_target = _confluence_page_target(href)
+        if page_target is not None:
+            self._emit_reference_intent(kind="page_link", identity=page_target)
         target = href.replace(" ", "%20").replace(")", "\\)")
         return f"[{label}]({target})"
 
@@ -859,6 +863,19 @@ def _is_safe_link_target(value: str) -> bool:
     except ValueError:
         return False
     return parsed.scheme.lower() in {"", "http", "https", "mailto"}
+
+
+def _confluence_page_target(value: str) -> str | None:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if parsed.netloc:
+        return None
+    match = _CONFLUENCE_PAGE_ID.search(parsed.path + ("?" + parsed.query if parsed.query else ""))
+    if match is None:
+        return None
+    return f"confluence:page:{match.group(1)}"
 
 
 def _normalize_final_text(value: str) -> str:

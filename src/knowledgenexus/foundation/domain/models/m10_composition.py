@@ -8,14 +8,19 @@ from typing import Protocol
 
 from .confluence_crawl_run import CrawlRunId
 from .m10_snapshot import M10SnapshotError, M10SnapshotMetrics, M10SnapshotProjection, M10SnapshotRequest
+from .tombstone_propagation import _validate_json_object, _validate_tombstone_record
 
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _JIRA = re.compile(r"^jira:issue:[A-Z][A-Z0-9_]*-[0-9]+$")
 _PAGE_TARGET = re.compile(r"^confluence:page:[^\s:]+$")
 _MEDIA_TARGET = re.compile(r"^confluence:attachment:[^\s:]+$")
-_HANDOFF_FIELDS = {"run_id", "generation_id", "source_version", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "raw_artifact_identity", "errors"}
-_GIT_FIELDS = {"repository", "branch", "commit", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "errors"}
+_TOMBSTONE_RELATION = re.compile(r"^rel:[0-9a-f]{16}$")
+_TOMBSTONE_CONFLUENCE_ACL = re.compile(r"^acl:confluence:[^\s:]+$")
+_TOMBSTONE_GIT_DOCUMENT = re.compile(r"^git:file:[^\s]+$")
+_TOMBSTONE_GIT_ACL = re.compile(r"^acl:repo:[^\s:]+$")
+_HANDOFF_FIELDS = {"run_id", "generation_id", "source_version", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "raw_artifact_identity", "errors", "tombstones"}
+_GIT_FIELDS = {"repository", "branch", "commit", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "errors", "tombstones"}
 _RESULT_FIELDS = {"projection", "failure_category"}
 _RELATION_STATUSES = {"resolved", "unresolved_without_jira_api", "deferred_mvp", "unresolved_target"}
 _MEDIA_STATUSES = {"parsed", "ocr", "summarized", "not_processed", "failed"}
@@ -64,6 +69,9 @@ class M10ConfluenceHandoff:
     sync_state: tuple[dict[str, object], ...]
     raw_artifact_identity: str
     errors: tuple[str, ...] = ()
+    # Tombstones are optional at the end of the wire model to preserve legacy
+    # positional full-snapshot constructors.
+    tombstones: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _guard(self, M10ConfluenceHandoff, _HANDOFF_FIELDS)
@@ -76,6 +84,7 @@ class M10ConfluenceHandoff:
         for name in _SCHEMAS:
             object.__setattr__(self, name, _records(name, getattr(self, name)))
         object.__setattr__(self, "errors", _errors(self.errors))
+        object.__setattr__(self, "tombstones", _records("tombstones", self.tombstones))
 
 
 @dataclass(frozen=True)
@@ -91,6 +100,7 @@ class M10GitHandoff:
     symbols: tuple[dict[str, object], ...]
     sync_state: tuple[dict[str, object], ...]
     errors: tuple[str, ...] = ()
+    tombstones: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _guard(self, M10GitHandoff, _GIT_FIELDS)
@@ -99,6 +109,7 @@ class M10GitHandoff:
         for name in _SCHEMAS:
             object.__setattr__(self, name, _records(name, getattr(self, name)))
         object.__setattr__(self, "errors", _errors(self.errors))
+        object.__setattr__(self, "tombstones", _records("tombstones", self.tombstones))
 
 
 class M10ConfluenceAdapter(Protocol):
@@ -149,6 +160,90 @@ def _validate_records(streams: dict[str, tuple[dict[str, object], ...]], injecte
             untouched.append(copy.deepcopy(record))
         clean[name] = tuple(untouched)
     return clean
+
+
+def _validate_tombstones(
+    records: tuple[dict[str, object], ...],
+    injected_validator: M10SchemaValidator,
+    canonical_validator: M10SchemaValidator,
+) -> tuple[dict[str, object], ...]:
+    """Validate deterministic TombstoneRecords without allowing validator mutation."""
+    if type(records) is not tuple or any(type(record) is not dict for record in records):
+        raise M10SnapshotError("tombstones must be tuple of records")
+    clean: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for record in records:
+        try:
+            _validate_json_object(record)
+            _validate_tombstone_record(record)
+        except Exception:
+            raise M10SnapshotError("tombstone record is invalid") from None
+        for validator in (canonical_validator, injected_validator):
+            isolated = copy.deepcopy(record)
+            try:
+                validator.validate_record("TombstoneRecord", isolated)
+            except Exception:
+                raise M10SnapshotError("tombstone schema validation failed") from None
+            if isolated != record:
+                raise M10SnapshotError("tombstone validator mutated record")
+        tombstone_id = record["tombstone_id"]
+        if tombstone_id in seen:
+            raise M10SnapshotError("duplicate tombstone identity")
+        seen.add(tombstone_id)
+        clean.append(copy.deepcopy(record))
+    return tuple(clean)
+
+
+def _validate_tombstone_ownership(
+    name: str,
+    records: tuple[dict[str, object], ...],
+    request: M10SnapshotRequest | None = None,
+) -> None:
+    """Reject tombstones for streams owned by the other M10 source."""
+    allowed = {"document", "chunk", "acl", "symbol"} if name == "git" else {"document", "chunk", "media", "relation", "acl"}
+    grammars = {
+        "confluence": {
+            "document": _PAGE_TARGET,
+            "chunk": re.compile(r"^chunk:confluence:[0-9a-f]{16}(?:-[0-9]+)?$"),
+            "media": _MEDIA_TARGET,
+            "relation": _TOMBSTONE_RELATION,
+            "acl": _TOMBSTONE_CONFLUENCE_ACL,
+        },
+        "git": {
+            "document": _TOMBSTONE_GIT_DOCUMENT,
+            "chunk": re.compile(r"^chunk:git:[0-9a-f]{16}(?:-[0-9]+)?$"),
+            "acl": _TOMBSTONE_GIT_ACL,
+            # Symbol IDs are repository/branch/path-qualified and therefore
+            # do not carry a fixed source prefix.  Reject all IDs reserved
+            # for the other entity grammars, while requiring a qualified ID.
+            "symbol": None,
+        },
+    }[name]
+    for record in records:
+        entity_type = record.get("entity_type")
+        entity_id = record.get("entity_id")
+        if entity_type not in allowed or type(entity_id) is not str:
+            raise M10SnapshotError(f"{name} tombstone ownership is invalid")
+        grammar = grammars[entity_type]
+        if grammar is not None:
+            if grammar.fullmatch(entity_id) is None:
+                raise M10SnapshotError(f"{name.title()} tombstone ownership is invalid")
+            if name == "git" and entity_type == "acl" and request is not None and entity_id != f"acl:repo:{request.git_repository}":
+                raise M10SnapshotError("Git tombstone ownership is invalid")
+            continue
+        # Symbol IDs are generated as repo:branch:file:qualified_name.  Keep
+        # the grammar source-safe without assuming a repository name here.
+        if (
+            not entity_id
+            or entity_id.startswith(("confluence:", "git:file:", "chunk:", "acl:", "rel:"))
+            or len(entity_id.split(":")) < 3
+            or any(not part for part in entity_id.split(":"))
+        ):
+            raise M10SnapshotError("Git tombstone ownership is invalid")
+        if request is not None:
+            parts = entity_id.split(":", 2)
+            if parts[:2] != [request.git_repository, request.git_branch]:
+                raise M10SnapshotError("Git tombstone ownership is invalid")
 
 
 def _require_canonical_validator(value: object) -> M10SchemaValidator:
@@ -210,6 +305,12 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
         raise M10SnapshotError("adapter handoff contains errors")
     confluence_streams = {name: getattr(confluence, name) for name in _SCHEMAS}
     git_streams = {name: getattr(git, name) for name in _SCHEMAS}
+    confluence_tombstones = _validate_tombstones(confluence.tombstones, schema_validator, canonical_schema_validator)
+    git_tombstones = _validate_tombstones(git.tombstones, schema_validator, canonical_schema_validator)
+    _validate_tombstone_ownership("confluence", confluence_tombstones, request)
+    _validate_tombstone_ownership("git", git_tombstones, request)
+    if request.export_mode == "full_snapshot" and (confluence_tombstones or git_tombstones):
+        raise M10SnapshotError("full snapshots must not contain tombstones")
     _validate_records(confluence_streams, schema_validator, canonical_schema_validator)
     _validate_records(git_streams, schema_validator, canonical_schema_validator)
     _handoff_ownership("confluence", confluence_streams, request)
@@ -282,6 +383,28 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
             raise M10SnapshotError("resolved relation target is invalid")
         if status != "resolved" and (target in set().union(*ids.values()) or (record.get("relation_type") == "mentions_jira_key" and not _JIRA.fullmatch(target))):
             raise M10SnapshotError("unresolved relation target is invalid")
+        relation_type = record.get("relation_type")
+        if status == "resolved" and relation_type == "embeds_media":
+            media = next((row for row in streams["media_assets"] if row.get("media_id") == target), None)
+            source_doc = next((row for row in documents if row.get("document_id") == source), None)
+            if media is None or source_doc is None or source_doc.get("source_system") != "confluence" or media.get("parent_document_id") != source:
+                raise M10SnapshotError("resolved media relation ownership is invalid")
+        if status == "resolved" and relation_type in {"includes_page", "links_to_page"}:
+            target_doc = next((row for row in documents if row.get("document_id") == target), None)
+            source_doc = next((row for row in documents if row.get("document_id") == source), None)
+            if target_doc is None or source_doc is None or target_doc.get("source_system") != "confluence" or source_doc.get("source_system") != "confluence":
+                raise M10SnapshotError("resolved page relation ownership is invalid")
+    relation_ids = {_identity(row, "relation_id") for row in streams["relations"]}
+    for stream_name in ("documents", "chunks"):
+        for row in streams[stream_name]:
+            referenced = row.get("relation_ids", [])
+            if (
+                type(referenced) is not list
+                or any(type(value) is not str or not value for value in referenced)
+                or len(referenced) != len(set(referenced))
+                or any(value not in relation_ids for value in referenced)
+            ):
+                raise M10SnapshotError("relation ID closure is invalid")
     for record in streams["media_assets"]:
         if not request.media_policy.include_attachments or len(streams["media_assets"]) > request.media_policy.max_assets:
             raise M10SnapshotError("media policy or budget is invalid")
@@ -328,8 +451,11 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
     media_failed = sum(1 for row in ordered["media_assets"] if row["processing_status"] == "failed")
     confluence_documents = sum(1 for row in ordered["documents"] if row["source_system"] == "confluence")
     git_documents = sum(1 for row in ordered["documents"] if row["source_system"] == "git")
-    metrics = M10SnapshotMetrics(len(ordered["documents"]), len(ordered["chunks"]), len(ordered["relations"]), len(ordered["acl"]), len(ordered["media_assets"]), len(ordered["symbols"]), len(ordered["sync_state"]), 0, confluence_documents, git_documents, sum(1 for row in ordered["relations"] if row["resolution_status"] != "resolved"), media_processed, media_failed, sum(1 for row in ordered["symbols"] if row.get("chunk_id") is not None), sum(1 for row in ordered["chunks"] if not row["acl_tags"]))
-    return M10SnapshotProjection.from_request(request, dataset_name="spen_knowledge_poc", schemas_version="1.0", source_scopes={"confluence": {"source_id": request.confluence_scope.source_id, "space_keys": request.confluence_scope.space_keys, "root_page_ids": request.confluence_scope.root_page_ids, "page_ids": request.confluence_scope.page_ids}, "git": {"repository": request.git_repository, "branch": request.git_branch, "commit": request.git_commit}}, documents=ordered["documents"], chunks=ordered["chunks"], relations=ordered["relations"], acl=ordered["acl"], media_assets=ordered["media_assets"], symbols=ordered["symbols"], sync_state=ordered["sync_state"], tombstones=(), metrics=metrics)
+    tombstones = tuple(sorted(confluence_tombstones + git_tombstones, key=lambda row: (row["entity_type"], row["entity_id"], row["tombstone_id"])))
+    if len({row["tombstone_id"] for row in tombstones}) != len(tombstones):
+        raise M10SnapshotError("duplicate tombstone identity")
+    metrics = M10SnapshotMetrics(len(ordered["documents"]), len(ordered["chunks"]), len(ordered["relations"]), len(ordered["acl"]), len(ordered["media_assets"]), len(ordered["symbols"]), len(ordered["sync_state"]), len(tombstones), confluence_documents, git_documents, sum(1 for row in ordered["relations"] if row["resolution_status"] != "resolved"), media_processed, media_failed, sum(1 for row in ordered["symbols"] if row.get("chunk_id") is not None), sum(1 for row in ordered["chunks"] if not row["acl_tags"]))
+    return M10SnapshotProjection.from_request(request, dataset_name="spen_knowledge_poc", schemas_version="1.0", source_scopes={"confluence": {"source_id": request.confluence_scope.source_id, "space_keys": request.confluence_scope.space_keys, "root_page_ids": request.confluence_scope.root_page_ids, "page_ids": request.confluence_scope.page_ids}, "git": {"repository": request.git_repository, "branch": request.git_branch, "commit": request.git_commit}}, documents=ordered["documents"], chunks=ordered["chunks"], relations=ordered["relations"], acl=ordered["acl"], media_assets=ordered["media_assets"], symbols=ordered["symbols"], sync_state=ordered["sync_state"], tombstones=tombstones, metrics=metrics)
 
 
 __all__ = ["M10SchemaValidator", "M10ConfluenceHandoff", "M10GitHandoff", "M10ConfluenceAdapter", "M10GitAdapter", "compose_m10_projection"]

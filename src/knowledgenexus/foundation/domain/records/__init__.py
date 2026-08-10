@@ -13,6 +13,9 @@ from knowledgenexus.foundation.domain.records.manifest_record_builder import (
 from knowledgenexus.foundation.domain.records.relation_record_builder import (
     RelationRecordBuilder,
 )
+from knowledgenexus.foundation.domain.records.sync_state_record_builder import (
+    SyncStateRecordBuilder,
+)
 
 __all__ = [
     "ACLRecordBuilder",
@@ -20,4 +23,5 @@ __all__ = [
     "ChunkRecordBuilder",
     "ManifestRecordBuilder",
     "RelationRecordBuilder",
+    "SyncStateRecordBuilder",
 ]

@@ -39,6 +39,10 @@ def read_delta_snapshot(path: object, *, validator: FoundationSchemaValidator) -
         raise ValueError("invalid snapshot path")
     if type(validator) is not FoundationSchemaValidator:
         raise TypeError("invalid validator")
+    expected_files = {"manifest.json"} | {file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS}
+    entries = tuple(path.iterdir())
+    if {entry.name for entry in entries} != expected_files or any(not entry.is_file() or entry.is_symlink() for entry in entries):
+        raise ValueError("delta snapshot file set is invalid")
     manifest = _strict_json(path / "manifest.json")
     if type(manifest) is not dict or manifest.get("export_mode") != "delta":
         raise ValueError("snapshot is not a delta export")

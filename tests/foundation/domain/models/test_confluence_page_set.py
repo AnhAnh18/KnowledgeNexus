@@ -14,6 +14,7 @@ from knowledgenexus.foundation.domain.models import (
     ConfluencePageSetError,
     ConfluencePageSetFailureCategory,
     CrawlRunId,
+    NormalizationReferenceIntent,
 )
 
 
@@ -133,3 +134,41 @@ def test_result_rejects_page_metric_aggregate_mismatch_and_error_ordinal() -> No
             requested_pages=1,
             succeeded_pages=0,
         )
+
+
+def test_result_preserves_reference_intents_by_page() -> None:
+    intent = NormalizationReferenceIntent(
+        ordinal=1,
+        kind="drawio",
+        status="deferred_mvp",
+        target_identity="diagram.drawio",
+        placeholder_identity="diagram.drawio",
+    )
+    metrics = ConfluencePageSetMetrics(
+        requested_pages=1,
+        succeeded_pages=1,
+        failed_pages=0,
+        document_count=1,
+        chunk_count=0,
+        warning_count=0,
+        reference_intent_count=1,
+        content_kind_counts=(),
+    )
+    page_metrics = (
+        ConfluencePageSetPageMetrics(
+            page_ordinal=1,
+            chunk_count=0,
+            warning_count=0,
+            reference_intent_count=1,
+            content_kind_counts=(),
+        ),
+    )
+    result = ConfluencePageSetResult(
+        documents=({"document_id": "confluence:page:1000"},),
+        chunks=(),
+        page_metrics=page_metrics,
+        metrics=metrics,
+        reference_intents_by_page=(("confluence:page:1000", (intent,)),),
+    )
+    assert result.reference_intents_by_page[0][1] == (intent,)
+    assert b"diagram.drawio" in result.to_canonical_json()

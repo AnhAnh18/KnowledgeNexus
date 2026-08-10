@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,14 @@ from knowledgenexus.foundation.domain.models.m10_composition import (
     M10GitHandoff,
 )
 from knowledgenexus.foundation.domain.models.m10_snapshot import M10MediaPolicy
+from knowledgenexus.foundation.domain.models.m10_composition import M10ConfluenceHandoff
+from knowledgenexus.foundation.domain.models.tombstone_propagation import (
+    TombstoneEntityType,
+    TombstoneReason,
+    TombstoneTarget,
+)
+from knowledgenexus.foundation.domain.rules.dataset_version_generator import DatasetVersionGenerator
+from knowledgenexus.foundation.domain.rules.tombstone_record_builder import TombstoneRecordBuilder
 from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
 
 
@@ -167,6 +176,55 @@ def test_export_m10_publishes_using_m3_and_derives_counts(tmp_path):
         "quality_report.md", "relations.jsonl", "symbols.jsonl", "sync_state.jsonl", "tombstones.jsonl",
     ])
     assert left.calls == right.calls == 1
+
+
+def test_delta_export_publishes_non_empty_tombstones_against_base(tmp_path):
+    request = _request(tmp_path)
+    confluence, git = _handoffs()
+    full = M10FullSnapshotExporter(
+        confluence_adapter=_Adapter(confluence),
+        git_adapter=_Adapter(git),
+    ).execute(request)
+    stamp = "2026-08-05T00:01:00.000000Z"
+    delta_request = replace(
+        request,
+        generated_at=stamp,
+        export_mode="delta",
+        base_dataset_version=full.dataset_version,
+    )
+    dataset_version = DatasetVersionGenerator.generate(
+        instant=datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    )
+    tombstone = TombstoneRecordBuilder.build(
+        target=TombstoneTarget(TombstoneEntityType.DOCUMENT, "confluence:page:123"),
+        reason=TombstoneReason.SOURCE_DELETED,
+        detected_at=stamp,
+        dataset_version=dataset_version,
+        schema_validator=FoundationSchemaValidator(),
+    )
+    delta_confluence = M10ConfluenceHandoff(
+        confluence.run_id,
+        confluence.generation_id,
+        confluence.source_version,
+        confluence.documents,
+        confluence.chunks,
+        confluence.relations,
+        confluence.acl,
+        confluence.media_assets,
+        confluence.symbols,
+        confluence.sync_state,
+        confluence.raw_artifact_identity,
+        (),
+        (tombstone,),
+    )
+    result = M10FullSnapshotExporter(
+        confluence_adapter=_Adapter(delta_confluence),
+        git_adapter=_Adapter(git),
+    ).execute(delta_request)
+    assert result.status == "published"
+    assert result.metrics.tombstones == 1
+    assert (result.final_path / "tombstones.jsonl").read_text(encoding="utf-8").count("tombstone_id") == 1
+    assert (result.final_path / "manifest.json").read_text(encoding="utf-8").find('"export_mode":"delta"') >= 0
 
 
 @pytest.mark.parametrize("bad", [None, object(), {"request": True}])

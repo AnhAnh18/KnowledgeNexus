@@ -66,7 +66,7 @@ class M10QualityCompletionError(ValueError):
     """Sanitized failure for the additive generic M10 report boundary."""
 
 
-def _validate_m10_quality_input(quality: object) -> None:
+def _validate_m10_quality_input(quality: object, *, allow_delta: bool = False) -> None:
     if type(quality) is not M10QualityReportInput or set(vars(quality)) != set(M10QualityReportInput.__dataclass_fields__):
         raise TypeError("m10_quality has invalid fields")
     for name in ("active_profile", "profile_status", "chunker_version"):
@@ -86,7 +86,7 @@ def _validate_m10_quality_input(quality: object) -> None:
         for metric in keys:
             item = value[metric]
             if name == "completion_checks":
-                if type(item) is not bool or not item:
+                if type(item) is not bool or (not item and not (allow_delta and metric == "tombstones_empty")):
                     raise ValueError("m10_quality completion checks are invalid")
             elif type(item) is not int or item < 0:
                 raise ValueError("m10_quality metric values are invalid")
@@ -106,7 +106,11 @@ def _validate_m10_quality_input(quality: object) -> None:
     if sy["active"] != sy["rows_total"] or sy["pages"] + sy["attachments"] + sy["files"] + sy["repos"] != sy["rows_total"]:
         raise ValueError("m10_quality sync metrics are inconsistent")
     t = quality.tombstone_metrics
-    if t["rows_total"] != quality.expected_counts["tombstones"] or t["initial_empty"] != 1 or t["rows_total"] != 0:
+    if t["rows_total"] != quality.expected_counts["tombstones"]:
+        raise ValueError("m10_quality tombstone metrics are inconsistent")
+    if not allow_delta and (t["initial_empty"] != 1 or t["rows_total"] != 0):
+        raise ValueError("m10_quality tombstone metrics are inconsistent")
+    if allow_delta and t["initial_empty"] not in (0, 1):
         raise ValueError("m10_quality tombstone metrics are inconsistent")
     scopes = quality.source_scopes
     if type(scopes) is not dict or tuple(scopes) != tuple(sorted(scopes)) or set(scopes) not in ({"confluence"}, {"confluence", "git"}):
@@ -153,6 +157,8 @@ def _validate_m10_streams(*, staging_path: Path, manifest: dict[str, object], va
                     validator.validate_record("TombstoneRecord", isolated)
                     if isolated != before:
                         raise ValueError("canonical validator mutated a tombstone")
+                    if record.get("dataset_version") != manifest.get("dataset_version"):
+                        raise ValueError("tombstone dataset version does not match manifest")
             streams[count_key] = records
             continue
         if len(records) != manifest["counts"][count_key]:
@@ -182,7 +188,7 @@ def _complete_m10_quality(*, staging_path: Path, validator: FoundationSchemaVali
     validator.validate_record("Manifest", manifest_before)
     if manifest_before != manifest:
         raise ValueError("canonical validator mutated manifest")
-    _verify_full_snapshot_invariants(manifest)
+    _verify_export_invariants(manifest)
     _validate_m10_scope(manifest.get("source_scopes"))
     if _canonical_json(manifest["source_scopes"]) != _canonical_json(quality.source_scopes):
         raise ValueError("source scope mismatch")
@@ -255,7 +261,9 @@ class FullSnapshotStagingCompleter:
                     raise TypeError("one_page_quality is incompatible with m10_quality")
                 if type(validator) is not FoundationSchemaValidator:
                     raise TypeError("m10_quality requires the shared FoundationSchemaValidator")
-                _validate_m10_quality_input(m10_quality)
+                manifest = _strict_json_object(staging_path / "manifest.json")
+                allow_delta = manifest.get("export_mode") == "delta"
+                _validate_m10_quality_input(m10_quality, allow_delta=allow_delta)
                 return _complete_m10_quality(staging_path=staging_path, validator=validator, quality=m10_quality)
             except Exception:
                 raise M10QualityCompletionError("m10_quality completion failed") from None
@@ -271,7 +279,7 @@ class FullSnapshotStagingCompleter:
         _verify_file_set(staging_path, EXPECTED_MACHINE_FILES)
         manifest = _load_manifest(staging_path / "manifest.json")
         validator.validate_record("Manifest", manifest)
-        _verify_full_snapshot_invariants(manifest)
+        _verify_export_invariants(manifest, allow_delta=m10_quality is not None)
 
         if one_page_quality is None:
             report = _render_quality_report(manifest)
@@ -305,9 +313,10 @@ def _load_manifest(path: Path) -> dict[str, object]:
     return manifest
 
 
-def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
+def _verify_export_invariants(manifest: Mapping[str, object], *, allow_delta: bool = True) -> None:
     mode = manifest.get("export_mode")
-    if mode not in {"full_snapshot", "delta"}:
+    allowed_modes = {"full_snapshot", "delta"} if allow_delta else {"full_snapshot"}
+    if mode not in allowed_modes:
         raise ValueError("Manifest export_mode is invalid")
     if mode == "full_snapshot" and "base_dataset_version" in manifest:
         raise ValueError("Full-snapshot Manifest must not contain base_dataset_version")
@@ -327,6 +336,11 @@ def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
             raise TypeError("Manifest counts values must be actual integers")
         if value < 0:
             raise ValueError("Manifest counts values must be non-negative")
+
+
+def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
+    """Keep the historical strict helper for callers that require full mode."""
+    _verify_export_invariants(manifest, allow_delta=False)
 
 
 def _canonical_json(value: object) -> str:

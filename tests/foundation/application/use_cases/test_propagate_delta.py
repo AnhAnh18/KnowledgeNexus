@@ -43,7 +43,7 @@ def _summary(document_id: str, content_hash: str = "a" * 64, entries=()) -> Docu
     )
 
 
-def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=()):
+def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=(), previous_acl_hashes=(), current_acl_hashes=()):
     return DeltaPropagationRequest(
         previous_dataset_version="base",
         current_dataset_version="next",
@@ -54,6 +54,8 @@ def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64,
         current_summaries=tuple(current),
         inventory=tuple(inventory),
         previous_dependents=tuple(previous_dependents),
+        previous_acl_hashes=tuple(previous_acl_hashes),
+        current_acl_hashes=tuple(current_acl_hashes),
     )
 
 
@@ -186,6 +188,33 @@ def test_dependents_reject_document_root_and_duplicate_targets() -> None:
     old = _summary("confluence:page:1")
     with pytest.raises(ValueError):
         _request(previous=(old,), previous_dependents=((old.document_id, (TombstoneTarget(TombstoneEntityType.DOCUMENT, old.document_id),)),))
+
+
+def test_acl_only_change_is_marked_changed_without_content_tombstones() -> None:
+    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
+    current = _summary("confluence:page:1", entries=old.entries)
+    result = PropagateDelta(schema_validator=Validator()).execute(
+        _request(
+            previous=(old,),
+            current=(current,),
+            previous_acl_hashes=((old.document_id, "a" * 64),),
+            current_acl_hashes=((current.document_id, "b" * 64),),
+        )
+    )
+    assert result.status is DeltaPropagationStatus.SUCCESS
+    assert result.document_outcomes == ((old.document_id, "changed"),)
+    assert result.reemit_document_ids == (old.document_id,)
+    assert result.records == ()
+
+
+def test_dependents_for_non_prior_document_fail_closed() -> None:
+    old = _summary("confluence:page:1")
+    target = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1")
+    result = PropagateDelta(schema_validator=Validator()).execute(
+        _request(previous=(old,), previous_dependents=(("confluence:page:2", (target,)),))
+    )
+    assert result.status is DeltaPropagationStatus.FAILED
+    assert result.error_category is DeltaPropagationFailureCategory.INVENTORY_CONFLICT
 
 
 def test_conflicting_inventory_is_atomic() -> None:

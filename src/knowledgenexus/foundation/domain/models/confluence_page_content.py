@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 
 _REFERENCE_INTENT_KINDS = frozenset(
-    {"drawio", "image_attachment", "include_page"}
+    {"drawio", "image_attachment", "include_page", "page_link"}
 )
 _REFERENCE_INTENT_STATUSES = frozenset({"unresolved_target", "deferred_mvp"})
 _MAX_REFERENCE_IDENTITY_BYTES = 256
@@ -70,7 +70,7 @@ class NormalizationReferenceIntent:
             raise ValueError("include_page intents are unresolved")
         if (
             self.status == "deferred_mvp"
-            and self.kind not in {"drawio", "image_attachment"}
+            and self.kind not in {"drawio", "image_attachment", "page_link"}
         ):
             raise ValueError("status is invalid for intent kind")
         if target_identity == "unknown" and self.status != "unresolved_target":

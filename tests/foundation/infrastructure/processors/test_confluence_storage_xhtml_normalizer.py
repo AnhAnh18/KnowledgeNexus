@@ -635,3 +635,19 @@ def test_code_inside_table_uses_complex_grid_without_flattening() -> None:
 def test_result_repr_does_not_disclose_normalized_body() -> None:
     result = _normalize("<p>REVIEW_SENTINEL_SECRET</p>")
     assert "REVIEW_SENTINEL_SECRET" not in repr(result)
+
+
+def test_confluence_page_link_emits_reference_intent_without_changing_markdown() -> None:
+    result = _normalize(
+        '<p><a href="/wiki/spaces/SPEN/pages/12345/design">Design page</a></p>'
+    )
+    assert result.normalized_body_text == "[Design page](/wiki/spaces/SPEN/pages/12345/design)"
+    assert result.reference_intents[0].kind == "page_link"
+    assert result.reference_intents[0].target_identity == "confluence:page:12345"
+
+
+def test_external_pages_path_is_not_guessed_as_confluence_relation() -> None:
+    result = _normalize(
+        '<p><a href="https://external.example/pages/12345/design">External</a></p>'
+    )
+    assert result.reference_intents == ()

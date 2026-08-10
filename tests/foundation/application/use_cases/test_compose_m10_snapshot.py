@@ -5,6 +5,10 @@ from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import
     M10CompositionFailure,
     M10CompositionFailureCategory,
 )
+from knowledgenexus.foundation.application.use_cases.assemble_m10_handoffs import (
+    AssembleConfluenceM10Handoff,
+    AssembleGitM10Handoff,
+)
 from knowledgenexus.foundation.domain.models.m10_composition import M10ConfluenceHandoff, M10GitHandoff
 from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotRequest
 from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
@@ -84,6 +88,29 @@ def test_canonical_validator_subclass_is_rejected_before_adapter_calls():
         ComposeM10Snapshot(confluence_adapter=left, git_adapter=right, canonical_schema_validator=DerivedValidator())
     assert exc.value.category is M10CompositionFailureCategory.ADAPTER
     assert left.calls == right.calls == 0
+
+
+def test_handoff_assemblers_project_sync_rows_instead_of_manual_injection(tmp_path):
+    confluence, git = _handoffs()
+    request = _request(tmp_path)
+    assembled_confluence = AssembleConfluenceM10Handoff().execute(
+        request=request,
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+        relations=confluence.relations,
+        acl=confluence.acl,
+    )
+    assembled_git = AssembleGitM10Handoff().execute(
+        request=request,
+        documents=git.documents,
+        chunks=git.chunks,
+        acl=git.acl,
+        symbols=git.symbols,
+    )
+    assert [row["entity_type"] for row in assembled_confluence.sync_state] == ["page"]
+    assert [row["entity_type"] for row in assembled_git.sync_state] == ["file", "repo"]
 
 
 def test_validator_mutation_does_not_reach_projection(tmp_path):

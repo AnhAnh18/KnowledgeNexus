@@ -128,12 +128,19 @@ class BoundedMediaCorpusAcceptance:
     source_unchanged: bool
     no_silent_omission: bool
     evidence_digest: str | None = None
+    failure_reason: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.status) is not str or self.status not in {"complete", "pending_external_input", "failed"}:
             raise ValueError("status is invalid")
         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
             raise ValueError("evidence_kind is invalid")
+        if self.failure_reason is not None and (
+            type(self.failure_reason) is not str
+            or not self.failure_reason
+            or len(self.failure_reason) > 256
+        ):
+            raise ValueError("failure_reason is invalid")
         for field in ("processed_count", "skipped_count", "failed_count"):
             value = getattr(self, field)
             if type(value) is not int or value < 0:
@@ -157,7 +164,7 @@ class BoundedMediaCorpusAcceptance:
         if total != self.processed_count + self.skipped_count + self.failed_count:
             raise ValueError("media counters are inconsistent")
         if self.status == "pending_external_input":
-            if self.kind_counts or total or any((self.deterministic_repeat, self.source_unchanged, self.no_silent_omission)) or self.evidence_kind is not None or self.evidence_digest is not None:
+            if self.kind_counts or total or any((self.deterministic_repeat, self.source_unchanged, self.no_silent_omission)) or self.evidence_kind is not None or self.evidence_digest is not None or self.failure_reason is not None:
                 raise ValueError("pending media gate carries observations")
         elif self.status == "complete":
             if seen != _MEDIA_KIND_SET or any(count == 0 for _, count in self.kind_counts):
@@ -169,8 +176,13 @@ class BoundedMediaCorpusAcceptance:
             if self.evidence_kind is None or self.evidence_digest is None:
                 raise ValueError("complete media gate evidence is missing")
             _digest(self.evidence_digest, "evidence_digest")
-        elif self.failed_count == 0 or not self.no_silent_omission:
-            raise ValueError("failed media gate must report explicit failures")
+            if self.failure_reason is not None:
+                raise ValueError("complete media gate carries failure")
+        else:
+            if self.failure_reason is None:
+                raise ValueError("failed media gate requires failure reason")
+            if self.evidence_digest is not None:
+                raise ValueError("failed media gate carries evidence")
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(status={self.status!r}, total={sum(count for _, count in self.kind_counts)})"
@@ -200,6 +212,7 @@ class ScaleGateEvidence:
     duration_milliseconds: int | None = None
     evidence_kind: str | None = None
     evidence_digest: str | None = None
+    failure_reason: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.status) is not str or self.status not in {"pass", "pending_external_input", "failed"}:
@@ -227,7 +240,7 @@ class ScaleGateEvidence:
             seen.add(stream)
         for field in ("deterministic_repeat", "readback_valid", "relation_closed", "acl_closed", "sync_closed", "atomic_publish", "no_clobber", "sanitized_output"):
             _bool(getattr(self, field), field)
-        if self.transport not in {"offline_fixture", "production"}:
+        if type(self.transport) is not str or self.transport not in {"offline_fixture", "production"}:
             raise ValueError("transport is invalid")
         for field in ("rss_baseline_bytes", "rss_peak_bytes", "duration_milliseconds"):
             value = getattr(self, field)
@@ -237,19 +250,32 @@ class ScaleGateEvidence:
             raise ValueError("RSS counters are inconsistent")
         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
             raise ValueError("evidence_kind is invalid")
+        if self.failure_reason is not None and (
+            type(self.failure_reason) is not str
+            or not self.failure_reason
+            or len(self.failure_reason) > 256
+        ):
+            raise ValueError("failure_reason is invalid")
         if self.status == "pending_external_input":
-            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
+            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or self.failure_reason is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
                 raise ValueError("pending scale gate carries observations")
         elif self.status == "pass":
             if self.observed_pages < self.target_pages or self.run_count < 2 or seen != _STREAM_SET:
                 raise ValueError("scale evidence is incomplete")
+            if self.evidence_kind == "sanitized_real_capture" and self.transport != "production":
+                raise ValueError("sanitized real scale evidence requires production transport")
             if not all((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
                 raise ValueError("scale checks are incomplete")
             if self.evidence_kind is None or self.evidence_digest is None:
                 raise ValueError("scale evidence digest is missing")
             _digest(self.evidence_digest, "evidence_digest")
-        elif self.evidence_digest is not None:
-            raise ValueError("failed scale gate carries evidence")
+            if self.failure_reason is not None:
+                raise ValueError("pass scale gate carries failure")
+        else:
+            if self.failure_reason is None:
+                raise ValueError("failed scale gate requires failure reason")
+            if self.evidence_digest is not None:
+                raise ValueError("failed scale gate carries evidence")
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(status={self.status!r}, target_pages={self.target_pages})"

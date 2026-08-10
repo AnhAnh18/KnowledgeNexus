@@ -10,6 +10,9 @@ from enum import StrEnum
 from typing import Any
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+from knowledgenexus.foundation.domain.models.confluence_page_content import (
+    NormalizationReferenceIntent,
+)
 from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
     ConfluenceRawPageEnvelope,
     M7_RAW_PAGE_REQUEST_PROFILE_VERSION,
@@ -228,6 +231,7 @@ class ConfluencePageSetResult:
     chunks: tuple[dict[str, object], ...]
     page_metrics: tuple[ConfluencePageSetPageMetrics, ...]
     metrics: ConfluencePageSetMetrics
+    reference_intents_by_page: tuple[tuple[str, tuple[NormalizationReferenceIntent, ...]], ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.documents) is not tuple or type(self.chunks) is not tuple:
@@ -259,13 +263,68 @@ class ConfluencePageSetResult:
                 page_kind_counts[kind] = page_kind_counts.get(kind, 0) + count
         if tuple(sorted(page_kind_counts.items())) != self.metrics.content_kind_counts:
             raise ValueError("page content-kind counts do not match metrics")
+        reference_intents_by_page = self._validate_reference_intents(
+            self.reference_intents_by_page,
+            documents,
+            expected_total=self.metrics.reference_intent_count,
+        )
         object.__setattr__(self, "documents", documents)
         object.__setattr__(self, "chunks", chunks)
+        object.__setattr__(self, "reference_intents_by_page", reference_intents_by_page)
+
+    @staticmethod
+    def _validate_reference_intents(
+        value: object,
+        documents: tuple[dict[str, object], ...],
+        *,
+        expected_total: int,
+    ) -> tuple[tuple[str, tuple[NormalizationReferenceIntent, ...]], ...]:
+        if type(value) is not tuple:
+            raise TypeError("reference_intents_by_page must be a tuple")
+        if not value:
+            if expected_total != 0:
+                raise ValueError("reference intents are missing")
+            return ()
+        if len(value) != len(documents):
+            raise ValueError("reference intent page count does not match documents")
+        output: list[tuple[str, tuple[NormalizationReferenceIntent, ...]]] = []
+        document_ids = tuple(record.get("document_id") for record in documents)
+        for index, entry in enumerate(value):
+            if type(entry) is not tuple or len(entry) != 2:
+                raise TypeError("reference intent page entry is invalid")
+            page_document_id, intents = entry
+            if type(page_document_id) is not str or page_document_id != document_ids[index]:
+                raise ValueError("reference intent page identity is invalid")
+            if type(intents) is not tuple or any(type(intent) is not NormalizationReferenceIntent for intent in intents):
+                raise TypeError("reference intents are invalid")
+            ordinals = tuple(intent.ordinal for intent in intents)
+            if ordinals != tuple(range(1, len(ordinals) + 1)):
+                raise ValueError("reference intent ordinals are invalid")
+            output.append((page_document_id, tuple(intents)))
+        if sum(len(intents) for _, intents in output) != expected_total:
+            raise ValueError("reference intent count does not match metrics")
+        return tuple(output)
 
     def to_canonical_json(self) -> bytes:
         payload = {
             "documents": self.documents,
             "chunks": self.chunks,
+            "reference_intents_by_page": [
+                {
+                    "document_id": document_id,
+                    "reference_intents": [
+                        {
+                            "ordinal": intent.ordinal,
+                            "kind": intent.kind,
+                            "status": intent.status,
+                            "target_identity": intent.target_identity,
+                            "placeholder_identity": intent.placeholder_identity,
+                        }
+                        for intent in intents
+                    ],
+                }
+                for document_id, intents in self.reference_intents_by_page
+            ],
             "page_metrics": [
                 {
                     "page_ordinal": item.page_ordinal,
