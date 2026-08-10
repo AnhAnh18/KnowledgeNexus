@@ -14,6 +14,9 @@ from knowledgenexus.foundation.domain.rules.media_asset_record_builder import (
     MediaAssetRecordBuilder,
 )
 from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
+from knowledgenexus.foundation.domain.rules.symbol_id_generator import SymbolIdGenerator
+from knowledgenexus.foundation.domain.rules.symbol_record_builder import SymbolRecordBuilder
+from knowledgenexus.foundation.domain.rules.tombstone_record_builder import TombstoneRecordBuilder
 from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
     WikiStructureParseError,
     WikiStructureParser,
@@ -30,6 +33,9 @@ __all__ = [
     "ChunkStabilitySummaryBuilder",
     "MediaAssetRecordBuilder",
     "TombstoneIdGenerator",
+    "SymbolIdGenerator",
+    "SymbolRecordBuilder",
+    "TombstoneRecordBuilder",
     "WikiStructureParseError",
     "WikiStructureParser",
     "OccurrenceResolutionConflict",

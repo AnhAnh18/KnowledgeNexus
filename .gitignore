@@ -15,6 +15,7 @@ akp_context_bundle_*.zip
 
 # Local AI/Codex working notes
 .local_ai/
+.codex-workflow/
 
 # Environment
 .env
