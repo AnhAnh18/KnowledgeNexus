@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
+from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain
+
 PACKET_FORMAT_VERSION = "confluence-subtree-indexing-packet-v1"
 DEFAULT_BATCH_SIZE = 100
 MAX_PAGES = 5000
@@ -122,8 +124,12 @@ class SubtreePacketExporter:
         if not isinstance(output_dir, Path) or not output_dir.is_absolute() or output_dir.exists():
             raise ValueError("output directory must be an absolute new directory")
         parent = output_dir.parent
-        if any(part.is_symlink() for part in (parent, *parent.parents) if part.exists()):
-            raise ValueError("output path contains a symlink")
+        if not parent.is_dir():
+            raise ValueError("output parent must already exist")
+        try:
+            require_plain_directory_chain(parent)
+        except Exception as exc:
+            raise ValueError("output path is not a plain directory chain") from exc
         docs = tuple(sorted((dict(x) for x in documents), key=lambda x: str(x.get("document_id", ""))))
         chks = tuple(sorted((dict(x) for x in chunks), key=lambda x: str(x.get("chunk_id", ""))))
         media = tuple(sorted((dict(x) for x in media_assets), key=lambda x: str(x.get("media_id", ""))))
@@ -150,7 +156,6 @@ class SubtreePacketExporter:
             mids.add(ident)
         payload = dict(summary or {})
         payload.update({"format_version": PACKET_FORMAT_VERSION, "document_count": len(docs), "chunk_count": len(chks), "media_asset_count": len(media), "acl_mode": "restricted_unresolved"})
-        parent.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=str(parent)))
         try:
             for name, rows in (("documents.jsonl", docs), ("chunks.jsonl", chks), ("media_assets.jsonl", media)):
@@ -184,7 +189,7 @@ def process_preserved_pages(*, processor: object, request: object) -> dict[str, 
     return {"documents": documents, "chunks": chunks, "metrics": result.metrics, "reference_intents_by_page": result.reference_intents_by_page}
 
 
-def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachments: Callable[[str], Iterable[AttachmentMetadata]], fetch_body: Callable[[AttachmentMetadata], bytes], process_body: Callable[[AttachmentMetadata, bytes], Mapping[str, object]], schema_validator: object | None = None,) -> dict[str, object]:
+def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachments: Callable[[str], Iterable[AttachmentMetadata]], fetch_body: Callable[[AttachmentMetadata], bytes], process_body: Callable[[AttachmentMetadata, bytes], Mapping[str, object]], schema_validator: object | None = None, config: ConfluenceSubtreeCorpusConfig | None = None, publish_body: Callable[[AttachmentMetadata, bytes], object] | None = None, acknowledge: Callable[[AttachmentMetadata], object] | None = None,) -> dict[str, object]:
     """Resolve and process only exact Draw.io references.
 
     Metadata listing and body fetching are injected production seams.  The
@@ -196,14 +201,24 @@ def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachm
     validate = getattr(schema_validator, "validate_record", None) if schema_validator is not None else None
     if schema_validator is not None and not callable(validate):
         raise TypeError("schema validator is invalid")
+    if config is not None and type(config) is not ConfluenceSubtreeCorpusConfig:
+        raise TypeError("config is invalid")
+    if publish_body is not None and not callable(publish_body):
+        raise TypeError("publish_body is invalid")
+    if acknowledge is not None and not callable(acknowledge):
+        raise TypeError("acknowledge is invalid")
     assets: list[dict[str, object]] = []
     failures = 0
     observed = 0
     resolved = 0
+    downloaded_bytes = 0
     for ref in references:
         if type(ref) is not DrawioReference:
             raise TypeError("drawio reference is invalid")
         observed += 1
+        if config is not None and observed > config.drawio_count:
+            failures += 1
+            continue
         try:
             match = match_drawio_attachment(ref, tuple(list_attachments(ref.parent_page_id)))
             if match is None:
@@ -212,6 +227,14 @@ def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachm
             body = fetch_body(match)
             if type(body) is not bytes:
                 raise ValueError("drawio body is invalid")
+            if config is not None and (len(body) > config.drawio_bytes or downloaded_bytes + len(body) > config.drawio_bytes):
+                failures += 1
+                continue
+            downloaded_bytes += len(body)
+            if publish_body is not None:
+                publish_body(match, body)
+            if acknowledge is not None:
+                acknowledge(match)
             asset = dict(process_body(match, body))
             if validate is not None:
                 validate("MediaAsset", asset)
