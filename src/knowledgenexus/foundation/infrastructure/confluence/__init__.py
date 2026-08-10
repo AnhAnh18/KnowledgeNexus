@@ -33,6 +33,10 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_htt
     ConfluenceStatusAwareExecutionResult,
     RetryingConfluenceHttpTransport,
 )
+from knowledgenexus.foundation.infrastructure.confluence.confluence_subtree_live_composition import (
+    LiveSubtreeComposition,
+    compose_live_subtree,
+)
 
 __all__ = [
     "ConfluenceDataCenterInventoryAdapter",
@@ -56,4 +60,6 @@ __all__ = [
     "RetryingConfluenceHttpTransport",
     "prepare_confluence_get_input",
     "UrllibConfluenceHttpTransport",
+    "LiveSubtreeComposition",
+    "compose_live_subtree",
 ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -38,6 +39,10 @@ def _parser() -> argparse.ArgumentParser:
         q.add_argument("--profile-path")
         q.add_argument("--tokenizer-assets-dir")
         q.add_argument("--run-id")
+        q.add_argument("--resume-run-id")
+        q.add_argument("--resume-unique", action="store_true")
+        q.add_argument("--space-key")
+        q.add_argument("--root-page-id")
     return p
 
 
@@ -48,11 +53,29 @@ def main(argv: list[str] | None = None) -> int:
         if not state.is_absolute(): raise ValueError("invalid configuration")
         config = ConfluenceSubtreeCorpusConfig(max_pages=args.max_pages, batch_size=args.batch_size)
         if args.phase == "inventory":
-            if not args.selection_path: raise ValueError("selection input is required")
-            selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
-            state.mkdir(parents=True, exist_ok=True)
-            (state / "inventory.json").write_text(json.dumps([{"page_id": x.page_id, "crawled_at": x.crawled_at, "expected_source_version": x.expected_source_version} for x in selection], sort_keys=True), encoding="utf-8")
-            result = {"status":"complete", "phase":"inventory", "selected_pages":len(selection)}
+            if args.space_key and args.root_page_id and args.profile_path:
+                from knowledgenexus.foundation.application.use_cases.execute_bounded_confluence_inventory import ExecuteBoundedConfluenceInventory
+                from knowledgenexus.foundation.domain.models.confluence_source_config import ConfluenceIncludeRoot, ConfluenceSourceConfig
+                from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
+                from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ResumeExplicitRunRequest, ResumeUniqueIncompleteRunRequest, StartNewRunRequest
+                profile = json.loads(Path(args.profile_path).read_text(encoding="utf-8"))
+                source_config = ConfluenceSourceConfig(source_id="confluence-root1", space_key=args.space_key, include_roots=(ConfluenceIncludeRoot(page_id=args.root_page_id),))
+                composition = compose_live_subtree(raw_root=Path(args.raw_root or (state / "raw")), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=args.max_pages)
+                if args.resume_run_id:
+                    from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+                    request = ResumeExplicitRunRequest(workspace=state, run_id=CrawlRunId(args.resume_run_id), endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+                elif args.resume_unique:
+                    request = ResumeUniqueIncompleteRunRequest(workspace=state, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+                else:
+                    request = StartNewRunRequest(workspace=state, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+                result_obj = ExecuteBoundedConfluenceInventory(checkpoint_run_port=composition.checkpoint_run_port, inventory_window_port_factory=lambda transport: composition.inventory_adapter, inventory_transport_factory=lambda activation: composition.transport, max_pages=args.max_pages).execute(request=request)
+                result = {"status": result_obj.result.status, "phase": args.phase, "selected_pages": result_obj.selected_pages}
+            elif not args.selection_path: raise ValueError("selection input is required")
+            else:
+                selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
+                state.mkdir(parents=True, exist_ok=True)
+                (state / "inventory.json").write_text(json.dumps([{"page_id": x.page_id, "crawled_at": x.crawled_at, "expected_source_version": x.expected_source_version} for x in selection], sort_keys=True), encoding="utf-8")
+                result = {"status":"complete", "phase":"inventory", "selected_pages":len(selection)}
         elif args.phase == "capture-pages":
             # The CLI is intentionally offline unless an approved adapter is
             # supplied by the embedding operator; consume fixture bodies when
