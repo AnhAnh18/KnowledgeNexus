@@ -68,6 +68,8 @@ class _BoundedWindowPort:
         if type(space_key) is not str or not space_key or type(root_page_id) is not str or not root_page_id or type(start) is not int or start < 0 or type(page_size) is not int or page_size <= 0:
             raise CheckpointStateError()
         remaining = self._max_pages - self._selected
+        if remaining <= 0:
+            raise CheckpointStateError()
         value = self._inner.fetch_descendants_window(space_key=space_key, root_page_id=root_page_id, start=start, page_size=min(page_size, remaining))
         if type(value) is not ConfluenceInventoryWindow:
             raise CheckpointStateError()

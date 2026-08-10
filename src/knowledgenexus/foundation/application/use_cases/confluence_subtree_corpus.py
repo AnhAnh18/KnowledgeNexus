@@ -189,7 +189,7 @@ def process_preserved_pages(*, processor: object, request: object) -> dict[str, 
     return {"documents": documents, "chunks": chunks, "metrics": result.metrics, "reference_intents_by_page": result.reference_intents_by_page}
 
 
-def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachments: Callable[[str], Iterable[AttachmentMetadata]], fetch_body: Callable[[AttachmentMetadata], bytes], process_body: Callable[[AttachmentMetadata, bytes], Mapping[str, object]], schema_validator: object | None = None, config: ConfluenceSubtreeCorpusConfig | None = None, publish_body: Callable[[AttachmentMetadata, bytes], object] | None = None, acknowledge: Callable[[AttachmentMetadata], object] | None = None,) -> dict[str, object]:
+def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachments: Callable[[str], Iterable[AttachmentMetadata]], fetch_body: Callable[[AttachmentMetadata], bytes], process_body: Callable[[AttachmentMetadata, bytes], Mapping[str, object]], schema_validator: object | None = None, config: ConfluenceSubtreeCorpusConfig | None = None, persist_body: Callable[[AttachmentMetadata, bytes], object] | None = None,) -> dict[str, object]:
     """Resolve and process only exact Draw.io references.
 
     Metadata listing and body fetching are injected production seams.  The
@@ -203,10 +203,8 @@ def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachm
         raise TypeError("schema validator is invalid")
     if config is not None and type(config) is not ConfluenceSubtreeCorpusConfig:
         raise TypeError("config is invalid")
-    if publish_body is not None and not callable(publish_body):
-        raise TypeError("publish_body is invalid")
-    if acknowledge is not None and not callable(acknowledge):
-        raise TypeError("acknowledge is invalid")
+    if persist_body is not None and not callable(persist_body):
+        raise TypeError("persist_body is invalid")
     assets: list[dict[str, object]] = []
     failures = 0
     observed = 0
@@ -234,10 +232,8 @@ def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachm
             asset = dict(process_body(match, body))
             if validate is not None:
                 validate("MediaAsset", asset)
-            if publish_body is not None:
-                publish_body(match, body)
-            if acknowledge is not None:
-                acknowledge(match)
+            if persist_body is not None:
+                persist_body(match, body)
             assets.append(asset)
             resolved += 1
         except Exception:
@@ -267,7 +263,7 @@ class ConfluenceSubtreeCorpusHarness:
         start = next((i for i, batch in enumerate(batches) if any(not _valid_page_artifact(pages_root / f"{p}.bin") for p in batch)), len(batches))
         selected = batches[start:start + self.config.stop_after_batches]
         captured = 0
-        total_bytes = sum(p.stat().st_size for p in pages_root.glob("*.bin")) if pages_root.is_dir() else 0
+        total_bytes = sum(p.stat().st_size for p in pages_root.glob("*.bin") if _valid_page_artifact(p)) if pages_root.is_dir() else 0
         for batch in selected:
             for page_id in batch:
                 target = self.state_dir / "pages" / f"{page_id}.bin"
