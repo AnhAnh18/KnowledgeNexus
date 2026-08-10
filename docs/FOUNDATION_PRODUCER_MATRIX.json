@@ -7,7 +7,7 @@
     {"name": "relations", "schema": "RelationRecord", "producers": ["Jira relation builder", "generic page/media relation materializer"], "closure": "source and resolved targets exist; unresolved targets use stable markers"},
     {"name": "acl", "schema": "ACLRecord", "producers": ["Confluence ACL composer", "Git ACL composer"], "closure": "exactly one ACL per document"},
     {"name": "media_assets", "schema": "MediaAsset", "producers": ["Confluence media batch processor"], "closure": "parent_document_id exists and status is truthful"},
-    {"name": "symbols", "schema": "SymbolRecord", "producers": ["Git symbol builder"], "closure": "document_id and source provenance exist"},
+    {"name": "symbols", "schema": "SymbolRecord", "producers": ["Git symbol builder"], "closure": "Git file provenance exists and optional chunk_id points to an emitted chunk"},
     {"name": "sync_state", "schema": "SyncStateRecord", "producers": ["SyncStateRecordBuilder"], "closure": "entity belongs to emitted source scope"},
     {"name": "tombstones", "schema": "TombstoneRecord", "producers": ["PropagateDelta", "ProjectTombstones"], "closure": "target existed in prior snapshot and cascades by contract"}
   ],

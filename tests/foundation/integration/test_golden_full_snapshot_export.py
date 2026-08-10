@@ -45,7 +45,7 @@ EXPECTED_COUNTS = {
     "acl": 1,
     "media_assets": 1,
     "symbols": 0,
-    "sync_state": 1,
+    "sync_state": 2,
     "tombstones": 0,
 }
 
@@ -133,7 +133,7 @@ def test_golden_graph_preserves_m2d_invariants() -> None:
     assert _ids(records["chunks"], "document_id") <= document_ids
     assert _ids(records["acl"], "document_id") <= document_ids
     assert _ids(records["media_assets"], "parent_document_id") <= document_ids
-    assert _ids(records["sync_state"], "entity_id") <= document_ids
+    assert _ids(records["sync_state"], "entity_id") <= document_ids | _ids(records["media_assets"], "media_id")
     assert _ids(records["relations"], "source_id") <= document_ids
     assert _ids(records["relations"], "target_id") == {"jira:issue:GOLDEN-1"}
 

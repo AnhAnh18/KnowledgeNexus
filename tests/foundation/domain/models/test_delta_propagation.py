@@ -14,6 +14,8 @@ from knowledgenexus.foundation.domain.models import (
     DeltaPropagationResult,
     DeltaPropagationStatus,
     DocumentChunkSetSummary,
+    TombstoneEntityType,
+    TombstoneTarget,
 )
 
 
@@ -215,6 +217,22 @@ def test_nested_entry_forbidden_extra_field_is_rejected() -> None:
             previous_config_hash="a" * 64, current_config_hash="b" * 64,
             detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(),
         )
+
+
+def test_current_dependents_and_reemit_records_validate_and_copy_inputs() -> None:
+    summary = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
+    target = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:a1")
+    acl = {"acl_id": "acl:confluence:page:1", "document_id": summary.document_id}
+    chunk = {"chunk_id": summary.entries[0].chunk_id, "document_id": summary.document_id}
+    request = DeltaPropagationRequest(
+        previous_dataset_version="base", current_dataset_version="next",
+        previous_config_hash="a" * 64, current_config_hash="b" * 64,
+        detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(summary,),
+        previous_dependents=((summary.document_id, (target,)),), current_dependents=((summary.document_id, (target,)),),
+        current_acl_records=(acl,), current_chunk_records=(chunk,),
+    )
+    acl["document_id"] = "confluence:page:forged"
+    assert request.current_acl_records[0]["document_id"] == summary.document_id
 
 
 @pytest.mark.parametrize(

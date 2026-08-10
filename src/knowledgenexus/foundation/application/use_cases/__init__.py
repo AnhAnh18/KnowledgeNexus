@@ -54,6 +54,11 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop 
 from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
     FetchAndStoreConfluenceAttachmentBody,
 )
+from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_raw_page_generation import (
+    FetchAndStoreConfluenceRawPageGeneration,
+    GenerationRawPageFetchError,
+    GenerationRawPageFetchResult,
+)
 from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
     AcceptConfluenceMiniCorpus,
 )
@@ -72,6 +77,11 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
 from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
 from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
 from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
+from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
+    M10DeltaOrchestrationError,
+    M10DeltaOrchestrationResult,
+    M10DeltaOrchestrator,
+)
 from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
     ComposeM10Snapshot,
     M10CompositionFailure,
@@ -118,6 +128,9 @@ __all__ = [
     "ControlledStopPolicy",
     "is_inventory_window_commit",
     "FetchAndStoreConfluenceAttachmentBody",
+    "FetchAndStoreConfluenceRawPageGeneration",
+    "GenerationRawPageFetchError",
+    "GenerationRawPageFetchResult",
     "AcceptConfluenceMiniCorpus",
     "ProcessConfluenceMediaAttachment",
     "MediaBatchProcessingError",
@@ -128,6 +141,9 @@ __all__ = [
     "BuildGitSymbols",
     "ProjectTombstones",
     "PropagateDelta",
+    "M10DeltaOrchestrationError",
+    "M10DeltaOrchestrationResult",
+    "M10DeltaOrchestrator",
     "ComposeM10Snapshot",
     "M10CompositionFailure",
     "M10CompositionFailureCategory",

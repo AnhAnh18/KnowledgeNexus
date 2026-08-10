@@ -37,11 +37,12 @@ class ConfluenceMaterializedInput:
     acl: tuple[dict[str, object], ...]
     media_assets: tuple[dict[str, object], ...] = ()
     tombstones: tuple[dict[str, object], ...] = ()
+    sync_inventory: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.source_version) is not str or not self.source_version or type(self.raw_artifact_identity) is not str or not self.raw_artifact_identity:
             raise ValueError("Confluence materialized provenance is invalid")
-        for name in ("documents", "chunks", "relations", "acl", "media_assets", "tombstones"):
+        for name in ("documents", "chunks", "relations", "acl", "media_assets", "tombstones", "sync_inventory"):
             object.__setattr__(self, name, _records(getattr(self, name), name))
 
 
@@ -52,9 +53,10 @@ class GitMaterializedInput:
     acl: tuple[dict[str, object], ...]
     symbols: tuple[dict[str, object], ...] = ()
     tombstones: tuple[dict[str, object], ...] = ()
+    sync_inventory: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
-        for name in ("documents", "chunks", "acl", "symbols", "tombstones"):
+        for name in ("documents", "chunks", "acl", "symbols", "tombstones", "sync_inventory"):
             object.__setattr__(self, name, _records(getattr(self, name), name))
 
 
@@ -94,7 +96,10 @@ def _invoke_stage_callable(callable_stage: object, *, request: M10SnapshotReques
         return callable_stage(request)  # type: ignore[operator]
     accepts_kwargs = any(item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values())
     if accepts_kwargs:
-        return callable_stage(request=request, **state)  # type: ignore[operator]
+        # Stages are trusted seams but remain side-effect constrained: never
+        # expose the adapter's mutable record dictionaries to a provider.
+        isolated_state = {name: copy.deepcopy(value) for name, value in state.items()}
+        return callable_stage(request=request, **isolated_state)  # type: ignore[operator]
 
     positional: list[object] = []
     kwargs: dict[str, object] = {}
@@ -106,9 +111,9 @@ def _invoke_stage_callable(callable_stage: object, *, request: M10SnapshotReques
                 kwargs[name] = request
             continue
         if name in state and parameter.kind is not inspect.Parameter.POSITIONAL_ONLY:
-            kwargs[name] = state[name]
+            kwargs[name] = copy.deepcopy(state[name])
         elif name in state and parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
-            positional.append(state[name])
+            positional.append(copy.deepcopy(state[name]))
     return callable_stage(*positional, **kwargs)  # type: ignore[operator]
 
 
@@ -177,10 +182,11 @@ class ConfluenceM10MaterializedSource:
         acl_stage: object | None = None,
         media_stage: object | None = None,
         tombstone_stage: object | None = None,
+        inventory_stage: object | None = None,
     ) -> None:
         if not callable(getattr(page_stage, "execute", None)) and not callable(page_stage):
             raise TypeError("page_stage is invalid")
-        for name, stage in (("relation_stage", relation_stage), ("acl_stage", acl_stage), ("media_stage", media_stage), ("tombstone_stage", tombstone_stage)):
+        for name, stage in (("relation_stage", relation_stage), ("acl_stage", acl_stage), ("media_stage", media_stage), ("tombstone_stage", tombstone_stage), ("inventory_stage", inventory_stage)):
             if stage is not None and not callable(getattr(stage, "execute", None)) and not callable(stage):
                 raise TypeError(f"{name} is invalid")
         self._page_stage = page_stage
@@ -188,6 +194,7 @@ class ConfluenceM10MaterializedSource:
         self._acl_stage = acl_stage
         self._media_stage = media_stage
         self._tombstone_stage = tombstone_stage
+        self._inventory_stage = inventory_stage
 
     def collect(self, request: M10SnapshotRequest) -> ConfluenceMaterializedInput:
         if type(request) is not M10SnapshotRequest:
@@ -224,15 +231,19 @@ class ConfluenceM10MaterializedSource:
         acl: tuple[dict[str, object], ...] = _records_from_result(page, ("acl", "acl_records"), "acl") if _field(page, "acl") is not None or _field(page, "acl_records") is not None else ()
         media: tuple[dict[str, object], ...] = _records_from_result(page, ("media_assets", "assets"), "media_assets") if _field(page, "media_assets") is not None or _field(page, "assets") is not None else ()
         tombstones: tuple[dict[str, object], ...] = _records_from_result(page, ("tombstones",), "tombstones") if _field(page, "tombstones") is not None else ()
+        sync_inventory: tuple[dict[str, object], ...] = _records_from_result(page, ("sync_inventory", "inventory"), "sync_inventory") if _field(page, "sync_inventory") is not None or _field(page, "inventory") is not None else ()
         state["media_assets"] = media
+        state["sync_inventory"] = sync_inventory
         if page_media_result is not None:
             state["media_result"] = page_media_result
             state["media"] = page_media_result
             media = _records_from_result(page_media_result, ("assets", "media_assets"), "media_assets")
             state["media_assets"] = media
-        # Media must run before generic relation materialization so a relation
-        # stage can resolve attachment intents against the current asset set.
-        for stage_name, stage in (("media_stage", self._media_stage), ("relation_stage", self._relation_stage), ("acl_stage", self._acl_stage), ("tombstone_stage", self._tombstone_stage)):
+        # Media must run before ACL/relation materialization so relation stages
+        # can resolve attachment intents against the current asset set. Generic
+        # relations intentionally run after ACL so their IDs are appended to
+        # the final ACL-enriched documents and chunks.
+        for stage_name, stage in (("media_stage", self._media_stage), ("acl_stage", self._acl_stage), ("relation_stage", self._relation_stage), ("tombstone_stage", self._tombstone_stage), ("inventory_stage", self._inventory_stage)):
             if stage is None:
                 continue
             result = _stage_call(stage, request=request, state=state)
@@ -244,14 +255,17 @@ class ConfluenceM10MaterializedSource:
                 materialized_relations = _field(result, "relations")
                 materialized_documents = _field(result, "documents")
                 materialized_chunks = _field(result, "chunks")
+                materialized_assets = _field(result, "media_assets")
+                if materialized_assets is None:
+                    materialized_assets = _field(result, "assets")
                 if materialized_relations is not None and (materialized_documents is not None or materialized_chunks is not None):
                     relations = _records(materialized_relations, "relations")
                     if materialized_documents is not None:
                         state["documents"] = _records(materialized_documents, "documents")
                     if materialized_chunks is not None:
                         state["chunks"] = _records(materialized_chunks, "chunks")
-                elif _field(result, "media_assets") is not None or _field(result, "assets") is not None:
-                    media = _records_from_result(result, ("media_assets", "assets"), "media_assets")
+                if materialized_assets is not None:
+                    media = _records(materialized_assets, "media_assets")
                     state["media_assets"] = media
                 media_result = _field(result, "media_result")
                 if media_result is None:
@@ -271,7 +285,8 @@ class ConfluenceM10MaterializedSource:
                 if chunks is not None:
                     state["chunks"] = _records(chunks, "chunks")
             elif stage_name == "relation_stage":
-                relations = _records_from_result(result, ("relations", "records"), "relations")
+                relation_rows = _records_from_result(result, ("relations", "records"), "relations")
+                relations = _merge_records(relations, relation_rows, identity="relation_id")
                 docs = _field(result, "documents")
                 chunks = _field(result, "chunks")
                 if docs is not None:
@@ -292,6 +307,8 @@ class ConfluenceM10MaterializedSource:
                     state["chunks"] = _records(chunks, "chunks")
             elif stage_name == "tombstone_stage":
                 tombstones = _records_from_result(result, ("tombstones", "records"), "tombstones")
+            elif stage_name == "inventory_stage":
+                sync_inventory = _records_from_result(result, ("sync_inventory", "inventory", "records"), "sync_inventory")
         return ConfluenceMaterializedInput(
             source_version,
             raw_identity,
@@ -301,20 +318,22 @@ class ConfluenceM10MaterializedSource:
             acl,
             media,
             tombstones,
+            sync_inventory,
         )
 
 
 class GitM10MaterializedSource:
     """Compose pinned Git document/symbol producers into an M10 source port."""
 
-    def __init__(self, *, document_stage: object, symbol_stage: object | None = None, acl_stage: object | None = None, tombstone_stage: object | None = None) -> None:
-        for name, stage in (("document_stage", document_stage), ("symbol_stage", symbol_stage), ("acl_stage", acl_stage), ("tombstone_stage", tombstone_stage)):
+    def __init__(self, *, document_stage: object, symbol_stage: object | None = None, acl_stage: object | None = None, tombstone_stage: object | None = None, inventory_stage: object | None = None) -> None:
+        for name, stage in (("document_stage", document_stage), ("symbol_stage", symbol_stage), ("acl_stage", acl_stage), ("tombstone_stage", tombstone_stage), ("inventory_stage", inventory_stage)):
             if stage is not None and not callable(getattr(stage, "execute", None)) and not callable(stage):
                 raise TypeError(f"{name} is invalid")
         self._document_stage = document_stage
         self._symbol_stage = symbol_stage
         self._acl_stage = acl_stage
         self._tombstone_stage = tombstone_stage
+        self._inventory_stage = inventory_stage
 
     def collect(self, request: M10SnapshotRequest) -> GitMaterializedInput:
         if type(request) is not M10SnapshotRequest:
@@ -327,7 +346,8 @@ class GitM10MaterializedSource:
         acl = _records_from_result(result, ("acl", "acl_records"), "acl") if _field(result, "acl") is not None or _field(result, "acl_records") is not None else ()
         symbols = _records_from_result(result, ("symbols", "symbol_records"), "symbols") if _field(result, "symbols") is not None or _field(result, "symbol_records") is not None else ()
         tombstones = _records_from_result(result, ("tombstones",), "tombstones") if _field(result, "tombstones") is not None else ()
-        for name, stage in (("symbol_stage", self._symbol_stage), ("acl_stage", self._acl_stage), ("tombstone_stage", self._tombstone_stage)):
+        sync_inventory = _records_from_result(result, ("sync_inventory", "inventory"), "sync_inventory") if _field(result, "sync_inventory") is not None or _field(result, "inventory") is not None else ()
+        for name, stage in (("symbol_stage", self._symbol_stage), ("acl_stage", self._acl_stage), ("tombstone_stage", self._tombstone_stage), ("inventory_stage", self._inventory_stage)):
             if stage is None:
                 continue
             output = _stage_call(stage, request=request, state=state)
@@ -340,6 +360,9 @@ class GitM10MaterializedSource:
                 if name == "tombstone_stage":
                     tombstones = _records_from_result(output, ("tombstones", "records"), "tombstones")
                     continue
+                if name == "inventory_stage":
+                    sync_inventory = _records_from_result(output, ("sync_inventory", "inventory", "records"), "sync_inventory")
+                    continue
                 acl = _records_from_result(output, ("acl", "acl_records", "records"), "acl")
                 docs = _field(output, "documents")
                 chunks = _field(output, "chunks")
@@ -347,7 +370,7 @@ class GitM10MaterializedSource:
                     state["documents"] = _records(docs, "documents")
                 if chunks is not None:
                     state["chunks"] = _records(chunks, "chunks")
-        return GitMaterializedInput(state["documents"], state["chunks"], acl, symbols, tombstones)
+        return GitMaterializedInput(state["documents"], state["chunks"], acl, symbols, tombstones, sync_inventory)
 
 
 class ConfluenceM10Adapter:
@@ -375,6 +398,7 @@ class ConfluenceM10Adapter:
                 acl=materialized.acl,
                 media_assets=materialized.media_assets,
                 tombstones=materialized.tombstones,
+                sync_inventory=materialized.sync_inventory,
             )
         except M10SourceAdapterError:
             raise
@@ -404,6 +428,7 @@ class GitM10Adapter:
                 acl=materialized.acl,
                 symbols=materialized.symbols,
                 tombstones=materialized.tombstones,
+                sync_inventory=materialized.sync_inventory,
             )
         except M10SourceAdapterError:
             raise

@@ -44,7 +44,7 @@ class MiniCorpusOperatorInputError(Exception):
     """Shared sanitized operator-input failure for bounded mini-corpus CLIs.
 
     Both `accept_confluence_mini_corpus` and
-    `export_confluence_mini_corpus_indexing_packet` raise and catch this
+    `build_confluence_mini_corpus_indexing_packet` raise and catch this
     exact exception type, so a rejected operator input (bad path, missing
     parent, argparse failure, ...) is always reported as `"configuration"`
     rather than falling through to the generic `"unexpected"` category.

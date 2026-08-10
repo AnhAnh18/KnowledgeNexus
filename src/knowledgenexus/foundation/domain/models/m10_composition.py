@@ -18,7 +18,7 @@ _MEDIA_TARGET = re.compile(r"^confluence:attachment:[^\s:]+$")
 _TOMBSTONE_RELATION = re.compile(r"^rel:[0-9a-f]{16}$")
 _TOMBSTONE_CONFLUENCE_ACL = re.compile(r"^acl:confluence:[^\s:]+$")
 _TOMBSTONE_GIT_DOCUMENT = re.compile(r"^git:file:[^\s]+$")
-_TOMBSTONE_GIT_ACL = re.compile(r"^acl:repo:[^\s:]+$")
+_TOMBSTONE_GIT_ACL = re.compile(r"^acl:repo:[^\s:]+(?::[0-9a-f]{16})?$")
 _HANDOFF_FIELDS = {"run_id", "generation_id", "source_version", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "raw_artifact_identity", "errors", "tombstones"}
 _GIT_FIELDS = {"repository", "branch", "commit", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "errors", "tombstones"}
 _RESULT_FIELDS = {"projection", "failure_category"}
@@ -133,6 +133,20 @@ def _path(value: object) -> str:
     return value
 
 
+def _confluence_version_matches(record: dict[str, object], handoff_version: str) -> bool:
+    """Accept per-page versions when one bounded run spans revisions.
+
+    ``source_version`` remains mandatory on every emitted record.  A handoff
+    may use ``mixed`` as its generation-level marker when pages were captured
+    at different Confluence versions; single-version legacy handoffs retain
+    the stricter equality check.
+    """
+    value = record.get("source_version")
+    if type(value) is not str or not value:
+        return False
+    return handoff_version == "mixed" or value == handoff_version
+
+
 def _validate_records(streams: dict[str, tuple[dict[str, object], ...]], injected_validator: M10SchemaValidator, canonical_validator: M10SchemaValidator) -> dict[str, tuple[dict[str, object], ...]]:
     if not callable(getattr(injected_validator, "validate_record", None)) or not callable(getattr(canonical_validator, "validate_record", None)):
         raise TypeError("schema validator is invalid")
@@ -228,8 +242,11 @@ def _validate_tombstone_ownership(
         if grammar is not None:
             if grammar.fullmatch(entity_id) is None:
                 raise M10SnapshotError(f"{name.title()} tombstone ownership is invalid")
-            if name == "git" and entity_type == "acl" and request is not None and entity_id != f"acl:repo:{request.git_repository}":
-                raise M10SnapshotError("Git tombstone ownership is invalid")
+            if name == "git" and entity_type == "acl" and request is not None:
+                repository_acl = f"acl:repo:{request.git_repository}"
+                per_file_acl = re.fullmatch(re.escape(repository_acl) + r":[0-9a-f]{16}", entity_id)
+                if entity_id != repository_acl and per_file_acl is None:
+                    raise M10SnapshotError("Git tombstone ownership is invalid")
             continue
         # Symbol IDs are generated as repo:branch:file:qualified_name.  Keep
         # the grammar source-safe without assuming a repository name here.
@@ -328,7 +345,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
         source = record["source_system"]
         if source == "confluence":
             page = record.get("page_id")
-            if type(page) is not str or page not in request.ordered_page_ids or record.get("source_version") != confluence.source_version:
+            if type(page) is not str or page not in request.ordered_page_ids or not _confluence_version_matches(record, confluence.source_version):
                 raise M10SnapshotError("Confluence document provenance is invalid")
             confluence_pages.append(page)
         elif source == "git":
@@ -359,7 +376,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
         parent_acl = acl_by_document[parent].get("acl_tags")
         if record.get("acl_tags") != parent_acl:
             raise M10SnapshotError("chunk ACL inheritance is invalid")
-        if record.get("source_system") == "confluence" and (record.get("page_id") not in request.ordered_page_ids or record.get("page_id") != next(doc.get("page_id") for doc in documents if doc["document_id"] == parent) or record.get("source_version") != confluence.source_version):
+        if record.get("source_system") == "confluence" and (record.get("page_id") not in request.ordered_page_ids or record.get("page_id") != next(doc.get("page_id") for doc in documents if doc["document_id"] == parent) or not _confluence_version_matches(record, confluence.source_version)):
             raise M10SnapshotError("Confluence chunk provenance is invalid")
         if record.get("source_system") == "git" and (record.get("repo") != request.git_repository or record.get("branch") != request.git_branch or record.get("source_version") != request.git_commit or record["acl_tags"] != [f"repo:{request.git_repository}"]):
             raise M10SnapshotError("Git chunk ACL/provenance is invalid")
@@ -395,6 +412,12 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
             if target_doc is None or source_doc is None or target_doc.get("source_system") != "confluence" or source_doc.get("source_system") != "confluence":
                 raise M10SnapshotError("resolved page relation ownership is invalid")
     relation_ids = {_identity(row, "relation_id") for row in streams["relations"]}
+    relation_owners = {
+        _identity(row, "document_id"): row for row in streams["documents"]
+    }
+    relation_owners.update(
+        {_identity(row, "chunk_id"): row for row in streams["chunks"]}
+    )
     for stream_name in ("documents", "chunks"):
         for row in streams[stream_name]:
             referenced = row.get("relation_ids", [])
@@ -405,12 +428,17 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
                 or any(value not in relation_ids for value in referenced)
             ):
                 raise M10SnapshotError("relation ID closure is invalid")
+    for record in streams["relations"]:
+        relation_id = _identity(record, "relation_id")
+        owner = relation_owners.get(record.get("source_id"))
+        if owner is None or relation_id not in owner.get("relation_ids", []):
+            raise M10SnapshotError("relation owner linkage is invalid")
     for record in streams["media_assets"]:
         if not request.media_policy.include_attachments or len(streams["media_assets"]) > request.media_policy.max_assets:
             raise M10SnapshotError("media policy or budget is invalid")
         parent = record.get("parent_document_id")
         parent_record = next((doc for doc in documents if doc["document_id"] == parent), None)
-        if parent_record is None or parent_record.get("source_system") != "confluence" or record.get("source_system") != "confluence" or record.get("source_version") != confluence.source_version or record.get("processing_status") not in request.media_policy.allowed_processing_statuses:
+        if parent_record is None or parent_record.get("source_system") != "confluence" or record.get("source_system") != "confluence" or not _confluence_version_matches(record, confluence.source_version) or record.get("processing_status") not in request.media_policy.allowed_processing_statuses:
             raise M10SnapshotError("media provenance/policy is invalid")
         downloaded = record.get("download_status") == "downloaded"
         content_hash, raw_uri = record.get("content_hash"), record.get("raw_uri")

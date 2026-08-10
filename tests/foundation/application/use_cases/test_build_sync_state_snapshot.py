@@ -59,3 +59,30 @@ def test_rejects_wrong_runtime_inputs(value: object) -> None:
             synced_at="2026-08-08T00:00:00Z",
             documents=value,
         )
+
+
+def test_authoritative_inventory_must_cover_exact_emitted_entities() -> None:
+    page = _page()
+    inventory = ({
+        "source_id": "SVMC",
+        "entity_id": page["document_id"],
+        "entity_type": "page",
+        "last_seen_version": "7",
+        "last_content_hash": page["content_hash"],
+        "last_synced_at": "2026-08-08T00:00:00Z",
+        "status": "active",
+    },)
+    result = BuildSyncStateSnapshot().execute(
+        source_id="SVMC",
+        synced_at="2026-08-08T00:00:00Z",
+        documents=(page,),
+        inventory=inventory,
+    )
+    assert result.records[0]["last_seen_version"] == "7"
+    with pytest.raises(SyncStateSnapshotError, match="cover emitted"):
+        BuildSyncStateSnapshot().execute(
+            source_id="SVMC",
+            synced_at="2026-08-08T00:00:00Z",
+            documents=(page,),
+            inventory=(),
+        )

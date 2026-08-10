@@ -20,6 +20,10 @@ from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import
     ComposeM10Snapshot,
     M10CompositionFailure,
 )
+from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
+    M10DeltaOrchestrationResult,
+)
+from knowledgenexus.foundation.domain.models.delta_propagation import DeltaInventoryEntry
 from knowledgenexus.foundation.domain.models.m10_snapshot import (
     M10QualityReportInput,
     M10SnapshotProjection,
@@ -36,6 +40,9 @@ from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
     M10PublisherPort,
     M10StagingCompleterPort,
     M10StagingWriterPort,
+)
+from knowledgenexus.foundation.domain.rules.snapshot_readback import (
+    validate_snapshot_streams,
 )
 
 
@@ -336,6 +343,10 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
             if isolated_row != row:
                 raise ValueError("validator mutated record")
             assert_validation_bytes_unchanged()
+    validate_snapshot_streams(
+        streams,
+        export_mode=request.export_mode,
+    )
     if request.export_mode == "full_snapshot" and streams["tombstones"]:
         raise ValueError
     if request.export_mode == "delta":
@@ -357,7 +368,7 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
 class ExportM10Snapshot:
     """Compose and publish one validated M10 full snapshot."""
 
-    def __init__(self, *, confluence_adapter: object, git_adapter: object, schema_validator: FoundationSchemaValidator | None = None, canonical_schema_validator: FoundationSchemaValidator | None = None, staging_writer: M10StagingWriterPort | None = None, staging_completer: M10StagingCompleterPort | None = None, publisher: M10PublisherPort | None = None) -> None:
+    def __init__(self, *, confluence_adapter: object, git_adapter: object, schema_validator: FoundationSchemaValidator | None = None, canonical_schema_validator: FoundationSchemaValidator | None = None, staging_writer: M10StagingWriterPort | None = None, staging_completer: M10StagingCompleterPort | None = None, publisher: M10PublisherPort | None = None, delta_orchestrator: object | None = None, delta_inventory: tuple[DeltaInventoryEntry, ...] = ()) -> None:
         try:
             if not callable(getattr(confluence_adapter, "collect", None)) or not callable(getattr(git_adapter, "collect", None)):
                 raise TypeError
@@ -369,6 +380,10 @@ class ExportM10Snapshot:
                 raise TypeError
             if not callable(getattr(staging_writer, "write", None)) or not callable(getattr(staging_completer, "complete", None)) or not callable(getattr(publisher, "publish", None)):
                 raise TypeError
+            if delta_orchestrator is not None and not callable(getattr(delta_orchestrator, "execute", None)):
+                raise TypeError
+            if type(delta_inventory) is not tuple or any(type(item) is not DeltaInventoryEntry for item in delta_inventory):
+                raise TypeError
         except Exception:
             raise M10SnapshotExportFailure("adapter") from None
         self._composer = ComposeM10Snapshot(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=schema_validator, canonical_schema_validator=canonical_schema_validator)
@@ -376,6 +391,8 @@ class ExportM10Snapshot:
         self._staging_writer = staging_writer
         self._staging_completer = staging_completer
         self._publisher = publisher
+        self._delta_orchestrator = delta_orchestrator
+        self._delta_inventory = delta_inventory
 
     def execute(self, request: object, *, export_root: object | None = None, generated_at: object | None = None) -> M10SnapshotResult:
         request = _validated_request(request)
@@ -399,6 +416,15 @@ class ExportM10Snapshot:
             projection = composed.projection
             if type(projection) is not M10SnapshotProjection:
                 raise ValueError
+            if request.export_mode == "delta" and self._delta_orchestrator is not None:
+                orchestrated = self._delta_orchestrator.execute(
+                    request,
+                    projection,
+                    inventory=self._delta_inventory,
+                )
+                if type(orchestrated) is not M10DeltaOrchestrationResult:
+                    raise ValueError
+                projection = orchestrated.projection
             projection_before = deepcopy(projection)
             quality = _derive_quality(request, projection)
             generated_at = request.generated_at

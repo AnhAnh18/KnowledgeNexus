@@ -129,6 +129,35 @@ def test_materialized_sources_compose_injected_foundation_stages(tmp_path) -> No
     assert GitM10Adapter(source=Provider(git_input)).collect(request).documents == git.documents
 
 
+def test_materialized_source_isolates_mutable_stage_state(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+    )
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class MutatingRelationStage:
+        def execute(self, request, **state):
+            # A provider must not be able to mutate the records retained by the
+            # materialized source while inspecting its input.
+            state["documents"][0]["title"] = "provider mutation"
+            state["chunks"][0]["text"] = "provider mutation"
+            return confluence.relations
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), relation_stage=MutatingRelationStage()
+    ).collect(request)
+    assert result.documents == confluence.documents
+    assert result.chunks == confluence.chunks
+
+
 @pytest.mark.parametrize("bad", [None, object(), {"documents": ()}])
 def test_materialized_sources_fail_closed_on_bad_stage_output(tmp_path, bad) -> None:
     request = _request(tmp_path)
@@ -188,6 +217,79 @@ def test_confluence_materialized_source_runs_media_before_relation_stage(tmp_pat
     assert result.relations == confluence.relations
 
 
+def test_confluence_materialized_source_runs_acl_before_generic_relations(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+    )
+    events: list[str] = []
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class AclStage:
+        def execute(self, request, **state):
+            assert state["documents"] == confluence.documents
+            events.append("acl")
+            return _Output(
+                documents=tuple({**row, "acl_tags": ["space:SVMC"]} for row in confluence.documents),
+                chunks=tuple({**row, "acl_tags": ["space:SVMC"]} for row in confluence.chunks),
+                acl=confluence.acl,
+            )
+
+    class RelationStage:
+        def execute(self, request, **state):
+            assert state["documents"][0]["acl_tags"] == ["space:SVMC"]
+            assert state["chunks"][0]["acl_tags"] == ["space:SVMC"]
+            events.append("relation")
+            return confluence.relations
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), acl_stage=AclStage(), relation_stage=RelationStage()
+    ).collect(request)
+    assert events == ["acl", "relation"]
+    assert result.relations == confluence.relations
+
+
+def test_confluence_materialized_source_merges_generic_relations_with_page_relations(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    generic = {
+        **confluence.relations[0],
+        "relation_id": "rel:fedcba9876543210",
+        "relation_type": "embeds_media",
+        "target_id": "confluence:attachment:missing",
+        "resolution_status": "unresolved_target",
+    }
+
+    class PageStage:
+        def execute(self, request):
+            return _Output(
+                source_version=confluence.source_version,
+                raw_artifact_identity=confluence.raw_artifact_identity,
+                documents=confluence.documents,
+                chunks=confluence.chunks,
+                relations=confluence.relations,
+            )
+
+    class RelationStage:
+        def execute(self, request, **state):
+            return _Output(relations=(generic,))
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), relation_stage=RelationStage()
+    ).collect(request)
+    assert {row["relation_id"] for row in result.relations} == {
+        confluence.relations[0]["relation_id"],
+        generic["relation_id"],
+    }
+
+
 def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_and_keeps_enrichment(tmp_path) -> None:
     confluence, _ = _handoffs()
     request = _request(tmp_path)
@@ -211,7 +313,7 @@ def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_
         def execute(self, *, documents, chunks, media, page_references=(), page_targets=()):
             assert documents == confluence.documents
             assert chunks == confluence.chunks
-            assert media is media_result
+            assert media == media_result
             assert page_references == ()
             assert page_targets == ()
             return _Output(documents=enriched_documents, chunks=enriched_chunks, relations=())
@@ -266,6 +368,36 @@ def test_confluence_materialized_source_accepts_combined_materializer_at_media_s
     ).collect(request)
     assert result.documents == confluence.documents
     assert result.chunks == confluence.chunks
+
+
+def test_combined_media_relation_stage_preserves_assets(tmp_path) -> None:
+    confluence, _ = _handoffs()
+    request = _request(tmp_path)
+    asset = {"media_id": "confluence:attachment:1", "parent_document_id": confluence.documents[0]["document_id"]}
+    page = _Output(
+        source_version=confluence.source_version,
+        raw_artifact_identity=confluence.raw_artifact_identity,
+        documents=confluence.documents,
+        chunks=confluence.chunks,
+    )
+
+    class PageStage:
+        def execute(self, request):
+            return page
+
+    class CombinedStage:
+        def execute(self, request, **state):
+            return _Output(
+                relations=confluence.relations,
+                documents=confluence.documents,
+                chunks=confluence.chunks,
+                media_assets=(asset,),
+            )
+
+    result = ConfluenceM10MaterializedSource(
+        page_stage=PageStage(), media_stage=CombinedStage()
+    ).collect(request)
+    assert result.media_assets == (asset,)
 
 
 @pytest.mark.parametrize(

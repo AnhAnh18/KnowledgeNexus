@@ -20,7 +20,7 @@
 | acl | 1 |
 | media_assets | 1 |
 | symbols | 0 |
-| sync_state | 1 |
+| sync_state | 2 |
 | tombstones | 0 |
 
 ## Completion Checks

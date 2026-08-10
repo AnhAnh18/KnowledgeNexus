@@ -81,8 +81,8 @@ def test_ocr_approval_evaluator_accepts_only_valid_model() -> None:
 
 def _readback(*, digest: str = "d" * 64, closed: bool = True) -> PublishedSnapshotReadback:
     streams = (
-        ("acl", 10), ("chunks", 20), ("documents", 10), ("media_assets", 3),
-        ("relations", 4), ("symbols", 2), ("sync_state", 13), ("tombstones", 0),
+        ("acl", 10000), ("chunks", 20), ("documents", 10000), ("media_assets", 3),
+        ("relations", 4), ("symbols", 2), ("sync_state", 10003), ("tombstones", 0),
     )
     return PublishedSnapshotReadback(
         dataset_version="v20260808-120000-000001Z",
@@ -145,4 +145,28 @@ def test_gate_input_rejects_impossible_stream_counts_before_field_access() -> No
             no_clobber=True,
             sanitized_output=True,
             transport="production",
+        )
+
+
+def test_gate_input_rejects_document_count_below_observed_pages() -> None:
+    with pytest.raises(ValueError, match="document count"):
+        PublishedSnapshotReadback(
+            dataset_version="v20260808-120000-000001Z",
+            content_digest="d" * 64,
+            observed_pages=10000,
+            stream_counts=(
+                ("acl", 0), ("chunks", 0), ("documents", 0), ("media_assets", 0),
+                ("relations", 0), ("symbols", 0), ("sync_state", 0), ("tombstones", 0),
+            ),
+            readback_valid=True,
+            relation_closed=True,
+            acl_closed=True,
+            sync_closed=True,
+            atomic_publish=True,
+            no_clobber=True,
+            sanitized_output=True,
+            transport="production",
+            rss_baseline_bytes=100,
+            rss_peak_bytes=200,
+            duration_milliseconds=300,
         )

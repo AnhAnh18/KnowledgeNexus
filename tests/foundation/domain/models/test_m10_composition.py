@@ -31,11 +31,14 @@ def _request(tmp_path: Path) -> M10SnapshotRequest:
 
 def _handoffs():
     document = build_sample_document_record(); chunk = build_sample_chunk_record(); relation = build_sample_relation_record(); acl = build_sample_acl_record()
-    confluence = M10ConfluenceHandoff(RUN, RUN, "1", (document,), (chunk,), (relation,), (acl,), (), (), (), "raw-1")
     gd = {"schema_version": "1.0", "document_id": "git:file:src-a.py", "source_system": "git", "source_type": "code_file", "title": "a.py", "repo": "org-repo", "branch": "main", "file_path": "src/a.py", "source_version": COMMIT, "content_hash": "b" * 64, "acl_id": "acl:repo:org-repo", "jira_keys": [], "relation_ids": [], "crawled_at": "2026-08-05T00:00:00Z", "metadata": {}}
     gc = {"schema_version": "1.0", "chunk_id": "chunk:git:0123456789abcdef", "document_id": gd["document_id"], "source_system": "git", "source_type": "code_file", "title": "a.py", "text": "print(1)", "content_kind": "code_block", "language": "cpp", "token_count": 2, "heading_path": [], "repo": "org-repo", "branch": "main", "file_path": "src/a.py", "line_start": 1, "line_end": 1, "acl_tags": ["repo:org-repo"], "source_version": COMMIT, "content_hash": "c" * 64, "chunker_version": "1.2.0", "updated_at": None}
     ga = {"schema_version": "1.0", "acl_id": "acl:repo:org-repo", "document_id": gd["document_id"], "source_system": "git", "is_restricted": False, "acl_tags": ["repo:org-repo"], "acl_extraction_status": "ok", "extracted_at": "2026-08-05T00:00:00Z"}
-    git = M10GitHandoff("org-repo", "main", COMMIT, (gd,), (gc,), (), (ga,), (), (), ())
+    confluence_sync = {"schema_version": "1.0", "source_id": "src", "entity_id": document["document_id"], "entity_type": "page", "last_seen_version": "1", "last_content_hash": document["content_hash"], "last_synced_at": "2026-08-05T00:00:00Z", "status": "active"}
+    git_file_sync = {"schema_version": "1.0", "source_id": "org-repo", "entity_id": gd["document_id"], "entity_type": "file", "last_seen_version": COMMIT, "last_content_hash": gd["content_hash"], "last_synced_at": "2026-08-05T00:00:00Z", "status": "active"}
+    git_repo_sync = {"schema_version": "1.0", "source_id": "org-repo", "entity_id": "org-repo", "entity_type": "repo", "last_seen_version": COMMIT, "last_content_hash": None, "last_synced_at": "2026-08-05T00:00:00Z", "status": "active"}
+    confluence = M10ConfluenceHandoff(RUN, RUN, "1", (document,), (chunk,), (relation,), (acl,), (), (), (confluence_sync,), "raw-1")
+    git = M10GitHandoff("org-repo", "main", COMMIT, (gd,), (gc,), (), (ga,), (), (), (git_file_sync, git_repo_sync))
     return confluence, git
 
 
@@ -93,9 +96,30 @@ def test_relation_status_and_sync_state_rules(tmp_path):
         compose_m10_projection(request, M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, (bad_relation,), confluence.acl, (), confluence.symbols, confluence.sync_state, confluence.raw_artifact_identity), git, schema_validator=NoopValidator())
     sync = {"schema_version": "1.0", "source_id": "src", "entity_id": "confluence:page:123", "entity_type": "page", "last_seen_version": "1", "last_content_hash": None, "last_synced_at": "2026-08-05T00:00:00Z", "status": "active"}
     with_sync = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (), confluence.symbols, (sync,), confluence.raw_artifact_identity)
-    assert compose_m10_projection(request, with_sync, git, schema_validator=NoopValidator()).metrics.sync_state == 1
+    assert compose_m10_projection(request, with_sync, git, schema_validator=NoopValidator()).metrics.sync_state == 3
     with pytest.raises(M10SnapshotError):
         compose_m10_projection(request, M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (), confluence.symbols, ({**sync, "status": "tombstoned"},), confluence.raw_artifact_identity), git, schema_validator=NoopValidator())
+
+
+def test_relation_must_be_linked_from_its_source_record(tmp_path):
+    request = _request(tmp_path)
+    confluence, git = _handoffs()
+    unlinked = {**confluence.relations[0], "relation_id": "rel:fedcba9876543210"}
+    handoff = M10ConfluenceHandoff(
+        confluence.run_id,
+        confluence.generation_id,
+        confluence.source_version,
+        confluence.documents,
+        confluence.chunks,
+        (confluence.relations[0], unlinked),
+        confluence.acl,
+        (),
+        confluence.symbols,
+        confluence.sync_state,
+        confluence.raw_artifact_identity,
+    )
+    with pytest.raises(M10SnapshotError, match="relation owner linkage"):
+        compose_m10_projection(request, handoff, git, schema_validator=NoopValidator())
 
 
 @pytest.mark.parametrize("target", ["unknown", "none", "null", "unresolved", " "])
@@ -146,7 +170,7 @@ def test_tombstone_ownership_requires_git_source_grammar(tmp_path):
     wrong_chunk = TombstoneRecordBuilder.build(
         target=TombstoneTarget(TombstoneEntityType.CHUNK, "chunk:confluence:" + "0" * 16),
         reason=TombstoneReason.SOURCE_DELETED,
-        detected_at="2026-08-05T00:00:00Z",
+        detected_at="2026-08-05T00:00:00.000000Z",
         dataset_version="delta-1",
         schema_validator=schema_validator,
     )
@@ -194,3 +218,34 @@ def test_git_symbol_tombstone_is_bound_to_repository_and_branch(tmp_path):
     )
     with pytest.raises(M10SnapshotError):
         compose_m10_projection(request, confluence, handoff, schema_validator=NoopValidator())
+
+
+def test_git_per_file_acl_tombstone_matches_composition_root_grammar(tmp_path):
+    request = replace(_request(tmp_path), export_mode="delta", base_dataset_version="base-1")
+    confluence, git = _handoffs()
+    acl_id = "acl:repo:org-repo:" + "0" * 16
+    document = {**git.documents[0], "acl_id": acl_id}
+    acl = {**git.acl[0], "acl_id": acl_id}
+    tombstone = TombstoneRecordBuilder.build(
+        target=TombstoneTarget(TombstoneEntityType.ACL, acl_id),
+        reason=TombstoneReason.CONFIG_INVALIDATED,
+        detected_at="2026-08-05T00:00:00.000000Z",
+        dataset_version="delta-1",
+        schema_validator=NoopValidator(),
+    )
+    handoff = M10GitHandoff(
+        git.repository,
+        git.branch,
+        git.commit,
+        (document,),
+        git.chunks,
+        git.relations,
+        (acl,),
+        git.media_assets,
+        git.symbols,
+        git.sync_state,
+        git.errors,
+        (tombstone,),
+    )
+    projection = compose_m10_projection(request, confluence, handoff, schema_validator=NoopValidator())
+    assert projection.tombstones[0]["entity_id"] == acl_id

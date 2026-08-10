@@ -80,16 +80,26 @@ class PropagateDelta:
                     raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
                 inventory[entry.document_id] = entry
             dependents = {document_id: targets for document_id, targets in request.previous_dependents}
+            current_dependents = {document_id: targets for document_id, targets in request.current_dependents}
+            has_current_dependent_inventory = bool(request.current_dependents)
             if not set(dependents).issubset(previous):
+                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+            if not set(current_dependents).issubset(current):
                 raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
             previous_acl = dict(request.previous_acl_hashes)
             current_acl = dict(request.current_acl_hashes)
             if not set(previous_acl).issubset(previous) or not set(current_acl).issubset(current):
                 raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+            self._validate_reemit_inventory(request.previous_acl_records, previous, "acl_id")
+            self._validate_reemit_inventory(request.current_acl_records, current, "acl_id")
+            self._validate_reemit_inventory(request.previous_chunk_records, previous, "chunk_id")
+            self._validate_reemit_inventory(request.current_chunk_records, current, "chunk_id")
 
             records: list[dict[str, object]] = []
             document_outcomes: list[tuple[str, str]] = []
             reemit_document_ids: list[str] = []
+            reemit_acl_records: list[dict[str, object]] = []
+            reemit_chunk_records: list[dict[str, object]] = []
             new_count = unchanged_count = changed_count = removed_count = 0
             union_ids = set(previous) | set(current)
             for inventory_id in inventory:
@@ -144,20 +154,41 @@ class PropagateDelta:
                 acl_changed = bool(previous_acl or current_acl) and previous_acl.get(document_id) != current_acl.get(document_id)
                 if acl_changed:
                     reemit_document_ids.append(document_id)
-                if old.document_content_hash == new.document_content_hash and not acl_changed:
+                current_entries = {entry.chunk_id: entry for entry in new.entries}
+                prior_dependents = {(target.entity_type, target.entity_id): target for target in dependents.get(document_id, ())}
+                next_dependents = {(target.entity_type, target.entity_id): target for target in current_dependents.get(document_id, ())}
+                removed_dependents = (
+                    [prior_dependents[key] for key in sorted(set(prior_dependents) - set(next_dependents), key=lambda item: (item[0].value, item[1]))]
+                    if has_current_dependent_inventory else []
+                )
+                dependency_changed = has_current_dependent_inventory and (bool(removed_dependents) or set(prior_dependents) != set(next_dependents))
+                if old.document_content_hash == new.document_content_hash and not acl_changed and not dependency_changed:
                     unchanged_count += 1
                     document_outcomes.append((document_id, "unchanged"))
                     continue
 
                 changed_count += 1
                 document_outcomes.append((document_id, "changed"))
-                current_entries = {entry.chunk_id: entry for entry in new.entries}
+                if removed_dependents:
+                    for target in removed_dependents:
+                        records.extend(self._dependent_tombstone(target, request))
+                if acl_changed and old.document_content_hash == new.document_content_hash:
+                    acl_records = self._records_for_document(request.current_acl_records, document_id, "acl_id", required=bool(request.current_acl_records))
+                    chunk_records = self._records_for_document(request.current_chunk_records, document_id, "chunk_id", required=bool(request.current_chunk_records))
+                    if request.current_acl_records and len(acl_records) != 1:
+                        raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+                    if request.current_chunk_records and {row["chunk_id"] for row in chunk_records} != set(current_entries):
+                        raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+                    reemit_acl_records.extend(acl_records)
+                    reemit_chunk_records.extend(chunk_records)
                 for entry in sorted(old.entries, key=lambda item: item.chunk_id):
                     counterpart = current_entries.get(entry.chunk_id)
                     if counterpart is None or counterpart.content_hash != entry.content_hash:
                         records.extend(self._chunk_tombstone(entry.chunk_id, request))
 
             records = self._deduplicate_and_sort(records)
+            reemit_acl_records.sort(key=lambda row: str(row["acl_id"]))
+            reemit_chunk_records.sort(key=lambda row: str(row["chunk_id"]))
             document_tombstones = sum(record["entity_type"] == "document" for record in records)
             chunk_tombstones = sum(record["entity_type"] == "chunk" for record in records)
             media_tombstones = sum(record["entity_type"] == "media" for record in records)
@@ -198,6 +229,8 @@ class PropagateDelta:
                 },
                 "document_outcomes": tuple(document_outcomes),
                 "reemit_document_ids": tuple(reemit_document_ids),
+                "reemit_acl_records": tuple(reemit_acl_records),
+                "reemit_chunk_records": tuple(reemit_chunk_records),
                 "records": tuple(records),
                 "status": DeltaPropagationStatus.SUCCESS.value,
             }
@@ -214,6 +247,8 @@ class PropagateDelta:
                 digest=digest,
                 document_outcomes=tuple(document_outcomes),
                 reemit_document_ids=tuple(reemit_document_ids),
+                reemit_acl_records=tuple(reemit_acl_records),
+                reemit_chunk_records=tuple(reemit_chunk_records),
             )
         except _Failure as exc:
             return DeltaPropagationResult(
@@ -266,6 +301,49 @@ class PropagateDelta:
         if result.status is not TombstoneProjectionStatus.SUCCESS:
             raise _Failure(DeltaPropagationFailureCategory.TOMBSTONE_FAILURE)
         return list(result.records)
+
+    def _dependent_tombstone(self, target: TombstoneTarget, request: DeltaPropagationRequest) -> list[dict[str, object]]:
+        result = self._projector.execute(
+            TombstoneProjectionRequest(
+                root=target,
+                reason=TombstoneReason.CONTENT_UPDATED,
+                detected_at=request.detected_at,
+                dataset_version=request.current_dataset_version,
+            )
+        )
+        if result.status is not TombstoneProjectionStatus.SUCCESS:
+            raise _Failure(DeltaPropagationFailureCategory.TOMBSTONE_FAILURE)
+        return list(result.records)
+
+    @staticmethod
+    def _records_for_document(
+        records: tuple[dict[str, object], ...],
+        document_id: str,
+        id_field: str,
+        *,
+        required: bool,
+    ) -> list[dict[str, object]]:
+        matched = [record for record in records if record.get("document_id") == document_id]
+        if required and not matched:
+            raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+        return [dict(record) for record in sorted(matched, key=lambda row: str(row[id_field]))]
+
+    @staticmethod
+    def _validate_reemit_inventory(
+        records: tuple[dict[str, object], ...],
+        summaries: dict[str, DocumentChunkSetSummary],
+        id_field: str,
+    ) -> None:
+        summary_chunks = {
+            document_id: {entry.chunk_id for entry in summary.entries}
+            for document_id, summary in summaries.items()
+        }
+        for record in records:
+            document_id = record.get("document_id")
+            if type(document_id) is not str or document_id not in summaries:
+                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+            if id_field == "chunk_id" and record.get("chunk_id") not in summary_chunks[document_id]:
+                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
 
     @staticmethod
     def _deduplicate_and_sort(records: list[dict[str, object]]) -> list[dict[str, object]]:
