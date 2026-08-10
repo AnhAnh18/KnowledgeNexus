@@ -174,6 +174,14 @@ from knowledgenexus.foundation.domain.models.media_processing import (
     PdfTextExtractionResponse,
     text_digest,
 )
+from knowledgenexus.foundation.domain.models.media_ocr import (
+    OcrLimits,
+    OcrRequest,
+    OcrRequestStatus,
+    OcrResult,
+    PdfPageRasterizerPort,
+    RasterizedPdfImage,
+)
 from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
     MiniCorpusAcceptanceError,
     MiniCorpusAcceptanceFailureCategory,
@@ -375,6 +383,12 @@ __all__ = [
     "OcrLabelResult",
     "PdfPageTextResult",
     "PdfTextExtractionResponse",
+    "OcrLimits",
+    "OcrRequest",
+    "OcrRequestStatus",
+    "OcrResult",
+    "PdfPageRasterizerPort",
+    "RasterizedPdfImage",
     "text_digest",
     "MiniCorpusAcceptanceError",
     "MiniCorpusAcceptanceFailureCategory",

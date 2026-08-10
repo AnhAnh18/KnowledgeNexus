@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import time
+from datetime import datetime, timezone
+from typing import Callable
 
 from knowledgenexus.foundation.domain.models.media_body_materialization import (
     MediaAttachmentBodyEnvelope,
@@ -25,9 +29,12 @@ from knowledgenexus.foundation.domain.models.media_processing import (
     PdfTextExtractionResponse,
     text_digest,
 )
+from knowledgenexus.foundation.domain.models.media_ocr import OcrLimits, OcrRequest, OcrRequestStatus, OcrResult, RasterizedPdfImage
 from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
 from knowledgenexus.foundation.ports.media_processing_port import (
     ImageOcrPort,
+    OcrCapabilityPort,
+    PdfPageRasterizerPort,
     PdfTextExtractionPort,
 )
 from knowledgenexus.foundation.infrastructure.processors.drawio_xml_processor import (
@@ -42,6 +49,93 @@ _DRAWIO_CAPABILITY = ("stdlib-drawio-v1", "1")
 _PDF_CAPABILITY = ("pdf-text-fixture-v1", "1")
 _OCR_CAPABILITY = ("image-ocr-fixture-v1", "1")
 _MAX_EXTRACTED_BYTES = 8 * 1024 * 1024
+_RFC3339 = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})\Z")
+
+
+def _ocr_cancelled(request: OcrRequest, started: float, clock: object) -> bool:
+    try:
+        if request.is_cancelled is not None and bool(request.is_cancelled()):
+            return True
+        if float(clock()) - started >= request.limits.max_seconds:
+            return True
+        if request.deadline is not None:
+            deadline = datetime.fromisoformat(request.deadline.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) >= deadline:
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def _validate_raster_images(images: object, *, source_digest: str, page_numbers: tuple[int, ...], body_size: int, limits: OcrLimits) -> tuple[RasterizedPdfImage, ...]:
+    if type(images) is not tuple or len(images) != len(page_numbers) or len(images) > limits.max_images:
+        raise ValueError("rasterizer result count invalid")
+    seen: set[int] = set()
+    for item, page in zip(images, page_numbers):
+        if type(item) is not RasterizedPdfImage or item.source_digest != source_digest or item.page_number != page or item.image_index in seen:
+            raise ValueError("rasterizer binding invalid")
+        seen.add(item.image_index)
+    if sum(len(item.body) for item in images) > limits.max_raster_bytes:
+        raise OverflowError("raster byte limit")
+    if body_size > limits.max_input_bytes:
+        raise OverflowError("input byte limit")
+    return images
+
+
+def _validate_ocr_result(result: object, *, request: OcrRequest, image: RasterizedPdfImage) -> OcrResult:
+    if type(result) is not OcrResult:
+        raise ValueError("OCR result invalid")
+    try:
+        # Rebuild nested values so forged same-type dataclasses cannot bypass
+        # their own post-init invariants at this capability boundary.
+        raw_request = result.request
+        rebuilt_request = OcrRequest(
+            source_digest=raw_request.source_digest,
+            locator=MediaSourceLocator(
+                parent_page_id=raw_request.locator.parent_page_id,
+                attachment_id=raw_request.locator.attachment_id,
+                filename=raw_request.locator.filename,
+                raw_uri=raw_request.locator.raw_uri,
+                pdf_page_number=raw_request.locator.pdf_page_number,
+                image_index=raw_request.locator.image_index,
+            ),
+            selected_image_indices=raw_request.selected_image_indices,
+            deadline=raw_request.deadline,
+            engine_id=raw_request.engine_id,
+            engine_version=raw_request.engine_version,
+            limits=OcrLimits(**{name: getattr(raw_request.limits, name) for name in OcrLimits.__dataclass_fields__}),
+            is_cancelled=raw_request.is_cancelled,
+            input_bytes=raw_request.input_bytes,
+            raster_bytes=raw_request.raster_bytes,
+            page_number=raw_request.page_number,
+        )
+        labels = tuple(
+            OcrLabelResult(image_index=label.image_index, text=label.text, confidence=label.confidence)
+            for label in result.labels
+        )
+        rebuilt = OcrResult(
+            request=rebuilt_request,
+            status=result.status,
+            labels=labels,
+            input_bytes=result.input_bytes,
+            raster_bytes=result.raster_bytes,
+            output_bytes=result.output_bytes,
+            images_requested=result.images_requested,
+            images_processed=result.images_processed,
+            output_digest=result.output_digest,
+            failure_category=result.failure_category,
+        )
+    except Exception:
+        raise ValueError("OCR result invalid") from None
+    if rebuilt.request != request or rebuilt.status is not OcrRequestStatus.SUCCEEDED:
+        raise ValueError("OCR result invalid")
+    if rebuilt.request.page_number != image.page_number or rebuilt.request.locator.image_index != image.image_index:
+        raise ValueError("OCR request binding invalid")
+    if rebuilt.images_processed != 1 or tuple(label.image_index for label in rebuilt.labels) != (image.image_index,):
+        raise ValueError("OCR labels are not bound")
+    if rebuilt.input_bytes != request.input_bytes or rebuilt.raster_bytes != len(image.body):
+        raise ValueError("OCR counters invalid")
+    return rebuilt
 
 
 def _revalidate_envelope(value: object) -> MediaAttachmentBodyEnvelope:
@@ -170,7 +264,7 @@ def _locator(
 
 
 class PdfTextProcessor:
-    def __init__(self, *, capability: PdfTextExtractionPort, schema_validator: object | None = None) -> None:
+    def __init__(self, *, capability: PdfTextExtractionPort, rasterizer: PdfPageRasterizerPort | None = None, ocr_capability: OcrCapabilityPort | None = None, ocr_engine_id: str | None = None, ocr_engine_version: str | None = None, ocr_limits: OcrLimits | None = None, schema_validator: object | None = None, clock: object | None = None) -> None:
         try:
             extract = getattr(capability, "extract_pdf_text", None)
         except Exception:
@@ -185,12 +279,32 @@ class PdfTextProcessor:
         if not callable(validate):
             raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
         self._capability = capability
+        if rasterizer is not None and not callable(getattr(rasterizer, "rasterize_pdf_pages", None)):
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        if ocr_capability is not None and not callable(getattr(ocr_capability, "recognize", None)):
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        if (rasterizer is None) != (ocr_capability is None):
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        if ocr_capability is not None and (type(ocr_engine_id) is not str or type(ocr_engine_version) is not str):
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        if ocr_limits is not None and type(ocr_limits) is not OcrLimits:
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        if clock is not None and not callable(clock):
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        self._rasterizer = rasterizer
+        self._ocr_capability = ocr_capability
+        self._ocr_engine_id = ocr_engine_id
+        self._ocr_engine_version = ocr_engine_version
+        self._ocr_limits = ocr_limits or OcrLimits()
+        self._clock = time.monotonic if clock is None else clock
         self._validator = validator
 
     def process(self, *, envelope: object, observation: object) -> MediaProcessingResult:
         body_envelope = _revalidate_envelope(envelope)
         attachment = _revalidate_observation(observation)
         _validate_binding(body_envelope, attachment)
+        if len(body_envelope.body_bytes) > self._ocr_limits.max_input_bytes:
+            return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.LIMIT_EXCEEDED, warning="OCR input limit exceeded")
         try:
             response = self._capability.extract_pdf_text(body=body_envelope.body_bytes)
         except Exception:
@@ -217,7 +331,17 @@ class PdfTextProcessor:
             confidence=None,
         )["raw_uri"]
         assert type(raw_uri) is str
-        if not response.pages or any(page.image_only for page in response.pages):
+        if not response.pages:
+            return self._failure(
+                body_envelope=body_envelope,
+                observation=attachment,
+                category=MediaProcessingFailureCategory.CAPABILITY_UNAVAILABLE,
+                warning="pdf image-only page deferred",
+                response=response,
+                raw_uri=raw_uri,
+            )
+        image_pages = tuple(page for page in response.pages if page.image_only)
+        if image_pages and self._rasterizer is None:
             return self._failure(
                 body_envelope=body_envelope,
                 observation=attachment,
@@ -230,6 +354,8 @@ class PdfTextProcessor:
         details: list[MediaExtractionDetail] = []
         output_bytes = 0
         for index, page in enumerate(response.pages, start=1):
+            if page.image_only:
+                continue
             page_text = page.text
             if page.table_markdown:
                 page_text = f"{page_text}\n{page.table_markdown}" if page_text else page.table_markdown
@@ -246,7 +372,7 @@ class PdfTextProcessor:
             output_bytes = projected_bytes
             details.append(
                 MediaExtractionDetail(
-                    ordinal=index,
+                    ordinal=len(details) + 1,
                     locator=_locator(
                         observation=attachment,
                         raw_uri=raw_uri,
@@ -259,8 +385,55 @@ class PdfTextProcessor:
                     text_sha256=text_digest(marked),
                 )
             )
+        if image_pages:
+            try:
+                source_digest = hashlib.sha256(body_envelope.body_bytes).hexdigest()
+                started = float(self._clock())
+                if len(image_pages) > self._ocr_limits.max_images:
+                    raise OverflowError
+                images = self._rasterizer.rasterize_pdf_pages(
+                    source_digest=source_digest,
+                    body=body_envelope.body_bytes,
+                    page_numbers=tuple(page.page_number for page in image_pages),
+                    limits=self._ocr_limits,
+                )
+                images = _validate_raster_images(images, source_digest=source_digest, page_numbers=tuple(page.page_number for page in image_pages), body_size=len(body_envelope.body_bytes), limits=self._ocr_limits)
+                for image in images:
+                    locator = _locator(observation=attachment, raw_uri=raw_uri, image_index=image.image_index)
+                    if _ocr_cancelled(OcrRequest(source_digest=source_digest, locator=locator, selected_image_indices=(image.image_index,), deadline=None, engine_id=self._ocr_engine_id, engine_version=self._ocr_engine_version, limits=self._ocr_limits, input_bytes=len(body_envelope.body_bytes), raster_bytes=len(image.body), page_number=image.page_number), started, self._clock):
+                        raise TimeoutError
+                    request = OcrRequest(
+                        source_digest=source_digest,
+                        locator=locator,
+                        selected_image_indices=(image.image_index,),
+                        deadline=None,
+                        engine_id=self._ocr_engine_id,
+                        engine_version=self._ocr_engine_version,
+                        limits=self._ocr_limits,
+                        input_bytes=len(body_envelope.body_bytes),
+                        raster_bytes=len(image.body),
+                        page_number=image.page_number,
+                    )
+                    result = self._ocr_capability.recognize(request=request, images=(image,))
+                    result = _validate_ocr_result(result, request=request, image=image)
+                    for label in result.labels:
+                        if label.confidence < self._ocr_limits.min_confidence or len(label.text.encode("utf-8")) < self._ocr_limits.min_text_bytes:
+                            raise LookupError
+                        marked = f"[pdf_page: {image.page_number}] [image: {label.image_index}] {label.text}"
+                        projected_bytes = output_bytes + (2 if parts else 0) + len(marked.encode("utf-8"))
+                        if projected_bytes > min(_MAX_EXTRACTED_BYTES, self._ocr_limits.max_output_bytes):
+                            raise OverflowError
+                        parts.append(marked)
+                        output_bytes = projected_bytes
+                        details.append(MediaExtractionDetail(ordinal=len(details) + 1, locator=locator, processor_kind=MediaProcessorKind.IMAGE_OCR, capability_id=self._ocr_engine_id, capability_version=self._ocr_engine_version, status="ocr", text_sha256=text_digest(marked), pdf_page_number=image.page_number))
+            except OverflowError:
+                return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.LIMIT_EXCEEDED, warning="OCR output limit exceeded", response=response, raw_uri=raw_uri)
+            except (TimeoutError, LookupError):
+                return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.LIMIT_EXCEEDED, warning="OCR quality or deadline policy rejected output", response=response, raw_uri=raw_uri)
+            except Exception:
+                return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.CAPABILITY_FAILURE, warning="PDF OCR fallback failed", response=response, raw_uri=raw_uri)
         text = "\n\n".join(parts)
-        if len(text.encode("utf-8")) > _MAX_EXTRACTED_BYTES:
+        if len(text.encode("utf-8")) > min(_MAX_EXTRACTED_BYTES, self._ocr_limits.max_output_bytes):
             return self._failure(
                 body_envelope=body_envelope,
                 observation=attachment,
@@ -328,7 +501,7 @@ class PdfTextProcessor:
 
 
 class ImageOcrProcessor:
-    def __init__(self, *, capability: ImageOcrPort, schema_validator: object | None = None) -> None:
+    def __init__(self, *, capability: ImageOcrPort, schema_validator: object | None = None, ocr_limits: OcrLimits | None = None, clock: Callable[[], float] | None = None, is_cancelled: Callable[[], bool] | None = None, deadline: str | None = None) -> None:
         try:
             extract = getattr(capability, "extract_labels", None)
         except Exception:
@@ -344,11 +517,37 @@ class ImageOcrProcessor:
             raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
         self._capability = capability
         self._validator = validator
+        self._limits = ocr_limits or OcrLimits()
+        if clock is not None and not callable(clock):
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        if is_cancelled is not None and not callable(is_cancelled):
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        if deadline is not None:
+            if type(deadline) is not str:
+                raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+            if _RFC3339.fullmatch(deadline) is None:
+                raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
+            try:
+                datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            except Exception:
+                raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
+        if ocr_limits is not None and type(ocr_limits) is not OcrLimits:
+            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+        self._clock = clock or time.monotonic
+        self._is_cancelled = is_cancelled
+        self._deadline = deadline
 
     def process(self, *, envelope: object, observation: object) -> MediaProcessingResult:
         body_envelope = _revalidate_envelope(envelope)
         attachment = _revalidate_observation(observation)
         _validate_binding(body_envelope, attachment)
+        started = float(self._clock())
+        if len(body_envelope.body_bytes) > self._limits.max_input_bytes:
+            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR input limit exceeded")
+        if len(body_envelope.body_bytes) > self._limits.max_raster_bytes:
+            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR raster limit exceeded")
+        if self._cancelled(started):
+            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR request cancelled or expired")
         try:
             response = self._capability.extract_labels(body=body_envelope.body_bytes)
             response = _revalidate_ocr_response(response)
@@ -361,6 +560,8 @@ class ImageOcrProcessor:
                 MediaProcessingFailureCategory.CAPABILITY_FAILURE,
                 "OCR capability failed",
             )
+        if self._cancelled(started):
+            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR request cancelled or expired")
         if not response.labels:
             return self._failure(
                 body_envelope,
@@ -368,6 +569,10 @@ class ImageOcrProcessor:
                 MediaProcessingFailureCategory.PARSE_FAILED,
                 "OCR produced no labels",
             )
+        if any(label.image_index != 1 for label in response.labels):
+            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.MALFORMED_RESULT, "OCR labels are not bound to the selected image")
+        if len(response.labels) > self._limits.max_images or any(label.confidence < self._limits.min_confidence or len(label.text.encode("utf-8")) < self._limits.min_text_bytes for label in response.labels):
+            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR quality policy rejected output")
         raw_uri = _asset(
             envelope=body_envelope,
             observation=attachment,
@@ -382,7 +587,7 @@ class ImageOcrProcessor:
         for index, label in enumerate(response.labels, start=1):
             marked = f"[image: {label.image_index}] {label.text}"
             projected_bytes = output_bytes + (1 if parts else 0) + len(marked.encode("utf-8"))
-            if projected_bytes > _MAX_EXTRACTED_BYTES:
+            if projected_bytes > min(_MAX_EXTRACTED_BYTES, self._limits.max_output_bytes):
                 return self._failure(
                     body_envelope,
                     attachment,
@@ -403,7 +608,7 @@ class ImageOcrProcessor:
                 )
             )
         confidence = sum(label.confidence for label in response.labels) / len(response.labels)
-        if len("\n".join(parts).encode("utf-8")) > _MAX_EXTRACTED_BYTES:
+        if len("\n".join(parts).encode("utf-8")) > min(_MAX_EXTRACTED_BYTES, self._limits.max_output_bytes):
             return self._failure(
                 body_envelope,
                 attachment,
@@ -422,6 +627,20 @@ class ImageOcrProcessor:
         except Exception:
             raise MediaProcessingError(MediaProcessingFailureCategory.SCHEMA_INVALID) from None
         return MediaProcessingResult(asset=asset, details=tuple(details))
+
+    def _cancelled(self, started: float) -> bool:
+        try:
+            if self._is_cancelled is not None and bool(self._is_cancelled()):
+                return True
+            if float(self._clock()) - started >= self._limits.max_seconds:
+                return True
+            if self._deadline is not None:
+                deadline = datetime.fromisoformat(self._deadline.replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) >= deadline:
+                    return True
+        except Exception:
+            return True
+        return False
 
     @staticmethod
     def _failure(
