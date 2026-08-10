@@ -249,6 +249,7 @@ def capture_drawio_with_production_components(
     media_processor: object,
     acknowledge: Callable[[str], object] | None = None,
     config: ConfluenceSubtreeCorpusConfig | None = None,
+    state_path: Path | None = None,
 ) -> dict[str, object]:
     """Compose the approved metadata, body, raw-store and media use cases.
 
@@ -267,15 +268,30 @@ def capture_drawio_with_production_components(
     from knowledgenexus.foundation.domain.models.media_materialization import (
         ConfluenceAttachmentObservation, MediaPolicyDecision,
     )
-    assets: list[dict[str, object]] = []
-    failures = observed = resolved = 0
+    if state_path is not None and (not isinstance(state_path, Path) or not state_path.is_absolute()):
+        raise ValueError("state_path must be absolute")
+    prior: dict[str, object] = {}
+    if state_path is not None and state_path.exists():
+        prior = json.loads(state_path.read_text(encoding="utf-8"))
+        if type(prior) is not dict:
+            raise ValueError("drawio state is invalid")
+    refs = tuple(sorted(tuple(references), key=lambda r: (r.parent_page_id, r.filename, r.source_version)))
+    assets: list[dict[str, object]] = [dict(x) for x in prior.get("media_assets", ()) if type(x) is dict]
+    resolved_keys = set(tuple(x) for x in prior.get("resolved", ()) if type(x) is list and len(x) == 3)
+    failures = 0
+    observed = len(refs)
+    resolved = len(resolved_keys)
     cfg = config or ConfluenceSubtreeCorpusConfig(max_pages=MAX_PAGES)
     downloaded_bytes = 0
-    for ref in references:
+    observed_keys = {(r.parent_page_id, r.filename, r.source_version) for r in refs}
+    resolved_keys.intersection_update(observed_keys)
+    for index, ref in enumerate(refs):
         if type(ref) is not DrawioReference:
             raise TypeError("drawio reference is invalid")
-        observed += 1
-        if observed > cfg.drawio_count:
+        key = (ref.parent_page_id, ref.filename, ref.source_version)
+        if key in resolved_keys:
+            continue
+        if index >= cfg.drawio_count:
             failures += 1
             continue
         try:
@@ -314,17 +330,20 @@ def capture_drawio_with_production_components(
             if not asset:
                 raise ValueError("media processor returned no asset")
             assets.append(asset)
+            resolved_keys.add(key)
             if acknowledge is not None:
                 acknowledge(observation.attachment_id)
             resolved += 1
         except Exception:
             failures += 1
-    return {
-        "media_assets": tuple(assets),
-        "drawio_references_observed": observed,
-        "drawio_references_resolved": resolved,
-        "drawio_assets_failed": failures,
-    }
+    assets = sorted(assets, key=lambda x: str(x.get("media_id", "")))
+    payload = {"observed": [list(k) for k in sorted(observed_keys)], "resolved": [list(k) for k in sorted(resolved_keys)], "failed": failures, "media_assets": assets}
+    if state_path is not None:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(state_path)
+    return {"media_assets": tuple(assets), "drawio_references_observed": observed, "drawio_references_resolved": len(resolved_keys), "drawio_assets_failed": failures}
 
 
 class ConfluenceSubtreeCorpusHarness:
