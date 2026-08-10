@@ -116,13 +116,13 @@ class ProcessConfluencePageBatches:
                         if hasattr(self._fetcher, "estimate_page_bytes"):
                             estimate = self._fetcher.estimate_page_bytes(page_id=occurrence.page_id)
                             if type(estimate) is not int or estimate < 0: raise ValueError("policy budget exceeded")
-                            if config.max_page_bytes is not None and batch_bytes + estimate > config.max_page_bytes: raise ValueError("policy budget exceeded")
+                            if config.max_page_bytes is not None and estimate > config.max_page_bytes: raise ValueError("policy budget exceeded")
                             if config.max_bytes is not None and physical_bytes + estimate > config.max_bytes: raise ValueError("policy budget exceeded")
                         attempt_requests += 1
                         physical_requests += 1
                         body = self._fetcher.fetch_page_raw(page_id=occurrence.page_id)
                         if type(body) is not bytes: raise TypeError("fetcher returned invalid body")
-                        if config.max_page_bytes is not None and batch_bytes + len(body) > config.max_page_bytes: raise ValueError("policy budget exceeded")
+                        if config.max_page_bytes is not None and len(body) > config.max_page_bytes: raise ValueError("policy budget exceeded")
                         physical_bytes += len(body)
                         payload.append((occurrence.page_id, body)); attempt_bytes += len(body); batch_bytes += len(body)
                         if config.max_bytes is not None and physical_bytes > config.max_bytes: raise ValueError("policy budget exceeded")

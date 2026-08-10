@@ -96,13 +96,22 @@ class FetchAndStoreConfluenceAttachmentBody:
             _fail(MediaBodyMaterializationFailureCategory.INVALID_POLICY)
         if decision.policy != "download_and_process":
             _fail(MediaBodyMaterializationFailureCategory.INVALID_POLICY)
+        if (
+            observation.source_version is None
+            or not observation.source_version.isascii()
+            or not observation.source_version.isdecimal()
+            or observation.source_version.startswith("0")
+        ):
+            _fail(MediaBodyMaterializationFailureCategory.INVALID_OBSERVATION)
         if observation.size_bytes is not None and observation.size_bytes > self._budget.max_body_bytes:
             _fail(MediaBodyMaterializationFailureCategory.RESPONSE_SIZE_LIMIT)
 
         try:
             response = self._body_fetcher.fetch_attachment_body(
                 attachment_id=observation.attachment_id,
+                parent_page_id=observation.parent_page_id,
                 filename=observation.filename,
+                source_version=observation.source_version,
                 max_bytes=self._budget.max_body_bytes,
             )
         except ConfluenceAttachmentBodyTooLargeError:

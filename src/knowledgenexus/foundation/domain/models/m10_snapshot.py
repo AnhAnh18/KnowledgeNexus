@@ -75,10 +75,26 @@ def _timestamp(value: object) -> str:
     return value
 
 def _is_reparse_point(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(os.path, "isjunction", None)
+    if callable(is_junction) and is_junction(path):
+        return True
     try:
-        return bool(getattr(os.stat(path), "st_file_attributes", 0) & 0x40000000)
-    except (OSError, ValueError, TypeError):
+        return bool(
+            getattr(os.stat(path, follow_symlinks=False), "st_file_attributes", 0)
+            & 0x400
+        )
+    except (AttributeError, OSError, ValueError, TypeError):
         raise M10SnapshotError("unsafe dataset_root") from None
+
+def _has_reparse_component(path: Path) -> bool:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if os.path.lexists(current) and _is_reparse_point(current):
+            return True
+    return False
 
 @dataclass(frozen=True)
 class M10ProfileIdentity:
@@ -190,7 +206,7 @@ class M10SnapshotRequest:
             if type(getattr(self, n)) is not str or not _POSIX.fullmatch(getattr(self, n)): raise M10SnapshotError(f"invalid {n}")
         if type(self.git_commit) is not str or not _HEX40.fullmatch(self.git_commit): raise M10SnapshotError("invalid git_commit")
         _timestamp(self.generated_at)
-        if not isinstance(self.dataset_root, Path) or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
+        if not isinstance(self.dataset_root, Path) or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or _has_reparse_component(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
         if self.export_mode not in {"full_snapshot", "delta"}: raise M10SnapshotError("invalid export_mode")
         if self.export_mode == "delta" and (type(self.base_dataset_version) is not str or not self.base_dataset_version): raise M10SnapshotError("delta export requires base_dataset_version")
         if self.export_mode == M10_EXPORT_MODE and self.base_dataset_version is not None: raise M10SnapshotError("full snapshot cannot declare base_dataset_version")

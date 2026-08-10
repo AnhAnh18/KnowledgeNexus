@@ -9,6 +9,7 @@ from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader im
     PublishedSnapshotReader,
     read_published_snapshot,
 )
+from knowledgenexus.foundation.infrastructure.exporters import delta_snapshot_reader as reader_module
 from knowledgenexus.foundation.domain.rules.snapshot_readback import validate_snapshot_streams
 from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
 
@@ -61,3 +62,23 @@ def test_published_reader_rejects_non_utf8_quality_report(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="quality report"):
         read_published_snapshot(snapshot, validator=FoundationSchemaValidator())
+
+
+def test_published_reader_rejects_windows_junction_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = getattr(reader_module.os.path, "isjunction", None)
+
+    def isjunction(path: object) -> bool:
+        if Path(path) == tmp_path:
+            return True
+        return bool(original(path)) if callable(original) else False
+
+    monkeypatch.setattr(reader_module.os.path, "isjunction", isjunction, raising=False)
+
+    with pytest.raises(ValueError, match="invalid dataset root"):
+        PublishedSnapshotReader(
+            dataset_root=tmp_path,
+            validator=FoundationSchemaValidator(),
+        )

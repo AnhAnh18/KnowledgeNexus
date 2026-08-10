@@ -98,7 +98,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = _SanitizedParser(prog="evaluate-foundation-gates", add_help=True)
     parser.add_argument("--gate", choices=("media", "ocr", "scale"), required=True)
     parser.add_argument("--input", required=True, dest="input_path")
-    args = parser.parse_args([] if argv is None else argv)
+    args = parser.parse_args(argv)
     if type(args.input_path) is not str or not args.input_path:
         raise _ConfigurationError
     return args
@@ -344,7 +344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _emit_failure("configuration", EXIT_CONFIGURATION)
     except (_InputError, TypeError, ValueError):
         return _emit_failure("invalid_input", EXIT_INVALID_INPUT)
-    except BaseException:
+    except Exception:
         return _emit_failure("unexpected", EXIT_UNEXPECTED)
 
 
