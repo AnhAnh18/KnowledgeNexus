@@ -13,6 +13,10 @@ from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer impo
 from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import (
     M10FullSnapshotExporter,
 )
+from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import (
+    DeltaSnapshotReadback,
+    read_delta_snapshot,
+)
 
 __all__ = [
     "FullSnapshotPublisher",
@@ -20,4 +24,6 @@ __all__ = [
     "FullSnapshotStagingWriter",
     "JsonlRecordWriter",
     "M10FullSnapshotExporter",
+    "DeltaSnapshotReadback",
+    "read_delta_snapshot",
 ]

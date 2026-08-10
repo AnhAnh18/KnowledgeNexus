@@ -182,6 +182,11 @@ from knowledgenexus.foundation.domain.models.media_ocr import (
     PdfPageRasterizerPort,
     RasterizedPdfImage,
 )
+from knowledgenexus.foundation.domain.models.foundation_gate import (
+    BoundedMediaCorpusAcceptance,
+    OcrEngineApproval,
+    ScaleGateEvidence,
+)
 from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
     MiniCorpusAcceptanceError,
     MiniCorpusAcceptanceFailureCategory,
@@ -389,6 +394,9 @@ __all__ = [
     "OcrResult",
     "PdfPageRasterizerPort",
     "RasterizedPdfImage",
+    "BoundedMediaCorpusAcceptance",
+    "OcrEngineApproval",
+    "ScaleGateEvidence",
     "text_digest",
     "MiniCorpusAcceptanceError",
     "MiniCorpusAcceptanceFailureCategory",

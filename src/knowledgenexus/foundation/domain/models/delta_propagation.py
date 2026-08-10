@@ -16,6 +16,7 @@ from knowledgenexus.foundation.domain.models.chunk_stability import (
 )
 from knowledgenexus.foundation.domain.models.tombstone_propagation import (
     TombstoneEntityType,
+    TombstoneTarget,
     TombstoneProjectionMetrics,
     TombstoneProjectionResult,
     TombstoneProjectionStatus,
@@ -129,15 +130,20 @@ class DeltaPropagationRequest:
     previous_summaries: tuple[DocumentChunkSetSummary, ...]
     current_summaries: tuple[DocumentChunkSetSummary, ...]
     inventory: tuple[DeltaInventoryEntry, ...] = ()
+    previous_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
 
     def __post_init__(self) -> None:
-        _require_exact_fields(
-            self,
-            frozenset({
-                "previous_dataset_version", "current_dataset_version", "previous_config_hash",
-                "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory",
-            }),
-        )
+        expected_fields = frozenset({
+            "previous_dataset_version", "current_dataset_version", "previous_config_hash",
+            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents",
+        })
+        actual_fields = frozenset(vars(self))
+        # previous_dependents was introduced as an optional wire extension;
+        # accept legacy in-memory requests and normalize the absent field.
+        if actual_fields == expected_fields - {"previous_dependents"}:
+            object.__setattr__(self, "previous_dependents", ())
+        elif actual_fields != expected_fields:
+            raise TypeError("model fields are invalid")
         previous = _opaque("previous_dataset_version", self.previous_dataset_version)
         current = _opaque("current_dataset_version", self.current_dataset_version)
         if previous == current:
@@ -171,6 +177,28 @@ class DeltaPropagationRequest:
             if entry.document_id in seen_inventory:
                 raise _InventoryConflictError("inventory contains duplicate IDs")
             seen_inventory.add(entry.document_id)
+        if type(self.previous_dependents) is not tuple:
+            raise TypeError("previous_dependents is invalid")
+        seen_dependents: set[str] = set()
+        for item in self.previous_dependents:
+            if type(item) is not tuple or len(item) != 2:
+                raise TypeError("previous_dependents entries are invalid")
+            document_id, targets = item
+            if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_dependents:
+                raise ValueError("previous dependent document ID is invalid")
+            seen_dependents.add(document_id)
+            if type(targets) is not tuple or any(type(target) is not TombstoneTarget for target in targets):
+                raise TypeError("previous dependent targets are invalid")
+            target_keys: set[tuple[TombstoneEntityType, str]] = set()
+            for target in targets:
+                TombstoneTarget.__post_init__(target)
+                if target.entity_type is TombstoneEntityType.DOCUMENT:
+                    raise ValueError("document cannot be a dependent target")
+                key = (target.entity_type, target.entity_id)
+                if key in target_keys:
+                    raise ValueError("previous dependent targets contain duplicate IDs")
+                target_keys.add(key)
+        object.__setattr__(self, "previous_dependents", tuple(self.previous_dependents))
 
 
 @dataclass(frozen=True, repr=False)
@@ -183,6 +211,10 @@ class DeltaPropagationMetrics:
     document_tombstone_count: int
     chunk_tombstone_count: int
     record_count: int
+    media_tombstone_count: int = 0
+    relation_tombstone_count: int = 0
+    acl_tombstone_count: int = 0
+    symbol_tombstone_count: int = 0
 
     def __post_init__(self) -> None:
         _require_exact_fields(
@@ -190,12 +222,14 @@ class DeltaPropagationMetrics:
             frozenset({
                 "document_count", "new_document_count", "unchanged_document_count", "changed_document_count",
                 "removed_document_count", "document_tombstone_count", "chunk_tombstone_count", "record_count",
+                "media_tombstone_count", "relation_tombstone_count", "acl_tombstone_count", "symbol_tombstone_count",
             }),
         )
         values = (
             self.document_count, self.new_document_count, self.unchanged_document_count,
             self.changed_document_count, self.removed_document_count, self.document_tombstone_count,
-            self.chunk_tombstone_count, self.record_count,
+            self.chunk_tombstone_count, self.record_count, self.media_tombstone_count,
+            self.relation_tombstone_count, self.acl_tombstone_count, self.symbol_tombstone_count,
         )
         if any(type(value) is not int or value < 0 for value in values):
             raise ValueError("metrics are invalid")
@@ -203,7 +237,7 @@ class DeltaPropagationMetrics:
             raise ValueError("document metrics are inconsistent")
         if self.document_tombstone_count > self.document_count:
             raise ValueError("document metrics are inconsistent")
-        if self.record_count != self.document_tombstone_count + self.chunk_tombstone_count:
+        if self.record_count != self.document_tombstone_count + self.chunk_tombstone_count + self.media_tombstone_count + self.relation_tombstone_count + self.acl_tombstone_count + self.symbol_tombstone_count:
             raise ValueError("record metrics are inconsistent")
 
 
@@ -246,6 +280,10 @@ def _canonical_payload(result: "DeltaPropagationResult") -> dict[str, object]:
             "record_count": metrics.record_count,
             "removed_document_count": metrics.removed_document_count,
             "unchanged_document_count": metrics.unchanged_document_count,
+            "media_tombstone_count": metrics.media_tombstone_count,
+            "relation_tombstone_count": metrics.relation_tombstone_count,
+            "acl_tombstone_count": metrics.acl_tombstone_count,
+            "symbol_tombstone_count": metrics.symbol_tombstone_count,
         } if metrics is not None else None,
         "document_outcomes": result.document_outcomes,
         "records": result.records,
@@ -335,11 +373,10 @@ class DeltaPropagationResult:
             raise ValueError("removed document metrics are inconsistent")
         if self.metrics.record_count != self.count:
             raise ValueError("record metrics are inconsistent")
-        document_count = sum(record["entity_type"] == "document" for record in self.records)
-        chunk_count = sum(record["entity_type"] == "chunk" for record in self.records)
-        if document_count + chunk_count != self.count:
+        counts = {kind: sum(record["entity_type"] == kind for record in self.records) for kind in ("document", "chunk", "media", "relation", "acl", "symbol")}
+        if sum(counts.values()) != self.count:
             raise ValueError("record entity types are invalid")
-        if self.metrics.document_tombstone_count != document_count or self.metrics.chunk_tombstone_count != chunk_count:
+        if (self.metrics.document_tombstone_count != counts["document"] or self.metrics.chunk_tombstone_count != counts["chunk"] or self.metrics.media_tombstone_count != counts["media"] or self.metrics.relation_tombstone_count != counts["relation"] or self.metrics.acl_tombstone_count != counts["acl"] or self.metrics.symbol_tombstone_count != counts["symbol"]):
             raise ValueError("record metrics are inconsistent")
         if type(self.digest) is not str or _SHA256.fullmatch(self.digest) is None:
             raise ValueError("digest is invalid")

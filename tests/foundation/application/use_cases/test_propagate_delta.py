@@ -15,6 +15,8 @@ from knowledgenexus.foundation.domain.models import (
     DeltaPropagationRequest,
     DeltaPropagationStatus,
     DocumentChunkSetSummary,
+    TombstoneEntityType,
+    TombstoneTarget,
 )
 
 
@@ -41,7 +43,7 @@ def _summary(document_id: str, content_hash: str = "a" * 64, entries=()) -> Docu
     )
 
 
-def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64):
+def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=()):
     return DeltaPropagationRequest(
         previous_dataset_version="base",
         current_dataset_version="next",
@@ -51,6 +53,7 @@ def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64,
         previous_summaries=tuple(previous),
         current_summaries=tuple(current),
         inventory=tuple(inventory),
+        previous_dependents=tuple(previous_dependents),
     )
 
 
@@ -159,6 +162,30 @@ def test_config_change_invalidates_present_previous_documents() -> None:
     )
     assert result.metrics.changed_document_count == 1
     assert result.records[0]["reason"] == "config_invalidated"
+
+
+def test_removed_document_cascades_prior_media_relation_acl_and_symbol_targets() -> None:
+    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
+    dependents = (
+        TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1"),
+        TombstoneTarget(TombstoneEntityType.RELATION, "rel:0123456789abcdef"),
+        TombstoneTarget(TombstoneEntityType.ACL, "acl:confluence:page:1"),
+        TombstoneTarget(TombstoneEntityType.SYMBOL, "symbol:git:file:1"),
+    )
+    request = _request(previous=(old,), previous_dependents=((old.document_id, dependents),))
+    result = PropagateDelta(schema_validator=Validator()).execute(request)
+    assert result.status is DeltaPropagationStatus.SUCCESS
+    assert {record["entity_type"] for record in result.records} == {"document", "chunk", "media", "relation", "acl", "symbol"}
+    assert result.metrics.media_tombstone_count == 1
+    assert result.metrics.relation_tombstone_count == 1
+    assert result.metrics.acl_tombstone_count == 1
+    assert result.metrics.symbol_tombstone_count == 1
+
+
+def test_dependents_reject_document_root_and_duplicate_targets() -> None:
+    old = _summary("confluence:page:1")
+    with pytest.raises(ValueError):
+        _request(previous=(old,), previous_dependents=((old.document_id, (TombstoneTarget(TombstoneEntityType.DOCUMENT, old.document_id),)),))
 
 
 def test_conflicting_inventory_is_atomic() -> None:

@@ -56,6 +56,8 @@ class FullSnapshotStagingWriter:
         sync_state: Iterable[Mapping[str, object]],
         tombstones: Iterable[Mapping[str, object]],
         source_scopes: Mapping[str, object] | None = None,
+        export_mode: str = "full_snapshot",
+        base_dataset_version: str | None = None,
     ) -> dict[str, object]:
         if staging_path.exists():
             raise FileExistsError(f"Staging path already exists: {staging_path}")
@@ -63,6 +65,12 @@ class FullSnapshotStagingWriter:
             raise FileNotFoundError(
                 f"Staging parent directory does not exist: {staging_path.parent}"
             )
+        if export_mode not in {"full_snapshot", "delta"}:
+            raise ValueError("unsupported export mode")
+        if export_mode == "delta" and (type(base_dataset_version) is not str or not base_dataset_version):
+            raise ValueError("delta export requires base dataset version")
+        if export_mode == "full_snapshot" and base_dataset_version is not None:
+            raise ValueError("full snapshot cannot declare base dataset version")
 
         staging_path.mkdir()
         try:
@@ -80,12 +88,13 @@ class FullSnapshotStagingWriter:
             )
             manifest = ManifestRecordBuilder.build(
                 dataset_version=dataset_version,
-                export_mode="full_snapshot",
+                export_mode=export_mode,
                 generated_at=generated_at,
                 config_hash=config_hash,
                 chunker_version=chunker_version,
                 schemas_version=schemas_version,
                 counts=counts,
+                base_dataset_version=base_dataset_version,
                 source_scopes=source_scopes,
             )
             validator.validate_record("Manifest", manifest)

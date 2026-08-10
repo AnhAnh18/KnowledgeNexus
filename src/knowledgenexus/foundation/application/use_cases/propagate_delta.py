@@ -79,6 +79,7 @@ class PropagateDelta:
                 ):
                     raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
                 inventory[entry.document_id] = entry
+            dependents = {document_id: targets for document_id, targets in request.previous_dependents}
 
             records: list[dict[str, object]] = []
             document_outcomes: list[tuple[str, str]] = []
@@ -110,6 +111,7 @@ class PropagateDelta:
                             old,
                             _REASON_BY_STATE[state],
                             request,
+                            dependents=dependents.get(document_id, ()),
                             source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
                         )
                     )
@@ -126,6 +128,7 @@ class PropagateDelta:
                             old,
                             TombstoneReason.CONFIG_INVALIDATED,
                             request,
+                            dependents=dependents.get(document_id, ()),
                             source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
                         )
                     )
@@ -147,6 +150,10 @@ class PropagateDelta:
             records = self._deduplicate_and_sort(records)
             document_tombstones = sum(record["entity_type"] == "document" for record in records)
             chunk_tombstones = sum(record["entity_type"] == "chunk" for record in records)
+            media_tombstones = sum(record["entity_type"] == "media" for record in records)
+            relation_tombstones = sum(record["entity_type"] == "relation" for record in records)
+            acl_tombstones = sum(record["entity_type"] == "acl" for record in records)
+            symbol_tombstones = sum(record["entity_type"] == "symbol" for record in records)
             metrics = DeltaPropagationMetrics(
                 document_count=len(union_ids),
                 new_document_count=new_count,
@@ -156,6 +163,10 @@ class PropagateDelta:
                 document_tombstone_count=document_tombstones,
                 chunk_tombstone_count=chunk_tombstones,
                 record_count=len(records),
+                media_tombstone_count=media_tombstones,
+                relation_tombstone_count=relation_tombstones,
+                acl_tombstone_count=acl_tombstones,
+                symbol_tombstone_count=symbol_tombstones,
             )
             payload = {
                 "base_dataset_version": request.previous_dataset_version,
@@ -170,6 +181,10 @@ class PropagateDelta:
                     "record_count": metrics.record_count,
                     "removed_document_count": metrics.removed_document_count,
                     "unchanged_document_count": metrics.unchanged_document_count,
+                    "media_tombstone_count": metrics.media_tombstone_count,
+                    "relation_tombstone_count": metrics.relation_tombstone_count,
+                    "acl_tombstone_count": metrics.acl_tombstone_count,
+                    "symbol_tombstone_count": metrics.symbol_tombstone_count,
                 },
                 "document_outcomes": tuple(document_outcomes),
                 "records": tuple(records),
@@ -206,13 +221,14 @@ class PropagateDelta:
         request: DeltaPropagationRequest,
         *,
         source_version_last_seen: str | None = None,
+        dependents: tuple[TombstoneTarget, ...] = (),
     ) -> list[dict[str, object]]:
         root = TombstoneTarget(
             TombstoneEntityType.DOCUMENT,
             summary.document_id,
             source_version_last_seen=source_version_last_seen,
         )
-        children = tuple(TombstoneTarget(TombstoneEntityType.CHUNK, entry.chunk_id) for entry in summary.entries)
+        children = tuple(TombstoneTarget(TombstoneEntityType.CHUNK, entry.chunk_id) for entry in summary.entries) + tuple(dependents)
         result = self._projector.execute(
             TombstoneProjectionRequest(
                 root=root,
