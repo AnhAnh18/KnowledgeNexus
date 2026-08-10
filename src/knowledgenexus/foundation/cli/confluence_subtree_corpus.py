@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -26,6 +27,27 @@ def _load_subtree_selection(path: Path, max_pages: int) -> tuple[ConfluencePageW
     if type(payload) is not list or not payload or len(payload) > max_pages or len(payload) > 5000:
         raise ValueError("invalid selection")
     return tuple(ConfluencePageWorkItem(page_id=x["page_id"], crawled_at=x["crawled_at"], expected_source_version=x["expected_source_version"]) for x in payload)
+
+def _atomic_json(path: Path, payload: object) -> None:
+    if not path.is_absolute():
+        raise ValueError("state path is invalid")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.is_symlink():
+        raise ValueError("state artifact is unsafe")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    tmp.replace(path)
+
+def _state_path(state: Path, run_id: str, name: str) -> Path:
+    if type(run_id) is not str or not run_id:
+        raise ValueError("run id is invalid")
+    if not state.is_absolute():
+        raise ValueError("state path is invalid")
+    root = state / "runs" / run_id
+    if root.exists() and not root.is_dir():
+        raise ValueError("state path is invalid")
+    root.mkdir(parents=True, exist_ok=True)
+    return root / name
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -77,12 +99,29 @@ def main(argv: list[str] | None = None) -> int:
                 # restarts and are enforced before every outbound attempt.
                 result_obj = composition.inventory_use_case(max_search_pages=args.max_pages).execute(request=request)
                 snapshot = result_obj.snapshot
-                result = {"status": result_obj.status, "phase": args.phase, "selected_pages": (snapshot.inventory_total if snapshot is not None else 0)}
+                if snapshot is None:
+                    raise ValueError("inventory snapshot missing")
+                from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+                from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ResumeExplicitRunRequest
+                with composition.checkpoint_run_port.resume_explicit_run_id(ResumeExplicitRunRequest(workspace=state, run_id=snapshot.run_id, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)) as session:
+                    from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
+                    occurrences = tuple(item for item in session.stream_inventory_occurrences(batch_size=100) if type(item) is InventoryOccurrence)
+                occurrences = tuple(sorted(occurrences, key=lambda x: (x.include_root_ordinal, x.window_start, x.item_ordinal, x.page_id)))
+                if any(x.metadata.updated_at is None for x in occurrences):
+                    raise ValueError("inventory timestamp missing")
+                rows = [{"page_id": x.page_id, "crawled_at": x.metadata.updated_at, "expected_source_version": x.metadata.source_version} for x in occurrences]
+                if len(rows) > args.max_pages:
+                    raise ValueError("inventory exceeds bound")
+                rid = str(snapshot.run_id)
+                _atomic_json(_state_path(state, rid, "inventory-selection.json"), {"run_id": rid, "generation_id": rid, "selection_identity": hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest(), "items": rows})
+                _atomic_json(state / "inventory.json", rows)
+                result = {"status": result_obj.status, "phase": args.phase, "selected_pages": len(rows), "run_id": rid}
             elif not args.selection_path: raise ValueError("selection input is required")
             else:
                 selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
                 state.mkdir(parents=True, exist_ok=True)
-                (state / "inventory.json").write_text(json.dumps([{"page_id": x.page_id, "crawled_at": x.crawled_at, "expected_source_version": x.expected_source_version} for x in selection], sort_keys=True), encoding="utf-8")
+                rows = [{"page_id": x.page_id, "crawled_at": x.crawled_at, "expected_source_version": x.expected_source_version} for x in selection]
+                _atomic_json(state / "inventory.json", rows)
                 result = {"status":"complete", "phase":"inventory", "selected_pages":len(selection)}
         elif args.phase == "capture-pages":
             if not args.raw_root or not args.profile_path or not args.run_id or not args.space_key or not args.root_page_id:
@@ -109,9 +148,14 @@ def main(argv: list[str] | None = None) -> int:
                 result_obj = use_case.run(run_id=CrawlRunId(args.run_id), occurrences=occurrences, stop_after_batches=None)
             result = {"status": "complete" if result_obj.complete else "failed", "phase": args.phase, "captured": result_obj.captured, "replayed": result_obj.replayed, "skipped": result_obj.skipped, "failed": result_obj.failed}
         elif args.phase == "process-pages":
-            if not args.raw_root or not args.selection_path or not args.profile_path or not args.tokenizer_assets_dir or not args.run_id:
+            if not args.raw_root or not args.profile_path or not args.tokenizer_assets_dir or not args.run_id:
                 raise ValueError("process inputs are required")
-            selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
+            selection_file = Path(args.selection_path) if args.selection_path else _state_path(state, args.run_id, "inventory-selection.json")
+            if selection_file.name == "inventory-selection.json":
+                envelope = json.loads(selection_file.read_text(encoding="utf-8")); selection_rows = envelope.get("items", envelope)
+                selection = tuple(ConfluencePageWorkItem(page_id=x["page_id"], crawled_at=x["crawled_at"], expected_source_version=x.get("expected_source_version")) for x in selection_rows)
+            else:
+                selection = _load_subtree_selection(selection_file, args.max_pages)
             from knowledgenexus.foundation.application.use_cases.process_confluence_page_set import ProcessConfluencePageSet
             from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
             from knowledgenexus.foundation.domain.models.confluence_page_set import ACTIVE_PAGE_SET_PROFILE_IDENTITY, ConfluencePageSetRequest
@@ -124,13 +168,22 @@ def main(argv: list[str] | None = None) -> int:
             processed = ProcessConfluencePageSet(chunking_profile=profile, tokenizer=BgeM3LocalTokenizer(profile=profile, tokenizer_assets_dir=Path(args.tokenizer_assets_dir)), raw_page_store=ConfluenceRawPageGenerationStore(raw_root=Path(args.raw_root)), raw_page_mapper=ConfluenceDataCenterRawPageMapper(), storage_normalizer=ConfluenceStorageXhtmlNormalizer(), schema_validator=FoundationSchemaValidator()).execute(request=request)
             if not processed.documents or not processed.chunks or getattr(processed.metrics, "failed_pages", 0):
                 raise ValueError("page processing incomplete")
+            refs = []
+            for page_id, intents in processed.reference_intents_by_page.items():
+                for intent in intents:
+                    if getattr(intent, "kind", None) == "drawio":
+                        refs.append({"parent_page_id": page_id, "filename": intent.target_identity, "source_version": intent.placeholder_identity})
+            refs.sort(key=lambda x: (x["parent_page_id"], x["filename"], x["source_version"]))
+            selection_identity = hashlib.sha256(json.dumps([{ "page_id": x.page_id, "crawled_at": x.crawled_at, "expected_source_version": x.expected_source_version} for x in selection], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            _atomic_json(_state_path(state, args.run_id, "processing-state.json"), {"run_id": args.run_id, "generation_id": args.run_id, "selection_identity": selection_identity, "page_count": len(selection), "completed_pages": len(selection) - getattr(processed.metrics, "failed_pages", 0), "failed_pages": getattr(processed.metrics, "failed_pages", 0), "drawio_references": refs})
             result = {"status": "complete", "phase": args.phase, "page_count": len(selection), "document_count": len(processed.documents), "chunk_count": len(processed.chunks)}
         elif args.phase == "capture-drawio":
-            if not (args.space_key and args.root_page_id and args.profile_path and args.raw_root and args.drawio_references_path):
+            if not (args.space_key and args.root_page_id and args.profile_path and args.raw_root and args.run_id):
                 raise ValueError("drawio capture configuration is required")
             from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
             from knowledgenexus.foundation.domain.models.media_body_materialization import MediaBodyStoreBudget
-            refs_payload = json.loads(Path(args.drawio_references_path).read_text(encoding="utf-8"))
+            processing_state = _state_path(state, args.run_id, "processing-state.json")
+            refs_payload = json.loads(processing_state.read_text(encoding="utf-8")).get("drawio_references", [])
             if type(refs_payload) is not list:
                 raise ValueError("drawio references are invalid")
             refs = tuple(DrawioReference(parent_page_id=x["parent_page_id"], filename=x["filename"], source_version=x["source_version"]) for x in refs_payload)
@@ -143,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
             composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=args.max_pages)
             budget = MediaBodyStoreBudget(max_body_bytes=profile["drawio_max_body_bytes"], max_total_bytes=profile["drawio_max_total_bytes"], minimum_free_disk_reserve_bytes=profile["minimum_free_disk_reserve_bytes"])
             observer, materializer, processor = composition.attachment_components(attachment_root=Path(args.raw_root) / "attachments", budget=budget)
-            result = {"status": "complete", "phase": args.phase, **capture_drawio_with_production_components(references=refs, attachment_observer=observer, body_materializer=materializer, media_processor=processor, config=config, state_path=state / "drawio-state.json")}
+            result = {"status": "complete", "phase": args.phase, **capture_drawio_with_production_components(references=refs, attachment_observer=observer, body_materializer=materializer, media_processor=processor, config=config, state_path=_state_path(state, args.run_id, "drawio-state.json"))}
             if result["drawio_references_resolved"] != result["drawio_references_observed"]:
                 raise ValueError("drawio capture incomplete")
         elif args.phase == "export":
@@ -163,9 +216,13 @@ def main(argv: list[str] | None = None) -> int:
             page_result = ProcessConfluencePageSet(chunking_profile=profile, tokenizer=BgeM3LocalTokenizer(profile=profile, tokenizer_assets_dir=assets), raw_page_store=ConfluenceRawPageGenerationStore(raw_root=raw_root), raw_page_mapper=ConfluenceDataCenterRawPageMapper(), storage_normalizer=ConfluenceStorageXhtmlNormalizer(), schema_validator=FoundationSchemaValidator()).execute(request=request)
             intents = tuple(intent for values in page_result.reference_intents_by_page.values() for intent in values)
             drawio_observed = sum(getattr(intent, "kind", None) == "drawio" for intent in intents)
-            drawio_state_path = state / "drawio-state.json"
+            processing_state_path = _state_path(state, args.run_id, "processing-state.json")
+            processing_state = json.loads(processing_state_path.read_text(encoding="utf-8"))
+            current_refs = sorted(tuple((x["parent_page_id"], x["filename"], x["source_version"])) for x in processing_state.get("drawio_references", []))
+            drawio_state_path = _state_path(state, args.run_id, "drawio-state.json")
             drawio_state = json.loads(drawio_state_path.read_text(encoding="utf-8")) if drawio_state_path.exists() else {"observed": [], "resolved": [], "failed": 0, "media_assets": []}
-            if getattr(page_result.metrics, "failed_pages", 0) or len(drawio_state.get("resolved", ())) != len(drawio_state.get("observed", ())) or drawio_state.get("failed", 0) != 0:
+            observed_state = sorted(tuple(x) for x in drawio_state.get("observed", []))
+            if getattr(page_result.metrics, "failed_pages", 0) or (current_refs and (not drawio_state_path.exists() or observed_state != current_refs)) or len(drawio_state.get("resolved", ())) != len(drawio_state.get("observed", ())) or drawio_state.get("failed", 0) != 0:
                 raise ValueError("corpus processing is incomplete")
             media_assets = tuple(drawio_state.get("media_assets", ()))
             packet = SubtreePacketExporter(validator=FoundationSchemaValidator()).publish(output_dir=out, documents=page_result.documents, chunks=page_result.chunks, media_assets=media_assets, summary={"page_corpus_complete": not bool(getattr(page_result.metrics, "failed_pages", 0)), "drawio_references_observed": len(drawio_state.get("observed", ())), "drawio_references_resolved": len(drawio_state.get("resolved", ())), "drawio_assets_failed": drawio_state.get("failed", 0)})
