@@ -64,13 +64,22 @@ def main(argv: list[str] | None = None) -> int:
             result_obj = harness.capture_pages([x.page_id for x in selection], lambda pid: (source / f"{pid}.bin").read_bytes())
             result = {"status": result_obj["status"], "phase": args.phase, **result_obj}
         elif args.phase == "process-pages":
-            if not args.raw_root or not args.selection_path:
+            if not args.raw_root or not args.selection_path or not args.profile_path or not args.tokenizer_assets_dir or not args.run_id:
                 raise ValueError("process inputs are required")
-            # Processing is intentionally materialized by the export phase;
-            # this phase validates the bounded selection and records progress.
             selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
-            (state / "processed-pages.json").write_text(json.dumps({"page_count": len(selection)}, sort_keys=True), encoding="utf-8")
-            result = {"status": "complete", "phase": args.phase, "page_count": len(selection)}
+            from knowledgenexus.foundation.application.use_cases.process_confluence_page_set import ProcessConfluencePageSet
+            from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+            from knowledgenexus.foundation.domain.models.confluence_page_set import ACTIVE_PAGE_SET_PROFILE_IDENTITY, ConfluencePageSetRequest
+            from knowledgenexus.foundation.infrastructure.config.chunking_profile_loader import load_chunking_profile
+            from knowledgenexus.foundation.infrastructure.processors import ConfluenceDataCenterRawPageMapper, ConfluenceStorageXhtmlNormalizer
+            from knowledgenexus.foundation.infrastructure.raw_store import ConfluenceRawPageGenerationStore
+            from knowledgenexus.foundation.infrastructure.tokenization import BgeM3LocalTokenizer
+            profile = load_chunking_profile(Path(args.profile_path))
+            request = ConfluencePageSetRequest(run_id=CrawlRunId(args.run_id), generation_id=CrawlRunId(args.run_id), items=selection, profile_identity=ACTIVE_PAGE_SET_PROFILE_IDENTITY)
+            processed = ProcessConfluencePageSet(chunking_profile=profile, tokenizer=BgeM3LocalTokenizer(profile=profile, tokenizer_assets_dir=Path(args.tokenizer_assets_dir)), raw_page_store=ConfluenceRawPageGenerationStore(raw_root=Path(args.raw_root)), raw_page_mapper=ConfluenceDataCenterRawPageMapper(), storage_normalizer=ConfluenceStorageXhtmlNormalizer(), schema_validator=FoundationSchemaValidator()).execute(request=request)
+            if not processed.documents or not processed.chunks or getattr(processed.metrics, "failed_pages", 0):
+                raise ValueError("page processing incomplete")
+            result = {"status": "complete", "phase": args.phase, "page_count": len(selection), "document_count": len(processed.documents), "chunk_count": len(processed.chunks)}
         elif args.phase == "capture-drawio":
             # Draw.io capture requires the production metadata/body adapters;
             # never report a zero-counter run as a complete corpus.
@@ -92,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
             page_result = ProcessConfluencePageSet(chunking_profile=profile, tokenizer=BgeM3LocalTokenizer(profile=profile, tokenizer_assets_dir=assets), raw_page_store=ConfluenceRawPageGenerationStore(raw_root=raw_root), raw_page_mapper=ConfluenceDataCenterRawPageMapper(), storage_normalizer=ConfluenceStorageXhtmlNormalizer(), schema_validator=FoundationSchemaValidator()).execute(request=request)
             intents = tuple(intent for values in page_result.reference_intents_by_page.values() for intent in values)
             drawio_observed = sum(getattr(intent, "kind", None) == "drawio" for intent in intents)
+            if getattr(page_result.metrics, "failed_pages", 0) or drawio_observed:
+                raise ValueError("corpus processing is incomplete")
             packet = SubtreePacketExporter(validator=FoundationSchemaValidator()).publish(output_dir=out, documents=page_result.documents, chunks=page_result.chunks, media_assets=(), summary={"page_corpus_complete": not bool(getattr(page_result.metrics, "failed_pages", 0)), "drawio_references_observed": drawio_observed, "drawio_references_resolved": 0, "drawio_assets_failed": drawio_observed})
             result = {"status": "complete", "phase": args.phase, "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": 0}
         sys.stdout.write(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")

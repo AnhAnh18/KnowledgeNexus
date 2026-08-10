@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
-from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain
+from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain, require_plain_file
 
 PACKET_FORMAT_VERSION = "confluence-subtree-indexing-packet-v1"
 DEFAULT_BATCH_SIZE = 100
@@ -231,13 +231,13 @@ def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachm
                 failures += 1
                 continue
             downloaded_bytes += len(body)
+            asset = dict(process_body(match, body))
+            if validate is not None:
+                validate("MediaAsset", asset)
             if publish_body is not None:
                 publish_body(match, body)
             if acknowledge is not None:
                 acknowledge(match)
-            asset = dict(process_body(match, body))
-            if validate is not None:
-                validate("MediaAsset", asset)
             assets.append(asset)
             resolved += 1
         except Exception:
@@ -252,7 +252,8 @@ class ConfluenceSubtreeCorpusHarness:
         if type(config) is not ConfluenceSubtreeCorpusConfig:
             raise TypeError("config is invalid")
         if not isinstance(state_dir, Path) or not state_dir.is_absolute(): raise ValueError("state_dir must be absolute")
-        if state_dir.is_symlink(): raise ValueError("state_dir must not be a symlink")
+        require_plain_directory_chain(state_dir.parent)
+        if state_dir.exists() and state_dir.is_dir(): require_plain_directory_chain(state_dir)
         self.config, self.state_dir = config, state_dir
         state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -261,16 +262,16 @@ class ConfluenceSubtreeCorpusHarness:
             raise TypeError("fetch_page is invalid")
         batches = partition_page_ids(page_ids, batch_size=self.config.batch_size, max_pages=self.config.max_pages)
         pages_root = self.state_dir / "pages"
-        if pages_root.exists() and pages_root.is_symlink(): raise ValueError("pages directory must not be a symlink")
+        if pages_root.exists(): require_plain_directory_chain(pages_root)
         # Resume from the first batch that still has missing artifacts.
-        start = next((i for i, batch in enumerate(batches) if any(not (pages_root / f"{p}.bin").is_file() for p in batch)), len(batches))
+        start = next((i for i, batch in enumerate(batches) if any(not _valid_page_artifact(pages_root / f"{p}.bin") for p in batch)), len(batches))
         selected = batches[start:start + self.config.stop_after_batches]
         captured = 0
         total_bytes = sum(p.stat().st_size for p in pages_root.glob("*.bin")) if pages_root.is_dir() else 0
         for batch in selected:
             for page_id in batch:
                 target = self.state_dir / "pages" / f"{page_id}.bin"
-                if target.exists(): continue
+                if _valid_page_artifact(target): continue
                 body = fetch_page(page_id)
                 if type(body) is not bytes or len(body) > self.config.page_bytes or total_bytes + len(body) > self.config.total_bytes: raise ValueError("page budget exhausted")
                 usage = shutil.disk_usage(self.state_dir)
@@ -283,6 +284,14 @@ class ConfluenceSubtreeCorpusHarness:
                 total_bytes += len(body)
         complete = start + len(selected) >= len(batches)
         return {"status": "complete" if complete else "stopped", "batches": len(selected), "captured_pages": captured}
+
+
+def _valid_page_artifact(path: Path) -> bool:
+    try:
+        require_plain_file(path)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 __all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "capture_drawio_assets", "match_drawio_attachment", "partition_page_ids", "process_preserved_pages", "PACKET_FORMAT_VERSION"]

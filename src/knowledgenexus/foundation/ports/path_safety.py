@@ -19,4 +19,10 @@ def require_plain_directory_chain(path: Path) -> None:
             raise ValueError("directory path is not plain")
 
 
-__all__ = ["require_plain_directory_chain"]
+def require_plain_file(path: Path) -> None:
+    details = os.lstat(path)
+    if _is_reparse(details) or stat.S_ISLNK(details.st_mode) or not stat.S_ISREG(details.st_mode):
+        raise ValueError("file is not plain")
+
+
+__all__ = ["require_plain_directory_chain", "require_plain_file"]
