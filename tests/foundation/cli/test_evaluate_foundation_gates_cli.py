@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -255,3 +256,40 @@ def test_cli_rejects_configuration_without_echoing_argument(capsys: pytest.Captu
     captured = capsys.readouterr()
     assert json.loads(captured.err) == {"category": "configuration", "status": "failed"}
     assert "--gate" not in captured.err
+
+
+def test_module_entry_uses_process_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = _write(tmp_path, {"request": {
+        "profile_id": "m7-crawl-scale-acceptance-v2",
+        "target_pages": 10000,
+        "first_readback": _readback(),
+        "second_readback": _readback(),
+        "evidence_kind": "sanitized_real_capture",
+    }})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["evaluate-foundation-gates", "--gate", "scale", "--input", str(path)],
+    )
+
+    assert cli.main() == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "pass"
+
+
+def test_module_help_uses_standard_success_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["evaluate-foundation-gates", "--help"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "evaluate-foundation-gates" in captured.out
+    assert captured.err == ""

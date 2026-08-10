@@ -42,10 +42,20 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
 class _Fetcher:
     def __init__(self, response: object) -> None:
         self.response = response
-        self.calls: list[tuple[str, str, int]] = []
+        self.calls: list[tuple[str, str, str, str, int]] = []
 
-    def fetch_attachment_body(self, *, attachment_id: str, filename: str, max_bytes: int):
-        self.calls.append((attachment_id, filename, max_bytes))
+    def fetch_attachment_body(
+        self,
+        *,
+        attachment_id: str,
+        parent_page_id: str,
+        filename: str,
+        source_version: str,
+        max_bytes: int,
+    ):
+        self.calls.append(
+            (attachment_id, parent_page_id, filename, source_version, max_bytes)
+        )
         return self.response
 
 
@@ -150,7 +160,7 @@ def test_happy_path_downloads_once_and_builds_schema_valid_asset(tmp_path: Path)
     assert result.asset["download_status"] == "downloaded"
     assert result.asset["processing_status"] == "not_processed"
     assert result.asset["content_hash"] == hashlib.sha256(b"body").hexdigest()
-    assert len(fetcher.calls) == 1
+    assert fetcher.calls == [("2000", "1000", "diagram.drawio", "4", 100)]
     assert len(store.published) == 1
 
 
@@ -186,6 +196,33 @@ def test_non_download_policy_fails_before_fetch() -> None:
             decision=MediaPolicyDecision(attachment_id="2000", policy="metadata_only"),
         )
     assert error.value.category is MediaBodyMaterializationFailureCategory.INVALID_POLICY
+    assert fetcher.calls == []
+    assert store.published == []
+
+
+def test_download_requires_observed_attachment_version_before_fetch() -> None:
+    fetcher = _Fetcher(RawHttpObservation(status_code=200, body=b"body"))
+    store = _Store(Path("C:/synthetic-root"))
+    observation = ConfluenceAttachmentObservation(
+        attachment_id="2000",
+        parent_page_id="1000",
+        filename="diagram.drawio",
+        mime_type="application/xml",
+        size_bytes=4,
+        source_version=None,
+        updated_at=None,
+        crawled_at="2026-08-05T00:00:00Z",
+    )
+
+    with pytest.raises(MediaBodyMaterializationError) as error:
+        _use_case(fetcher, store).execute(
+            observation=observation,
+            decision=MediaPolicyDecision(
+                attachment_id="2000", policy="download_and_process"
+            ),
+        )
+
+    assert error.value.category is MediaBodyMaterializationFailureCategory.INVALID_OBSERVATION
     assert fetcher.calls == []
     assert store.published == []
 

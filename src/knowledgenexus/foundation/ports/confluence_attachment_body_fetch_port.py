@@ -48,7 +48,9 @@ class ConfluenceAttachmentBodyFetchPort(Protocol):
         self,
         *,
         attachment_id: str,
+        parent_page_id: str,
         filename: str,
+        source_version: str,
         max_bytes: int,
     ) -> RawHttpObservation: ...
 

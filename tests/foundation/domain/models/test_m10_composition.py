@@ -6,6 +6,7 @@ import pytest
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 from knowledgenexus.foundation.domain.models.m10_composition import M10ConfluenceHandoff, M10GitHandoff, compose_m10_projection
 from knowledgenexus.foundation.domain.models.m10_snapshot import M10ConfluenceScope, M10MediaPolicy, M10ProfileIdentity, M10SnapshotError, M10SnapshotRequest
+from knowledgenexus.foundation.domain.models import m10_snapshot as m10_snapshot_module
 from knowledgenexus.foundation.domain.models.chunking_profile import ChunkingProfile, TokenizerAsset
 from knowledgenexus.foundation.domain.models.jira_relation_profile import JIRA_EXTRACTION_MODE, JIRA_KEY_PATTERN, JiraRelationProfile
 from knowledgenexus.foundation.domain.models.one_page_export import OnePageExportProfileBundle
@@ -46,6 +47,23 @@ def test_composition_merges_sources_deterministically(tmp_path):
     projection = compose_m10_projection(_request(tmp_path), *_handoffs(), schema_validator=NoopValidator())
     assert tuple(record["document_id"] for record in projection.documents) == ("confluence:page:123", "git:file:src-a.py")
     assert projection.metrics.documents == 2 and projection.tombstones == ()
+
+
+def test_snapshot_request_rejects_windows_junction_dataset_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = getattr(m10_snapshot_module.os.path, "isjunction", None)
+
+    def isjunction(path: object) -> bool:
+        if Path(path) == tmp_path:
+            return True
+        return bool(original(path)) if callable(original) else False
+
+    monkeypatch.setattr(m10_snapshot_module.os.path, "isjunction", isjunction, raising=False)
+
+    with pytest.raises(M10SnapshotError, match="unsafe dataset_root"):
+        _request(tmp_path)
 
 
 @pytest.mark.parametrize("bad", [None, object(), {"run_id": RUN}])

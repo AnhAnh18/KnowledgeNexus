@@ -17,6 +17,11 @@ class Fetch:
 class EstimatingFetch(Fetch):
     def estimate_page_bytes(self, *, page_id): return len(page_id)
 
+class FixedSizeFetch(Fetch):
+    def __init__(self, size): super().__init__(); self.size = size
+    def estimate_page_bytes(self, *, page_id): return self.size
+    def fetch_page_raw(self, *, page_id): self.calls += 1; return b"x" * self.size
+
 def test_partition_is_deterministic_and_default_is_100():
     reqs = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(201))
     assert [len(x.occurrences) for x in reqs] == [100, 100, 1]
@@ -114,6 +119,14 @@ def test_estimator_enforces_page_and_global_budgets_conjunctively_before_fetch()
     # must not be called when both known estimates are evaluated.
     result = driver.run((req,), config=BatchRunConfig(max_attempts=1, max_page_bytes=100, max_bytes=5))
     assert result.failed == 1 and fetch.calls == 0
+
+def test_page_byte_budget_is_per_response_not_cumulative():
+    fetch = FixedSizeFetch(60); store = InMemoryConfluenceCrawlBatchStore()
+    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
+    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(2))[0]
+    result = driver.run((req,), config=BatchRunConfig(max_attempts=1, max_page_bytes=100, max_bytes=1000))
+    assert result.committed == 1 and result.failed == 0
+    assert result.page_count == 2 and result.byte_count == 120 and fetch.calls == 2
 
 def test_expired_retry_requeue_cannot_reset_attempt_or_reclaim_same_token():
     fetch = Fetch(fail=1); store = InMemoryConfluenceCrawlBatchStore()

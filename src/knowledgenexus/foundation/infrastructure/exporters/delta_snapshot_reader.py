@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from copy import deepcopy
 from dataclasses import dataclass
@@ -24,6 +25,30 @@ from .full_snapshot_staging_writer import JSONL_FILE_SCHEMA_PAIRS
 
 _DATASET_VERSION = re.compile(r"^v[0-9]{8}-[0-9]{6}-[0-9]{6}Z$")
 _CONCRETE_PATH_TYPE = type(Path())
+
+
+def _is_reparse_point(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(os.path, "isjunction", None)
+    if callable(is_junction) and is_junction(path):
+        return True
+    try:
+        return bool(
+            getattr(os.stat(path, follow_symlinks=False), "st_file_attributes", 0)
+            & 0x400
+        )
+    except (AttributeError, OSError, ValueError, TypeError):
+        raise ValueError("unsafe snapshot path") from None
+
+
+def _has_reparse_component(path: Path) -> bool:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if os.path.lexists(current) and _is_reparse_point(current):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -68,7 +93,7 @@ class PublishedSnapshotReader:
     """Read a previously published snapshot by its dataset version."""
 
     def __init__(self, *, dataset_root: Path, validator: FoundationSchemaValidator) -> None:
-        if type(dataset_root) is not _CONCRETE_PATH_TYPE or not dataset_root.is_absolute() or not dataset_root.is_dir() or dataset_root.is_symlink():
+        if type(dataset_root) is not _CONCRETE_PATH_TYPE or not dataset_root.is_absolute() or not dataset_root.is_dir() or _has_reparse_component(dataset_root):
             raise ValueError("invalid dataset root")
         if type(validator) is not FoundationSchemaValidator:
             raise TypeError("invalid validator")
@@ -84,7 +109,7 @@ class PublishedSnapshotReader:
         if dataset_version in seen or len(seen) >= 32:
             raise ValueError("snapshot version chain is invalid")
         path = self._dataset_root / dataset_version
-        if path.parent != self._dataset_root or not path.is_dir() or path.is_symlink():
+        if path.parent != self._dataset_root or not path.is_dir() or _has_reparse_component(path):
             raise ValueError("published snapshot is unavailable")
         result = read_published_snapshot(
             path,
@@ -135,7 +160,7 @@ def read_delta_snapshot(
     validator: FoundationSchemaValidator,
     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
 ) -> DeltaSnapshotReadback:
-    if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or path.is_symlink():
+    if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or _has_reparse_component(path):
         raise ValueError("invalid snapshot path")
     if type(validator) is not FoundationSchemaValidator:
         raise TypeError("invalid validator")
@@ -205,7 +230,7 @@ def read_published_snapshot(
     expected_dataset_version: str | None = None,
 ) -> PublishedSnapshotReadback:
     """Read either a full or delta publication through the same strict seam."""
-    if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or path.is_symlink():
+    if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or _has_reparse_component(path):
         raise ValueError("invalid snapshot path")
     if type(validator) is not FoundationSchemaValidator:
         raise TypeError("invalid validator")
