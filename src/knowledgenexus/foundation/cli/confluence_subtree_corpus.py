@@ -11,6 +11,8 @@ from knowledgenexus.foundation.application.use_cases.confluence_subtree_corpus i
     ConfluenceSubtreeCorpusConfig,
     ConfluenceSubtreeCorpusHarness,
     SubtreePacketExporter,
+    DrawioReference,
+    capture_drawio_with_production_components,
 )
 from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
 from knowledgenexus.foundation.domain.models.confluence_page_set import ConfluencePageWorkItem
@@ -43,6 +45,7 @@ def _parser() -> argparse.ArgumentParser:
         q.add_argument("--resume-unique", action="store_true")
         q.add_argument("--space-key")
         q.add_argument("--root-page-id")
+        q.add_argument("--drawio-references-path")
     return p
 
 
@@ -104,9 +107,21 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("page processing incomplete")
             result = {"status": "complete", "phase": args.phase, "page_count": len(selection), "document_count": len(processed.documents), "chunk_count": len(processed.chunks)}
         elif args.phase == "capture-drawio":
-            # Draw.io capture requires the production metadata/body adapters;
-            # never report a zero-counter run as a complete corpus.
-            raise ValueError("drawio capture adapters are required")
+            if not (args.space_key and args.root_page_id and args.profile_path and args.raw_root and args.drawio_references_path):
+                raise ValueError("drawio capture configuration is required")
+            from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
+            from knowledgenexus.foundation.domain.models.media_body_materialization import MediaBodyStoreBudget
+            refs_payload = json.loads(Path(args.drawio_references_path).read_text(encoding="utf-8"))
+            if type(refs_payload) is not list:
+                raise ValueError("drawio references are invalid")
+            refs = tuple(DrawioReference(parent_page_id=x["parent_page_id"], filename=x["filename"], source_version=x["source_version"]) for x in refs_payload)
+            profile = json.loads(Path(args.profile_path).read_text(encoding="utf-8"))
+            composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=args.max_pages)
+            budget = MediaBodyStoreBudget(max_body_bytes=int(profile.get("drawio_max_body_bytes", 4 * 1024 * 1024)), max_total_bytes=int(profile.get("drawio_max_total_bytes", 4 * 1024 * 1024 * 1024)), minimum_free_disk_reserve_bytes=int(profile.get("minimum_free_disk_reserve_bytes", 1024 * 1024 * 1024)))
+            observer, materializer, processor = composition.attachment_components(attachment_root=Path(args.raw_root) / "attachments", budget=budget)
+            result = {"status": "complete", "phase": args.phase, **capture_drawio_with_production_components(references=refs, attachment_observer=observer, body_materializer=materializer, media_processor=processor, config=config)}
+            if result["drawio_references_resolved"] != result["drawio_references_observed"]:
+                raise ValueError("drawio capture incomplete")
         elif args.phase == "export":
             if not args.output_dir or not args.raw_root or not args.selection_path or not args.profile_path or not args.tokenizer_assets_dir or not args.run_id:
                 raise ValueError("export inputs are required")

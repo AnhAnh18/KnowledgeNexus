@@ -308,5 +308,10 @@ class FetchAndStoreConfluenceAttachmentBody:
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"
 
+    @property
+    def raw_attachment_store(self) -> ConfluenceRawAttachmentStorePort:
+        """Expose the approved store boundary for downstream processing."""
+        return self._raw_attachment_store
+
 
 __all__ = ["FetchAndStoreConfluenceAttachmentBody"]
