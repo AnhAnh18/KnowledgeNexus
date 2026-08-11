@@ -31,3 +31,9 @@ __all__ = [
     "publish_restriction_sidecar",
     "serialize_restriction_observations",
 ]
+from .delta_inventory_artifact_store import (
+    DeltaInventoryArtifactStore,
+    DeltaInventoryArtifactStoreError,
+)
+
+__all__ = ["DeltaInventoryArtifactStore", "DeltaInventoryArtifactStoreError"]
