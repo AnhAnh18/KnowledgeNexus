@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -258,6 +259,81 @@ class DeltaInventoryEnvelope:
             raise ValueError("envelope is invalid")
         if self.metrics.total_count != len(self.entries):
             raise ValueError("envelope is invalid")
+
+    def to_bytes(self) -> bytes:
+        payload = {
+            "format_version": self.format_version,
+            "run_id": str(self.run_id),
+            "generation_id": str(self.generation_id),
+            "current_selection_identity": self.current_selection_identity,
+            "accepted_base_dataset_version": self.accepted_base_dataset_version,
+            "current_scope_identity": self.current_scope_identity,
+            "entries": [
+                {
+                    "document_id": entry.document_id,
+                    "state": entry.state.value,
+                    "source_version_last_seen": entry.source_version_last_seen,
+                    "detail": entry.detail,
+                }
+                for entry in self.entries
+            ],
+            "metrics": {
+                "present_count": self.metrics.present_count,
+                "source_deleted_count": self.metrics.source_deleted_count,
+                "access_revoked_count": self.metrics.access_revoked_count,
+                "moved_out_of_scope_count": self.metrics.moved_out_of_scope_count,
+            },
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+    @classmethod
+    def from_bytes(cls, serialized: bytes) -> "DeltaInventoryEnvelope":
+        if type(serialized) is not bytes:
+            raise ValueError("envelope is invalid")
+        def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            result: dict[str, object] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("envelope is invalid")
+                result[key] = value
+            return result
+        try:
+            payload = json.loads(serialized.decode("utf-8"), object_pairs_hook=reject_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+            if type(payload) is not dict:
+                raise ValueError
+            entries_payload = payload["entries"]
+            metrics_payload = payload["metrics"]
+            if type(entries_payload) is not list or type(metrics_payload) is not dict:
+                raise ValueError
+            entries = tuple(
+                DeltaInventoryEntry(
+                    item["document_id"],
+                    DeltaInventoryState(item["state"]),
+                    item["source_version_last_seen"],
+                    item["detail"],
+                )
+                for item in entries_payload
+            )
+            envelope = cls(
+                payload["format_version"],
+                CrawlRunId(payload["run_id"]),
+                CrawlRunId(payload["generation_id"]),
+                payload["current_selection_identity"],
+                payload["accepted_base_dataset_version"],
+                payload["current_scope_identity"],
+                entries,
+                DeltaInventoryMetrics(
+                    metrics_payload["present_count"],
+                    metrics_payload["source_deleted_count"],
+                    metrics_payload["access_revoked_count"],
+                    metrics_payload["moved_out_of_scope_count"],
+                ),
+            )
+        except Exception:
+            raise ValueError("envelope is invalid") from None
+        if envelope.to_bytes() != serialized:
+            raise ValueError("envelope is invalid")
+        return envelope
 
 
 def _validate_w4_entry(entry: object) -> DeltaInventoryEntry:
