@@ -40,6 +40,9 @@ class Transport:
         self.calls += 1
         return self.response
 
+    def snapshot(self):
+        return type("Snapshot", (), {"requests_started_for_run": self.calls})()
+
 
 class RawStore:
     def __init__(self, existing: ConfluenceRawPageEnvelope | None = None) -> None:
@@ -48,7 +51,7 @@ class RawStore:
 
     def read_page(self, *, run_id: CrawlRunId, page_id: str) -> ConfluenceRawPageEnvelope:
         if self.existing is None:
-            raise ValueError("missing")
+            raise FileNotFoundError("missing")
         return self.existing
 
     def publish_page(self, *, envelope: ConfluenceRawPageEnvelope) -> object:
@@ -104,6 +107,24 @@ def test_matching_raw_replay_performs_no_get() -> None:
     result = CaptureDeltaInventory().execute(_request(transport, raw, artifact))
     assert transport.calls == 0
     assert result.entries[0].state.value == "source_deleted"
+
+
+def test_wrong_run_replay_fails_without_get() -> None:
+    other = CrawlRunId("123e4567-e89b-42d3-a456-426614174001")
+    raw_envelope = ConfluenceRawPageEnvelope.capture(
+        run_id=other, page_id="1", source_version="v1", http_status=404, body_bytes=b"not found"
+    )
+    transport = Transport(Response(500, b"must not fetch"))
+    with pytest.raises(DeltaInventoryCaptureError):
+        CaptureDeltaInventory().execute(_request(transport, RawStore(raw_envelope), ArtifactStore()))
+    assert transport.calls == 0
+
+
+def test_malformed_200_body_fails_closed() -> None:
+    transport = Transport(Response(200, b'{"id":"1","version":{"number":2},"ancestors":[{"id":2}]}'))
+    with pytest.raises(DeltaInventoryCaptureError):
+        CaptureDeltaInventory().execute(_request(transport, RawStore(), ArtifactStore()))
+    assert transport.calls == 1
 
 
 def test_inventory_envelope_round_trips_canonically() -> None:

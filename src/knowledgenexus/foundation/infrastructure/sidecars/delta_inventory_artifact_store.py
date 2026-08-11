@@ -6,7 +6,9 @@ from pathlib import Path
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 from knowledgenexus.foundation.domain.models.delta_inventory import DeltaInventoryEnvelope
-from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain
+from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain, require_plain_file
+
+_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
 
 class DeltaInventoryArtifactStoreError(ValueError):
@@ -48,6 +50,11 @@ class DeltaInventoryArtifactStore:
             target.parent.mkdir(parents=True, exist_ok=True)
             require_plain_directory_chain(target.parent)
             if target.exists() or target.is_symlink():
+                if target.is_symlink():
+                    raise DeltaInventoryArtifactStoreError("unsafe_target")
+                require_plain_file(target)
+                if target.stat().st_size > _MAX_ARTIFACT_BYTES:
+                    raise DeltaInventoryArtifactStoreError("artifact_too_large")
                 existing = target.read_bytes()
                 if existing != content:
                     raise DeltaInventoryArtifactStoreError("replay_conflict")
@@ -60,11 +67,17 @@ class DeltaInventoryArtifactStore:
             try:
                 os.link(temporary, target)
             except FileExistsError:
+                if target.is_symlink():
+                    raise DeltaInventoryArtifactStoreError("unsafe_target")
+                require_plain_file(target)
+                if target.stat().st_size > _MAX_ARTIFACT_BYTES:
+                    raise DeltaInventoryArtifactStoreError("artifact_too_large")
                 if target.read_bytes() != content:
                     raise DeltaInventoryArtifactStoreError("replay_conflict")
             finally:
                 temporary.unlink(missing_ok=True)
-            if target.read_bytes() != content:
+            require_plain_file(target)
+            if target.stat().st_size > _MAX_ARTIFACT_BYTES or target.read_bytes() != content:
                 raise DeltaInventoryArtifactStoreError("publication_failed")
             return target
         except DeltaInventoryArtifactStoreError:
@@ -75,6 +88,9 @@ class DeltaInventoryArtifactStore:
     def read(self, *, generation_id: CrawlRunId) -> DeltaInventoryEnvelope:
         target = self.resolve_path(generation_id=generation_id)
         try:
+            require_plain_file(target)
+            if target.stat().st_size > _MAX_ARTIFACT_BYTES:
+                raise ValueError
             return DeltaInventoryEnvelope.from_bytes(target.read_bytes())
         except Exception:
             raise DeltaInventoryArtifactStoreError("artifact_invalid") from None
