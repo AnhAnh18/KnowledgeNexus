@@ -364,6 +364,8 @@ def main(
         parse_argv = [] if argv is None and request is not None else argv
         parsed = _parse_args(parse_argv)
         _media_policy(parsed.media_policy)
+        if parsed.export_mode == "full_snapshot" and (parsed.base_dataset_version is not None or parsed.excluded_ancestor_page_ids):
+            raise _ConfigurationError
         if request is None and confluence_adapter is None and git_adapter is None:
             if argv is not None and len(argv) == 0:
                 raise M10SnapshotExportFailure("invalid_request")
