@@ -92,7 +92,8 @@ No live request.
 6. Prepare separate W5-B and W5-C runbooks. Parse-check only; do not execute.
 7. Run the complete offline preflight matrix, including asset-backed tests when
    the explicit bundle exists.
-8. Stop for independent review.
+8. Stop for owner confirmation and the separate W5-B live authorization. A
+   separate independent code/evidence review is not required at this boundary.
 
 Default W5-A changes are documentation/runbook only. If production code needs
 a fix, stop and propose a separate bounded implementation/review task.
@@ -129,8 +130,9 @@ Requirements:
 - Strict-read all eight streams, manifest counts, cross-stream closure,
   `LATEST.txt`, atomic publication and absence of staging residue.
 - Raw/state inputs remain byte-identical.
-- Stop after the one authorized live sequence and obtain independent evidence
-  review before W5-C.
+- Stop after the one authorized live sequence. Continue to W5-C only after the
+  owner inspects the sanitized W5-B outcome and grants a new W5-C live
+  authorization.
 
 ### W5-C — controlled real second sync and sparse delta
 
@@ -178,9 +180,10 @@ Require:
 - deterministic repeat into fresh roots;
 - all base/raw/state inputs unchanged.
 
-### W5-D — independent evidence review and closeout
+### W5-D — evidence reconciliation and closeout candidate
 
-Begin only after W5-B and W5-C evidence are independently approved.
+Begin only after W5-B and W5-C have completed under their separate owner
+authorizations and their sanitized local evidence is available.
 
 Documentation-only. Update the active learning/readiness state and portable
 milestone status. Record capabilities/milestones as portable truth; keep
@@ -244,14 +247,21 @@ than silently skip when it is missing. Also run `compileall`, `git diff
 
 ## 7. Review and stop rules
 
-Each stage requires a fresh independent reviewer who did not implement/fix it
-and does not edit files. Report P0-P3, commands/results, provenance, boundary
-confirmation and rerun decision.
+Use one consolidated fresh independent review after W5-D. The reviewer must not
+have implemented, fixed or operated W5 and must not edit files. Review the full
+W5-A-through-D code/runbook/evidence range and report P0-P3, exact
+commands/results, provenance, boundary confirmation and rerun decisions.
+
+Stage transitions do not require separate independent reviewers, but the live
+W5-B and W5-C invocations still require distinct explicit owner authorizations.
+The agent must stop at each live-authorization boundary and cannot treat this
+prompt as standing permission to invoke Confluence.
 
 Stop if transfer equivalence, clean execution provenance, profiles/assets,
 safe real evidence cases, fresh paths, live authorization or sanitization
 cannot be proven. Do not guess.
 
-Start with W5-A only. Return its inspection/runbook review notice and explicitly
-confirm no live request. Do not continue to W5-B/C until their separate owner
-authorization gates are satisfied.
+Start with W5-A. Return its inspection/runbook notice and explicitly confirm no
+live request. After the owner separately authorizes W5-B and later W5-C, the
+same implementation/operator agent may complete A through D. Stop after the
+W5-D closeout candidate for one consolidated independent review by Codex.
