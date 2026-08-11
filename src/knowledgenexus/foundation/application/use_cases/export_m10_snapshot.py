@@ -22,6 +22,7 @@ from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import
 )
 from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
     M10DeltaOrchestrationResult,
+    _stream_view,
 )
 from knowledgenexus.foundation.domain.models.delta_propagation import DeltaInventoryEntry
 from knowledgenexus.foundation.domain.models.m10_snapshot import (
@@ -425,9 +426,9 @@ class ExportM10Snapshot:
                 if type(orchestrated) is not M10DeltaOrchestrationResult:
                     raise ValueError
                 projection = orchestrated.projection
-                delta_base_streams = orchestrated.base_streams
-                if type(delta_base_streams) is not dict or not delta_base_streams:
+                if type(orchestrated.base_streams) is not dict or not orchestrated.base_streams:
                     raise ValueError
+                delta_base_streams = _stream_view(orchestrated.base_streams)
             else:
                 delta_base_streams = None
             projection_before = deepcopy(projection)
