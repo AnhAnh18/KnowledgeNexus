@@ -5,10 +5,12 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+from itertools import islice
 from pathlib import Path
 
 from knowledgenexus.foundation.application.use_cases.confluence_subtree_corpus import (
@@ -34,6 +36,7 @@ _PROCESSING_FIELDS = frozenset({
     "format_version", "run_id", "generation_id", "selection_identity",
     "page_count", "completed_pages", "failed_pages", "drawio_references",
 })
+_RAW_ATTACHMENT_URI = re.compile(r"raw://confluence/attachments/(?P<attachment_id>[^/]+)/(?P<content_hash>[0-9a-f]{64})")
 
 
 def _reject_duplicate_keys(pairs: list[tuple[object, object]]) -> dict[object, object]:
@@ -107,7 +110,11 @@ def _load_subtree_selection(path: Path, max_pages: int, *, expected_run_id: Craw
     if type(payload) is not list or not payload or len(payload) > max_pages or len(payload) > 5000:
         raise ValueError("invalid selection")
     items = tuple(ConfluencePageWorkItem(page_id=x["page_id"], crawled_at=x["crawled_at"], expected_source_version=x.get("expected_source_version")) for x in payload if type(x) is dict)
-    if len(items) != len(payload) or len({item.page_id for item in items}) != len(items):
+    if (
+        len(items) != len(payload)
+        or len({item.page_id for item in items}) != len(items)
+        or any(item.expected_source_version is None for item in items)
+    ):
         raise ValueError("invalid selection")
     return items
 
@@ -166,6 +173,20 @@ def _state_path(state: Path, run_id: str, name: str) -> Path:
     return root / name
 
 
+def _assert_root_page_in_selection(root_page_id: str, selection: Mapping[str, object]) -> None:
+    """Fail closed if the published selection ever drops the configured root.
+
+    A COMPLETE inventory phase implies the root was durably committed, but
+    nothing else in this module cross-checks the operator's configured
+    ``--root-page-id`` against what actually got published.
+    """
+    rows = selection.get("items")
+    if type(rows) is not list or not any(
+        type(row) is dict and row.get("page_id") == root_page_id for row in rows
+    ):
+        raise ValueError("published selection is missing the configured root page")
+
+
 def _selection_payload_from_inventory(
     *,
     run_id: CrawlRunId,
@@ -180,6 +201,8 @@ def _selection_payload_from_inventory(
             raise ValueError("inventory fact is invalid")
         page_id = fact.metadata.page_id
         version = fact.metadata.source_version
+        if version is None:
+            raise ValueError("inventory page version missing")
         if page_id in seen:
             if seen[page_id] != version:
                 raise ValueError("inventory page version conflict")
@@ -378,18 +401,25 @@ def _corpus_config(args: argparse.Namespace, profile: Mapping[str, object]) -> C
     )
 
 
-def _bounded_reliability_profile(
+def _validated_page_bound(
     args: argparse.Namespace, profile: Mapping[str, object]
-) -> dict[str, object]:
-    """Bind the operator's smaller page cap into the durable run identity."""
+) -> Mapping[str, object]:
+    """Reject an operator page cap that exceeds the approved reliability profile.
+
+    The reliability profile is a closed, fingerprinted contract: only its
+    approved values may reach the checkpoint registry or live composition
+    (``_validate_profile`` rejects anything else). The operator's smaller
+    ``--max-pages`` is therefore enforced separately, by
+    ``ConfluenceSubtreeCorpusConfig`` and by the inventory-selection bound,
+    against this unmodified profile -- it must never be written back into
+    the profile mapping itself.
+    """
     if type(args.max_pages) is not int or args.max_pages <= 0:
         raise ValueError("page bound is invalid")
     configured = profile.get("max_pages_per_run")
     if type(configured) is not int or args.max_pages > configured:
         raise ValueError("page bound exceeds reliability profile")
-    bounded = dict(profile)
-    bounded["max_pages_per_run"] = args.max_pages
-    return bounded
+    return profile
 
 
 def _drawio_config(
@@ -455,7 +485,7 @@ def _compose_page_processor(args: argparse.Namespace, *, run_id: CrawlRunId, ite
 def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     if not args.raw_root:
         raise ValueError("raw root is required")
-    profile = _bounded_reliability_profile(
+    profile = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     _corpus_config(args, profile)
@@ -486,7 +516,10 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
     with composition.checkpoint_run_port.activate_raw_generation(activation_request) as session:
         if not callable(getattr(session, "stream_inventory_occurrences", None)):
             raise ValueError("raw generation activation failed")
-        facts = tuple(session.stream_inventory_occurrences(batch_size=args.batch_size))
+        # Stop reading the durable stream one item past the operator's cap
+        # instead of draining a larger approved-profile inventory in full;
+        # the identical overflow is still rejected below.
+        facts = tuple(islice(session.stream_inventory_occurrences(batch_size=args.batch_size), args.max_pages + 1))
         session.pause_session()
     selection_path = _state_path(state, str(snapshot.run_id), "inventory-selection.json")
     if selection_path.exists():
@@ -502,6 +535,7 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
         crawled_at = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
         selection = _selection_payload_from_inventory(run_id=snapshot.run_id, facts=facts, max_pages=args.max_pages, crawled_at=crawled_at)
         _atomic_json(selection_path, selection)
+    _assert_root_page_in_selection(args.root_page_id, selection)
     return {"status": "complete", "phase": "inventory", "selected_pages": len(selection["items"]), "run_id": str(snapshot.run_id)}
 
 
@@ -509,7 +543,7 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
     if not args.raw_root or not args.run_id:
         raise ValueError("live page capture inputs are required")
     run_id = _require_run_id(args.run_id)
-    profile = _bounded_reliability_profile(
+    profile = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     _corpus_config(args, profile)
@@ -527,7 +561,7 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
     with composition.checkpoint_run_port.activate_raw_generation(request) as session:
         if not callable(getattr(session, "stream_inventory_occurrences", None)):
             raise ValueError("raw generation activation failed")
-        facts = tuple(session.stream_inventory_occurrences(batch_size=args.batch_size))
+        facts = tuple(islice(session.stream_inventory_occurrences(batch_size=args.batch_size), args.max_pages + 1))
         candidate = _selection_payload_from_inventory(run_id=run_id, facts=facts, max_pages=args.max_pages, crawled_at=selection_items[0].crawled_at)
         if candidate != selection_payload:
             raise ValueError("selection binding mismatch")
@@ -579,7 +613,7 @@ def _capture_drawio_phase(args: argparse.Namespace, state: Path) -> dict[str, ob
     if not args.run_id or not args.raw_root:
         raise ValueError("Draw.io capture inputs are required")
     run_id = _require_run_id(args.run_id)
-    profile = _bounded_reliability_profile(
+    profile = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     base_config = _corpus_config(args, profile)
@@ -641,11 +675,59 @@ def _capture_drawio_phase(args: argparse.Namespace, state: Path) -> dict[str, ob
     return {"status": "complete", "phase": "capture-drawio", "drawio_references_observed": captured["drawio_references_observed"], "drawio_references_resolved": captured["drawio_references_resolved"], "drawio_assets_failed": captured["drawio_assets_failed"]}
 
 
+def _verify_drawio_media_assets_on_disk(
+    *,
+    raw_root: Path,
+    media_assets: list[dict[str, object]],
+    profile: Mapping[str, object],
+    drawio_config: ConfluenceSubtreeCorpusConfig,
+) -> None:
+    """Re-read every Draw.io raw attachment body from disk before publication.
+
+    ``drawio-state.json`` only proves its own resolutions are internally
+    consistent; it does not prove the referenced raw evidence still exists
+    unmodified. A deleted or truncated artifact must fail export closed
+    instead of publishing a packet that claims zero Draw.io failures.
+    """
+    if not media_assets:
+        return
+    from knowledgenexus.foundation.domain.models.media_body_materialization import MediaBodyStoreBudget
+    from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store import (
+        ConfluenceRawAttachmentStore,
+    )
+    from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
+        ConfluenceRawAttachmentStoreError,
+    )
+    max_body = min(profile["max_response_bytes_per_request"], drawio_config.drawio_bytes)
+    budget = MediaBodyStoreBudget(
+        max_body_bytes=max_body, max_total_bytes=drawio_config.drawio_bytes,
+        minimum_free_disk_reserve_bytes=profile["minimum_free_disk_reserve_bytes"],
+    )
+    store = ConfluenceRawAttachmentStore(data_root=raw_root / "attachments", budget=budget)
+    for asset in media_assets:
+        raw_uri = asset.get("raw_uri")
+        content_hash = asset.get("content_hash")
+        size_bytes = asset.get("size_bytes")
+        if type(raw_uri) is not str or type(content_hash) is not str or type(size_bytes) is not int:
+            raise ValueError("drawio media asset raw evidence is invalid")
+        match = _RAW_ATTACHMENT_URI.fullmatch(raw_uri)
+        if match is None or match.group("content_hash") != content_hash:
+            raise ValueError("drawio media asset raw evidence is invalid")
+        try:
+            envelope = store.read_attachment(
+                attachment_id=match.group("attachment_id"), content_hash=content_hash,
+            )
+        except ConfluenceRawAttachmentStoreError:
+            raise ValueError("drawio media asset raw evidence is missing or modified") from None
+        if len(envelope.body_bytes) != size_bytes:
+            raise ValueError("drawio media asset raw evidence is missing or modified")
+
+
 def _export_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     if not args.run_id or not args.output_dir or not args.raw_root:
         raise ValueError("export inputs are required")
     run_id = _require_run_id(args.run_id)
-    reliability = _bounded_reliability_profile(
+    reliability = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
     config = _corpus_config(args, reliability)
@@ -670,6 +752,10 @@ def _export_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     )
     if drawio_state is not None and (drawio_state["failed"] != 0 or len(resolutions) != len(refs)):
         raise ValueError("Draw.io state incomplete")
+    _verify_drawio_media_assets_on_disk(
+        raw_root=Path(args.raw_root), media_assets=media_assets,
+        profile=reliability, drawio_config=drawio_config,
+    )
     packet = SubtreePacketExporter(validator=FoundationSchemaValidator()).publish(
         output_dir=Path(args.output_dir), documents=processed.documents,
         chunks=processed.chunks, media_assets=media_assets,

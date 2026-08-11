@@ -49,6 +49,7 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointReservationResult,
     CheckpointStateError,
     InventoryWorkItem,
+    RawPageAcknowledgement,
     RawPageReplayCommand,
     RawPageReplayFailure,
     RawPageReplayResult,
@@ -138,6 +139,11 @@ class _RunActivated:
         inspector: ConfluenceRawPageOrphanInspectionPort,
     ) -> RawPageReplayResult | RawPageReplayFailure:
         return self._state.replay_raw_page(command, inspector)
+
+    def acknowledge_raw_page(
+        self, acknowledgement: RawPageAcknowledgement
+    ) -> RawPageReplayResult | RawPageReplayFailure:
+        return self._state.acknowledge_raw_page(acknowledgement)
 
     def replay_raw_restriction(
         self,

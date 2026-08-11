@@ -124,6 +124,7 @@ def test_public_run_port_has_method_oriented_shape_and_safe_reprs(tmp_path) -> N
             "read_schema_state",
             "reserve_outbound_attempt",
             "replay_raw_page",
+            "acknowledge_raw_page",
             "replay_raw_restriction",
             "session_id",
             "snapshot",
