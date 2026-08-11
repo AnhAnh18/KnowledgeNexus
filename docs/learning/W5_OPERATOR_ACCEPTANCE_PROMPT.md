@@ -5,6 +5,42 @@
 W5 is a staged real-input acceptance and closeout task. This prompt does not
 authorize a live Confluence request by itself.
 
+## 0. Execution topology and role separation
+
+This prompt is read by a source-review/local implementation agent running in:
+
+```text
+D:\Claude\KnowledgeNexus
+```
+
+That agent is not the main-machine operator and must never receive, request,
+read or use the main-machine credentials, raw-data paths or unsanitized
+evidence.
+
+Roles are locked:
+
+```text
+LOCAL_IMPLEMENTATION_AGENT
+  reviews the plan, prepares/tests runbooks, commits portable artifacts,
+  prepares exact main-machine execution prompts, and reconciles returned
+  sanitized evidence.
+
+MAIN_MACHINE_OPERATOR
+  applies the approved transfer/runbook, performs separately authorized W5-B
+  and W5-C executions, and returns sanitized evidence packets.
+
+OWNER
+  supplies main-machine values directly to the main-machine operator and grants
+  each live authorization.
+
+INDEPENDENT_REVIEWER
+  reviews the final A-through-D code/runbook/evidence range without editing.
+```
+
+The local implementation agent may own one goal covering W5-A through W5-D,
+but that goal must wait at the W5-B/W5-C external-execution gates. Waiting for
+main-machine evidence is not permission to emulate, fabricate or replace it.
+
 ## 1. Frozen base and repository identities
 
 ```text
@@ -102,6 +138,11 @@ a fix, stop and propose a separate bounded implementation/review task.
 
 Requires separate explicit owner authorization after W5-A approval.
 
+The local implementation agent prepares the reviewed W5-B execution packet but
+does not execute it. The owner transfers it to the main-machine operator. The
+local agent resumes only after receiving an aggregate sanitized result/evidence
+packet.
+
 Reuse the existing phases; create no new crawler:
 
 ```text
@@ -137,6 +178,10 @@ Requirements:
 ### W5-C — controlled real second sync and sparse delta
 
 Requires a new explicit owner authorization after W5-B approval.
+
+The local implementation agent prepares the reviewed W5-C execution packet but
+does not execute it. All real paths, credentials and source-state details stay
+between the owner and main-machine operator.
 
 The agent must not modify/delete Confluence pages, restrictions or content.
 Any controlled source changes are performed and attested by the owner or an
@@ -184,6 +229,10 @@ Require:
 
 Begin only after W5-B and W5-C have completed under their separate owner
 authorizations and their sanitized local evidence is available.
+
+The owner transfers only the sanitized evidence packet back to the local
+implementation agent. The local agent must not request raw logs, raw sidecars,
+page IDs, filesystem paths, credentials or unsanitized Confluence content.
 
 Documentation-only. Update the active learning/readiness state and portable
 milestone status. Record capabilities/milestones as portable truth; keep
