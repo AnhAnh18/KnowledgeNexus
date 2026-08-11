@@ -105,6 +105,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--space-key", "--space-keys", action="append", dest="space_keys")
     parser.add_argument("--root-page-id", "--root-page-ids", action="append", dest="root_page_ids")
     parser.add_argument("--exclude-page-id", "--exclusions", action="append", dest="excluded_page_ids")
+    parser.add_argument("--exclude-ancestor-page-id", action="append", dest="excluded_ancestor_page_ids")
     parser.add_argument("--media-policy", choices=("disabled", "best-effort", "required"), default="disabled")
     parser.add_argument("--git-repository")
     # Identity names the pinned repository; this path identifies the local
@@ -381,7 +382,7 @@ def main(
                     store = DeltaInventoryArtifactStore(state_root=Path(parsed.state_dir) / "runs")
                     envelope = store.read(generation_id=request.generation_id)
                     expected_selection = selection_identity(tuple(CurrentSelectionPage(page_id) for page_id in request.ordered_page_ids))
-                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.include_root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), ()))
+                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.include_root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), tuple(parsed.excluded_ancestor_page_ids or ())))
                     if (envelope.run_id != request.run_id or envelope.generation_id != request.generation_id or envelope.accepted_base_dataset_version != request.base_dataset_version or envelope.current_selection_identity != expected_selection or envelope.current_scope_identity != expected_scope):
                         raise ValueError
                     prior_reader = PublishedSnapshotReader(dataset_root=request.dataset_root, validator=validator or FoundationSchemaValidator())
