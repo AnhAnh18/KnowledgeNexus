@@ -36,6 +36,8 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 
 ## Open items (operational, not design)
 
+The W4 second-sync contract is defined in `DELTA_SECOND_SYNC_SPEC.md`.
+
 `data_root` + disk cap (before full media crawl) · real PAT values (at code time) · real `exclude_subtrees` (after inventory) · winning bge-m3 budget (after benchmark) · fill 37-item benchmark anchors from crawled corpus · enable HQ wiki (Phase 1.1) · multi-branch (post-MVP, needs identity change) · query-time ACL resolver owner · Task 3 retrieval design doc · import-linter ruleset + sample_export fixture owner (v7.5). The v7.4 Part B BGE-M3 contract migration and active `spen-sdk`→`spen-sdk` spelling correction are applied; historical decision-log text remains unchanged for audit fidelity.
 
 ## Working norms (please continue these)

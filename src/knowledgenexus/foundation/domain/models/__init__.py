@@ -120,6 +120,17 @@ from knowledgenexus.foundation.domain.models.delta_propagation import (
     DeltaPropagationResult,
     DeltaPropagationStatus,
 )
+from knowledgenexus.foundation.domain.models.delta_inventory import (
+    CurrentSelectionPage,
+    DeltaInventoryClassificationRequest,
+    DeltaInventoryClassificationResult,
+    DeltaInventoryFailureCategory,
+    DeltaInventoryMetrics,
+    DeltaInventoryObservation,
+    DeltaInventoryScope,
+    DeltaInventoryStatus,
+    PriorConfluenceDocument,
+)
 from knowledgenexus.foundation.domain.models.confluence_chunking import (
     ChunkingResult,
     ConfluenceChunkingError,
@@ -354,6 +365,15 @@ __all__ = [
     "DeltaPropagationRequest",
     "DeltaPropagationResult",
     "DeltaPropagationStatus",
+    "CurrentSelectionPage",
+    "DeltaInventoryClassificationRequest",
+    "DeltaInventoryClassificationResult",
+    "DeltaInventoryFailureCategory",
+    "DeltaInventoryMetrics",
+    "DeltaInventoryObservation",
+    "DeltaInventoryScope",
+    "DeltaInventoryStatus",
+    "PriorConfluenceDocument",
     "ChunkingResult",
     "ConfluenceChunkingError",
     "ConfluenceChunkingFailureCategory",

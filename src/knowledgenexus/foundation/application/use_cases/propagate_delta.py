@@ -147,6 +147,7 @@ class PropagateDelta:
                             request,
                             dependents=dependents.get(document_id, ()),
                             source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
+                            detail=observation.detail if observation is not None else None,
                         )
                     )
                     continue
@@ -268,11 +269,13 @@ class PropagateDelta:
         request: DeltaPropagationRequest,
         *,
         source_version_last_seen: str | None = None,
+        detail: str | None = None,
         dependents: tuple[TombstoneTarget, ...] = (),
     ) -> list[dict[str, object]]:
         root = TombstoneTarget(
             TombstoneEntityType.DOCUMENT,
             summary.document_id,
+            detail=detail,
             source_version_last_seen=source_version_last_seen,
         )
         children = tuple(TombstoneTarget(TombstoneEntityType.CHUNK, entry.chunk_id) for entry in summary.entries) + tuple(dependents)

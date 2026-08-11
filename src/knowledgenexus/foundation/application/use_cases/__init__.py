@@ -86,6 +86,7 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
 from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
 from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
 from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
+from knowledgenexus.foundation.application.use_cases.classify_delta_inventory import ClassifyDeltaInventory
 from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
     M10DeltaOrchestrationError,
     M10DeltaOrchestrationResult,
@@ -155,6 +156,7 @@ __all__ = [
     "BuildGitSymbols",
     "ProjectTombstones",
     "PropagateDelta",
+    "ClassifyDeltaInventory",
     "M10DeltaOrchestrationError",
     "M10DeltaOrchestrationResult",
     "M10DeltaOrchestrator",
