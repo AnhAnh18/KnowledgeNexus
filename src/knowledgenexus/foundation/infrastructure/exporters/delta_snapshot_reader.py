@@ -116,6 +116,7 @@ class PublishedSnapshotReader:
             path,
             validator=self._validator,
             expected_dataset_version=dataset_version,
+            _allow_unbound_delta=True,
         )
         if result.manifest.get("export_mode") == "delta":
             base = result.manifest.get("base_dataset_version")
@@ -170,6 +171,8 @@ def read_delta_snapshot(
         raise ValueError("invalid snapshot path")
     if type(validator) is not FoundationSchemaValidator:
         raise TypeError("invalid validator")
+    if prior_streams is None:
+        raise ValueError("delta base streams are required")
     expected_files = {"manifest.json", "quality_report.md"} | {file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS}
     entries = tuple(path.iterdir())
     if {entry.name for entry in entries} != expected_files or any(not entry.is_file() or entry.is_symlink() for entry in entries):
@@ -233,6 +236,7 @@ def read_published_snapshot(
     validator: FoundationSchemaValidator,
     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     expected_dataset_version: str | None = None,
+    _allow_unbound_delta: bool = False,
 ) -> PublishedSnapshotReadback:
     """Read either a full or delta publication through the same strict seam."""
     if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or _has_reparse_component(path):
@@ -246,6 +250,8 @@ def read_published_snapshot(
     manifest = _strict_json(path / "manifest.json")
     if type(manifest) is not dict or manifest.get("export_mode") not in {"full_snapshot", "delta"}:
         raise ValueError("snapshot mode is invalid")
+    if manifest.get("export_mode") == "delta" and prior_streams is None and not _allow_unbound_delta:
+        raise ValueError("delta base streams are required")
     if not _quality_report_bytes(path / "quality_report.md"):
         raise ValueError("snapshot quality report is invalid")
     dataset_version = manifest.get("dataset_version")

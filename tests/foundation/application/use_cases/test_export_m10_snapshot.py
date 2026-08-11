@@ -217,14 +217,12 @@ def test_delta_export_publishes_non_empty_tombstones_against_base(tmp_path):
         (),
         (tombstone,),
     )
-    result = M10FullSnapshotExporter(
-        confluence_adapter=_Adapter(delta_confluence),
-        git_adapter=_Adapter(git),
-    ).execute(delta_request)
-    assert result.status == "published"
-    assert result.metrics.tombstones == 1
-    assert (result.final_path / "tombstones.jsonl").read_text(encoding="utf-8").count("tombstone_id") == 1
-    assert (result.final_path / "manifest.json").read_text(encoding="utf-8").find('"export_mode":"delta"') >= 0
+    with pytest.raises(M10SnapshotExportFailure) as exc:
+        M10FullSnapshotExporter(
+            confluence_adapter=_Adapter(delta_confluence),
+            git_adapter=_Adapter(git),
+        ).execute(delta_request)
+    assert exc.value.category == "invalid_request"
 
 
 @pytest.mark.parametrize("bad", [None, object(), {"request": True}])

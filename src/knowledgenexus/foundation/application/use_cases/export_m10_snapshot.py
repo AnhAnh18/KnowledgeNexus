@@ -393,6 +393,9 @@ class ExportM10Snapshot:
 
     def execute(self, request: object, *, export_root: object | None = None, generated_at: object | None = None) -> M10SnapshotResult:
         request = _validated_request(request)
+        if request.export_mode == "delta":
+            if self._delta_orchestrator is None or not self._delta_inventory:
+                raise M10SnapshotExportFailure("invalid_request")
         if export_root is not None and (type(export_root) is not _CONCRETE_PATH_TYPE or export_root != request.dataset_root):
             raise M10SnapshotExportFailure("invalid_request")
         if generated_at is not None and (type(generated_at) is not str or generated_at != request.generated_at):

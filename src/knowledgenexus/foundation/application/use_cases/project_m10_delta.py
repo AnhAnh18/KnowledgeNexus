@@ -27,6 +27,7 @@ from knowledgenexus.foundation.domain.models.delta_propagation import (
     DeltaPropagationResult,
     DeltaPropagationStatus,
 )
+from knowledgenexus.foundation.domain.models.delta_inventory import _validate_w4_entry
 from knowledgenexus.foundation.domain.models.m10_snapshot import (
     M10SnapshotProjection,
     M10SnapshotRequest,
@@ -258,6 +259,8 @@ def _sparse_streams(
     current: Mapping[str, Sequence[Mapping[str, object]]],
     propagation: DeltaPropagationResult,
     tombstones: tuple[dict[str, object], ...],
+    *,
+    config_invalidated: bool = False,
 ) -> dict[str, tuple[dict[str, object], ...]]:
     outcomes = dict(propagation.document_outcomes)
     changed_docs = {doc_id for doc_id, outcome in outcomes.items() if outcome in {"new", "changed"}}
@@ -287,9 +290,8 @@ def _sparse_streams(
         for row in current[name]:
             identity = row.get(id_field)
             prior_row = old_by_stream[name].get(identity)
+            canonical_changed = prior_row is None or _canonical_bytes(prior_row) != _canonical_bytes(row)
             belongs = row.get("document_id") in affected_ids or row.get("parent_document_id") in affected_ids
-            if prior_row is None:
-                belongs = True
             if name == "relations":
                 belongs = belongs or current_chunks.get(row.get("source_id")) in affected_ids or current_chunks.get(row.get("target_id")) in affected_ids
             if name == "sync_state":
@@ -300,12 +302,11 @@ def _sparse_streams(
                 belongs = True
             if name == "acl" and identity in reemit_acls:
                 belongs = True
-            if not belongs:
+            if config_invalidated:
+                belongs = True
+            if not belongs and not canonical_changed:
                 continue
-            if name == "chunks" and row.get("document_id") in changed_docs and identity not in reemit_chunks:
-                if prior_row is not None and _canonical_bytes(prior_row) == _canonical_bytes(row):
-                    continue
-            elif name not in {"documents", "chunks"} and prior_row is not None and _canonical_bytes(prior_row) == _canonical_bytes(row):
+            if name == "documents" and identity not in changed_docs:
                 continue
             rows.append(dict(row))
         rows.sort(key=lambda row: str(row.get(id_field, "")))
@@ -364,7 +365,7 @@ class M10DeltaOrchestrator:
             if type(entry) is not DeltaInventoryEntry:
                 raise M10DeltaOrchestrationError("inventory is invalid")
             try:
-                DeltaInventoryEntry.__post_init__(entry)
+                _validate_w4_entry(entry)
             except Exception:
                 raise M10DeltaOrchestrationError("inventory is invalid") from None
             if entry.document_id in inventory_by_id:
@@ -439,7 +440,13 @@ class M10DeltaOrchestrator:
         if result.status is not DeltaPropagationStatus.SUCCESS:
             raise M10DeltaOrchestrationError("delta propagation failed")
         tombstones = _merge_tombstones(current["tombstones"], result.records)
-        sparse = _sparse_streams(prior, current, result, tombstones)
+        sparse = _sparse_streams(
+            prior,
+            current,
+            result,
+            tombstones,
+            config_invalidated=previous_config_hash != projection.config_hash,
+        )
         emitted_counts = {name: len(sparse[name]) for name in _STREAMS}
         metrics = replace(
             projection.metrics,
