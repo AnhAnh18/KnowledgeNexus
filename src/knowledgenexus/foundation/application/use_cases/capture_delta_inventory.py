@@ -77,6 +77,17 @@ class DeltaInventoryCaptureRequest:
                 raise ValueError("invalid identity")
         if type(self.prior_documents) is not tuple or type(self.current_selection) is not tuple or type(self.scope) is not DeltaInventoryScope:
             raise ValueError("invalid capture input")
+        for item in self.prior_documents:
+            if type(item) is not PriorConfluenceDocument:
+                raise ValueError("invalid prior snapshot")
+            PriorConfluenceDocument.__post_init__(item)
+        for item in self.current_selection:
+            if type(item) is not CurrentSelectionPage:
+                raise ValueError("invalid selection")
+            CurrentSelectionPage.__post_init__(item)
+        DeltaInventoryScope.__post_init__(self.scope)
+        if len({item.page_id for item in self.prior_documents}) != len(self.prior_documents) or len({item.page_id for item in self.current_selection}) != len(self.current_selection):
+            raise ValueError("duplicate page IDs")
         if not callable(getattr(self.transport, "get_response_bytes", None)):
             raise ValueError("invalid transport")
         if not callable(getattr(self.raw_page_store, "publish_page", None)) or not callable(getattr(self.raw_page_store, "read_page", None)):
