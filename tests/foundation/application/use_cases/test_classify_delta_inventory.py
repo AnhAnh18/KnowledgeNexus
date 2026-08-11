@@ -1,5 +1,6 @@
 from knowledgenexus.foundation.application.use_cases.classify_delta_inventory import ClassifyDeltaInventory
 import pytest
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 from knowledgenexus.foundation.domain.models import (
     CurrentSelectionPage,
     DeltaInventoryClassificationRequest,
@@ -71,11 +72,11 @@ def test_scope_is_derived_and_envelope_metrics_are_bound() -> None:
     result = ClassifyDeltaInventory().execute(request)
     assert result.entries[0].state is DeltaInventoryState.MOVED_OUT_OF_SCOPE
     envelope = DeltaInventoryEnvelope(
-        "1.0.0", "run", "generation", "selection", "base", "scope", result.entries, result.metrics
+        "1.0.0", CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), "a" * 64, "base", "b" * 64, result.entries, result.metrics
     )
     assert envelope.entries == result.entries
     with pytest.raises(ValueError):
-        DeltaInventoryEnvelope("1.0.0", "run", "generation", "selection", "base", "scope", result.entries, DeltaInventoryMetrics(0, 0, 0, 0))
+        DeltaInventoryEnvelope("1.0.0", CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), "a" * 64, "base", "b" * 64, result.entries, DeltaInventoryMetrics(0, 0, 0, 0))
 
 
 def test_observation_rejects_caller_scope_booleans_and_invalid_ids() -> None:
@@ -83,3 +84,17 @@ def test_observation_rejects_caller_scope_booleans_and_invalid_ids() -> None:
         DeltaInventoryObservation("1", 404, ("bad",), 0, "a" * 64, "v1")
     with pytest.raises(TypeError):
         DeltaInventoryObservation("1", 404, (), 0, "a" * 64, "v1", True)  # type: ignore[call-arg]
+
+
+def test_public_result_and_envelope_reject_invalid_w4_dispositions() -> None:
+    from knowledgenexus.foundation.domain.models import DeltaInventoryClassificationResult, DeltaInventoryMetrics, DeltaInventoryStatus, DeltaInventoryEntry
+
+    forged = DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.CONFIG_INVALIDATED, "v1")
+    with pytest.raises(ValueError):
+        DeltaInventoryClassificationResult(DeltaInventoryStatus.SUCCESS, (forged,), DeltaInventoryMetrics(0, 0, 0, 0))
+    missing_detail = DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.SOURCE_DELETED, "v1", None)
+    with pytest.raises(ValueError):
+        DeltaInventoryClassificationResult(DeltaInventoryStatus.SUCCESS, (missing_detail,), DeltaInventoryMetrics(0, 1, 0, 0))
+    valid = DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.SOURCE_DELETED, "v1", "confluence_404_may_mask_access_revoked")
+    with pytest.raises(ValueError):
+        DeltaInventoryEnvelope("1.0.0", CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), "selection", "base", "scope", (valid,), DeltaInventoryMetrics(0, 1, 0, 0))

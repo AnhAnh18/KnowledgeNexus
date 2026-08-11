@@ -12,6 +12,7 @@ from knowledgenexus.foundation.domain.models.delta_propagation import (
 )
 from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
 from knowledgenexus.foundation.domain.rules.confluence_page_id import require_confluence_page_id
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _OPAQUE = re.compile(r"^\S+$")
@@ -94,6 +95,8 @@ class DeltaInventoryScope:
                 require_confluence_page_id(item)
             if len(set(values)) != len(values):
                 raise ValueError("scope is invalid")
+        if not self.include_root_page_ids:
+            raise ValueError("scope is invalid")
 
 
 @dataclass(frozen=True, repr=False)
@@ -114,6 +117,8 @@ class DeltaInventoryObservation:
             raise ValueError("observation is invalid")
         for item in self.ancestor_page_ids:
             require_confluence_page_id(item)
+        if len(set(self.ancestor_page_ids)) != len(self.ancestor_page_ids):
+            raise ValueError("observation is invalid")
         if type(self.response_byte_count) is not int or isinstance(self.response_byte_count, bool) or self.response_byte_count < 0:
             raise ValueError("observation is invalid")
         if type(self.response_sha256) is not str or _SHA256.fullmatch(self.response_sha256) is None:
@@ -192,9 +197,7 @@ class DeltaInventoryClassificationResult:
             raise ValueError("result is invalid")
         DeltaInventoryMetrics.__post_init__(self.metrics)
         for entry in self.entries:
-            if type(entry) is not DeltaInventoryEntry:
-                raise ValueError("result is invalid")
-            DeltaInventoryEntry.__post_init__(entry)
+            _validate_w4_entry(entry)
         counts = {
             DeltaInventoryState.PRESENT: self.metrics.present_count,
             DeltaInventoryState.SOURCE_DELETED: self.metrics.source_deleted_count,
@@ -202,6 +205,8 @@ class DeltaInventoryClassificationResult:
             DeltaInventoryState.MOVED_OUT_OF_SCOPE: self.metrics.moved_out_of_scope_count,
         }
         if any(sum(entry.state is state for entry in self.entries) != count for state, count in counts.items()):
+            raise ValueError("result is invalid")
+        if self.metrics.total_count != len(self.entries):
             raise ValueError("result is invalid")
         if tuple(sorted(self.entries, key=lambda entry: entry.document_id)) != self.entries or len({entry.document_id for entry in self.entries}) != len(self.entries):
             raise ValueError("result is invalid")
@@ -213,8 +218,8 @@ DELTA_INVENTORY_FORMAT_VERSION = "1.0.0"
 @dataclass(frozen=True, repr=False)
 class DeltaInventoryEnvelope:
     format_version: str
-    run_id: str
-    generation_id: str
+    run_id: CrawlRunId
+    generation_id: CrawlRunId
     current_selection_identity: str
     accepted_base_dataset_version: str
     current_scope_identity: str
@@ -225,15 +230,22 @@ class DeltaInventoryEnvelope:
         _fields(self, {"format_version", "run_id", "generation_id", "current_selection_identity", "accepted_base_dataset_version", "current_scope_identity", "entries", "metrics"})
         if self.format_version != DELTA_INVENTORY_FORMAT_VERSION:
             raise ValueError("envelope is invalid")
-        for name in ("run_id", "generation_id", "current_selection_identity", "accepted_base_dataset_version", "current_scope_identity"):
-            _identity(getattr(self, name), name)
+        if type(self.run_id) is not CrawlRunId or type(self.generation_id) is not CrawlRunId:
+            raise ValueError("envelope is invalid")
+        CrawlRunId(self.run_id.value)
+        CrawlRunId(self.generation_id.value)
+        if self.run_id != self.generation_id:
+            raise ValueError("envelope is invalid")
+        for name in ("current_selection_identity", "current_scope_identity"):
+            value = getattr(self, name)
+            if type(value) is not str or _SHA256.fullmatch(value) is None:
+                raise ValueError("envelope is invalid")
+        _identity(self.accepted_base_dataset_version, "accepted_base_dataset_version")
         if type(self.entries) is not tuple or type(self.metrics) is not DeltaInventoryMetrics:
             raise ValueError("envelope is invalid")
         DeltaInventoryMetrics.__post_init__(self.metrics)
         for entry in self.entries:
-            if type(entry) is not DeltaInventoryEntry or not entry.document_id.startswith("confluence:page:"):
-                raise ValueError("envelope is invalid")
-            DeltaInventoryEntry.__post_init__(entry)
+            _validate_w4_entry(entry)
         if tuple(sorted(self.entries, key=lambda item: item.document_id)) != self.entries or len({item.document_id for item in self.entries}) != len(self.entries):
             raise ValueError("envelope is invalid")
         counts = {
@@ -244,6 +256,33 @@ class DeltaInventoryEnvelope:
         }
         if any(sum(entry.state is state for entry in self.entries) != count for state, count in counts.items()):
             raise ValueError("envelope is invalid")
+        if self.metrics.total_count != len(self.entries):
+            raise ValueError("envelope is invalid")
+
+
+def _validate_w4_entry(entry: object) -> DeltaInventoryEntry:
+    if type(entry) is not DeltaInventoryEntry:
+        raise ValueError("result is invalid")
+    DeltaInventoryEntry.__post_init__(entry)
+    prefix = "confluence:page:"
+    if not entry.document_id.startswith(prefix):
+        raise ValueError("result is invalid")
+    page_id = entry.document_id[len(prefix):]
+    require_confluence_page_id(page_id)
+    if DocumentIdGenerator.confluence_page_id(page_id) != entry.document_id:
+        raise ValueError("result is invalid")
+    if entry.state is DeltaInventoryState.PRESENT:
+        if entry.source_version_last_seen is not None or entry.detail is not None:
+            raise ValueError("result is invalid")
+    elif entry.state is DeltaInventoryState.SOURCE_DELETED:
+        if not entry.source_version_last_seen or entry.detail != _DETAIL_404:
+            raise ValueError("result is invalid")
+    elif entry.state in (DeltaInventoryState.ACCESS_REVOKED, DeltaInventoryState.MOVED_OUT_OF_SCOPE):
+        if not entry.source_version_last_seen or entry.detail is not None:
+            raise ValueError("result is invalid")
+    else:
+        raise ValueError("result is invalid")
+    return entry
 
 
 __all__ = [
