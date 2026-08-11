@@ -1,33 +1,120 @@
-# MCP Server Setup Guide
+# 🔌 KnowledgeNexus MCP Server - Setup Guide
 
-Guide to set up the KnowledgeNexus MCP Server to connect Cline with the KnowledgeNexus RAG platform.
+Quick setup guide to connect **Claude Code**, **Gemini CLI**, **Cline**, and **Claude Desktop** to the KnowledgeNexus MCP Server.
 
-## 📋 Overview
+## 📍 Server URL
 
-The KnowledgeNexus MCP Server is a bridge between Cline and the KnowledgeNexus RAG platform. It allows Cline to:
+The MCP server is running at:
 
-- **Search** knowledge from KnowledgeNexus
-- **Export** search results to Markdown files
-- **List** documents in KnowledgeNexus
-- **Check health** of the platform
-
-The MCP server lives inside the project at `mcp/` — anyone who clones the repo can use it.
-
-## 📦 Installation
-
-### 1. Install dependencies and build
-
-```bash
-cd mcp
-npm install
-npm run build
+```
+http://<SERVER_LAN_IP>:8787/mcp
 ```
 
-After building, the file `mcp/build/index.js` will be created.
+Where `<SERVER_LAN_IP>` is the **IP address of the machine running the MCP server** (not your client machine).
 
-### 2. Configure Cline MCP Settings
+### 🖥️ Current Server
 
-Open the Cline MCP settings file:
+The KnowledgeNexus MCP server is running on:
+
+```
+http://107.98.74.75:8787/mcp
+```
+
+## 🔧 Setup Instructions by LLM
+
+### Claude Code
+
+#### Option 1: CLI (Recommended)
+
+```bash
+claude mcp add knowledgenexus --transport http http://107.98.74.75:8787/mcp
+```
+
+Or replace `107.98.74.75` with your server's IP if different.
+
+Verify:
+
+```bash
+claude mcp list
+```
+
+#### Option 2: Edit config file
+
+Create or edit `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "knowledgenexus": {
+      "type": "http",
+      "url": "http://107.98.74.75:8787/mcp"
+    }
+  }
+}
+```
+
+---
+
+### Gemini CLI
+
+#### Option 1: CLI
+
+```bash
+gemini mcp add knowledgenexus http://107.98.74.75:8787/mcp -t http
+```
+
+Verify:
+
+```bash
+gemini mcp list
+```
+
+#### Option 2: Edit config file
+
+Edit `.gemini/settings.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "knowledgenexus": {
+      "type": "http",
+      "url": "http://107.98.74.75:8787/mcp"
+    }
+  }
+}
+```
+
+---
+
+### Codex CLI
+
+#### Option 1: CLI
+
+```bash
+codex mcp add knowledgenexus http://107.98.74.75:8787/mcp -t http
+```
+
+Verify:
+
+```bash
+codex mcp list
+```
+
+#### Option 2: Edit config file
+
+Edit `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.knowledgenexus]
+type = "http"
+url = "http://107.98.74.75:8787/mcp"
+```
+
+---
+
+### Cline (VS Code)
+
+1. Open the Cline MCP settings file:
 
 | OS | Path |
 |----|------|
@@ -35,108 +122,131 @@ Open the Cline MCP settings file:
 | **macOS** | `~/Library/Application Support/Code/User/globalStorage/cline-sr.cline-sr/settings/cline_mcp_settings.json` |
 | **Linux** | `~/.config/Code/User/globalStorage/cline-sr.cline-sr/settings/cline_mcp_settings.json` |
 
-Add the following configuration to `mcpServers`:
+2. Add to `mcpServers`:
 
 ```json
 {
-  "knowledgenexus-mcp": {
+  "knowledgenexus": {
     "disabled": false,
     "timeout": 60,
-    "type": "stdio",
-    "command": "node",
-    "args": ["<ABSOLUTE_PATH_TO_PROJECT>/mcp/build/index.js"],
-    "env": {
-      "KNOWLEDGENEXUS_API_URL": "http://localhost:8000"
+    "type": "http",
+    "url": "http://107.98.74.75:8787/mcp"
+  }
+}
+```
+
+3. Save the file and restart Cline or reload VS Code
+
+---
+
+### Claude Desktop
+
+1. Edit the config file:
+
+| OS | Path |
+|----|------|
+| **Windows** | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **macOS** | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+
+2. Add to `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "knowledgenexus": {
+      "type": "http",
+      "url": "http://107.98.74.75:8787/mcp"
     }
   }
 }
 ```
 
-> ⚠️ **Important:** Replace `<ABSOLUTE_PATH_TO_PROJECT>` with the absolute path to the KnowledgeNexus project root directory on your machine.
-
-### 3. Start the KnowledgeNexus API
-
-The MCP server requires the KnowledgeNexus API to be running:
-
-```bash
-# From project root
-uv run knowledgenexus
-# or
-uv run uvicorn knowledgenexus.main:app --reload --port 8000
-```
-
-### 4. Restart Cline
-
-After updating the MCP settings, restart Cline (or reload VS Code) so the MCP server is loaded.
-
-## 🛠️ Available Tools
-
-| Tool | Description | Parameters |
-|------|-------------|-----------|
-| `search` | Search knowledge chunks | `query` (required), `top_k`, `score_threshold` |
-| `export_search_results` | Search + export to `.md` | `query`, `output_path` (required), `top_k`, `score_threshold` |
-| `list_documents` | List all documents | `limit`, `offset` |
-| `export_documents_list` | Export document list to `.md` | `output_path` (required), `limit`, `offset` |
-| `get_store_stats` | Storage statistics (Qdrant + SQLite) | — |
-| `health_check` | Check platform health | — |
-
-## 💡 Usage Examples
-
-Ask Cline:
-
-- "Search KnowledgeNexus for 'how to configure qdrant'"
-- "Search for 'table layout performance' and export results to ./search-results.md"
-- "List all documents in KnowledgeNexus"
-- "Check the health of KnowledgeNexus"
-- "Get store stats from KnowledgeNexus"
-
-## 🔧 Troubleshooting
-
-### MCP server cannot connect
-
-1. **Check build exists:** Ensure `mcp/build/index.js` was created after `npm run build`
-2. **Check path:** The path in `args` must be an **absolute path** and correct
-3. **Check Node.js:** Ensure `node` is in your PATH (`node --version`)
-
-### API error when calling a tool
-
-1. **Check API is running:** `curl http://localhost:8000/api/v1/health`
-2. **Check port:** The API runs on port 8000 by default; if different, update `KNOWLEDGENEXUS_API_URL`
-3. **Check Qdrant:** Ensure Qdrant is running on port 6333
-
-### Rebuild after code changes
-
-```bash
-cd mcp
-npm run build
-```
-
-Then restart Cline to reload the MCP server.
-
-## 📁 MCP Directory Structure
-
-```
-mcp/
-├── src/
-│   └── index.ts          # MCP server source code
-├── build/                # Build output (gitignored)
-│   └── index.js
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
-## 🔄 Development Workflow
-
-```bash
-# Watch mode - auto-rebuild on code changes
-cd mcp
-npm run dev
-
-# Once code is stable, build for production
-npm run build
-```
+3. Fully quit and reopen Claude Desktop
 
 ---
 
-*Last updated: 2026-07-22*
+## ✅ Verify Connection
+
+After setup, test the connection:
+
+```bash
+# Test from terminal
+curl -X POST http://107.98.74.75:8787/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {"name": "test", "version": "1.0"}
+    },
+    "id": 1
+  }'
+```
+
+✅ If you see a JSON response with `serverInfo`, the connection is working!
+
+*Replace `107.98.74.75` with your server's IP if different.*
+
+---
+
+## ❓ Troubleshooting
+
+### Connection refused or timeout
+
+1. **Check MCP server is running:**
+   ```bash
+   # On the server machine, check port 8787 is listening
+   netstat -ano | findstr ":8787"
+   ```
+
+2. **Check Windows Firewall (if needed):**
+   ```cmd
+   netsh advfirewall firewall add rule name="KnowledgeNexus MCP" dir=in action=allow protocol=TCP localport=8787
+   ```
+
+3. **Verify IP address:**
+   - Use correct LAN IP (not `localhost` or `127.0.0.1` from remote machines)
+   - Run `ipconfig` to find your IPv4 address
+
+### "Connected but no tools found"
+
+1. Make sure REST API is running on `http://localhost:8000`:
+   ```bash
+   curl http://localhost:8000/api/v1/health
+   ```
+
+2. Check MCP server is actually started and logs show:
+   ```
+   KnowledgeNexus MCP server running on http://0.0.0.0:8787/mcp
+   ```
+
+3. Restart your MCP client (Cline, Claude Code, etc.)
+
+---
+
+## 🛠️ Available MCP Tools
+
+Once connected, you can use these tools in your LLM:
+
+| Tool | Description |
+|------|-------------|
+| **search** | Search KnowledgeNexus for knowledge chunks |
+| **export_search_results** | Export search results to Markdown file |
+| **list_documents** | List all documents with pagination |
+| **export_documents_list** | Export document list to Markdown file |
+| **get_store_stats** | View Qdrant vector DB + SQLite statistics |
+| **health_check** | Check API connectivity and health |
+
+### Example Usage
+
+Ask your LLM:
+
+> "Search KnowledgeNexus for information about machine learning"
+
+The LLM will automatically use the `search` tool to find relevant knowledge chunks.
+
+---
+
+**Last updated:** 2026-08-11

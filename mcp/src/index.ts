@@ -8,6 +8,8 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import express, { type Request, type Response } from 'express';
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -18,11 +20,23 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
 const API_BASE_URL = process.env.KNOWLEDGENEXUS_API_URL || 'http://localhost:8000';
+const MCP_TRANSPORT = (process.env.MCP_TRANSPORT || 'stdio').toLowerCase();
+const MCP_HTTP_HOST = process.env.MCP_HTTP_HOST || '0.0.0.0';
+
+// Validate port: must be 1-65535
+const portStr = process.env.MCP_HTTP_PORT || '8787';
+const portNum = parseInt(portStr, 10);
+if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+  console.error(`[Error] Invalid MCP_HTTP_PORT: "${portStr}" (must be 1-65535)`);
+  process.exit(1);
+}
+const MCP_HTTP_PORT = portNum;
 
 // ---------------------------------------------------------------------------
 // Types (matching KnowledgeNexus REST API schemas)
@@ -235,36 +249,30 @@ function formatDocumentsAsMarkdown(
 // MCP Server
 // ---------------------------------------------------------------------------
 
-class KnowledgeNexusServer {
-  private server: Server;
-
-  constructor() {
-    this.server = new Server(
-      {
-        name: 'knowledgenexus-mcp',
-        version: '0.1.0',
+function createMcpServer(): Server {
+  const server = new Server(
+    {
+      name: 'knowledgenexus-mcp',
+      version: '0.1.0',
+    },
+    {
+      capabilities: {
+        tools: {},
       },
-      {
-        capabilities: {
-          tools: {},
-        },
-      }
-    );
+    }
+  );
 
-    this.setupToolHandlers();
+  registerToolHandlers(server);
 
-    this.server.onerror = (error) =>
-      console.error('[KnowledgeNexus MCP Error]', error);
+  server.onerror = (error) =>
+    console.error('[KnowledgeNexus MCP Error]', error);
 
-    process.on('SIGINT', async () => {
-      await this.server.close();
-      process.exit(0);
-    });
-  }
+  return server;
+}
 
-  private setupToolHandlers(): void {
-    // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+function registerToolHandlers(server: Server): void {
+  // List available tools
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
           name: 'search',
@@ -397,9 +405,9 @@ class KnowledgeNexusServer {
       ],
     }));
 
-    // Handle tool calls
-    this.server.setRequestHandler(
-      CallToolRequestSchema,
+  // Handle tool calls
+  server.setRequestHandler(
+    CallToolRequestSchema,
       async (request) => {
         const { name, arguments: args } = request.params;
 
@@ -606,19 +614,245 @@ class KnowledgeNexusServer {
         }
       }
     );
-  }
-
-  async run(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('KnowledgeNexus MCP server running on stdio');
-    console.error(`API base URL: ${API_BASE_URL}`);
-  }
 }
+
+// ---------------------------------------------------------------------------
+// Transports
+// ---------------------------------------------------------------------------
+
+async function runStdio(): Promise<void> {
+  const server = createMcpServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+
+  process.on('SIGINT', async () => {
+    await server.close();
+    process.exit(0);
+  });
+
+  console.error('KnowledgeNexus MCP server running on stdio');
+  console.error(`API base URL: ${API_BASE_URL}`);
+}
+
+
+// ---------------------------------------------------------------------------
+// Multi-session HTTP Transport
+// ---------------------------------------------------------------------------
+
+// Map of session ID → transport, so each MCP client gets its own session.
+// This allows multiple clients (Cline, Gemini, Claude, etc.) to connect simultaneously.
+const sessionTransports = new Map<string, StreamableHTTPServerTransport>();
+
+async function runHttp(): Promise<void> {
+  // IMPORTANT: Do NOT use createMcpExpressApp() — it registers express.json() globally,
+  // which consumes the request body stream. When @hono/node-server (used internally by
+  // StreamableHTTPServerTransport) tries to convert the Node.js request to a Web Standard
+  // Request, it fails because the stream is already consumed, resulting in HTTP 500.
+  //
+  // Instead, create a plain Express app WITHOUT express.json() and let the SDK read
+  // the body from the raw stream itself via @hono/node-server's conversion.
+  const app = express();
+
+  // Accept header middleware for MCP compatibility.
+  // Some MCP clients (e.g. older Cline builds) don't send Accept: application/json, text/event-stream
+  // which causes "Not Acceptable" errors. Inject it if missing.
+  // NOTE: @hono/node-server (used internally by StreamableHTTPServerTransport) reads headers from
+  // req.rawHeaders (flat array), NOT req.headers (object). We must patch BOTH.
+  app.use('/mcp', (req: Request, res: Response, next) => {
+    // CORS headers for remote access
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Accept, mcp-session-id');
+    res.header('Connection', 'keep-alive');
+    res.header('Keep-Alive', 'timeout=90, max=100');
+
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      res.status(200).end();
+      return;
+    }
+
+    const accept = req.headers['accept'] as string | undefined;
+    const required = ['application/json', 'text/event-stream'];
+    if (!accept || !required.every((t) => accept.includes(t))) {
+      const newAccept = 'application/json, text/event-stream';
+      req.headers['accept'] = newAccept;
+      const raw = req.rawHeaders as string[];
+      let found = false;
+      for (let i = 0; i < raw.length; i += 2) {
+        if (raw[i].toLowerCase() === 'accept') {
+          raw[i + 1] = newAccept;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        raw.push('Accept', newAccept);
+      }
+    }
+    next();
+  });
+
+  // POST: handle MCP JSON-RPC requests (initialize, tools/list, tools/call, etc.)
+  //
+  // Multi-session handling:
+  // - If the request has an mcp-session-id header, route it to the existing transport.
+  // - If it's an initialize request (no session ID), create a new transport + server.
+  // - This allows multiple MCP clients to connect simultaneously.
+  app.post('/mcp', async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      if (sessionId && sessionTransports.has(sessionId)) {
+        // Existing session — route to the transport that owns this session
+        const transport = sessionTransports.get(sessionId)!;
+        await transport.handleRequest(req, res);
+      } else if (sessionId && !sessionTransports.has(sessionId)) {
+        // Session ID provided but not found — server was likely restarted.
+        // Tell the client to re-initialize.
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32001,
+            message: 'Session not found. The server may have been restarted. Please re-initialize.',
+          },
+          id: null,
+        });
+      } else {
+        // No session ID — this should be an initialize request.
+        // Create a fresh transport + server for this new client.
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => crypto.randomUUID(),
+          onsessioninitialized: (newSessionId: string) => {
+            sessionTransports.set(newSessionId, transport);
+          },
+          onsessionclosed: (closedSessionId: string) => {
+            sessionTransports.delete(closedSessionId);
+          },
+        });
+        const server = createMcpServer();
+        await server.connect(transport);
+        await transport.handleRequest(req, res);
+      }
+    } catch (error) {
+      console.error('[KnowledgeNexus MCP HTTP POST Error]', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: { code: -32603, message: 'Internal server error', data: String(error) },
+          id: null,
+        });
+      }
+    }
+  });
+
+  // GET: handle SSE streaming connections (server-to-client notifications)
+  app.get('/mcp', async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      if (sessionId && sessionTransports.has(sessionId)) {
+        const transport = sessionTransports.get(sessionId)!;
+        await transport.handleRequest(req, res);
+      } else {
+        res.status(400).json({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'Bad Request: No valid session. Send an initialize request first.' },
+          id: null,
+        });
+      }
+    } catch (error) {
+      console.error('[KnowledgeNexus MCP HTTP GET Error]', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: { code: -32603, message: 'Internal server error' },
+          id: null,
+        });
+      }
+    }
+  });
+
+  // DELETE: handle session cleanup/termination
+  app.delete('/mcp', async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      if (sessionId && sessionTransports.has(sessionId)) {
+        const transport = sessionTransports.get(sessionId)!;
+        await transport.handleRequest(req, res);
+        sessionTransports.delete(sessionId);
+      } else {
+        res.status(400).json({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'Bad Request: No valid session to delete.' },
+          id: null,
+        });
+      }
+    } catch (error) {
+      console.error('[KnowledgeNexus MCP HTTP DELETE Error]', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: { code: -32603, message: 'Internal server error' },
+          id: null,
+        });
+      }
+    }
+  });
+
+  // Global error handler — logs any uncaught errors from middleware/routes
+  app.use((err: Error, req: Request, res: Response, next: (err?: unknown) => void) => {
+    console.error('[KnowledgeNexus MCP Express Error]', err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: { code: -32603, message: 'Internal server error', data: String(err) },
+        id: null,
+      });
+    }
+  });
+
+  const httpServer = app.listen(MCP_HTTP_PORT, MCP_HTTP_HOST);
+
+  // Configure socket timeouts for stable long-running connections
+  httpServer.keepAliveTimeout = 90000; // 90 seconds
+  httpServer.headersTimeout = 95000; // 95 seconds (must be > keepAliveTimeout)
+  httpServer.requestTimeout = 120000; // 120 seconds for individual requests
+
+  httpServer.on('listening', () => {
+    console.error(
+      `KnowledgeNexus MCP server running on http://${MCP_HTTP_HOST}:${MCP_HTTP_PORT}/mcp`
+    );
+    console.error(`API base URL: ${API_BASE_URL}`);
+    console.error(`Connection settings: keepAliveTimeout=90s, requestTimeout=120s`);
+  });
+
+  httpServer.on('error', (error) => {
+    console.error(`[KnowledgeNexus MCP HTTP Server Error] ${error.message}`);
+    process.exit(1);
+  });
+}
+
+
+// ---------------------------------------------------------------------------
+// Process-level error handlers — prevent server crash on unhandled errors
+// ---------------------------------------------------------------------------
+
+process.on('uncaughtException', (error) => {
+  console.error('[KnowledgeNexus MCP Uncaught Exception]', error);
+  // Do NOT exit — keep the server running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[KnowledgeNexus MCP Unhandled Rejection]', reason);
+  // Do NOT exit — keep the server running
+});
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-const server = new KnowledgeNexusServer();
-server.run().catch(console.error);
+if (MCP_TRANSPORT === 'http') {
+  runHttp().catch(console.error);
+} else {
+  runStdio().catch(console.error);
+}
