@@ -10,11 +10,24 @@ Prompts written so far:
 | Package | Prompt file | Status |
 |---|---|---|
 | W0 | (inline below, historical) | **DONE** — `d25ea42`, merged in `764efa3` |
-| W1 | `docs/learning/W1_PROMPT_M10_OPERATOR_COMPOSITION.md` | ready to hand out |
-| W2 | `docs/learning/W2_PROMPT_HARNESS_TO_M10_BINDING.md` | ready to hand out |
+| W1+W2 | `docs/learning/W1W2_PROMPT_M10_OPERATOR_PIPELINE.md` | **active** — partial attempt in tree |
 | W3 | — | **RESOLVED**, no work needed |
-| W4 | `docs/learning/W4_PROMPT_DELTA_SECOND_SYNC.md` | ready to hand out |
+| W4 | `docs/learning/W4_PROMPT_DELTA_SECOND_SYNC.md` | ready, after W1+W2 |
 | W5 | (operator runbook below) | needs the main machine |
+
+**W1 and W2 were merged after a first implementation attempt failed.** The
+original W1 prompt contained a scope error: it assumed a raw generation root
+alone is sufficient input. It is not — enumerating Draw.io media requires
+`attachment_id` and `content_hash`, which live in the harness's
+`drawio-state.json`, and that was scoped into W2. The split made W1
+unbuildable. `W1_PROMPT_M10_OPERATOR_COMPOSITION.md` and
+`W2_PROMPT_HARNESS_TO_M10_BINDING.md` are superseded and kept only for history.
+
+The first attempt also produced two lessons now encoded in the merged prompt:
+a CLI that parses arguments and discards them is not an operator path, and
+`MaterializeConfluenceAcl` is **not** blocked by missing restriction evidence —
+it has an explicit deny-safe `unavailable` path emitting
+`["restricted:unresolved"]`.
 
 Status labels used here:
 

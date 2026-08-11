@@ -1,3 +1,8 @@
+> **SUPERSEDED.** Use `docs/learning/W1W2_PROMPT_M10_OPERATOR_PIPELINE.md`.
+> W1 and W2 were merged after a failed attempt: this prompt's scope
+> assumed a raw generation root alone is sufficient input, which it is not.
+> Kept for history only.
+
 # W1 implementer prompt — operator-runnable Confluence M10 snapshot
 
 Hand this file to a codex implementer as one task. It is W1 of
