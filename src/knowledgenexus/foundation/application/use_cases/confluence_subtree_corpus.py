@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
+from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain, require_plain_file
+
 PACKET_FORMAT_VERSION = "confluence-subtree-indexing-packet-v1"
 DEFAULT_BATCH_SIZE = 100
 MAX_PAGES = 5000
@@ -121,9 +123,18 @@ class SubtreePacketExporter:
     def publish(self, *, output_dir: Path, documents: Iterable[Mapping[str, object]], chunks: Iterable[Mapping[str, object]], media_assets: Iterable[Mapping[str, object]], summary: Mapping[str, object] | None = None) -> dict[str, object]:
         if not isinstance(output_dir, Path) or not output_dir.is_absolute() or output_dir.exists():
             raise ValueError("output directory must be an absolute new directory")
+        parent = output_dir.parent
+        if not parent.is_dir():
+            raise ValueError("output parent must already exist")
+        try:
+            require_plain_directory_chain(parent)
+        except Exception as exc:
+            raise ValueError("output path is not a plain directory chain") from exc
         docs = tuple(sorted((dict(x) for x in documents), key=lambda x: str(x.get("document_id", ""))))
         chks = tuple(sorted((dict(x) for x in chunks), key=lambda x: str(x.get("chunk_id", ""))))
         media = tuple(sorted((dict(x) for x in media_assets), key=lambda x: str(x.get("media_id", ""))))
+        if not docs or not chks:
+            raise ValueError("packet records must be non-empty")
         doc_ids: set[str] = set()
         for row in docs:
             self._validator.validate_record("CanonicalDocument", row)
@@ -145,8 +156,6 @@ class SubtreePacketExporter:
             mids.add(ident)
         payload = dict(summary or {})
         payload.update({"format_version": PACKET_FORMAT_VERSION, "document_count": len(docs), "chunk_count": len(chks), "media_asset_count": len(media), "acl_mode": "restricted_unresolved"})
-        parent = output_dir.parent
-        parent.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=str(parent)))
         try:
             for name, rows in (("documents.jsonl", docs), ("chunks.jsonl", chks), ("media_assets.jsonl", media)):
@@ -160,6 +169,78 @@ class SubtreePacketExporter:
         return {"format_version": PACKET_FORMAT_VERSION, "files_written": list(_FILES), "document_count": len(docs), "chunk_count": len(chks), "media_asset_count": len(media)}
 
 
+def process_preserved_pages(*, processor: object, request: object) -> dict[str, object]:
+    """Run the approved offline page-set pipeline over preserved generations.
+
+    The processor is deliberately injected: this boundary cannot acquire a
+    transport or silently substitute a different chunking profile.
+    """
+    execute = getattr(processor, "execute", None)
+    if not callable(execute) or request is None:
+        raise TypeError("processor/request is invalid")
+    result = execute(request=request)
+    for name in ("documents", "chunks", "metrics", "reference_intents_by_page"):
+        if not hasattr(result, name):
+            raise ValueError("page processing result is invalid")
+    documents = tuple(dict(row) for row in result.documents)
+    chunks = tuple(dict(row) for row in result.chunks)
+    if not documents or not chunks:
+        raise ValueError("page processing produced no records")
+    return {"documents": documents, "chunks": chunks, "metrics": result.metrics, "reference_intents_by_page": result.reference_intents_by_page}
+
+
+def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachments: Callable[[str], Iterable[AttachmentMetadata]], fetch_body: Callable[[AttachmentMetadata], bytes], process_body: Callable[[AttachmentMetadata, bytes], Mapping[str, object]], schema_validator: object | None = None, config: ConfluenceSubtreeCorpusConfig | None = None, persist_body: Callable[[AttachmentMetadata, bytes], object] | None = None,) -> dict[str, object]:
+    """Resolve and process only exact Draw.io references.
+
+    Metadata listing and body fetching are injected production seams.  The
+    function never requests unrelated attachment bodies and reports failures
+    without discarding the parent page records.
+    """
+    if not callable(list_attachments) or not callable(fetch_body) or not callable(process_body):
+        raise TypeError("drawio callbacks are invalid")
+    validate = getattr(schema_validator, "validate_record", None) if schema_validator is not None else None
+    if schema_validator is not None and not callable(validate):
+        raise TypeError("schema validator is invalid")
+    if config is not None and type(config) is not ConfluenceSubtreeCorpusConfig:
+        raise TypeError("config is invalid")
+    if persist_body is not None and not callable(persist_body):
+        raise TypeError("persist_body is invalid")
+    assets: list[dict[str, object]] = []
+    failures = 0
+    observed = 0
+    resolved = 0
+    downloaded_bytes = 0
+    for ref in references:
+        if type(ref) is not DrawioReference:
+            raise TypeError("drawio reference is invalid")
+        observed += 1
+        if config is not None and observed > config.drawio_count:
+            failures += 1
+            continue
+        try:
+            match = match_drawio_attachment(ref, tuple(list_attachments(ref.parent_page_id)))
+            if match is None:
+                failures += 1
+                continue
+            body = fetch_body(match)
+            if type(body) is not bytes:
+                raise ValueError("drawio body is invalid")
+            if config is not None and (len(body) > config.drawio_bytes or downloaded_bytes + len(body) > config.drawio_bytes):
+                failures += 1
+                continue
+            downloaded_bytes += len(body)
+            asset = dict(process_body(match, body))
+            if validate is not None:
+                validate("MediaAsset", asset)
+            if persist_body is not None:
+                persist_body(match, body)
+            assets.append(asset)
+            resolved += 1
+        except Exception:
+            failures += 1
+    return {"media_assets": tuple(assets), "drawio_references_observed": observed, "drawio_references_resolved": resolved, "drawio_assets_failed": failures}
+
+
 class ConfluenceSubtreeCorpusHarness:
     """Small orchestration seam for independently resumable injected phases."""
 
@@ -167,7 +248,8 @@ class ConfluenceSubtreeCorpusHarness:
         if type(config) is not ConfluenceSubtreeCorpusConfig:
             raise TypeError("config is invalid")
         if not isinstance(state_dir, Path) or not state_dir.is_absolute(): raise ValueError("state_dir must be absolute")
-        if state_dir.is_symlink(): raise ValueError("state_dir must not be a symlink")
+        require_plain_directory_chain(state_dir.parent)
+        if state_dir.exists() and state_dir.is_dir(): require_plain_directory_chain(state_dir)
         self.config, self.state_dir = config, state_dir
         state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,16 +258,16 @@ class ConfluenceSubtreeCorpusHarness:
             raise TypeError("fetch_page is invalid")
         batches = partition_page_ids(page_ids, batch_size=self.config.batch_size, max_pages=self.config.max_pages)
         pages_root = self.state_dir / "pages"
-        if pages_root.exists() and pages_root.is_symlink(): raise ValueError("pages directory must not be a symlink")
+        if pages_root.exists(): require_plain_directory_chain(pages_root)
         # Resume from the first batch that still has missing artifacts.
-        start = next((i for i, batch in enumerate(batches) if any(not (pages_root / f"{p}.bin").is_file() for p in batch)), len(batches))
+        start = next((i for i, batch in enumerate(batches) if any(not _valid_page_artifact(pages_root / f"{p}.bin") for p in batch)), len(batches))
         selected = batches[start:start + self.config.stop_after_batches]
         captured = 0
-        total_bytes = sum(p.stat().st_size for p in pages_root.glob("*.bin")) if pages_root.is_dir() else 0
+        total_bytes = sum(p.stat().st_size for p in pages_root.glob("*.bin") if _valid_page_artifact(p)) if pages_root.is_dir() else 0
         for batch in selected:
             for page_id in batch:
                 target = self.state_dir / "pages" / f"{page_id}.bin"
-                if target.exists(): continue
+                if _valid_page_artifact(target): continue
                 body = fetch_page(page_id)
                 if type(body) is not bytes or len(body) > self.config.page_bytes or total_bytes + len(body) > self.config.total_bytes: raise ValueError("page budget exhausted")
                 usage = shutil.disk_usage(self.state_dir)
@@ -200,4 +282,12 @@ class ConfluenceSubtreeCorpusHarness:
         return {"status": "complete" if complete else "stopped", "batches": len(selected), "captured_pages": captured}
 
 
-__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "match_drawio_attachment", "partition_page_ids", "PACKET_FORMAT_VERSION"]
+def _valid_page_artifact(path: Path) -> bool:
+    try:
+        require_plain_file(path)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "capture_drawio_assets", "match_drawio_attachment", "partition_page_ids", "process_preserved_pages", "PACKET_FORMAT_VERSION"]
