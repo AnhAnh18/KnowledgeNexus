@@ -198,6 +198,14 @@ class RetryingConfluenceHttpTransport:
     def snapshot(self) -> ConfluenceRetryExecutionSnapshot:
         return ConfluenceRetryExecutionSnapshot(self._requests, self._last_start)
 
+    @property
+    def request_profile_version(self) -> str:
+        return "m7-confluence-request-profile-v1"
+
+    @property
+    def checkpoint_bound(self) -> bool:
+        return self._attempt_reserver is not None
+
     def _observe_clock(self) -> int | float:
         value = self._clock()
         if type(value) not in (int, float) or isinstance(value, bool):

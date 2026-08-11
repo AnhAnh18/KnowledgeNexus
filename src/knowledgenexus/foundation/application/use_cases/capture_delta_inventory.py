@@ -13,6 +13,7 @@ from typing import Protocol
 from knowledgenexus.foundation.application.use_cases.classify_delta_inventory import ClassifyDeltaInventory
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import ConfluenceRawPageEnvelope
+from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import M7_RAW_PAGE_REQUEST_PROFILE_VERSION
 from knowledgenexus.foundation.domain.models.delta_inventory import (
     CurrentSelectionPage,
     DeltaInventoryClassificationRequest,
@@ -31,6 +32,7 @@ _SHA256 = "0123456789abcdef"
 
 class DeltaInventoryCaptureFailureCategory(StrEnum):
     INVALID_INPUT = "invalid_input"
+    INCOMPLETE_EVIDENCE = "incomplete_evidence"
     PROBE_FAILED = "incomplete_evidence"
     RAW_EVIDENCE_FAILED = "invalid_observation"
     CLASSIFICATION_FAILED = "invalid_result"
@@ -95,7 +97,7 @@ class DeltaInventoryCaptureRequest:
         DeltaInventoryScope.__post_init__(self.scope)
         if len({item.page_id for item in self.prior_documents}) != len(self.prior_documents) or len({item.page_id for item in self.current_selection}) != len(self.current_selection):
             raise ValueError("duplicate page IDs")
-        if not callable(getattr(self.transport, "get_response_bytes", None)) or not callable(getattr(self.transport, "snapshot", None)):
+        if (not callable(getattr(self.transport, "get_response_bytes", None)) or not callable(getattr(self.transport, "snapshot", None)) or getattr(self.transport, "request_profile_version", None) != M7_RAW_PAGE_REQUEST_PROFILE_VERSION or getattr(self.transport, "checkpoint_bound", False) is not True):
             raise ValueError("invalid transport")
         if not callable(getattr(self.raw_page_store, "publish_page", None)) or not callable(getattr(self.raw_page_store, "read_page", None)):
             raise ValueError("invalid raw store")

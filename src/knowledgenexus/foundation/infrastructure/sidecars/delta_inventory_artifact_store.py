@@ -11,6 +11,16 @@ from knowledgenexus.foundation.ports.path_safety import require_plain_directory_
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
 
+def _bounded_read(path: Path) -> bytes:
+    require_plain_file(path)
+    with path.open("rb") as handle:
+        content = handle.read(_MAX_ARTIFACT_BYTES + 1)
+    require_plain_file(path)
+    if len(content) > _MAX_ARTIFACT_BYTES:
+        raise DeltaInventoryArtifactStoreError("artifact_too_large")
+    return content
+
+
 class DeltaInventoryArtifactStoreError(ValueError):
     """Sanitized failure for generation-scoped delta inventory artifacts."""
 
@@ -55,7 +65,7 @@ class DeltaInventoryArtifactStore:
                 require_plain_file(target)
                 if target.stat().st_size > _MAX_ARTIFACT_BYTES:
                     raise DeltaInventoryArtifactStoreError("artifact_too_large")
-                existing = target.read_bytes()
+                existing = _bounded_read(target)
                 if existing != content:
                     raise DeltaInventoryArtifactStoreError("replay_conflict")
                 return target
@@ -72,12 +82,12 @@ class DeltaInventoryArtifactStore:
                 require_plain_file(target)
                 if target.stat().st_size > _MAX_ARTIFACT_BYTES:
                     raise DeltaInventoryArtifactStoreError("artifact_too_large")
-                if target.read_bytes() != content:
+                if _bounded_read(target) != content:
                     raise DeltaInventoryArtifactStoreError("replay_conflict")
             finally:
                 temporary.unlink(missing_ok=True)
             require_plain_file(target)
-            if target.stat().st_size > _MAX_ARTIFACT_BYTES or target.read_bytes() != content:
+            if target.stat().st_size > _MAX_ARTIFACT_BYTES or _bounded_read(target) != content:
                 raise DeltaInventoryArtifactStoreError("publication_failed")
             return target
         except DeltaInventoryArtifactStoreError:
@@ -91,7 +101,7 @@ class DeltaInventoryArtifactStore:
             require_plain_file(target)
             if target.stat().st_size > _MAX_ARTIFACT_BYTES:
                 raise ValueError
-            return DeltaInventoryEnvelope.from_bytes(target.read_bytes())
+            return DeltaInventoryEnvelope.from_bytes(_bounded_read(target))
         except Exception:
             raise DeltaInventoryArtifactStoreError("artifact_invalid") from None
 

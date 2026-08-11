@@ -32,6 +32,9 @@ class Response:
 
 
 class Transport:
+    request_profile_version = "m7-confluence-request-profile-v1"
+    checkpoint_bound = True
+
     def __init__(self, response: Response) -> None:
         self.response = response
         self.calls = 0
