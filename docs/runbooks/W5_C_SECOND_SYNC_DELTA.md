@@ -19,14 +19,51 @@ offline delta export. Never return credentials or raw runtime artifacts.
 
 ## Authorized sequence
 
+The frozen subtree CLI uses a positional phase and requires `--state-dir` and
+`--max-pages` for every phase. Fill these placeholders privately on the main
+machine; do not copy the resulting command or values into Git.
+
 ```powershell
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase inventory <approved-options>
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-pages <approved-options>
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase process-pages <approved-options>
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-drawio <approved-options>
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-delta-inventory <approved-options>
+$common = @(
+  "--state-dir", "<ABS-STATE-DIR>", "--max-pages", "<MAX-PAGES>",
+  "--raw-root", "<ABS-SECOND-RAW-ROOT>",
+  "--reliability-profile-path", "<ABS-RELIABILITY-PROFILE>",
+  "--chunking-profile-path", "<ABS-CHUNKING-PROFILE>",
+  "--tokenizer-assets-dir", "<ABS-BGE-M3-DIR>",
+  "--space-key", "<SPACE-KEY>",
+  "--root-page-id", "<ROOT-PAGE-ID>"
+)
+ $inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
+ $run = $inventory.run_id
+ if (-not $run) { throw "inventory did not return a run identity" }
+# COMMAND 1: start page capture. The operator must interrupt this process with
+# Ctrl+C only after a committed batch. Do not rerun COMMAND 1 after stopping.
+python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+  --run-id $run
+# COMMAND 2: run exactly once after COMMAND 1 was interrupted. It resumes the
+# same run and raw root; do not execute it if COMMAND 1 completed normally.
+python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+  --run-id $run
+python -m knowledgenexus.foundation.cli.confluence_subtree_corpus process-pages @common `
+  --run-id $run
+python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-drawio @common `
+  --run-id $run
+python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-delta-inventory @common `
+  --run-id $run --dataset-root "<ABS-BASE-DATASET-ROOT>" `
+  --base-dataset-version "<ACCEPTED-BASE-VERSION>"
 python -m knowledgenexus.foundation.cli.export_m10_snapshot `
-  --export-mode delta --base-dataset-version <accepted-base-version> <approved-offline-options>
+  --export-mode delta --base-dataset-version "<ACCEPTED-BASE-VERSION>" `
+  --raw-generation-root "<ABS-SECOND-RAW-ROOT>" `
+  --run-id $run --generation-id $run `
+  --chunking-profile "<ABS-CHUNKING-PROFILE>" --tokenizer-assets-dir "<ABS-BGE-M3-DIR>" `
+  --jira-relation-profile "<ABS-JIRA-RELATION-PROFILE>" `
+  --dataset-root "<ABS-DELTA-DATASET-ROOT>" --selection-path "<ABS-SECOND-SELECTION>" `
+  --state-dir "<ABS-STATE-DIR>" --processing-state "<ABS-SECOND-PROCESSING-STATE>" `
+  --drawio-state "<ABS-SECOND-DRAWIO-STATE>" --space-key "<SPACE-KEY>" `
+  --root-page-id "<ROOT-PAGE-ID>" --media-policy required `
+  --git-repository "<PINNED-GIT-NAME>" --git-branch "<PINNED-GIT-BRANCH>" `
+  --git-commit "<PINNED-GIT-COMMIT>" --generated-at "<RFC3339>" `
+  --profile-identity "<PROFILE-IDENTITY>"
 ```
 
 Complete inventory must precede missing-page probes. Preserve status/body

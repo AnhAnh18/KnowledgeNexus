@@ -22,9 +22,24 @@ def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
     assert "does not authorize" in (
         _RUNBOOKS / "W5_A_REAL_INPUT_ACCEPTANCE.md"
     ).read_text(encoding="utf-8")
-    assert "--export-mode delta" in (
-        _RUNBOOKS / "W5_C_SECOND_SYNC_DELTA.md"
-    ).read_text(encoding="utf-8")
+    b_text = (_RUNBOOKS / "W5_B_ROOT1_FULL_SNAPSHOT.md").read_text(encoding="utf-8")
+    c_text = (_RUNBOOKS / "W5_C_SECOND_SYNC_DELTA.md").read_text(encoding="utf-8")
+    assert "--export-mode delta" in c_text
+    assert "--phase" not in b_text + c_text
+    assert "confluence_subtree_corpus inventory @common" in b_text
+    assert "confluence_subtree_corpus capture-delta-inventory @common" in c_text
+    assert '"--raw-root", "<ABS-RAW-ROOT>"' in b_text
+    assert '"--raw-root", "<ABS-SECOND-RAW-ROOT>"' in c_text
+    assert "$run = $inventory.run_id" in b_text + c_text
+    assert "--run-id $run" in b_text + c_text
+    assert "--resume-run-id $run" not in b_text + c_text
+    assert '--raw-generation-root "<ABS-RAW-ROOT>"' in b_text
+    assert '--raw-generation-root "<ABS-SECOND-RAW-ROOT>"' in c_text
+    assert "COMMAND 1" in b_text + c_text
+    assert "COMMAND 2" in b_text + c_text
+    assert "<ABS-DATASET-ROOT-A>" in b_text
+    assert "<ABS-DATASET-ROOT-B>" in b_text
+    assert "--jira-relation-profile" in b_text + c_text
 
 
 def test_w5_a_sanitized_templates_are_valid_pending_envelopes() -> None:
