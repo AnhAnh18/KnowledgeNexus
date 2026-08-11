@@ -84,6 +84,10 @@ def test_observation_rejects_caller_scope_booleans_and_invalid_ids() -> None:
         DeltaInventoryObservation("1", 404, ("bad",), 0, "a" * 64, "v1")
     with pytest.raises(TypeError):
         DeltaInventoryObservation("1", 404, (), 0, "a" * 64, "v1", True)  # type: ignore[call-arg]
+    with pytest.raises(ValueError):
+        DeltaInventoryObservation("1", 404, ("2", "2"), 0, "a" * 64, "v1")
+    with pytest.raises(ValueError):
+        DeltaInventoryScope(())
 
 
 def test_public_result_and_envelope_reject_invalid_w4_dispositions() -> None:
@@ -95,6 +99,14 @@ def test_public_result_and_envelope_reject_invalid_w4_dispositions() -> None:
     missing_detail = DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.SOURCE_DELETED, "v1", None)
     with pytest.raises(ValueError):
         DeltaInventoryClassificationResult(DeltaInventoryStatus.SUCCESS, (missing_detail,), DeltaInventoryMetrics(0, 1, 0, 0))
+    missing_version = DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.SOURCE_DELETED, None, "confluence_404_may_mask_access_revoked")
+    with pytest.raises(ValueError):
+        DeltaInventoryClassificationResult(DeltaInventoryStatus.SUCCESS, (missing_version,), DeltaInventoryMetrics(0, 1, 0, 0))
     valid = DeltaInventoryEntry("confluence:page:1", DeltaInventoryState.SOURCE_DELETED, "v1", "confluence_404_may_mask_access_revoked")
     with pytest.raises(ValueError):
         DeltaInventoryEnvelope("1.0.0", CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), "selection", "base", "scope", (valid,), DeltaInventoryMetrics(0, 1, 0, 0))
+    with pytest.raises(ValueError):
+        DeltaInventoryEnvelope("1.0.0", CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), CrawlRunId("123e4567-e89b-42d3-a456-426614174001"), "a" * 64, "base", "b" * 64, (valid,), DeltaInventoryMetrics(0, 1, 0, 0))
+    forged_document = DeltaInventoryEntry("confluence:page:evil", DeltaInventoryState.SOURCE_DELETED, "v1", "confluence_404_may_mask_access_revoked")
+    with pytest.raises(ValueError):
+        DeltaInventoryEnvelope("1.0.0", CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), CrawlRunId("123e4567-e89b-42d3-a456-426614174000"), "a" * 64, "base", "b" * 64, (forged_document,), DeltaInventoryMetrics(0, 1, 0, 0))

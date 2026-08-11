@@ -8,10 +8,10 @@ artifact consumed by the W4 second-sync path.
 The canonical envelope fields, in order, are:
 
 1. `format_version` (exactly `1.0.0`);
-2. `run_id`, `generation_id`, `current_selection_identity`,
-   `accepted_base_dataset_version`, and `current_scope_identity` (non-empty
-   opaque bindings; selection and scope identities are canonical lower-case
-   SHA-256 values when produced by an adapter);
+2. `run_id` and `generation_id` (canonical lowercase UUIDv4 values, equal to
+   each other); `current_selection_identity` and `current_scope_identity`
+   (exactly 64 lowercase hexadecimal SHA-256 characters); and
+   `accepted_base_dataset_version` (non-empty opaque dataset version);
 3. `entries` (sorted by `document_id`, unique);
 4. `metrics` with exactly `present_count`, `source_deleted_count`,
    `access_revoked_count`, and `moved_out_of_scope_count`.
@@ -28,6 +28,11 @@ selection occurs exactly once. `document_id` is derived from `page_id` using the
 canonical Confluence document-ID rule and is never an independent authority.
 Removed pages retain the accepted base document's `source_version_last_seen`.
 Git records are not valid W4 input.
+
+The envelope is rejected when run and generation identities differ, when either
+identity has a non-canonical UUIDv4 shape, or when either selection/scope
+identity is not a lowercase SHA-256 digest. These are normative field rules,
+not adapter-only conventions.
 
 Each observation has exactly `page_id`, `http_status`, `ancestor_page_ids`,
 `response_byte_count`, `response_sha256`, and `source_version_last_seen`.
@@ -56,8 +61,17 @@ pages, `404/source_deleted`, `403/access_revoked`, and
 `200/moved_out_of_scope` only when derived scope facts prove exclusion or that
 the page is no longer under an include root. A 404 entry must carry the exact
 detail `confluence_404_may_mask_access_revoked`; other states have no detail.
-Each removed entry carries the prior source version. Metrics equal the exact
-counts of emitted entries; no counter may be negative, boolean, or inconsistent.
+Each removed entry carries the prior source version. Only these four W4 states
+are valid in an envelope or classifier result: `present`, `source_deleted`,
+`access_revoked`, and `moved_out_of_scope`. `present` has null source version
+and null detail. `source_deleted` requires the prior source version and exact
+404 ambiguity detail. `access_revoked` and `moved_out_of_scope` require the
+prior source version and null detail. Metrics equal the exact counts of emitted
+entries and `total_count` equals `len(entries)`; no counter may be negative,
+boolean, hidden, or inconsistent.
+
+Every envelope document ID must be `confluence:page:<ASCII-decimal-page-id>`
+and must re-derive from that suffix through the canonical document-ID rule.
 
 401, exhausted retryable statuses, unexpected statuses, malformed evidence, and
 an in-scope 200 missing from a supposedly complete selection fail closed.
