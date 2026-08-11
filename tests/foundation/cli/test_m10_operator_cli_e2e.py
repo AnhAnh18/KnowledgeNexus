@@ -145,7 +145,7 @@ def test_determinism_two_publishes(monkeypatch, tmp_path, capsys):
             state=state, raw_root=raw_root, tok=tok, run_id=run_id, dataset_root=dataset_root,
         )))
     assert payloads[0]["counts"] == payloads[1]["counts"]
-    assert payloads[0]["digest"] == payloads[1]["digest"], "snapshot digest is not deterministic"
+    assert payloads[0]["dataset_version"] == payloads[1]["dataset_version"], "snapshot version is not deterministic"
 
 
 def test_drawio_media_path(monkeypatch, tmp_path, capsys):
