@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -17,6 +18,10 @@ from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence imp
 )
 from knowledgenexus.foundation.domain.models.confluence_raw_page_orphan_inspection import (
     ConfluenceRawPageOrphanInspectionRequest,
+)
+from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
+    ConfluenceRawPageArtifact,
+    ConfluenceRawPageEnvelope,
 )
 from knowledgenexus.foundation.domain.models.confluence_raw_restriction_orphan_inspection import (
     ConfluenceRawRestrictionOrphanInspectionRequest,
@@ -158,6 +163,28 @@ class RawPageReplayResult:
 
     def __repr__(self) -> str:
         return f"RawPageReplayResult(decision={self.decision.value!r})"
+
+
+@dataclass(frozen=True, repr=False)
+class RawPageAcknowledgement:
+    """Durable acknowledgement for an already-published raw page."""
+
+    envelope: ConfluenceRawPageEnvelope
+    artifact: ConfluenceRawPageArtifact
+
+    def __post_init__(self) -> None:
+        if type(self.envelope) is not ConfluenceRawPageEnvelope:
+            raise TypeError("envelope is invalid")
+        if type(self.artifact) is not ConfluenceRawPageArtifact:
+            raise TypeError("artifact is invalid")
+        if self.artifact.run_id != self.envelope.run_id or self.artifact.page_id != self.envelope.page_id:
+            raise ValueError("artifact identity mismatch")
+        serialized = self.envelope.to_bytes()
+        if self.artifact.raw_sha256 != hashlib.sha256(serialized).hexdigest() or self.artifact.byte_count != len(serialized):
+            raise ValueError("artifact evidence mismatch")
+
+    def __repr__(self) -> str:
+        return "RawPageAcknowledgement()"
 
 
 class RawRestrictionReplayDecision(StrEnum):
@@ -376,6 +403,10 @@ class ConfluenceCheckpointStatePort(Protocol):
         self,
         command: RawPageReplayCommand,
         inspector: ConfluenceRawPageOrphanInspectionPort,
+    ) -> RawPageReplayResult | RawPageReplayFailure: ...
+
+    def acknowledge_raw_page(
+        self, acknowledgement: RawPageAcknowledgement
     ) -> RawPageReplayResult | RawPageReplayFailure: ...
 
     def replay_raw_restriction(
