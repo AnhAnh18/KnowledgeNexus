@@ -40,7 +40,7 @@ _REASON_BY_STATE = {
 class PropagateDelta:
     """Compute a deterministic, read-only tombstone delta."""
 
-    def __init__(self, *, schema_validator: object) -> None:
+    def __init__(self, *, schema_validator: object, require_inventory: bool = False) -> None:
         try:
             validator = getattr(schema_validator, "validate_record", None)
         except Exception:
@@ -49,6 +49,9 @@ class PropagateDelta:
             raise TypeError("schema_validator is invalid")
         self._validator = schema_validator
         self._projector = ProjectTombstones(schema_validator=schema_validator)
+        if type(require_inventory) is not bool:
+            raise TypeError("require_inventory is invalid")
+        self._require_inventory = require_inventory
 
     def execute(self, request: object) -> DeltaPropagationResult:
         try:
@@ -118,6 +121,11 @@ class PropagateDelta:
                     continue
 
                 if new is None:
+                    # A missing current summary is not evidence of deletion by
+                    # itself.  W4 callers must provide an authoritative
+                    # non-present inventory disposition for every prior page.
+                    if observation is None and self._require_inventory:
+                        raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
                     if observation is not None and observation.state is DeltaInventoryState.PRESENT:
                         raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
                     removed_count += 1

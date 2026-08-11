@@ -35,7 +35,7 @@ class SnapshotClosureReport:
     tombstone_closed: bool
 
 
-def validate_snapshot_streams(
+def _validate_snapshot_streams_full(
     streams: object,
     *,
     export_mode: str,
@@ -220,4 +220,96 @@ def validate_snapshot_streams(
     )
 
 
-__all__ = ["SnapshotClosureReport", "SnapshotReadbackError", "validate_snapshot_streams"]
+def _stream_shape(streams: object) -> dict[str, tuple[dict[str, object], ...]]:
+    """Validate only stream containers and stable IDs (sparse deltas have no local closure)."""
+    if not isinstance(streams, Mapping) or set(streams) != set(_STREAMS):
+        raise SnapshotReadbackError("stream set is invalid")
+    normalized: dict[str, tuple[dict[str, object], ...]] = {}
+    for name in _STREAMS:
+        value = streams[name]
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+            raise SnapshotReadbackError("stream type is invalid")
+        rows: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for row in value:
+            if not isinstance(row, Mapping):
+                raise SnapshotReadbackError("stream record is invalid")
+            copied = dict(row)
+            identity = copied.get(_IDS[name])
+            if type(identity) is not str or not identity or identity in seen:
+                raise SnapshotReadbackError("stream identity is invalid")
+            seen.add(identity)
+            rows.append(copied)
+        normalized[name] = tuple(rows)
+    return normalized
+
+
+def validate_snapshot_overlay(
+    base_streams: Mapping[str, Sequence[Mapping[str, object]]],
+    delta_streams: Mapping[str, Sequence[Mapping[str, object]]],
+) -> SnapshotClosureReport:
+    """Apply a sparse delta to its exact base and validate effective closure."""
+    base = _stream_shape(base_streams)
+    delta = _stream_shape(delta_streams)
+    # The accepted base is a complete publication; reject malformed base data
+    # before allowing a delta to mask it through replacement rows.
+    _validate_snapshot_streams_full(base, export_mode="full_snapshot")
+    prior_ids = {
+        entity_type: {row[_IDS[stream_name]] for row in base[stream_name]}
+        for entity_type, stream_name in _TOMBSTONE_ENTITY_STREAMS.items()
+    }
+    for row in delta["tombstones"]:
+        entity_type, entity_id = row.get("entity_type"), row.get("entity_id")
+        if entity_type not in prior_ids or entity_id not in prior_ids[entity_type]:
+            raise SnapshotReadbackError("tombstone target is not in prior snapshot")
+
+    effective: dict[str, list[dict[str, object]]] = {
+        name: [dict(row) for row in base[name]] for name in _STREAMS
+    }
+    removed_sync_ids: set[str] = set()
+    for row in delta["tombstones"]:
+        stream_name = _TOMBSTONE_ENTITY_STREAMS[row["entity_type"]]
+        identity_field = _IDS[stream_name]
+        if row["entity_type"] in {"document", "media"}:
+            removed_sync_ids.add(row["entity_id"])
+        effective[stream_name] = [
+            item for item in effective[stream_name] if item[identity_field] != row["entity_id"]
+        ]
+    if removed_sync_ids:
+        effective["sync_state"] = [
+            row for row in effective["sync_state"] if row.get("entity_id") not in removed_sync_ids
+        ]
+    for name in _STREAMS:
+        if name == "tombstones":
+            continue
+        identity_field = _IDS[name]
+        by_id = {row[identity_field]: row for row in effective[name]}
+        for row in delta[name]:
+            by_id[row[identity_field]] = dict(row)
+        effective[name] = list(by_id.values())
+    effective["tombstones"] = []
+    validated = _validate_snapshot_streams_full(effective, export_mode="full_snapshot")
+    # Closure is checked against the effective corpus, while counts remain
+    # the rows physically emitted by this sparse delta.
+    return SnapshotClosureReport(
+        stream_counts=tuple(sorted((name, len(delta[name])) for name in _STREAMS)),
+        relation_closed=validated.relation_closed,
+        acl_closed=validated.acl_closed,
+        sync_closed=validated.sync_closed,
+        tombstone_closed=validated.tombstone_closed,
+    )
+
+
+def validate_snapshot_streams(
+    streams: object,
+    *,
+    export_mode: str,
+    prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+) -> SnapshotClosureReport:
+    """Validate full snapshots or sparse deltas over their accepted base."""
+    if export_mode == "delta" and prior_streams is not None:
+        return validate_snapshot_overlay(prior_streams, streams)  # type: ignore[arg-type]
+    return _validate_snapshot_streams_full(streams, export_mode=export_mode)
+
+
+__all__ = ["SnapshotClosureReport", "SnapshotReadbackError", "validate_snapshot_overlay", "validate_snapshot_streams"]

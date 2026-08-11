@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
 from knowledgenexus.foundation.domain.rules.snapshot_readback import (
     SnapshotReadbackError,
+    validate_snapshot_overlay,
     validate_snapshot_streams,
 )
 from .full_snapshot_staging_writer import JSONL_FILE_SCHEMA_PAIRS
@@ -115,6 +116,7 @@ class PublishedSnapshotReader:
             path,
             validator=self._validator,
             expected_dataset_version=dataset_version,
+            _allow_unbound_delta=True,
         )
         if result.manifest.get("export_mode") == "delta":
             base = result.manifest.get("base_dataset_version")
@@ -122,13 +124,18 @@ class PublishedSnapshotReader:
                 raise ValueError("delta snapshot version chain is invalid")
             prior = self._read(base, seen=seen + (dataset_version,))
             try:
-                validate_snapshot_streams(
+                validate_snapshot_overlay(
+                    prior.streams,
                     result.streams,
-                    export_mode="delta",
-                    prior_streams=prior.streams,
                 )
             except SnapshotReadbackError:
                 raise ValueError("delta snapshot target closure is invalid") from None
+            overlay_streams = _apply_overlay(prior.streams, result.streams)
+            result = PublishedSnapshotReadback(
+                manifest=result.manifest,
+                streams=overlay_streams,
+                digest=result.digest,
+            )
         return result
 
 
@@ -164,6 +171,8 @@ def read_delta_snapshot(
         raise ValueError("invalid snapshot path")
     if type(validator) is not FoundationSchemaValidator:
         raise TypeError("invalid validator")
+    if prior_streams is None:
+        raise ValueError("delta base streams are required")
     expected_files = {"manifest.json", "quality_report.md"} | {file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS}
     entries = tuple(path.iterdir())
     if {entry.name for entry in entries} != expected_files or any(not entry.is_file() or entry.is_symlink() for entry in entries):
@@ -212,11 +221,10 @@ def read_delta_snapshot(
         digest.update(b"\0")
         digest.update(stream_path.read_bytes())
     try:
-        validate_snapshot_streams(
-            streams,
-            export_mode="delta",
-            prior_streams=prior_streams,
-        )
+        if prior_streams is None:
+            _stream_shape_for_reader(streams)
+        else:
+            validate_snapshot_streams(streams, export_mode="delta", prior_streams=prior_streams)
     except SnapshotReadbackError:
         raise ValueError("delta cross-stream closure is invalid") from None
     return DeltaSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
@@ -228,6 +236,7 @@ def read_published_snapshot(
     validator: FoundationSchemaValidator,
     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     expected_dataset_version: str | None = None,
+    _allow_unbound_delta: bool = False,
 ) -> PublishedSnapshotReadback:
     """Read either a full or delta publication through the same strict seam."""
     if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or _has_reparse_component(path):
@@ -241,6 +250,8 @@ def read_published_snapshot(
     manifest = _strict_json(path / "manifest.json")
     if type(manifest) is not dict or manifest.get("export_mode") not in {"full_snapshot", "delta"}:
         raise ValueError("snapshot mode is invalid")
+    if manifest.get("export_mode") == "delta" and prior_streams is None and not _allow_unbound_delta:
+        raise ValueError("delta base streams are required")
     if not _quality_report_bytes(path / "quality_report.md"):
         raise ValueError("snapshot quality report is invalid")
     dataset_version = manifest.get("dataset_version")
@@ -290,14 +301,49 @@ def read_published_snapshot(
         digest.update(b"\0")
         digest.update(stream_path.read_bytes())
     try:
-        validate_snapshot_streams(
-            streams,
-            export_mode=manifest["export_mode"],
-            prior_streams=prior_streams,
-        )
+        if manifest["export_mode"] == "delta" and prior_streams is None:
+            _stream_shape_for_reader(streams)
+        else:
+            validate_snapshot_streams(
+                streams,
+                export_mode=manifest["export_mode"],
+                prior_streams=prior_streams,
+            )
     except SnapshotReadbackError:
         raise ValueError("snapshot cross-stream closure is invalid") from None
     return PublishedSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
+
+
+def _stream_shape_for_reader(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> None:
+    expected = {"documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones"}
+    if set(streams) != expected:
+        raise SnapshotReadbackError("stream set is invalid")
+    ids = {"documents": "document_id", "chunks": "chunk_id", "relations": "relation_id", "acl": "acl_id", "media_assets": "media_id", "symbols": "symbol_id", "sync_state": "entity_id", "tombstones": "tombstone_id"}
+    for name, rows in streams.items():
+        seen: set[str] = set()
+        for row in rows:
+            identity = row.get(ids[name])
+            if type(identity) is not str or not identity or identity in seen:
+                raise SnapshotReadbackError("stream identity is invalid")
+            seen.add(identity)
+
+
+def _apply_overlay(base: Mapping[str, Sequence[Mapping[str, object]]], delta: Mapping[str, Sequence[Mapping[str, object]]]) -> dict[str, tuple[dict[str, object], ...]]:
+    ids = {"documents": "document_id", "chunks": "chunk_id", "relations": "relation_id", "acl": "acl_id", "media_assets": "media_id", "symbols": "symbol_id", "sync_state": "entity_id", "tombstones": "tombstone_id"}
+    target_streams = {"document": "documents", "chunk": "chunks", "relation": "relations", "acl": "acl", "media": "media_assets", "symbol": "symbols"}
+    result = {name: {row[ids[name]]: dict(row) for row in base[name]} for name in ids}
+    for row in delta["tombstones"]:
+        stream = target_streams[row["entity_type"]]
+        result[stream].pop(row["entity_id"], None)
+        if stream in {"documents", "media_assets"}:
+            result["sync_state"].pop(row["entity_id"], None)
+    for name in ids:
+        if name == "tombstones":
+            continue
+        for row in delta[name]:
+            result[name][row[ids[name]]] = dict(row)
+    result["tombstones"] = {}
+    return {name: tuple(rows[key] for key in sorted(rows)) for name, rows in result.items()}
 
 
 def _strict_json_line(line: str) -> object:
