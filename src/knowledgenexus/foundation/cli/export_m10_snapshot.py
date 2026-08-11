@@ -21,7 +21,11 @@ from knowledgenexus.foundation.domain.models.one_page_export import OnePageExpor
 from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import (
     M10SnapshotExportFailure,
 )
-from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
+from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter, M10DeltaSnapshotExporter
+from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import PublishedSnapshotReader
+from knowledgenexus.foundation.infrastructure.sidecars import DeltaInventoryArtifactStore
+from knowledgenexus.foundation.application.use_cases.capture_delta_inventory import selection_identity, scope_identity
+from knowledgenexus.foundation.domain.models.delta_inventory import CurrentSelectionPage, DeltaInventoryScope
 from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotResult
 from knowledgenexus.foundation.domain.models.media_body_materialization import MediaBodyStoreBudget
 from knowledgenexus.foundation.domain.models.media_materialization import ConfluenceAttachmentObservation, MediaMaterializationResult, MediaRelationIntent
@@ -331,9 +335,16 @@ def _build_operator_inputs(args: argparse.Namespace) -> tuple[M10SnapshotRequest
     return request, confluence, _EmptyGitAdapter()
 
 
-def run(*, request: object, confluence_adapter: object, git_adapter: object, validator: FoundationSchemaValidator | None = None):
+def run(*, request: object, confluence_adapter: object, git_adapter: object, validator: FoundationSchemaValidator | None = None, prior_snapshot_reader: object | None = None, delta_inventory: tuple[object, ...] = ()):
     """Run the injected offline boundary; useful for tests and embedding."""
-    exporter = M10FullSnapshotExporter(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=validator)
+    if type(request) is M10SnapshotRequest and request.export_mode == "delta":
+        if prior_snapshot_reader is None or not delta_inventory:
+            raise M10SnapshotExportFailure("invalid_request")
+        exporter = M10DeltaSnapshotExporter(prior_snapshot_reader=prior_snapshot_reader, delta_inventory=tuple(delta_inventory), confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=validator)
+    else:
+        if prior_snapshot_reader is not None or delta_inventory:
+            raise M10SnapshotExportFailure("invalid_request")
+        exporter = M10FullSnapshotExporter(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=validator)
     return exporter.execute(request)
 
 
@@ -361,9 +372,31 @@ def main(
                 raise
             except (OSError, TypeError, ValueError):
                 raise _ConfigurationError from None
+            prior_reader = None
+            inventory_entries: tuple[object, ...] = ()
+            if request.export_mode == "delta":
+                if not parsed.state_dir or request.base_dataset_version is None:
+                    raise _ConfigurationError
+                try:
+                    store = DeltaInventoryArtifactStore(state_root=Path(parsed.state_dir) / "runs")
+                    envelope = store.read(generation_id=request.generation_id)
+                    expected_selection = selection_identity(tuple(CurrentSelectionPage(page_id) for page_id in request.ordered_page_ids))
+                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.include_root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), ()))
+                    if (envelope.run_id != request.run_id or envelope.generation_id != request.generation_id or envelope.accepted_base_dataset_version != request.base_dataset_version or envelope.current_selection_identity != expected_selection or envelope.current_scope_identity != expected_scope):
+                        raise ValueError
+                    prior_reader = PublishedSnapshotReader(dataset_root=request.dataset_root, validator=validator or FoundationSchemaValidator())
+                    inventory_entries = tuple(envelope.entries)
+                except Exception:
+                    raise _ConfigurationError from None
+            else:
+                prior_reader = None
+                inventory_entries = ()
         elif request is None or confluence_adapter is None or git_adapter is None:
             raise M10SnapshotExportFailure("invalid_request")
-        result = run(request=request, confluence_adapter=confluence_adapter, git_adapter=git_adapter, validator=validator)
+        else:
+            prior_reader = None
+            inventory_entries = ()
+        result = run(request=request, confluence_adapter=confluence_adapter, git_adapter=git_adapter, validator=validator, prior_snapshot_reader=prior_reader, delta_inventory=inventory_entries)
     except SystemExit as exc:
         if type(exc.code) is int:
             return exc.code

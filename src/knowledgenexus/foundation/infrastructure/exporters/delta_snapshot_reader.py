@@ -112,11 +112,11 @@ class PublishedSnapshotReader:
         path = self._dataset_root / dataset_version
         if path.parent != self._dataset_root or not path.is_dir() or _has_reparse_component(path):
             raise ValueError("published snapshot is unavailable")
-        result = read_published_snapshot(
+        result = _read_published_snapshot_impl(
             path,
             validator=self._validator,
             expected_dataset_version=dataset_version,
-            _allow_unbound_delta=True,
+            allow_unbound_delta=True,
         )
         if result.manifest.get("export_mode") == "delta":
             base = result.manifest.get("base_dataset_version")
@@ -230,13 +230,13 @@ def read_delta_snapshot(
     return DeltaSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
 
 
-def read_published_snapshot(
+def _read_published_snapshot_impl(
     path: object,
     *,
     validator: FoundationSchemaValidator,
     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     expected_dataset_version: str | None = None,
-    _allow_unbound_delta: bool = False,
+    allow_unbound_delta: bool = False,
 ) -> PublishedSnapshotReadback:
     """Read either a full or delta publication through the same strict seam."""
     if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or _has_reparse_component(path):
@@ -250,7 +250,7 @@ def read_published_snapshot(
     manifest = _strict_json(path / "manifest.json")
     if type(manifest) is not dict or manifest.get("export_mode") not in {"full_snapshot", "delta"}:
         raise ValueError("snapshot mode is invalid")
-    if manifest.get("export_mode") == "delta" and prior_streams is None and not _allow_unbound_delta:
+    if manifest.get("export_mode") == "delta" and prior_streams is None and not allow_unbound_delta:
         raise ValueError("delta base streams are required")
     if not _quality_report_bytes(path / "quality_report.md"):
         raise ValueError("snapshot quality report is invalid")
@@ -312,6 +312,23 @@ def read_published_snapshot(
     except SnapshotReadbackError:
         raise ValueError("snapshot cross-stream closure is invalid") from None
     return PublishedSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
+
+
+def read_published_snapshot(
+    path: object,
+    *,
+    validator: FoundationSchemaValidator,
+    prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+    expected_dataset_version: str | None = None,
+) -> PublishedSnapshotReadback:
+    """Public strict reader; delta publications require an accepted base."""
+    return _read_published_snapshot_impl(
+        path,
+        validator=validator,
+        prior_streams=prior_streams,
+        expected_dataset_version=expected_dataset_version,
+        allow_unbound_delta=False,
+    )
 
 
 def _stream_shape_for_reader(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> None:

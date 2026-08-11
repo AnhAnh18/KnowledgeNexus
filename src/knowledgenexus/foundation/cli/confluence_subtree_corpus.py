@@ -29,7 +29,7 @@ from knowledgenexus.foundation.ports.path_safety import require_plain_directory_
 
 _SELECTION_FORMAT = "confluence-subtree-selection-v1"
 _PROCESSING_FORMAT = "confluence-subtree-processing-state-v1"
-_STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json"})
+_STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json", "delta-inventory.json"})
 _MAX_STATE_BYTES = 64 * 1024 * 1024
 _SELECTION_FIELDS = frozenset({"format_version", "run_id", "generation_id", "selection_identity", "items"})
 _PROCESSING_FIELDS = frozenset({
@@ -328,7 +328,7 @@ def _load_processing_payload(path: Path, *, run_id: CrawlRunId, selection_identi
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="confluence-subtree-corpus")
     subparsers = parser.add_subparsers(dest="phase", required=True)
-    for name in ("inventory", "capture-pages", "process-pages", "capture-drawio", "export"):
+    for name in ("inventory", "capture-pages", "process-pages", "capture-drawio", "capture-delta-inventory", "export"):
         phase = subparsers.add_parser(name)
         phase.add_argument("--state-dir", required=True)
         phase.add_argument("--max-pages", type=int, required=True)
@@ -344,6 +344,11 @@ def _parser() -> argparse.ArgumentParser:
         phase.add_argument("--resume-unique", action="store_true")
         phase.add_argument("--space-key")
         phase.add_argument("--root-page-id")
+        phase.add_argument("--include-root-page-id", action="append", dest="include_root_page_ids")
+        phase.add_argument("--exclude-page-id", action="append", dest="excluded_page_ids")
+        phase.add_argument("--exclude-ancestor-page-id", action="append", dest="excluded_ancestor_page_ids")
+        phase.add_argument("--base-dataset-version")
+        phase.add_argument("--dataset-root")
     return parser
 
 
@@ -764,6 +769,73 @@ def _export_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     return {"status": "complete", "phase": "export", "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": packet["media_asset_count"]}
 
 
+def _capture_delta_inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
+    if not args.run_id or not args.raw_root or not args.dataset_root or not args.base_dataset_version:
+        raise ValueError("delta inventory inputs are required")
+    run_id = _require_run_id(args.run_id)
+    selection, items = _load_selection_payload(_selection_file(args, state, run_id), run_id=run_id, max_pages=args.max_pages)
+    from knowledgenexus.foundation.application.use_cases.capture_delta_inventory import (
+        CaptureDeltaInventory, DeltaInventoryCaptureRequest, selection_identity, scope_identity,
+    )
+    from knowledgenexus.foundation.domain.models.delta_inventory import (
+        CurrentSelectionPage, DeltaInventoryScope, PriorConfluenceDocument,
+    )
+    from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import PublishedSnapshotReader
+    from knowledgenexus.foundation.infrastructure.raw_store import ConfluenceRawPageGenerationStore
+    from knowledgenexus.foundation.infrastructure.sidecars import DeltaInventoryArtifactStore
+    from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
+    from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
+    from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport import RetryingConfluenceHttpTransport
+    from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ActivateRawGenerationRequest
+
+    profile = _validated_page_bound(args, _load_reliability_profile(args.reliability_profile_path))
+    current = tuple(CurrentSelectionPage(item.page_id) for item in items)
+    current_identity = selection_identity(current)
+    payload = tuple({"page_id": item.page_id} for item in current)
+    scope = DeltaInventoryScope(
+        tuple(args.include_root_page_ids or ((args.root_page_id,) if args.root_page_id else ())),
+        tuple(args.excluded_page_ids or ()),
+        tuple(args.excluded_ancestor_page_ids or ()),
+    )
+    current_scope_identity = scope_identity(scope)
+    reader = PublishedSnapshotReader(dataset_root=Path(args.dataset_root), validator=FoundationSchemaValidator())
+    base = reader.read(args.base_dataset_version)
+    prior: list[PriorConfluenceDocument] = []
+    for row in base.streams["documents"]:
+        if row.get("source_system") != "confluence" or row.get("source_type") not in {"wiki_page", "page"}:
+            continue
+        document_id = row.get("document_id")
+        source_version = row.get("source_version")
+        if type(document_id) is not str or not document_id.startswith("confluence:page:") or type(source_version) is not str or not source_version:
+            raise ValueError("prior snapshot is invalid")
+        page_id = document_id.removeprefix("confluence:page:")
+        prior.append(PriorConfluenceDocument(page_id, document_id, source_version))
+    source_config = _source_config(args, profile)
+    composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=profile["max_inventory_windows_per_root"])
+    request = ActivateRawGenerationRequest(workspace=state, run_id=run_id, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+    with composition.checkpoint_run_port.activate_raw_generation(request) as session:
+        transport = RetryingConfluenceHttpTransport(inner=composition.http_inner, profile=composition.retry_profile, monotonic_clock=time.monotonic, sleeper=time.sleep, attempt_reserver=session)
+        capture_request = DeltaInventoryCaptureRequest(
+            run_id=run_id, generation_id=run_id,
+            accepted_base_dataset_version=args.base_dataset_version,
+            current_selection_identity=current_identity,
+            current_scope_identity=current_scope_identity,
+            prior_documents=tuple(prior), current_selection=current, scope=scope,
+            transport=transport,
+            raw_page_store=ConfluenceRawPageGenerationStore(raw_root=Path(args.raw_root)),
+            artifact_store=DeltaInventoryArtifactStore(state_root=state / "runs"),
+            selection_payload=payload,
+            max_response_bytes=profile["max_response_bytes_per_request"],
+            max_artifact_bytes=profile["max_response_bytes_per_request"],
+            max_artifacts=profile["max_raw_artifacts_per_run"],
+            minimum_free_disk_bytes=profile["minimum_free_disk_reserve_bytes"],
+            max_requests=profile["max_total_requests_per_run"],
+        )
+        result = CaptureDeltaInventory().execute(capture_request)
+        session.complete_session()
+    return {"status": "complete", "phase": "capture-delta-inventory", "present_count": result.metrics.present_count, "source_deleted_count": result.metrics.source_deleted_count, "access_revoked_count": result.metrics.access_revoked_count, "moved_out_of_scope_count": result.metrics.moved_out_of_scope_count}
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
@@ -775,6 +847,7 @@ def main(argv: list[str] | None = None) -> int:
             "capture-pages": _capture_pages_phase,
             "process-pages": _process_pages_phase,
             "capture-drawio": _capture_drawio_phase,
+            "capture-delta-inventory": _capture_delta_inventory_phase,
             "export": _export_phase,
         }
         result = handlers[args.phase](args, state)
