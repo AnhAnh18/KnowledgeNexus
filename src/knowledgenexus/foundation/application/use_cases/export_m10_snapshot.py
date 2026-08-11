@@ -426,6 +426,8 @@ class ExportM10Snapshot:
                     raise ValueError
                 projection = orchestrated.projection
                 delta_base_streams = orchestrated.base_streams
+                if type(delta_base_streams) is not dict or not delta_base_streams:
+                    raise ValueError
             else:
                 delta_base_streams = None
             projection_before = deepcopy(projection)

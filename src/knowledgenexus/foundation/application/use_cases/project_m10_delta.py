@@ -64,13 +64,17 @@ class M10DeltaOrchestrationError(ValueError):
 class M10DeltaOrchestrationResult:
     projection: M10SnapshotProjection
     propagation: DeltaPropagationResult
-    base_streams: dict[str, tuple[dict[str, object], ...]] | None = None
+    base_streams: dict[str, tuple[dict[str, object], ...]]
 
     def __post_init__(self) -> None:
         if type(self.projection) is not M10SnapshotProjection or type(self.propagation) is not DeltaPropagationResult:
             raise TypeError("delta result is invalid")
-        if self.base_streams is not None and type(self.base_streams) is not dict:
+        if type(self.base_streams) is not dict:
             raise TypeError("delta base streams are invalid")
+        try:
+            _stream_view(self.base_streams)
+        except Exception:
+            raise TypeError("delta base streams are invalid") from None
 
 
 def _canonical_hash(value: object) -> str:
@@ -306,7 +310,7 @@ def _sparse_streams(
                 belongs = True
             if not belongs and not canonical_changed:
                 continue
-            if name == "documents" and identity not in changed_docs:
+            if name == "documents" and not config_invalidated and identity not in changed_docs and not canonical_changed:
                 continue
             rows.append(dict(row))
         rows.sort(key=lambda row: str(row.get(id_field, "")))

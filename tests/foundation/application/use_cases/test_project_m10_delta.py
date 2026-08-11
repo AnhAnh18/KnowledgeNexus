@@ -198,6 +198,31 @@ def test_unchanged_second_sync_emits_valid_empty_delta(tmp_path: Path) -> None:
     assert all(not getattr(projection, name) for name in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones"))
 
 
+def test_byte_changed_document_is_emitted_even_when_content_hash_is_unchanged(tmp_path: Path) -> None:
+    request, full = _composed(tmp_path)
+    documents = []
+    for row in full.documents:
+        copied = dict(row)
+        if copied["document_id"] == "confluence:page:123":
+            copied["title"] = copied["title"] + " (renamed)"
+        documents.append(copied)
+    current = replace(
+        full,
+        generated_at="2026-08-05T00:01:00Z",
+        documents=tuple(documents),
+        tombstones=(),
+        metrics=replace(full.metrics, tombstones=0),
+        export_mode="delta",
+    )
+    delta_request = replace(request, generated_at="2026-08-05T00:01:00Z", export_mode="delta", base_dataset_version=_BASE_VERSION)
+    result = _orchestrator(full).execute(
+        delta_request,
+        current,
+        inventory=(DeltaInventoryEntry("confluence:page:123", DeltaInventoryState.PRESENT),),
+    )
+    assert [row["document_id"] for row in result.projection.documents] == ["confluence:page:123"]
+
+
 def test_config_invalidation_reemits_tombstoned_replacements(tmp_path: Path) -> None:
     request, full = _composed(tmp_path)
     delta_request = replace(request, generated_at="2026-08-05T00:01:00Z", export_mode="delta", base_dataset_version=_BASE_VERSION)
