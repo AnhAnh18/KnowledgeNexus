@@ -356,12 +356,14 @@ def main(
     confluence_adapter: object | None = None,
     git_adapter: object | None = None,
     validator: FoundationSchemaValidator | None = None,
+    prior_snapshot_reader: object | None = None,
+    delta_inventory: tuple[object, ...] = (),
 ) -> int:
     _silence_m3_loggers()
     try:
         # Embedded callers use the injected seam and must not inherit the
         # host process' argv (for example pytest's own flags).
-        parse_argv = [] if argv is None and request is not None else argv
+        parse_argv = (["--export-mode", request.export_mode] if argv is None and type(request) is M10SnapshotRequest else ( [] if argv is None and request is not None else argv))
         parsed = _parse_args(parse_argv)
         _media_policy(parsed.media_policy)
         if parsed.export_mode == "full_snapshot" and (parsed.base_dataset_version is not None or parsed.excluded_ancestor_page_ids):
@@ -375,8 +377,8 @@ def main(
                 raise
             except (OSError, TypeError, ValueError):
                 raise _ConfigurationError from None
-            prior_reader = None
-            inventory_entries: tuple[object, ...] = ()
+            prior_reader = prior_snapshot_reader
+            inventory_entries: tuple[object, ...] = tuple(delta_inventory)
             if request.export_mode == "delta":
                 if not parsed.state_dir or request.base_dataset_version is None:
                     raise _ConfigurationError
@@ -397,8 +399,12 @@ def main(
         elif request is None or confluence_adapter is None or git_adapter is None:
             raise M10SnapshotExportFailure("invalid_request")
         else:
-            prior_reader = None
-            inventory_entries = ()
+            prior_reader = prior_snapshot_reader
+            inventory_entries = tuple(delta_inventory)
+            if request.export_mode == "full_snapshot" and (prior_reader is not None or inventory_entries):
+                raise M10SnapshotExportFailure("invalid_request")
+            if request.export_mode == "delta" and (prior_reader is None or not inventory_entries):
+                raise M10SnapshotExportFailure("invalid_request")
         result = run(request=request, confluence_adapter=confluence_adapter, git_adapter=git_adapter, validator=validator, prior_snapshot_reader=prior_reader, delta_inventory=inventory_entries)
     except SystemExit as exc:
         if type(exc.code) is int:
@@ -427,7 +433,6 @@ def main(
         payload = {
             "status": "success",
             "dataset_version": result.dataset_version,
-            "digest": result.digest,
             "counts": counts,
             "network_used": False,
             "credentials_used": False,

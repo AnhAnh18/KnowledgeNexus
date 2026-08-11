@@ -826,7 +826,7 @@ def _capture_delta_inventory_phase(args: argparse.Namespace, state: Path) -> dic
             artifact_store=DeltaInventoryArtifactStore(state_root=state / "runs"),
             selection_payload=payload,
             max_response_bytes=profile["max_response_bytes_per_request"],
-            max_artifact_bytes=profile["max_response_bytes_per_request"],
+            max_artifact_bytes=profile["max_raw_bytes_per_run"],
             max_artifacts=profile["max_raw_artifacts_per_run"],
             minimum_free_disk_bytes=profile["minimum_free_disk_reserve_bytes"],
             max_requests=profile["max_total_requests_per_run"],

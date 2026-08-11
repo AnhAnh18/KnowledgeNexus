@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from knowledgenexus.foundation.cli import export_m10_snapshot as cli
 from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
+from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
 
 
 class _Adapter:
@@ -47,6 +49,33 @@ def test_cli_help_returns_success(capsys):
     captured = capsys.readouterr()
     assert "export-m10-snapshot" in captured.out
     assert captured.err == ""
+
+
+def test_injected_delta_main_forwards_dependencies_and_hides_digest(tmp_path, capsys, monkeypatch):
+    base_request = _request(tmp_path)
+    confluence, git = _handoffs()
+    full_result = M10FullSnapshotExporter(
+        confluence_adapter=_Adapter(confluence), git_adapter=_Adapter(git)
+    ).execute(base_request)
+    delta_request = replace(base_request, export_mode="delta", base_dataset_version="v20260805-000000-000000Z")
+    observed = {}
+
+    def fake_run(**kwargs):
+        observed.update(kwargs)
+        return full_result
+
+    monkeypatch.setattr(cli, "run", fake_run)
+    assert cli.main(
+        request=delta_request,
+        confluence_adapter=_Adapter(confluence),
+        git_adapter=_Adapter(git),
+        prior_snapshot_reader=object(),
+        delta_inventory=(object(),),
+    ) == 0
+    assert observed["prior_snapshot_reader"] is not None
+    assert observed["delta_inventory"]
+    payload = json.loads(capsys.readouterr().out)
+    assert "digest" not in payload
 
 
 def test_media_policy_maps_to_typed_contract():
