@@ -8,6 +8,9 @@ Part 1 crawls, normalizes, and exports knowledge from **Confluence (space SVMC)*
 
 ## Read order (priority)
 
+W4 readers must also read `DELTA_SECOND_SYNC_SPEC.md` with the active focused
+contracts; it governs second-sync inventory evidence and disposition fields.
+
 1. `schemas/*.json` — the data contract; **wins all field-level disputes**. Start with `defs.schema.json` (ID grammars + enums, referenced by the rest), then the record schemas, then `manifest.schema.json`.
 2. `CHUNKING_SPEC.md` — chunking behavior & token budget. §1 now locks BGE-M3 and `chunker_version 1.2.0`; the active medium budget remains provisional until benchmark evidence exists.
 3. `JIRA_RELATION_SPEC.md` + `jira_relation_profile.yaml` — the active M6E regex-only Jira relation and allowlist contract.
@@ -36,9 +39,14 @@ Precedence (highest wins): `schemas/` → active focused specs/profiles (`CHUNKI
 
 ## Open items (operational, not design)
 
+The W4 second-sync contract is defined in `DELTA_SECOND_SYNC_SPEC.md`.
+
 `data_root` + disk cap (before full media crawl) · real PAT values (at code time) · real `exclude_subtrees` (after inventory) · winning bge-m3 budget (after benchmark) · fill 37-item benchmark anchors from crawled corpus · enable HQ wiki (Phase 1.1) · multi-branch (post-MVP, needs identity change) · query-time ACL resolver owner · Task 3 retrieval design doc · import-linter ruleset + sample_export fixture owner (v7.5). The v7.4 Part B BGE-M3 contract migration and active `spen-sdk`→`spen-sdk` spelling correction are applied; historical decision-log text remains unchanged for audit fidelity.
 
 ## Working norms (please continue these)
+
+W4 precedence: `DELTA_SECOND_SYNC_SPEC.md` is the focused contract for
+evidence-bound second-sync inventory fields, ordering, and disposition rules.
 
 - **Multi-AI cross-validation:** decisions are drafted across tools (e.g. ChatGPT in parallel), then brought here to evaluate **against the actual schemas/spec** (verify enums/fields from the files, don't trust memory), then consolidated into the versioned decision logs. This is a deliberate quality gate.
 - **Analyze before editing:** comment/critique without modifying files unless explicitly told to. File creation/edits are a separate, deliberate step.

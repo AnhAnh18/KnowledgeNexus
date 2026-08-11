@@ -110,15 +110,21 @@ class DeltaInventoryEntry:
     document_id: str
     state: DeltaInventoryState
     source_version_last_seen: str | None = None
+    detail: str | None = None
 
     def __post_init__(self) -> None:
-        _require_exact_fields(self, frozenset({"document_id", "state", "source_version_last_seen"}))
+        _require_exact_fields(self, frozenset({"document_id", "state", "source_version_last_seen", "detail"}))
         if type(self.document_id) is not str or _DOCUMENT_ID.fullmatch(self.document_id) is None:
             raise ValueError("document_id is invalid")
         if type(self.state) is not DeltaInventoryState:
             raise TypeError("state is invalid")
         if self.source_version_last_seen is not None:
             _opaque("source_version_last_seen", self.source_version_last_seen)
+        if self.detail is not None:
+            if type(self.detail) is not str or "\n" in self.detail or "\r" in self.detail or len(self.detail.encode("utf-8")) > 1024:
+                raise ValueError("detail is invalid")
+            if self.state is not DeltaInventoryState.SOURCE_DELETED or self.detail != "confluence_404_may_mask_access_revoked":
+                raise ValueError("detail is invalid")
 
 
 @dataclass(frozen=True, repr=False)
