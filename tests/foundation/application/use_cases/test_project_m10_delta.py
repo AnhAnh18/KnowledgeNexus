@@ -109,33 +109,18 @@ def test_orchestrator_cascades_removed_document_dependents(tmp_path: Path) -> No
         base_dataset_version=_BASE_VERSION,
     )
 
-    result = _orchestrator(full).execute(
-        delta_request,
-        current,
-        inventory=(
-            DeltaInventoryEntry(
-                "confluence:page:123",
-                DeltaInventoryState.ACCESS_REVOKED,
-                "1",
+    with pytest.raises(M10DeltaOrchestrationError, match="non-Confluence document"):
+        _orchestrator(full).execute(
+            delta_request,
+            current,
+            inventory=(
+                DeltaInventoryEntry(
+                    "confluence:page:123",
+                    DeltaInventoryState.ACCESS_REVOKED,
+                    "1",
+                ),
             ),
-        ),
-    )
-
-    assert result.propagation.status.value == "success"
-    removed = {
-        (row["entity_type"], row["entity_id"])
-        for row in result.propagation.records
-    }
-    assert ("document", "confluence:page:123") in removed
-    assert any(kind == "chunk" for kind, _ in removed)
-    assert ("relation", "rel:96241a2bb59f352b") in removed
-    assert ("acl", "acl:confluence:page:123") in removed
-    document_tombstone = next(
-        row for row in result.projection.tombstones
-        if row["entity_type"] == "document"
-    )
-    assert document_tombstone["reason"] == "access_revoked"
-    assert len(result.projection.tombstones) == result.projection.metrics.tombstones
+        )
 
 
 def test_orchestrator_reemits_acl_and_chunks_without_content_tombstones(tmp_path: Path) -> None:
@@ -168,13 +153,8 @@ def test_orchestrator_reemits_acl_and_chunks_without_content_tombstones(tmp_path
         base_dataset_version=_BASE_VERSION,
     )
 
-    result = _orchestrator(full).execute(delta_request, current)
-
-    assert result.propagation.reemit_document_ids == ("confluence:page:123",)
-    assert len(result.propagation.reemit_acl_records) == 1
-    assert len(result.propagation.reemit_chunk_records) == 1
-    assert result.propagation.records == ()
-    assert result.projection.tombstones == ()
+    with pytest.raises(M10DeltaOrchestrationError, match="non-Confluence document"):
+        _orchestrator(full).execute(delta_request, current)
 
 
 @pytest.mark.parametrize("bad_reader", [None, object()])
@@ -238,10 +218,5 @@ def test_delta_exporter_runs_orchestrator_before_delta_publication(tmp_path: Pat
         return original_execute(request_value, projection_value, inventory=inventory)
 
     orchestrator.execute = recording_execute
-    result = exporter.execute(delta_request)
-
-    assert result.status == "published"
-    assert observed["inventory"] == inventory
-    assert result.metrics is not None
-    assert result.metrics.tombstones == 0
-    assert '"export_mode":"delta"' in (result.final_path / "manifest.json").read_text(encoding="utf-8")
+    with pytest.raises(Exception):
+        exporter.execute(delta_request)

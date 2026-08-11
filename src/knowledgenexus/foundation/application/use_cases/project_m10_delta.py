@@ -22,6 +22,7 @@ from knowledgenexus.foundation.domain.models.chunk_stability import (
 )
 from knowledgenexus.foundation.domain.models.delta_propagation import (
     DeltaInventoryEntry,
+    DeltaInventoryState,
     DeltaPropagationRequest,
     DeltaPropagationResult,
     DeltaPropagationStatus,
@@ -62,16 +63,23 @@ class M10DeltaOrchestrationError(ValueError):
 class M10DeltaOrchestrationResult:
     projection: M10SnapshotProjection
     propagation: DeltaPropagationResult
+    base_streams: dict[str, tuple[dict[str, object], ...]] | None = None
 
     def __post_init__(self) -> None:
         if type(self.projection) is not M10SnapshotProjection or type(self.propagation) is not DeltaPropagationResult:
             raise TypeError("delta result is invalid")
+        if self.base_streams is not None and type(self.base_streams) is not dict:
+            raise TypeError("delta base streams are invalid")
 
 
 def _canonical_hash(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     ).hexdigest()
+
+
+def _canonical_bytes(value: Mapping[str, object]) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
 def _stream_view(value: object) -> dict[str, tuple[dict[str, object], ...]]:
@@ -245,6 +253,66 @@ def _merge_tombstones(existing: Sequence[Mapping[str, object]], generated: Seque
     return tuple(sorted(by_id.values(), key=lambda row: (str(row.get("entity_type")), str(row.get("entity_id")), row["tombstone_id"])))
 
 
+def _sparse_streams(
+    prior: Mapping[str, Sequence[Mapping[str, object]]],
+    current: Mapping[str, Sequence[Mapping[str, object]]],
+    propagation: DeltaPropagationResult,
+    tombstones: tuple[dict[str, object], ...],
+) -> dict[str, tuple[dict[str, object], ...]]:
+    outcomes = dict(propagation.document_outcomes)
+    changed_docs = {doc_id for doc_id, outcome in outcomes.items() if outcome in {"new", "changed"}}
+    prior_documents = {row.get("document_id"): row for row in prior["documents"]}
+    current_documents = {row.get("document_id"): row for row in current["documents"]}
+    acl_only_docs = {
+        doc_id for doc_id in propagation.reemit_document_ids
+        if doc_id in prior_documents and doc_id in current_documents
+        and prior_documents[doc_id].get("content_hash") == current_documents[doc_id].get("content_hash")
+    }
+    changed_docs -= acl_only_docs
+    reemit_chunks = {row["chunk_id"] for row in propagation.reemit_chunk_records}
+    reemit_acls = {row["acl_id"] for row in propagation.reemit_acl_records}
+    old_by_stream = {
+        name: {row[_STREAM_IDS[name]]: row for row in prior[name]}
+        for name in _STREAMS
+    }
+    current_chunks = {row.get("chunk_id"): row.get("document_id") for row in current["chunks"]}
+    affected_ids = changed_docs | acl_only_docs
+    out: dict[str, tuple[dict[str, object], ...]] = {}
+    for name in _STREAMS:
+        if name == "tombstones":
+            out[name] = tombstones
+            continue
+        id_field = _STREAM_IDS[name]
+        rows: list[dict[str, object]] = []
+        for row in current[name]:
+            identity = row.get(id_field)
+            prior_row = old_by_stream[name].get(identity)
+            belongs = row.get("document_id") in affected_ids or row.get("parent_document_id") in affected_ids
+            if prior_row is None:
+                belongs = True
+            if name == "relations":
+                belongs = belongs or current_chunks.get(row.get("source_id")) in affected_ids or current_chunks.get(row.get("target_id")) in affected_ids
+            if name == "sync_state":
+                belongs = row.get("entity_id") in affected_ids or prior_row is None
+            if name == "documents":
+                belongs = identity in changed_docs
+            if name == "chunks" and identity in reemit_chunks:
+                belongs = True
+            if name == "acl" and identity in reemit_acls:
+                belongs = True
+            if not belongs:
+                continue
+            if name == "chunks" and row.get("document_id") in changed_docs and identity not in reemit_chunks:
+                if prior_row is not None and _canonical_bytes(prior_row) == _canonical_bytes(row):
+                    continue
+            elif name not in {"documents", "chunks"} and prior_row is not None and _canonical_bytes(prior_row) == _canonical_bytes(row):
+                continue
+            rows.append(dict(row))
+        rows.sort(key=lambda row: str(row.get(id_field, "")))
+        out[name] = tuple(rows)
+    return out
+
+
 class M10DeltaOrchestrator:
     """Turn a prior published stream and current M10 projection into a delta."""
 
@@ -254,7 +322,7 @@ class M10DeltaOrchestrator:
         if not callable(prior_snapshot_reader) and not callable(getattr(prior_snapshot_reader, "read", None)):
             raise TypeError("prior snapshot reader is invalid")
         self._reader = prior_snapshot_reader
-        self._propagator = PropagateDelta(schema_validator=schema_validator)
+        self._propagator = PropagateDelta(schema_validator=schema_validator, require_inventory=True)
 
     def execute(
         self,
@@ -281,6 +349,47 @@ class M10DeltaOrchestrator:
         except Exception:
             raise M10DeltaOrchestrationError("prior snapshot read failed") from None
         current = {name: tuple(dict(row) for row in getattr(projection, name)) for name in _STREAMS}
+        # W4-B is intentionally Confluence-only.  A missing Git row cannot be
+        # interpreted as a source deletion by the Confluence inventory path.
+        for streams in (prior, current):
+            for row in streams["documents"]:
+                if row.get("source_system") != "confluence":
+                    raise M10DeltaOrchestrationError("non-Confluence document is invalid")
+        prior_document_ids = {row["document_id"] for row in prior["documents"]}
+        current_document_ids = {row["document_id"] for row in current["documents"]}
+        if type(inventory) is not tuple:
+            raise M10DeltaOrchestrationError("inventory is invalid")
+        inventory_by_id: dict[str, DeltaInventoryEntry] = {}
+        for entry in inventory:
+            if type(entry) is not DeltaInventoryEntry:
+                raise M10DeltaOrchestrationError("inventory is invalid")
+            try:
+                DeltaInventoryEntry.__post_init__(entry)
+            except Exception:
+                raise M10DeltaOrchestrationError("inventory is invalid") from None
+            if entry.document_id in inventory_by_id:
+                raise M10DeltaOrchestrationError("inventory is conflicting")
+            if entry.state is DeltaInventoryState.CONFIG_INVALIDATED:
+                raise M10DeltaOrchestrationError("inventory state is invalid")
+            if not entry.document_id.startswith("confluence:page:"):
+                raise M10DeltaOrchestrationError("inventory document identity is invalid")
+            if entry.state is not DeltaInventoryState.PRESENT and (type(entry.source_version_last_seen) is not str or not entry.source_version_last_seen):
+                raise M10DeltaOrchestrationError("inventory source version is invalid")
+            if entry.state is DeltaInventoryState.SOURCE_DELETED and entry.detail != "confluence_404_may_mask_access_revoked":
+                raise M10DeltaOrchestrationError("inventory detail is invalid")
+            if entry.state is DeltaInventoryState.PRESENT and (entry.source_version_last_seen is not None or entry.detail is not None):
+                raise M10DeltaOrchestrationError("inventory present fields are invalid")
+            if entry.state in {DeltaInventoryState.ACCESS_REVOKED, DeltaInventoryState.MOVED_OUT_OF_SCOPE} and entry.detail is not None:
+                raise M10DeltaOrchestrationError("inventory detail is invalid")
+            inventory_by_id[entry.document_id] = entry
+        relevant_ids = prior_document_ids | current_document_ids
+        if set(inventory_by_id) != relevant_ids:
+            raise M10DeltaOrchestrationError("inventory closure is incomplete")
+        for document_id in relevant_ids:
+            present = document_id in current_document_ids
+            state = inventory_by_id[document_id].state
+            if present != (state is DeltaInventoryState.PRESENT):
+                raise M10DeltaOrchestrationError("inventory state is inconsistent")
         if not isinstance(prior_manifest, Mapping):
             raise M10DeltaOrchestrationError("prior snapshot manifest is invalid")
         if prior_manifest.get("dataset_version") != request.base_dataset_version:
@@ -330,9 +439,28 @@ class M10DeltaOrchestrator:
         if result.status is not DeltaPropagationStatus.SUCCESS:
             raise M10DeltaOrchestrationError("delta propagation failed")
         tombstones = _merge_tombstones(current["tombstones"], result.records)
-        metrics = replace(projection.metrics, tombstones=len(tombstones))
-        next_projection = replace(projection, tombstones=tombstones, metrics=metrics)
-        return M10DeltaOrchestrationResult(projection=next_projection, propagation=result)
+        sparse = _sparse_streams(prior, current, result, tombstones)
+        emitted_counts = {name: len(sparse[name]) for name in _STREAMS}
+        metrics = replace(
+            projection.metrics,
+            documents=emitted_counts["documents"],
+            chunks=emitted_counts["chunks"],
+            relations=emitted_counts["relations"],
+            acl=emitted_counts["acl"],
+            media_assets=emitted_counts["media_assets"],
+            symbols=emitted_counts["symbols"],
+            sync_state=emitted_counts["sync_state"],
+            tombstones=emitted_counts["tombstones"],
+            confluence_documents=sum(row.get("source_system") == "confluence" for row in sparse["documents"]),
+            git_documents=sum(row.get("source_system") == "git" for row in sparse["documents"]),
+            unresolved_relations=sum(row.get("resolution_status") != "resolved" for row in sparse["relations"]),
+            media_processed=sum(row.get("processing_status") in {"parsed", "ocr", "summarized"} for row in sparse["media_assets"]),
+            media_failed=sum(row.get("processing_status") == "failed" for row in sparse["media_assets"]),
+            symbols_resolved=sum(row.get("chunk_id") is not None for row in sparse["symbols"]),
+            default_deny_chunks=sum(row.get("acl_tags") == ["restricted:unresolved"] for row in sparse["chunks"]),
+        )
+        next_projection = replace(projection, **sparse, metrics=metrics)
+        return M10DeltaOrchestrationResult(projection=next_projection, propagation=result, base_streams=prior)
 
 
 __all__ = ["M10DeltaOrchestrationError", "M10DeltaOrchestrationResult", "M10DeltaOrchestrator"]

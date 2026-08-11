@@ -10,7 +10,7 @@ import hashlib
 import json
 import shutil
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
 from enum import StrEnum
@@ -306,7 +306,7 @@ def _sensitive_values(records: Mapping[str, tuple[dict[str, object], ...]], proj
     return {value for value in values if len(value) >= 8}
 
 
-def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10SnapshotProjection, dataset_version: str, generated_at: str, expected_counts: dict[str, int], quality_report: bytes, validator: FoundationSchemaValidator) -> None:
+def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10SnapshotProjection, dataset_version: str, generated_at: str, expected_counts: dict[str, int], quality_report: bytes, validator: FoundationSchemaValidator, *, prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None) -> None:
     root = request.dataset_root
     if final_path != root / dataset_version or type(final_path) is not _CONCRETE_PATH_TYPE or final_path.is_symlink() or not final_path.is_dir():
         raise ValueError
@@ -343,10 +343,7 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
             if isolated_row != row:
                 raise ValueError("validator mutated record")
             assert_validation_bytes_unchanged()
-    validate_snapshot_streams(
-        streams,
-        export_mode=request.export_mode,
-    )
+    validate_snapshot_streams(streams, export_mode=request.export_mode, prior_streams=prior_streams)
     if request.export_mode == "full_snapshot" and streams["tombstones"]:
         raise ValueError
     if request.export_mode == "delta":
@@ -425,6 +422,9 @@ class ExportM10Snapshot:
                 if type(orchestrated) is not M10DeltaOrchestrationResult:
                     raise ValueError
                 projection = orchestrated.projection
+                delta_base_streams = orchestrated.base_streams
+            else:
+                delta_base_streams = None
             projection_before = deepcopy(projection)
             quality = _derive_quality(request, projection)
             generated_at = request.generated_at
@@ -460,7 +460,7 @@ class ExportM10Snapshot:
             _cleanup_staging(staging_path)
             raise M10SnapshotExportFailure("publication") from None
         try:
-            _accept(final_path, request, projection, dataset_version, generated_at, quality.expected_counts, report_snapshot, self._validator)
+            _accept(final_path, request, projection, dataset_version, generated_at, quality.expected_counts, report_snapshot, self._validator, prior_streams=delta_base_streams)
             if projection != projection_before:
                 raise ValueError
             digest = _snapshot_digest(final_path)

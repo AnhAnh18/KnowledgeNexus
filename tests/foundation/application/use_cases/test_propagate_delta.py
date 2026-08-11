@@ -121,6 +121,13 @@ def test_empty_new_and_unchanged_delta_is_success_and_deterministic() -> None:
     assert unchanged.metrics.unchanged_document_count == 1
 
 
+def test_w4_strict_propagation_rejects_missing_prior_inventory() -> None:
+    old = _summary("confluence:page:1")
+    result = PropagateDelta(schema_validator=Validator(), require_inventory=True).execute(_request(previous=(old,)))
+    assert result.status is DeltaPropagationStatus.FAILED
+    assert result.error_category is DeltaPropagationFailureCategory.INVENTORY_CONFLICT
+
+
 def test_changed_chunk_emits_only_removed_or_changed_previous_chunks() -> None:
     old = _summary(
         "confluence:page:1",
