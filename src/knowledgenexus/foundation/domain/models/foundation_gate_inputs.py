@@ -18,6 +18,7 @@ _IDENTITY = re.compile(r"\A[a-z0-9][a-z0-9._:-]{0,127}\Z")
 _MEDIA_KINDS = frozenset({
     "chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf",
 })
+_MEDIA_SCOPES = frozenset({"all_media", "drawio_only"})
 _MEDIA_STATUSES = frozenset({"processed", "skipped", "failed"})
 _STREAMS = frozenset({
     "acl", "chunks", "documents", "media_assets", "relations", "symbols",
@@ -190,6 +191,7 @@ class BoundedMediaGateRequest:
     evidence_kind: str
     real_capture_attested: bool = False
     transport: str = "offline_fixture"
+    media_scope: str = "all_media"
 
     def __post_init__(self) -> None:
         if type(self.first_run) is not SanitizedMediaProcessorRun or type(self.second_run) is not SanitizedMediaProcessorRun:
@@ -200,12 +202,19 @@ class BoundedMediaGateRequest:
             raise TypeError("real_capture_attested is invalid")
         if type(self.transport) is not str or self.transport not in {"offline_fixture", "production"}:
             raise ValueError("transport is invalid")
+        if type(self.media_scope) is not str or self.media_scope not in _MEDIA_SCOPES:
+            raise ValueError("media_scope is invalid")
         if self.evidence_kind == "synthetic_fixture" and self.real_capture_attested:
             raise ValueError("synthetic media evidence cannot be real-capture attested")
         if self.evidence_kind == "synthetic_fixture" and self.transport != "offline_fixture":
             raise ValueError("synthetic media evidence must use offline transport")
         if self.first_run.expected_media_ids != self.second_run.expected_media_ids:
             raise ValueError("media run scopes differ")
+        if self.media_scope == "drawio_only" and any(
+            outcome.kind != "drawio"
+            for outcome in (*self.first_run.outcomes, *self.second_run.outcomes)
+        ):
+            raise ValueError("drawio_only media scope contains non-Draw.io outcomes")
 
 
 @dataclass(frozen=True, repr=False)

@@ -51,7 +51,10 @@ def _media_failure_reason(
         reasons.append("writes_changed")
     if sum(item.status == "failed" for item in first.outcomes) or sum(item.status == "failed" for item in second.outcomes):
         reasons.append("processor_failure")
-    if {kind for kind, _ in counts} != {"chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf"}:
+    required_kinds = {"drawio"} if request.media_scope == "drawio_only" else {
+        "chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf"
+    }
+    if {kind for kind, _ in counts} != required_kinds:
         reasons.append("corpus_coverage_incomplete")
     return ";".join(reasons) if reasons else None
 
@@ -79,6 +82,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
                 no_silent_omission=False,
                 evidence_digest=None,
                 failure_reason=None,
+                media_scope=request.media_scope,
             )
         first, second = request.first_run, request.second_run
         # The request model has already rejected duplicate/omitted identities;
@@ -90,6 +94,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
         reason = _media_failure_reason(request, counts=counts)
         facts = {
             "evidence_kind": request.evidence_kind,
+            "media_scope": request.media_scope,
             "real_capture_attested": request.real_capture_attested,
             "transport": request.transport,
             "expected_media_ids": first.expected_media_ids,
@@ -117,6 +122,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
                 no_silent_omission=True,
                 evidence_digest=None,
                 failure_reason=reason,
+                media_scope=request.media_scope,
             )
         return BoundedMediaCorpusAcceptance(
             status="complete",
@@ -129,6 +135,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
             source_unchanged=True,
             no_silent_omission=True,
             evidence_digest=_digest_facts(facts),
+            media_scope=request.media_scope,
         )
 
 

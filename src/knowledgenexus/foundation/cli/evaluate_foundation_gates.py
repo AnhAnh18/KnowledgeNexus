@@ -64,7 +64,7 @@ _READBACK_FIELDS = frozenset({
     "atomic_publish", "no_clobber", "sanitized_output", "transport",
     "rss_baseline_bytes", "rss_peak_bytes", "duration_milliseconds",
 })
-_MEDIA_REQUEST_FIELDS = frozenset({"first_run", "second_run", "evidence_kind", "real_capture_attested", "transport"})
+_MEDIA_REQUEST_FIELDS = frozenset({"first_run", "second_run", "evidence_kind", "real_capture_attested", "transport", "media_scope"})
 _SCALE_REQUEST_FIELDS = frozenset({
     "profile_id", "target_pages", "first_readback", "second_readback", "evidence_kind",
 })
@@ -238,6 +238,7 @@ def _request(gate: str, payload: object) -> BoundedMediaGateRequest | OcrEngineA
             evidence_kind=data["evidence_kind"],  # type: ignore[arg-type]
             real_capture_attested=data.get("real_capture_attested", False),  # type: ignore[arg-type]
             transport=data.get("transport", "offline_fixture"),  # type: ignore[arg-type]
+            media_scope=data.get("media_scope", "all_media"),  # type: ignore[arg-type]
         )
     data = _object(payload, _SCALE_REQUEST_FIELDS)
     return ScaleGateRequest(
@@ -313,7 +314,7 @@ def _safe_result(result: object, gate: str) -> dict[str, object]:
     payload = dataclasses.asdict(result)
     if set(payload) - {
         "status", "evidence_kind", "kind_counts", "processed_count", "skipped_count", "failed_count",
-        "deterministic_repeat", "source_unchanged", "no_silent_omission", "evidence_digest", "failure_reason",
+        "deterministic_repeat", "source_unchanged", "no_silent_omission", "evidence_digest", "failure_reason", "media_scope",
         "profile_id", "target_pages", "observed_pages", "run_count", "stream_counts", "readback_valid",
         "relation_closed", "acl_closed", "sync_closed", "atomic_publish", "no_clobber", "sanitized_output",
         "transport", "rss_baseline_bytes", "rss_peak_bytes", "duration_milliseconds",

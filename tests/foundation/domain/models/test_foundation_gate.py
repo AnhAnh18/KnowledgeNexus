@@ -76,6 +76,33 @@ def test_bounded_media_corpus_requires_every_kind_and_balanced_counters() -> Non
         )
 
 
+def test_bounded_media_corpus_drawio_only_requires_explicit_scope_and_counts() -> None:
+    result = BoundedMediaCorpusAcceptance(
+        status="complete", evidence_kind="sanitized_real_capture",
+        kind_counts=(("drawio", 1),), processed_count=1, skipped_count=0,
+        failed_count=0, deterministic_repeat=True, source_unchanged=True,
+        no_silent_omission=True, evidence_digest="d" * 64,
+        media_scope="drawio_only",
+    )
+    assert result.media_scope == "drawio_only"
+    with pytest.raises(ValueError):
+        BoundedMediaCorpusAcceptance(
+            status="complete", evidence_kind="sanitized_real_capture",
+            kind_counts=(("drawio", 1),), processed_count=1, skipped_count=0,
+            failed_count=0, deterministic_repeat=True, source_unchanged=True,
+            no_silent_omission=True, evidence_digest="d" * 64,
+            media_scope="not-approved",
+        )
+    with pytest.raises(ValueError):
+        BoundedMediaCorpusAcceptance(
+            status="complete", evidence_kind="sanitized_real_capture",
+            kind_counts=(("image", 1),), processed_count=1, skipped_count=0,
+            failed_count=0, deterministic_repeat=True, source_unchanged=True,
+            no_silent_omission=True, evidence_digest="d" * 64,
+            media_scope="drawio_only",
+        )
+
+
 def test_scale_gate_requires_two_readback_runs_and_all_streams() -> None:
     streams = (
         ("acl", 1), ("chunks", 2), ("documents", 1), ("media_assets", 1),
