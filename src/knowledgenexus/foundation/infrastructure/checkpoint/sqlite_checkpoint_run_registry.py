@@ -16,6 +16,7 @@ from knowledgenexus.foundation.domain.models.confluence_crawl_fingerprint import
     _build_effective_crawl_input,
 )
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    ActivateRawGeneration,
     CanonicalIncludeRoots,
     CommittedCheckpointTransition,
     CrawlRunId,
@@ -214,6 +215,14 @@ def _operation_value(operation: object) -> tuple[str, str | None] | None:
         if operation.run_id != run_id:
             return None
         return ("explicit", run_id.value)
+    if type(operation) is ActivateRawGeneration:
+        try:
+            run_id = CrawlRunId(operation.run_id.value)
+        except Exception:
+            return None
+        if operation.run_id != run_id:
+            return None
+        return ("raw_generation", run_id.value)
     return None
 
 
@@ -548,11 +557,11 @@ def _register_checkpoint_run(
         rows = transaction._fetchall(
             "SELECT run_id,generation_id,fingerprint_digest,status,inventory_phase,created_at "
             "FROM crawl_runs "
-            + ("WHERE run_id=?" if operation == "explicit" else "WHERE status='incomplete'")
+            + ("WHERE run_id=?" if operation in {"explicit", "raw_generation"} else "WHERE status='incomplete'")
             + " ORDER BY run_id",
-            (selected_run_id,) if operation == "explicit" else (),
+            (selected_run_id,) if operation in {"explicit", "raw_generation"} else (),
         )
-        if operation == "explicit":
+        if operation in {"explicit", "raw_generation"}:
             if not rows:
                 return _RunRegistryFailure(_RunRegistryFailureCategory.RUN_NOT_FOUND)
             stored = _read_stored_run(
@@ -564,6 +573,10 @@ def _register_checkpoint_run(
                 or stored.snapshot.include_roots != roots
             ):
                 return _RunRegistryFailure(_RunRegistryFailureCategory.RUN_NOT_RESUMABLE)
+            if operation == "raw_generation":
+                if stored.snapshot.inventory_phase is not InventoryPhaseStatus.COMPLETE:
+                    return _RunRegistryFailure(_RunRegistryFailureCategory.RUN_NOT_RESUMABLE)
+                return _activate_existing(transaction, stored, uuid4, utc_now, limits)
             if stored.snapshot.inventory_phase is InventoryPhaseStatus.COMPLETE:
                 return _InventoryComplete(stored.snapshot)
             return _activate_existing(transaction, stored, uuid4, utc_now, limits)

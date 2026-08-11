@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    ActivateRawGeneration,
     InventoryRootCommit,
     ResumeExplicitRunId,
     ResumeUniqueIncompleteRun,
@@ -305,6 +306,16 @@ def test_inventory_complete_resume_does_not_create_a_session(tmp_path) -> None:
         assert isinstance(result, _InventoryComplete)
         with workspace_module._open_locked_checkpoint_workspace(tmp_path):
             pass
+
+    with _register_checkpoint_run_context(
+        _request(tmp_path, ActivateRawGeneration(started.snapshot.run_id)),
+        uuid4=_ids("123e4567-e89b-42d3-a456-426614174003"),
+        utc_now=_clock,
+    ) as activation:
+        assert isinstance(activation, _RunActivated)
+        facts = tuple(activation.stream_inventory_occurrences(batch_size=1))
+        assert [fact.metadata.page_id for fact in facts] == ["a", "b"]
+        activation.pause_session()
 
 
 def test_start_conflicts_on_same_fingerprint_even_when_durable_roots_differ(tmp_path) -> None:

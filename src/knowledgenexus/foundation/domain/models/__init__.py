@@ -248,7 +248,7 @@ from knowledgenexus.foundation.domain.models.confluence_inventory_window import 
     ConfluenceInventoryWindow,
 )
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
-    CrawlRunId, CrawlSessionId, StartNewRun, ResumeExplicitRunId,
+    ActivateRawGeneration, CrawlRunId, CrawlSessionId, StartNewRun, ResumeExplicitRunId,
     ResumeUniqueIncompleteRun, CanonicalIncludeRoots, CrawlRunStatus,
     InventoryPhaseStatus, IncludeRootProgress, InventoryRootCommit,
     CommittedCheckpointTransition, CrawlRunSnapshot, CrawlRunOperation,
@@ -443,7 +443,7 @@ __all__ = [
     "ConfluenceCrawlFingerprintBuilder",
     "build_confluence_crawl_fingerprint",
     "ConfluenceInventoryWindow",
-    "CrawlRunId", "CrawlSessionId", "StartNewRun", "ResumeExplicitRunId",
+    "ActivateRawGeneration", "CrawlRunId", "CrawlSessionId", "StartNewRun", "ResumeExplicitRunId",
     "ResumeUniqueIncompleteRun", "CanonicalIncludeRoots", "CrawlRunStatus",
     "InventoryPhaseStatus", "IncludeRootProgress", "InventoryRootCommit",
     "CommittedCheckpointTransition", "CrawlRunSnapshot", "CrawlRunOperation",

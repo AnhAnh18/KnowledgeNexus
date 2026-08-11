@@ -85,7 +85,7 @@ class LiveSubtreeComposition:
             ),
         )
 
-    def attachment_components(self, *, attachment_root: Path, budget: MediaBodyStoreBudget, attachment_page_size: int = 100, max_attachment_pages: int = 100):
+    def attachment_components(self, *, attachment_root: Path, budget: MediaBodyStoreBudget, attachment_page_size: int = 100, max_attachment_pages: int = 100, transport: object | None = None):
         """Return concrete metadata, immutable-body and Draw.io processors."""
         if not isinstance(attachment_root, Path) or not attachment_root.is_absolute():
             raise ValueError("attachment_root must be absolute")
@@ -93,10 +93,11 @@ class LiveSubtreeComposition:
             raise ValueError("attachment_page_size must be positive")
         if type(max_attachment_pages) is not int or max_attachment_pages <= 0:
             raise ValueError("max_attachment_pages must be positive")
-        observer = _LiveAttachmentObserver(self.transport, attachment_page_size, max_attachment_pages)
+        selected_transport = self.transport if transport is None else transport
+        observer = _LiveAttachmentObserver(selected_transport, attachment_page_size, max_attachment_pages)
         store = ConfluenceRawAttachmentStore(data_root=attachment_root, budget=budget)
         materializer = FetchAndStoreConfluenceAttachmentBody(
-            body_fetcher=ConfluenceDataCenterAttachmentBodyAdapter(transport=self.transport),
+            body_fetcher=ConfluenceDataCenterAttachmentBodyAdapter(transport=selected_transport),
             raw_attachment_store=store, budget=budget,
         )
         processor = ProcessConfluenceMediaAttachment(drawio_processor=DrawioProcessor())

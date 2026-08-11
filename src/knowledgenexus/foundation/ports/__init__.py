@@ -103,6 +103,7 @@ from knowledgenexus.foundation.ports.confluence_raw_restriction_orphan_inspectio
     ConfluenceRawRestrictionOrphanInspectionPort,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+    ActivateRawGenerationRequest,
     CheckpointRunActivation,
     CheckpointRunInventoryComplete,
     CheckpointRunOutcome,
@@ -202,6 +203,7 @@ __all__ = [
     "CheckpointRunSelectionFailure",
     "CheckpointRunSelectionFailureCategory",
     "ConfluenceCheckpointRunPort",
+    "ActivateRawGenerationRequest",
     "ResumeExplicitRunRequest",
     "ResumeUniqueIncompleteRunRequest",
     "StartNewRunRequest",

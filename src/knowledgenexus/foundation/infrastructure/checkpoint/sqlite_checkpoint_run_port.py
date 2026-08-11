@@ -6,6 +6,7 @@ from typing import ContextManager
 import uuid
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    ActivateRawGeneration,
     CrawlRunSnapshot,
     CrawlSessionId,
     ResumeExplicitRunId,
@@ -13,6 +14,7 @@ from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     StartNewRun,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+    ActivateRawGenerationRequest,
     CheckpointRunInventoryComplete,
     CheckpointRunOutcome,
     CheckpointRunSelectionFailure,
@@ -240,6 +242,19 @@ class SqliteConfluenceCheckpointRunPort:
                 request,
                 ResumeUniqueIncompleteRun(),
                 ResumeUniqueIncompleteRunRequest,
+            )
+        )
+
+    def activate_raw_generation(
+        self, request: ActivateRawGenerationRequest
+    ) -> ContextManager[CheckpointRunOutcome]:
+        if type(request) is not ActivateRawGenerationRequest:
+            return self._invalid_request()
+        return self._activate(
+            self._request(
+                request,
+                ActivateRawGeneration(request.run_id),
+                ActivateRawGenerationRequest,
             )
         )
 

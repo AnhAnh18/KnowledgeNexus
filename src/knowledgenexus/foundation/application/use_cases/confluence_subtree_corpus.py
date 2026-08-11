@@ -9,12 +9,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
 from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain, require_plain_file
 
 PACKET_FORMAT_VERSION = "confluence-subtree-indexing-packet-v1"
@@ -22,6 +25,13 @@ DEFAULT_BATCH_SIZE = 100
 MAX_PAGES = 5000
 DEFAULT_ACL_TAGS = ["restricted:unresolved"]
 _FILES = ("documents.jsonl", "chunks.jsonl", "media_assets.jsonl", "packet_summary.json")
+_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
+_DRAWIO_STATE_FORMAT_VERSION = "confluence-subtree-drawio-state-v1"
+_DRAWIO_STATE_FIELDS = frozenset({
+    "format_version", "run_id", "generation_id", "selection_identity",
+    "observed", "resolutions", "failed", "downloaded_bytes",
+    "artifact_count", "media_assets",
+})
 
 
 def _finite(name: str, value: object, *, maximum: int | None = None) -> int:
@@ -68,10 +78,10 @@ def partition_page_ids(page_ids: Sequence[str], *, batch_size: int = DEFAULT_BAT
 class DrawioReference:
     parent_page_id: str
     filename: str
-    source_version: str
+    parent_source_version: str
 
     def __post_init__(self) -> None:
-        if any(type(v) is not str or not v for v in (self.parent_page_id, self.filename, self.source_version)):
+        if any(type(v) is not str or not v for v in (self.parent_page_id, self.filename, self.parent_source_version)):
             raise ValueError("drawio reference is invalid")
 
 
@@ -101,7 +111,7 @@ def match_drawio_attachment(reference: DrawioReference, attachments: Iterable[At
     for item in attachments:
         if type(item) is not AttachmentMetadata:
             raise TypeError("attachment metadata is invalid")
-    candidates = tuple(a for a in attachments if type(a) is AttachmentMetadata and a.parent_page_id == reference.parent_page_id and a.filename == reference.filename and a.source_version == reference.source_version and a.filename.lower().endswith((".drawio", ".drawio.xml", ".xml")))
+    candidates = tuple(a for a in attachments if type(a) is AttachmentMetadata and a.parent_page_id == reference.parent_page_id and a.filename == reference.filename and a.filename.lower().endswith((".drawio", ".drawio.xml", ".xml")))
     if len(candidates) > 1:
         raise ValueError("ambiguous drawio attachment")
     return candidates[0] if candidates else None
@@ -247,9 +257,12 @@ def capture_drawio_with_production_components(
     attachment_observer: object,
     body_materializer: object,
     media_processor: object,
+    run_id: CrawlRunId,
+    selection_identity: str,
+    prior_state: Mapping[str, object] | None = None,
+    persist_state: Callable[[Mapping[str, object]], object] | None = None,
     acknowledge: Callable[[str], object] | None = None,
     config: ConfluenceSubtreeCorpusConfig | None = None,
-    state_path: Path | None = None,
 ) -> dict[str, object]:
     """Compose the approved metadata, body, raw-store and media use cases.
 
@@ -263,36 +276,58 @@ def capture_drawio_with_production_components(
     list_attachments = getattr(attachment_observer, "list_attachments", None)
     execute_body = getattr(body_materializer, "execute", None)
     execute_media = getattr(media_processor, "execute", None)
-    if not callable(list_attachments) or not callable(execute_body) or not callable(execute_media):
-        raise TypeError("production attachment components are invalid")
     from knowledgenexus.foundation.domain.models.media_materialization import (
         ConfluenceAttachmentObservation, MediaPolicyDecision,
     )
-    if state_path is not None and (not isinstance(state_path, Path) or not state_path.is_absolute()):
-        raise ValueError("state_path must be absolute")
-    prior: dict[str, object] = {}
-    if state_path is not None and state_path.exists():
-        prior = json.loads(state_path.read_text(encoding="utf-8"))
-        if type(prior) is not dict:
-            raise ValueError("drawio state is invalid")
-    refs = tuple(sorted(tuple(references), key=lambda r: (r.parent_page_id, r.filename, r.source_version)))
-    assets: list[dict[str, object]] = [dict(x) for x in prior.get("media_assets", ()) if type(x) is dict]
-    resolved_keys = set(tuple(x) for x in prior.get("resolved", ()) if type(x) is list and len(x) == 3)
+    if type(run_id) is not CrawlRunId:
+        raise TypeError("run_id is invalid")
+    try:
+        run_id = CrawlRunId(run_id.value)
+    except Exception:
+        raise ValueError("run_id is invalid") from None
+    if type(selection_identity) is not str or _SHA256.fullmatch(selection_identity) is None:
+        raise ValueError("selection_identity is invalid")
+    if persist_state is not None and not callable(persist_state):
+        raise TypeError("persist_state is invalid")
+    refs = tuple(sorted(tuple(references), key=_drawio_reference_key))
+    if any(type(ref) is not DrawioReference for ref in refs):
+        raise TypeError("drawio reference is invalid")
+    if len({_drawio_reference_key(ref) for ref in refs}) != len(refs):
+        raise ValueError("drawio references contain duplicates")
+    if refs and (not callable(list_attachments) or not callable(execute_body) or not callable(execute_media)):
+        raise TypeError("production attachment components are invalid")
     failures = 0
     observed = len(refs)
-    resolved = len(resolved_keys)
     cfg = config or ConfluenceSubtreeCorpusConfig(max_pages=MAX_PAGES)
-    downloaded_bytes = 0
-    observed_keys = {(r.parent_page_id, r.filename, r.source_version) for r in refs}
-    resolved_keys.intersection_update(observed_keys)
-    for index, ref in enumerate(refs):
-        if type(ref) is not DrawioReference:
-            raise TypeError("drawio reference is invalid")
-        key = (ref.parent_page_id, ref.filename, ref.source_version)
+    if observed > cfg.drawio_count:
+        raise ValueError("drawio artifact budget exhausted")
+    observed_keys = tuple(_drawio_reference_key(ref) for ref in refs)
+    assets, resolutions, downloaded_bytes = validate_drawio_capture_state(
+        prior_state,
+        run_id=run_id,
+        selection_identity=selection_identity,
+        observed_keys=observed_keys,
+        config=cfg,
+    )
+    resolved_keys = {tuple(entry["reference"]) for entry in resolutions}
+
+    def snapshot() -> dict[str, object]:
+        return {
+            "format_version": _DRAWIO_STATE_FORMAT_VERSION,
+            "run_id": str(run_id),
+            "generation_id": str(run_id),
+            "selection_identity": selection_identity,
+            "observed": [list(key) for key in observed_keys],
+            "resolutions": [dict(entry) for entry in resolutions],
+            "failed": failures,
+            "downloaded_bytes": downloaded_bytes,
+            "artifact_count": len(resolutions),
+            "media_assets": [dict(asset) for asset in assets],
+        }
+
+    for ref in refs:
+        key = _drawio_reference_key(ref)
         if key in resolved_keys:
-            continue
-        if index >= cfg.drawio_count:
-            failures += 1
             continue
         try:
             metadata = tuple(list_attachments(ref.parent_page_id))
@@ -301,7 +336,6 @@ def capture_drawio_with_production_components(
                 if type(item) is ConfluenceAttachmentObservation
                 and item.parent_page_id == ref.parent_page_id
                 and item.filename == ref.filename
-                and item.source_version == ref.source_version
                 and item.filename.lower().endswith((".drawio", ".drawio.xml", ".xml"))
             )
             if len(candidates) != 1:
@@ -322,28 +356,142 @@ def capture_drawio_with_production_components(
             if envelope is None:
                 raise ValueError("materializer did not expose envelope")
             processed = execute_media(envelope=envelope, observation=observation)
-            body_bytes = getattr(envelope, "body_bytes", b"")
-            if type(body_bytes) is not bytes or downloaded_bytes + len(body_bytes) > cfg.drawio_bytes:
+            artifact = getattr(materialized, "artifact", None)
+            byte_count = getattr(artifact, "byte_count", None)
+            if type(byte_count) is not int or byte_count < 0 or downloaded_bytes + byte_count > cfg.drawio_bytes:
                 raise ValueError("drawio budget exhausted")
-            downloaded_bytes += len(body_bytes)
+            downloaded_bytes += byte_count
             asset = dict(getattr(processed, "asset", {}))
-            if not asset:
+            expected_parent_id = DocumentIdGenerator.confluence_page_id(ref.parent_page_id)
+            if (
+                not asset
+                or asset.get("parent_document_id") != expected_parent_id
+                or asset.get("filename") != ref.filename
+                or type(asset.get("media_id")) is not str
+            ):
                 raise ValueError("media processor returned no asset")
             assets.append(asset)
             resolved_keys.add(key)
+            resolutions.append({
+                "reference": list(key),
+                "media_id": asset["media_id"],
+                "body_byte_count": byte_count,
+            })
+            assets.sort(key=lambda item: str(item.get("media_id", "")))
+            resolutions.sort(key=lambda item: tuple(item["reference"]))
+            if persist_state is not None:
+                persist_state(snapshot())
             if acknowledge is not None:
                 acknowledge(observation.attachment_id)
-            resolved += 1
         except Exception:
             failures += 1
-    assets = sorted(assets, key=lambda x: str(x.get("media_id", "")))
-    payload = {"observed": [list(k) for k in sorted(observed_keys)], "resolved": [list(k) for k in sorted(resolved_keys)], "failed": failures, "media_assets": assets}
-    if state_path is not None:
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = state_path.with_suffix(state_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-        tmp.replace(state_path)
-    return {"media_assets": tuple(assets), "drawio_references_observed": observed, "drawio_references_resolved": len(resolved_keys), "drawio_assets_failed": failures}
+    final_state = snapshot()
+    if persist_state is not None:
+        persist_state(final_state)
+    return {
+        "media_assets": tuple(assets),
+        "drawio_references_observed": observed,
+        "drawio_references_resolved": len(resolved_keys),
+        "drawio_assets_failed": failures,
+        "state": final_state,
+    }
+
+
+def _drawio_reference_key(reference: DrawioReference) -> tuple[str, str, str]:
+    if type(reference) is not DrawioReference:
+        raise TypeError("drawio reference is invalid")
+    return (
+        reference.parent_page_id,
+        reference.filename,
+        reference.parent_source_version,
+    )
+
+
+def validate_drawio_capture_state(
+    value: Mapping[str, object] | None,
+    *,
+    run_id: CrawlRunId,
+    selection_identity: str,
+    observed_keys: tuple[tuple[str, str, str], ...],
+    config: ConfluenceSubtreeCorpusConfig,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], int]:
+    if value is None:
+        return [], [], 0
+    if not isinstance(value, Mapping):
+        raise TypeError("drawio state is invalid")
+    state = dict(value)
+    if frozenset(state) != _DRAWIO_STATE_FIELDS:
+        raise ValueError("drawio state is invalid")
+    if (
+        state["format_version"] != _DRAWIO_STATE_FORMAT_VERSION
+        or state["run_id"] != str(run_id)
+        or state["generation_id"] != str(run_id)
+        or state["selection_identity"] != selection_identity
+        or state["observed"] != [list(key) for key in observed_keys]
+    ):
+        raise ValueError("drawio state binding mismatch")
+    if (
+        type(state["failed"]) is not int
+        or state["failed"] < 0
+        or type(state["downloaded_bytes"]) is not int
+        or state["downloaded_bytes"] < 0
+        or type(state["artifact_count"]) is not int
+        or state["artifact_count"] < 0
+        or type(state["resolutions"]) is not list
+        or type(state["media_assets"]) is not list
+    ):
+        raise ValueError("drawio state is invalid")
+    resolutions: list[dict[str, object]] = []
+    resolution_keys: set[tuple[str, str, str]] = set()
+    media_ids: set[str] = set()
+    byte_total = 0
+    for raw in state["resolutions"]:
+        if type(raw) is not dict or set(raw) != {"reference", "media_id", "body_byte_count"}:
+            raise ValueError("drawio resolution is invalid")
+        reference = raw["reference"]
+        media_id = raw["media_id"]
+        byte_count = raw["body_byte_count"]
+        if (
+            type(reference) is not list
+            or len(reference) != 3
+            or any(type(part) is not str or not part for part in reference)
+            or type(media_id) is not str
+            or not media_id
+            or type(byte_count) is not int
+            or byte_count < 0
+        ):
+            raise ValueError("drawio resolution is invalid")
+        key = tuple(reference)
+        if key not in observed_keys or key in resolution_keys or media_id in media_ids:
+            raise ValueError("drawio resolution binding is invalid")
+        resolution_keys.add(key)
+        media_ids.add(media_id)
+        byte_total += byte_count
+        resolutions.append({"reference": list(key), "media_id": media_id, "body_byte_count": byte_count})
+    assets = [dict(asset) for asset in state["media_assets"] if type(asset) is dict]
+    if len(assets) != len(state["media_assets"]) or len(assets) != len(resolutions):
+        raise ValueError("drawio media assets are invalid")
+    assets_by_id = {asset.get("media_id"): asset for asset in assets}
+    if len(assets_by_id) != len(assets) or set(assets_by_id) != media_ids:
+        raise ValueError("drawio media asset binding is invalid")
+    for resolution in resolutions:
+        parent_page_id, filename, _ = resolution["reference"]
+        asset = assets_by_id[resolution["media_id"]]
+        if (
+            asset.get("parent_document_id") != DocumentIdGenerator.confluence_page_id(parent_page_id)
+            or asset.get("filename") != filename
+        ):
+            raise ValueError("drawio media asset binding is invalid")
+    if (
+        state["artifact_count"] != len(resolutions)
+        or state["downloaded_bytes"] != byte_total
+        or len(resolutions) > config.drawio_count
+        or byte_total > config.drawio_bytes
+    ):
+        raise ValueError("drawio state budget is invalid")
+    assets.sort(key=lambda item: str(item.get("media_id", "")))
+    resolutions.sort(key=lambda item: tuple(item["reference"]))
+    return assets, resolutions, byte_total
 
 
 class ConfluenceSubtreeCorpusHarness:
@@ -395,4 +543,4 @@ def _valid_page_artifact(path: Path) -> bool:
         return False
 
 
-__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "capture_drawio_assets", "capture_drawio_with_production_components", "match_drawio_attachment", "partition_page_ids", "process_preserved_pages", "PACKET_FORMAT_VERSION"]
+__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "capture_drawio_assets", "capture_drawio_with_production_components", "match_drawio_attachment", "partition_page_ids", "process_preserved_pages", "validate_drawio_capture_state", "PACKET_FORMAT_VERSION"]

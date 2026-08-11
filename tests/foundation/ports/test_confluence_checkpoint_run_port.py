@@ -13,6 +13,7 @@ from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_run_p
     SqliteConfluenceCheckpointRunPort,
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+    ActivateRawGenerationRequest,
     CheckpointRunSelectionFailure,
     ResumeExplicitRunRequest,
     ResumeUniqueIncompleteRunRequest,
@@ -73,6 +74,7 @@ def test_public_run_port_has_method_oriented_shape_and_safe_reprs(tmp_path) -> N
         name for name in dir(port) if not name.startswith("_")
     }
     assert public_methods == {
+        "activate_raw_generation",
         "start_new_run",
         "resume_explicit_run_id",
         "resume_unique_incomplete_run",
@@ -91,6 +93,15 @@ def test_public_run_port_has_method_oriented_shape_and_safe_reprs(tmp_path) -> N
             request.reliability_profile,
         )
     ) == "ResumeExplicitRunRequest()"
+    assert repr(
+        ActivateRawGenerationRequest(
+            tmp_path,
+            CrawlRunId("123e4567-e89b-42d3-a456-426614174000"),
+            request.endpoint_url,
+            request.source_config,
+            request.reliability_profile,
+        )
+    ) == "ActivateRawGenerationRequest()"
     assert repr(
         ResumeUniqueIncompleteRunRequest(
             tmp_path,
