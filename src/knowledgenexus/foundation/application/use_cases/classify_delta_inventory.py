@@ -11,6 +11,7 @@ from knowledgenexus.foundation.domain.models.delta_inventory import (
     DeltaInventoryMetrics,
     DeltaInventoryObservation,
     DeltaInventoryStatus,
+    DeltaInventoryScope,
     PriorConfluenceDocument,
 )
 from knowledgenexus.foundation.domain.models.delta_propagation import DeltaInventoryEntry, DeltaInventoryState
@@ -24,9 +25,33 @@ class ClassifyDeltaInventory:
             if type(request) is not DeltaInventoryClassificationRequest:
                 return self._failure(DeltaInventoryFailureCategory.INVALID_INPUT)
             try:
-                DeltaInventoryClassificationRequest.__post_init__(request)
+                if type(request.prior_documents) is not tuple:
+                    raise ValueError
+                for item in request.prior_documents:
+                    PriorConfluenceDocument.__post_init__(item)
+                if len({item.page_id for item in request.prior_documents}) != len(request.prior_documents):
+                    raise ValueError
             except Exception:
-                return self._failure(DeltaInventoryFailureCategory.INVALID_INPUT)
+                return self._failure(DeltaInventoryFailureCategory.INVALID_PRIOR_SNAPSHOT)
+            try:
+                if type(request.current_selection) is not tuple:
+                    raise ValueError
+                DeltaInventoryScope.__post_init__(request.scope)
+                for item in request.current_selection:
+                    CurrentSelectionPage.__post_init__(item)
+                if len({item.page_id for item in request.current_selection}) != len(request.current_selection):
+                    raise ValueError
+            except Exception:
+                return self._failure(DeltaInventoryFailureCategory.INVALID_SELECTION_SCOPE)
+            try:
+                if type(request.observations) is not tuple:
+                    raise ValueError
+                for item in request.observations:
+                    DeltaInventoryObservation.__post_init__(item)
+                if len({item.page_id for item in request.observations}) != len(request.observations):
+                    raise ValueError
+            except Exception:
+                return self._failure(DeltaInventoryFailureCategory.INVALID_OBSERVATION)
             prior = {item.page_id: item for item in request.prior_documents}
             selected = {item.page_id for item in request.current_selection}
             observations = {item.page_id: item for item in request.observations}
@@ -54,7 +79,10 @@ class ClassifyDeltaInventory:
                 access_revoked_count=sum(entry.state is DeltaInventoryState.ACCESS_REVOKED for entry in entries),
                 moved_out_of_scope_count=sum(entry.state is DeltaInventoryState.MOVED_OUT_OF_SCOPE for entry in entries),
             )
-            return DeltaInventoryClassificationResult(DeltaInventoryStatus.SUCCESS, tuple(entries), metrics)
+            try:
+                return DeltaInventoryClassificationResult(DeltaInventoryStatus.SUCCESS, tuple(entries), metrics)
+            except (TypeError, ValueError):
+                return self._failure(DeltaInventoryFailureCategory.INVALID_RESULT)
         except _ClassificationFailure as exc:
             return self._failure(exc.category)
         except Exception:
@@ -70,9 +98,10 @@ class ClassifyDeltaInventory:
         if status == 401:
             raise _ClassificationFailure(DeltaInventoryFailureCategory.INVALID_OBSERVATION)
         if status == 200:
-            excluded = observation.excluded_by_id or observation.excluded_by_ancestor
-            excluded = excluded or bool(set(observation.ancestor_page_ids) & set(scope.excluded_ancestor_page_ids))
-            if excluded or not observation.under_include_root:
+            under_include_root = observation.page_id in scope.include_root_page_ids or bool(set(observation.ancestor_page_ids) & set(scope.include_root_page_ids))
+            excluded_by_id = observation.page_id in scope.excluded_page_ids
+            excluded_by_ancestor = bool(set(observation.ancestor_page_ids) & set(scope.excluded_ancestor_page_ids))
+            if excluded_by_id or excluded_by_ancestor or not under_include_root:
                 return DeltaInventoryState.MOVED_OUT_OF_SCOPE, None
             raise _ClassificationFailure(DeltaInventoryFailureCategory.INVENTORY_INCONSISTENT)
         if 400 <= status <= 499:

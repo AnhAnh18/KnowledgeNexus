@@ -161,6 +161,19 @@ def test_inventory_removal_emits_document_cascade(state: DeltaInventoryState) ->
     assert result.records[0]["source_version_last_seen"] == "v7"
 
 
+def test_404_ambiguity_detail_reaches_document_tombstone() -> None:
+    old = _summary("confluence:page:1")
+    inventory = (DeltaInventoryEntry(
+        "confluence:page:1",
+        DeltaInventoryState.SOURCE_DELETED,
+        "v7",
+        "confluence_404_may_mask_access_revoked",
+    ),)
+    result = PropagateDelta(schema_validator=Validator()).execute(_request(previous=(old,), inventory=inventory))
+    assert result.status is DeltaPropagationStatus.SUCCESS
+    assert result.records[0]["detail"] == "confluence_404_may_mask_access_revoked"
+
+
 def test_config_change_invalidates_present_previous_documents() -> None:
     old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
     current = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))

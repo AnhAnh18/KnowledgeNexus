@@ -5,6 +5,17 @@
 Version 1.0.0. This contract defines the generation-scoped `delta-inventory.json`
 artifact consumed by the W4 second-sync path.
 
+The canonical envelope fields, in order, are:
+
+1. `format_version` (exactly `1.0.0`);
+2. `run_id`, `generation_id`, `current_selection_identity`,
+   `accepted_base_dataset_version`, and `current_scope_identity` (non-empty
+   opaque bindings; selection and scope identities are canonical lower-case
+   SHA-256 values when produced by an adapter);
+3. `entries` (sorted by `document_id`, unique);
+4. `metrics` with exactly `present_count`, `source_deleted_count`,
+   `access_revoked_count`, and `moved_out_of_scope_count`.
+
 ## Binding
 
 The artifact records `run_id`, `generation_id`, `current_selection_identity`,
@@ -17,6 +28,14 @@ selection occurs exactly once. `document_id` is derived from `page_id` using the
 canonical Confluence document-ID rule and is never an independent authority.
 Removed pages retain the accepted base document's `source_version_last_seen`.
 Git records are not valid W4 input.
+
+Each observation has exactly `page_id`, `http_status`, `ancestor_page_ids`,
+`response_byte_count`, `response_sha256`, and `source_version_last_seen`.
+Every page ID, ancestor ID, include-root ID, and exclusion ID must satisfy the
+strict ASCII-decimal Confluence page-ID rule. Scope facts are derived from those
+IDs: the page is under an include root when its ID or an ancestor is an include
+root; direct and ancestor exclusions are derived similarly. Callers cannot submit
+precomputed scope booleans.
 
 ## Evidence
 
@@ -32,9 +51,21 @@ status and approved current scope facts:
 - 403 -> `access_revoked`;
 - 200 plus proven exclusion/out-of-scope ancestry -> `moved_out_of_scope`.
 
+Allowed status/state combinations are therefore `200/present` only for selected
+pages, `404/source_deleted`, `403/access_revoked`, and
+`200/moved_out_of_scope` only when derived scope facts prove exclusion or that
+the page is no longer under an include root. A 404 entry must carry the exact
+detail `confluence_404_may_mask_access_revoked`; other states have no detail.
+Each removed entry carries the prior source version. Metrics equal the exact
+counts of emitted entries; no counter may be negative, boolean, or inconsistent.
+
 401, exhausted retryable statuses, unexpected statuses, malformed evidence, and
 an in-scope 200 missing from a supposedly complete selection fail closed.
 Restriction-endpoint 404 remains unavailable and is not page deletion evidence.
+
+The sanitized failure vocabulary is: `invalid_input`, `invalid_prior_snapshot`,
+`invalid_selection_scope`, `invalid_observation`, `incomplete_evidence`,
+`inventory_inconsistent`, `invalid_result`, and `internal_failure`.
 
 ## Safety and replay
 

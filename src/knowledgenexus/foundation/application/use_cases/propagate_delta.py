@@ -130,6 +130,7 @@ class PropagateDelta:
                             request,
                             dependents=dependents.get(document_id, ()),
                             source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
+                            detail=observation.detail if observation is not None else None,
                         )
                     )
                     continue
@@ -147,7 +148,6 @@ class PropagateDelta:
                             request,
                             dependents=dependents.get(document_id, ()),
                             source_version_last_seen=observation.source_version_last_seen if observation is not None else None,
-                            detail=observation.detail if observation is not None else None,
                         )
                     )
                     continue
