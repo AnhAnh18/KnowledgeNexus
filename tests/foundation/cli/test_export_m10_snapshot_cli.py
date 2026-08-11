@@ -49,6 +49,29 @@ def test_cli_help_returns_success(capsys):
     assert captured.err == ""
 
 
+def test_media_policy_maps_to_typed_contract():
+    assert cli._media_policy("disabled").include_attachments is False
+    assert cli._media_policy("best-effort").allow_download is False
+    assert cli._media_policy("required").allow_download is True
+
+
+def test_processed_media_is_projected_to_relation_model():
+    processed = {
+        "schema_version": "1.0", "media_id": "confluence:attachment:2000",
+        "parent_document_id": "confluence:page:1000", "source_system": "confluence",
+        "filename": "diagram.drawio", "mime_type": "application/xml", "size_bytes": 4,
+        "download_status": "downloaded", "processing_status": "parsed", "relevance": "high",
+        "extracted_text": "node", "summary": None, "confidence": 1.0,
+        "raw_uri": "raw://confluence/attachments/2000/" + "a" * 64,
+        "content_hash": "a" * 64, "source_version": "1", "updated_at": None,
+        "crawled_at": "2026-08-08T00:00:00Z",
+    }
+    projected = cli._relation_media_asset(processed)
+    from knowledgenexus.foundation.domain.models.media_materialization import MediaMaterializationResult
+    result = MediaMaterializationResult(assets=(projected,), relation_intents=())
+    assert result.assets[0]["processing_status"] == "not_processed"
+
+
 def test_cli_sanitizes_non_integer_system_exit(monkeypatch, capsys):
     def raise_secret(_argv):
         raise SystemExit("secret payload")
