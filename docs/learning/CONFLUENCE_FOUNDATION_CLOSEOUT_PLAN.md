@@ -3,17 +3,17 @@
 ## 0. How to use this document
 
 Each work package `W0`-`W5` below is a separate task. Do not hand the whole
-document to one implementer. `W1` and `W2` are the critical path.
+document to one implementer. W1+W2 are complete; W4 is the current code gate.
 
 Prompts written so far:
 
 | Package | Prompt file | Status |
 |---|---|---|
 | W0 | (inline below, historical) | **DONE** — `d25ea42`, merged in `764efa3` |
-| W1+W2 | `docs/learning/W1W2_PROMPT_M10_OPERATOR_PIPELINE.md` | **active** — partial attempt in tree |
+| W1+W2 | `docs/learning/W1W2_PROMPT_M10_OPERATOR_PIPELINE.md` | **DONE** — operator pipeline landed in `eb76648` |
 | W3 | — | **RESOLVED**, no work needed |
-| W4 | `docs/learning/W4_PROMPT_DELTA_SECOND_SYNC.md` | ready, after W1+W2 |
-| W5 | (operator runbook below) | needs the main machine |
+| W4 | `docs/learning/W4_PROMPT_DELTA_SECOND_SYNC.md` | **CURRENT** — staged implementation with independent review gates |
+| W5 | (operator runbook below) | blocked by W4; then runs on the main machine |
 
 **W1 and W2 were merged after a first implementation attempt failed.** The
 original W1 prompt contained a scope error: it assumed a raw generation root
@@ -31,7 +31,7 @@ it has an explicit deny-safe `unavailable` path emitting
 
 Status labels used here:
 
-- **verified** — confirmed by reading or running the code at `764efa3`.
+- **verified** — confirmed by reading or running the code at the milestone head named in the relevant section.
 - **assumed** — inferred, must be confirmed by the implementer before relying on it.
 
 ## 1. Goal
@@ -66,23 +66,25 @@ Every stream has a real production class. **verified**
 | `symbols` | Git-only; not produced by the Confluence path |
 | handoff assembly | `AssembleConfluenceM10Handoff` |
 
-### 2.2 The core gap — no operator-runnable M10 path
+### 2.2 Operator-runnable M10 full-snapshot path — closed by W1+W2
 
-**verified.**
+**verified at `eb76648`.** The merged W1+W2 implementation now:
 
-- `ConfluenceM10CompositionRoot` is referenced **only from tests**. No
-  production code constructs it.
-- `ConfluenceM10CompositionRoot.build()` accepts `relation_stage`, `acl_stage`,
-  `media_stage`, `sync_inventory_stage` as **already-built** objects defaulting
-  to `None`. It does not construct them.
-- `src/knowledgenexus/foundation/cli/export_m10_snapshot.py` **cannot be run
-  from a shell**: `_parse_args` calls `parser.parse_args([])`, and `request` /
-  `confluence_adapter` / `git_adapter` are Python-injected keyword arguments.
+- builds a real `M10SnapshotRequest` and production composition from parsed
+  shell arguments;
+- binds page order, run/generation identity, and selection identity to the
+  subtree harness state instead of accepting a hand-written page list;
+- composes the approved relation, deny-safe ACL, Draw.io media, sync-state,
+  and handoff producers;
+- publishes a deterministic eight-stream Confluence-only full snapshot while
+  retaining a valid pinned, zero-row Git identity; and
+- has a forcing test that drives harness state into `main(argv)` and exercises
+  the Draw.io and ACL paths.
 
-Every part is built; nothing wires them into a command an operator can run.
-This is why no real full-snapshot evidence exists yet. **W1 closes this.**
+W1 and W2 are complete as one merged package. The original separate W1 and W2
+prompt files remain historical only.
 
-### 2.3 The delta path has the same gap, one layer deeper
+### 2.3 The remaining gap — sparse, evidence-bound second-sync delta
 
 **verified.** More is already built than expected:
 
@@ -96,10 +98,11 @@ This is why no real full-snapshot evidence exists yet. **W1 closes this.**
   Done requires: `PRESENT`, `SOURCE_DELETED`, `ACCESS_REVOKED`,
   `MOVED_OUT_OF_SCOPE`, plus `CONFIG_INVALIDATED`.
 
-What is missing is (a) an operator path for delta mode, and (b) the logic that
-**builds** `delta_inventory` by classifying each document against the prior
-accepted run. `M10DeltaSnapshotExporter` has **no production wiring at all** —
-the same condition the full exporter was in before W1. **W4 closes this.**
+What is missing is (a) an operator path for delta mode, (b) evidence-bound
+construction of `delta_inventory`, and (c) projection of a genuinely sparse
+delta rather than republishing the full current projection with tombstones
+appended. Publication-time readback must validate delta closure against the
+accepted base snapshot. **W4 closes these gaps.**
 
 ### 2.4 Subtree harness (readiness doc Gate A) — landed
 
@@ -174,9 +177,10 @@ selection), plus the `acknowledge_raw_page` defect described in §2.4.
 
 ---
 
-### W1 — Operator-runnable Confluence M10 full snapshot — **critical path**
+### W1+W2 — Operator-runnable Confluence M10 full snapshot — **DONE** (`eb76648`)
 
-Prompt: `docs/learning/W1_PROMPT_M10_OPERATOR_COMPOSITION.md`
+Historical implementation prompt:
+`docs/learning/W1W2_PROMPT_M10_OPERATOR_PIPELINE.md`
 
 Build the four missing Confluence stages (relation, acl, media, sync
 inventory) plus an operator CLI that turns a preserved raw generation into a
@@ -188,9 +192,10 @@ including a Confluence-only run with zero Git records.
 
 ---
 
-### W2 — Bind the subtree harness generation to the M10 request
+### W2 — Bind the subtree harness generation to the M10 request — **DONE with W1**
 
-Prompt: `docs/learning/W2_PROMPT_HARNESS_TO_M10_BINDING.md`
+The separate prompt is superseded. Its requirements were incorporated into
+`docs/learning/W1W2_PROMPT_M10_OPERATOR_PIPELINE.md` and landed with W1.
 
 The harness produces a raw generation; the W1 CLI consumes one. Nothing yet
 proves they agree on `ordered_page_ids`, `raw_generation_id`, the raw page
@@ -208,7 +213,7 @@ See §2.5. W1 carries this as a settled input.
 
 ---
 
-### W4 — Operator-runnable second-sync delta
+### W4 — Operator-runnable second-sync delta — **CURRENT**
 
 Prompt: `docs/learning/W4_PROMPT_DELTA_SECOND_SYNC.md`
 

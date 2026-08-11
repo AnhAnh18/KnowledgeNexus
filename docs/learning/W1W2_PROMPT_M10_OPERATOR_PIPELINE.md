@@ -1,3 +1,7 @@
+> **IMPLEMENTED.** W1+W2 landed in `eb76648`. This file is retained as the
+> historical implementation contract; the current task is W4 in
+> `docs/learning/W4_PROMPT_DELTA_SECOND_SYNC.md`.
+
 # W1+W2 implementer prompt — operator-runnable Confluence M10 pipeline
 
 Supersedes `W1_PROMPT_M10_OPERATOR_COMPOSITION.md` and
@@ -18,7 +22,7 @@ Make an operator able to run, from a shell, a preserved Confluence raw
 generation plus its harness state into a published M10 full snapshot with all
 eight JSONL streams and a manifest.
 
-## Current state — a partial attempt exists, keep the good parts
+## Historical starting state — the partial attempt that W1+W2 replaced
 
 An earlier attempt is in the working tree. **Keep these, they are correct:**
 
@@ -245,7 +249,7 @@ Run and report exact commands and results for:
 python -m pytest tests/foundation tests/shared tests/architecture -q
 ```
 
-Baseline with the current partial attempt in the tree: **3265 passed, 40
+Historical baseline with the partial attempt in the tree: **3265 passed, 40
 skipped, 9 errors** in `tests/foundation` (all nine asset-backed BGE-M3), plus
 **117 passed** in `tests/shared tests/architecture`. Any new failure is yours.
 
