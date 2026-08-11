@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 from knowledgenexus.foundation.application.use_cases.confluence_subtree_corpus import (
     ConfluenceSubtreeCorpusConfig,
     ConfluenceSubtreeCorpusHarness,
     SubtreePacketExporter,
+    DrawioReference,
+    capture_drawio_with_production_components,
 )
 from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
 from knowledgenexus.foundation.domain.models.confluence_page_set import ConfluencePageWorkItem
@@ -38,6 +42,11 @@ def _parser() -> argparse.ArgumentParser:
         q.add_argument("--profile-path")
         q.add_argument("--tokenizer-assets-dir")
         q.add_argument("--run-id")
+        q.add_argument("--resume-run-id")
+        q.add_argument("--resume-unique", action="store_true")
+        q.add_argument("--space-key")
+        q.add_argument("--root-page-id")
+        q.add_argument("--drawio-references-path")
     return p
 
 
@@ -48,21 +57,57 @@ def main(argv: list[str] | None = None) -> int:
         if not state.is_absolute(): raise ValueError("invalid configuration")
         config = ConfluenceSubtreeCorpusConfig(max_pages=args.max_pages, batch_size=args.batch_size)
         if args.phase == "inventory":
-            if not args.selection_path: raise ValueError("selection input is required")
-            selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
-            state.mkdir(parents=True, exist_ok=True)
-            (state / "inventory.json").write_text(json.dumps([{"page_id": x.page_id, "crawled_at": x.crawled_at, "expected_source_version": x.expected_source_version} for x in selection], sort_keys=True), encoding="utf-8")
-            result = {"status":"complete", "phase":"inventory", "selected_pages":len(selection)}
+            if args.space_key and args.root_page_id and args.profile_path:
+                from knowledgenexus.foundation.application.use_cases.execute_bounded_confluence_inventory import ExecuteBoundedConfluenceInventory
+                from knowledgenexus.foundation.domain.models.confluence_source_config import ConfluenceIncludeRoot, ConfluenceSourceConfig
+                from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
+                from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ResumeExplicitRunRequest, ResumeUniqueIncompleteRunRequest, StartNewRunRequest
+                profile = json.loads(Path(args.profile_path).read_text(encoding="utf-8"))
+                source_config = ConfluenceSourceConfig(source_id="confluence-root1", space_key=args.space_key, include_roots=(ConfluenceIncludeRoot(page_id=args.root_page_id),))
+                composition = compose_live_subtree(raw_root=Path(args.raw_root or (state / "raw")), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=args.max_pages)
+                if args.resume_run_id:
+                    from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+                    request = ResumeExplicitRunRequest(workspace=state, run_id=CrawlRunId(args.resume_run_id), endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+                elif args.resume_unique:
+                    request = ResumeUniqueIncompleteRunRequest(workspace=state, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+                else:
+                    request = StartNewRunRequest(workspace=state, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+                # The durable executor creates a retry transport per activated
+                # checkpoint session; reservations therefore survive process
+                # restarts and are enforced before every outbound attempt.
+                result_obj = composition.inventory_use_case(max_search_pages=args.max_pages).execute(request=request)
+                snapshot = result_obj.snapshot
+                result = {"status": result_obj.status, "phase": args.phase, "selected_pages": (snapshot.inventory_total if snapshot is not None else 0)}
+            elif not args.selection_path: raise ValueError("selection input is required")
+            else:
+                selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
+                state.mkdir(parents=True, exist_ok=True)
+                (state / "inventory.json").write_text(json.dumps([{"page_id": x.page_id, "crawled_at": x.crawled_at, "expected_source_version": x.expected_source_version} for x in selection], sort_keys=True), encoding="utf-8")
+                result = {"status":"complete", "phase":"inventory", "selected_pages":len(selection)}
         elif args.phase == "capture-pages":
-            # The CLI is intentionally offline unless an approved adapter is
-            # supplied by the embedding operator; consume fixture bodies when
-            # present and preserve resumability.
-            if not args.selection_path or not args.raw_root: raise ValueError("capture inputs are required")
-            selection = _load_subtree_selection(Path(args.selection_path), args.max_pages)
-            harness = ConfluenceSubtreeCorpusHarness(config=config, state_dir=state)
-            source = Path(args.raw_root)
-            result_obj = harness.capture_pages([x.page_id for x in selection], lambda pid: (source / f"{pid}.bin").read_bytes())
-            result = {"status": result_obj["status"], "phase": args.phase, **result_obj}
+            if not args.raw_root or not args.profile_path or not args.run_id or not args.space_key or not args.root_page_id:
+                raise ValueError("live capture configuration is required")
+            from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
+            from knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages import CaptureConfluenceSubtreePages
+            from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector import ConfluenceRawPageOrphanInspector
+            from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport import RetryingConfluenceHttpTransport
+            from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_adapter import ConfluenceDataCenterPageAdapter
+            from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+            from knowledgenexus.foundation.domain.models.confluence_source_config import ConfluenceIncludeRoot, ConfluenceSourceConfig
+            from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ResumeExplicitRunRequest
+            profile = json.loads(Path(args.profile_path).read_text(encoding="utf-8"))
+            source_config = ConfluenceSourceConfig(source_id="confluence-root1", space_key=args.space_key, include_roots=(ConfluenceIncludeRoot(page_id=args.root_page_id),))
+            composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=args.max_pages)
+            request = ResumeExplicitRunRequest(workspace=state, run_id=CrawlRunId(args.run_id), endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+            with composition.checkpoint_run_port.resume_explicit_run_id(request) as outcome:
+                if not callable(getattr(outcome, "stream_inventory_occurrences", None)):
+                    raise ValueError("run selection failed")
+                page_transport = RetryingConfluenceHttpTransport(inner=composition.http_inner, profile=composition.retry_profile, monotonic_clock=time.monotonic, sleeper=time.sleep, attempt_reserver=outcome)
+                use_case = CaptureConfluenceSubtreePages(state_session=outcome, orphan_inspector=ConfluenceRawPageOrphanInspector(raw_root=Path(args.raw_root)), page_fetcher=ConfluenceDataCenterPageAdapter(transport=page_transport), raw_page_store=composition.raw_page_store)
+                from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
+                occurrences = tuple(item for item in outcome.stream_inventory_occurrences(batch_size=100) if type(item) is InventoryOccurrence)
+                result_obj = use_case.run(run_id=CrawlRunId(args.run_id), occurrences=occurrences, stop_after_batches=None)
+            result = {"status": "complete" if result_obj.complete else "failed", "phase": args.phase, "captured": result_obj.captured, "replayed": result_obj.replayed, "skipped": result_obj.skipped, "failed": result_obj.failed}
         elif args.phase == "process-pages":
             if not args.raw_root or not args.selection_path or not args.profile_path or not args.tokenizer_assets_dir or not args.run_id:
                 raise ValueError("process inputs are required")
@@ -81,9 +126,26 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("page processing incomplete")
             result = {"status": "complete", "phase": args.phase, "page_count": len(selection), "document_count": len(processed.documents), "chunk_count": len(processed.chunks)}
         elif args.phase == "capture-drawio":
-            # Draw.io capture requires the production metadata/body adapters;
-            # never report a zero-counter run as a complete corpus.
-            raise ValueError("drawio capture adapters are required")
+            if not (args.space_key and args.root_page_id and args.profile_path and args.raw_root and args.drawio_references_path):
+                raise ValueError("drawio capture configuration is required")
+            from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
+            from knowledgenexus.foundation.domain.models.media_body_materialization import MediaBodyStoreBudget
+            refs_payload = json.loads(Path(args.drawio_references_path).read_text(encoding="utf-8"))
+            if type(refs_payload) is not list:
+                raise ValueError("drawio references are invalid")
+            refs = tuple(DrawioReference(parent_page_id=x["parent_page_id"], filename=x["filename"], source_version=x["source_version"]) for x in refs_payload)
+            profile = json.loads(Path(args.profile_path).read_text(encoding="utf-8"))
+            required_budget_keys = ("drawio_max_body_bytes", "drawio_max_total_bytes", "minimum_free_disk_reserve_bytes")
+            if type(profile) is not dict or any(k not in profile or type(profile[k]) is not int or isinstance(profile[k], bool) or profile[k] <= 0 for k in required_budget_keys):
+                raise ValueError("drawio budgets are required")
+            if profile["drawio_max_body_bytes"] > profile["drawio_max_total_bytes"] or profile["drawio_max_total_bytes"] < profile["drawio_max_body_bytes"]:
+                raise ValueError("drawio budgets are contradictory")
+            composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=args.max_pages)
+            budget = MediaBodyStoreBudget(max_body_bytes=profile["drawio_max_body_bytes"], max_total_bytes=profile["drawio_max_total_bytes"], minimum_free_disk_reserve_bytes=profile["minimum_free_disk_reserve_bytes"])
+            observer, materializer, processor = composition.attachment_components(attachment_root=Path(args.raw_root) / "attachments", budget=budget)
+            result = {"status": "complete", "phase": args.phase, **capture_drawio_with_production_components(references=refs, attachment_observer=observer, body_materializer=materializer, media_processor=processor, config=config, state_path=state / "drawio-state.json")}
+            if result["drawio_references_resolved"] != result["drawio_references_observed"]:
+                raise ValueError("drawio capture incomplete")
         elif args.phase == "export":
             if not args.output_dir or not args.raw_root or not args.selection_path or not args.profile_path or not args.tokenizer_assets_dir or not args.run_id:
                 raise ValueError("export inputs are required")
@@ -101,10 +163,13 @@ def main(argv: list[str] | None = None) -> int:
             page_result = ProcessConfluencePageSet(chunking_profile=profile, tokenizer=BgeM3LocalTokenizer(profile=profile, tokenizer_assets_dir=assets), raw_page_store=ConfluenceRawPageGenerationStore(raw_root=raw_root), raw_page_mapper=ConfluenceDataCenterRawPageMapper(), storage_normalizer=ConfluenceStorageXhtmlNormalizer(), schema_validator=FoundationSchemaValidator()).execute(request=request)
             intents = tuple(intent for values in page_result.reference_intents_by_page.values() for intent in values)
             drawio_observed = sum(getattr(intent, "kind", None) == "drawio" for intent in intents)
-            if getattr(page_result.metrics, "failed_pages", 0) or drawio_observed:
+            drawio_state_path = state / "drawio-state.json"
+            drawio_state = json.loads(drawio_state_path.read_text(encoding="utf-8")) if drawio_state_path.exists() else {"observed": [], "resolved": [], "failed": 0, "media_assets": []}
+            if getattr(page_result.metrics, "failed_pages", 0) or len(drawio_state.get("resolved", ())) != len(drawio_state.get("observed", ())) or drawio_state.get("failed", 0) != 0:
                 raise ValueError("corpus processing is incomplete")
-            packet = SubtreePacketExporter(validator=FoundationSchemaValidator()).publish(output_dir=out, documents=page_result.documents, chunks=page_result.chunks, media_assets=(), summary={"page_corpus_complete": not bool(getattr(page_result.metrics, "failed_pages", 0)), "drawio_references_observed": drawio_observed, "drawio_references_resolved": 0, "drawio_assets_failed": drawio_observed})
-            result = {"status": "complete", "phase": args.phase, "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": 0}
+            media_assets = tuple(drawio_state.get("media_assets", ()))
+            packet = SubtreePacketExporter(validator=FoundationSchemaValidator()).publish(output_dir=out, documents=page_result.documents, chunks=page_result.chunks, media_assets=media_assets, summary={"page_corpus_complete": not bool(getattr(page_result.metrics, "failed_pages", 0)), "drawio_references_observed": len(drawio_state.get("observed", ())), "drawio_references_resolved": len(drawio_state.get("resolved", ())), "drawio_assets_failed": drawio_state.get("failed", 0)})
+            result = {"status": "complete", "phase": args.phase, "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": packet["media_asset_count"]}
         sys.stdout.write(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
         return 0
     except SystemExit as exc:

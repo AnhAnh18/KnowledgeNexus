@@ -241,6 +241,111 @@ def capture_drawio_assets(*, references: Iterable[DrawioReference], list_attachm
     return {"media_assets": tuple(assets), "drawio_references_observed": observed, "drawio_references_resolved": resolved, "drawio_assets_failed": failures}
 
 
+def capture_drawio_with_production_components(
+    *,
+    references: Iterable[DrawioReference],
+    attachment_observer: object,
+    body_materializer: object,
+    media_processor: object,
+    acknowledge: Callable[[str], object] | None = None,
+    config: ConfluenceSubtreeCorpusConfig | None = None,
+    state_path: Path | None = None,
+) -> dict[str, object]:
+    """Compose the approved metadata, body, raw-store and media use cases.
+
+    ``attachment_observer`` must expose ``list_attachments(page_id)`` and
+    return ``ConfluenceAttachmentObservation`` values.  The materializer is
+    the existing ``FetchAndStoreConfluenceAttachmentBody`` use case and the
+    processor is ``ProcessConfluenceMediaAttachment``.  Only exact Draw.io
+    matches are materialized; non-Draw.io metadata is never passed to the
+    body fetcher.  Acknowledgement happens only after successful processing.
+    """
+    list_attachments = getattr(attachment_observer, "list_attachments", None)
+    execute_body = getattr(body_materializer, "execute", None)
+    execute_media = getattr(media_processor, "execute", None)
+    if not callable(list_attachments) or not callable(execute_body) or not callable(execute_media):
+        raise TypeError("production attachment components are invalid")
+    from knowledgenexus.foundation.domain.models.media_materialization import (
+        ConfluenceAttachmentObservation, MediaPolicyDecision,
+    )
+    if state_path is not None and (not isinstance(state_path, Path) or not state_path.is_absolute()):
+        raise ValueError("state_path must be absolute")
+    prior: dict[str, object] = {}
+    if state_path is not None and state_path.exists():
+        prior = json.loads(state_path.read_text(encoding="utf-8"))
+        if type(prior) is not dict:
+            raise ValueError("drawio state is invalid")
+    refs = tuple(sorted(tuple(references), key=lambda r: (r.parent_page_id, r.filename, r.source_version)))
+    assets: list[dict[str, object]] = [dict(x) for x in prior.get("media_assets", ()) if type(x) is dict]
+    resolved_keys = set(tuple(x) for x in prior.get("resolved", ()) if type(x) is list and len(x) == 3)
+    failures = 0
+    observed = len(refs)
+    resolved = len(resolved_keys)
+    cfg = config or ConfluenceSubtreeCorpusConfig(max_pages=MAX_PAGES)
+    downloaded_bytes = 0
+    observed_keys = {(r.parent_page_id, r.filename, r.source_version) for r in refs}
+    resolved_keys.intersection_update(observed_keys)
+    for index, ref in enumerate(refs):
+        if type(ref) is not DrawioReference:
+            raise TypeError("drawio reference is invalid")
+        key = (ref.parent_page_id, ref.filename, ref.source_version)
+        if key in resolved_keys:
+            continue
+        if index >= cfg.drawio_count:
+            failures += 1
+            continue
+        try:
+            metadata = tuple(list_attachments(ref.parent_page_id))
+            candidates = tuple(
+                item for item in metadata
+                if type(item) is ConfluenceAttachmentObservation
+                and item.parent_page_id == ref.parent_page_id
+                and item.filename == ref.filename
+                and item.source_version == ref.source_version
+                and item.filename.lower().endswith((".drawio", ".drawio.xml", ".xml"))
+            )
+            if len(candidates) != 1:
+                failures += 1
+                continue
+            observation = candidates[0]
+            decision = MediaPolicyDecision(attachment_id=observation.attachment_id, policy="download_and_process")
+            materialized = execute_body(observation=observation, decision=decision)
+            envelope = getattr(materialized, "envelope", None)
+            # Materializers return a typed result with the immutable artifact;
+            # read the published body through the raw-store boundary.
+            artifact = getattr(materialized, "artifact", None)
+            if envelope is None:
+                store = getattr(body_materializer, "raw_attachment_store", None)
+                read = getattr(store, "read_attachment", None)
+                if callable(read) and artifact is not None:
+                    envelope = read(attachment_id=observation.attachment_id, content_hash=artifact.body_sha256)
+            if envelope is None:
+                raise ValueError("materializer did not expose envelope")
+            processed = execute_media(envelope=envelope, observation=observation)
+            body_bytes = getattr(envelope, "body_bytes", b"")
+            if type(body_bytes) is not bytes or downloaded_bytes + len(body_bytes) > cfg.drawio_bytes:
+                raise ValueError("drawio budget exhausted")
+            downloaded_bytes += len(body_bytes)
+            asset = dict(getattr(processed, "asset", {}))
+            if not asset:
+                raise ValueError("media processor returned no asset")
+            assets.append(asset)
+            resolved_keys.add(key)
+            if acknowledge is not None:
+                acknowledge(observation.attachment_id)
+            resolved += 1
+        except Exception:
+            failures += 1
+    assets = sorted(assets, key=lambda x: str(x.get("media_id", "")))
+    payload = {"observed": [list(k) for k in sorted(observed_keys)], "resolved": [list(k) for k in sorted(resolved_keys)], "failed": failures, "media_assets": assets}
+    if state_path is not None:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(state_path)
+    return {"media_assets": tuple(assets), "drawio_references_observed": observed, "drawio_references_resolved": len(resolved_keys), "drawio_assets_failed": failures}
+
+
 class ConfluenceSubtreeCorpusHarness:
     """Small orchestration seam for independently resumable injected phases."""
 
@@ -290,4 +395,4 @@ def _valid_page_artifact(path: Path) -> bool:
         return False
 
 
-__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "capture_drawio_assets", "match_drawio_attachment", "partition_page_ids", "process_preserved_pages", "PACKET_FORMAT_VERSION"]
+__all__ = ["AttachmentMetadata", "ConfluenceSubtreeCorpusConfig", "ConfluenceSubtreeCorpusHarness", "DrawioReference", "SubtreePacketExporter", "capture_drawio_assets", "capture_drawio_with_production_components", "match_drawio_attachment", "partition_page_ids", "process_preserved_pages", "PACKET_FORMAT_VERSION"]
