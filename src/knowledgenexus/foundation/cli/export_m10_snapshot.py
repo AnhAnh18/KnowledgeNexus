@@ -386,7 +386,7 @@ def main(
                     store = DeltaInventoryArtifactStore(state_root=Path(parsed.state_dir) / "runs")
                     envelope = store.read(generation_id=request.generation_id)
                     expected_selection = selection_identity(tuple(CurrentSelectionPage(page_id) for page_id in request.ordered_page_ids))
-                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.include_root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), tuple(parsed.excluded_ancestor_page_ids or ())))
+                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), tuple(parsed.excluded_ancestor_page_ids or ())))
                     if (envelope.run_id != request.run_id or envelope.generation_id != request.generation_id or envelope.accepted_base_dataset_version != request.base_dataset_version or envelope.current_selection_identity != expected_selection or envelope.current_scope_identity != expected_scope):
                         raise ValueError
                     prior_reader = PublishedSnapshotReader(dataset_root=request.dataset_root, validator=validator or FoundationSchemaValidator())

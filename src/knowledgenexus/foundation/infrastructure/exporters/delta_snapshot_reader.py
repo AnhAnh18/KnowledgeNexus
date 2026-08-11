@@ -59,7 +59,7 @@ class DeltaSnapshotReadback:
     digest: str
 
     def __post_init__(self) -> None:
-        if type(self.manifest) is not dict or type(self.streams) is not dict:
+        if not isinstance(self.manifest, Mapping) or not isinstance(self.streams, Mapping):
             raise TypeError("readback mappings are invalid")
         frozen_manifest = _freeze_value(self.manifest)
         frozen_streams = {
@@ -79,7 +79,7 @@ class PublishedSnapshotReadback:
     digest: str
 
     def __post_init__(self) -> None:
-        if type(self.manifest) is not dict or type(self.streams) is not dict:
+        if not isinstance(self.manifest, Mapping) or not isinstance(self.streams, Mapping):
             raise TypeError("readback mappings are invalid")
         frozen_manifest = _freeze_value(self.manifest)
         frozen_streams = {
