@@ -550,6 +550,10 @@ class _FakeLiveSubtreeComposition:
             inventory_transport_factory=lambda activation: object(),
         )
 
+    def guarded_raw_page_store(self, *, activation):
+        assert callable(getattr(activation, "guard_raw_publication", None))
+        return self.raw_page_store
+
     def attachment_components(self, **_kwargs):
         raise AssertionError("this offline e2e test does not exercise Draw.io attachment fetch")
 

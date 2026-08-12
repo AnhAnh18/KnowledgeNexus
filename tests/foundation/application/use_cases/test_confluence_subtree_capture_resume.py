@@ -87,6 +87,69 @@ def test_root_inventory_fact_is_included_in_page_capture():
     assert result.complete is True
 
 
+def test_capture_rejects_inventory_above_bound_before_replay():
+    run_id = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
+    roots = CanonicalIncludeRoots(("1000",))
+    root = InventoryRootCommit(
+        run_id,
+        0,
+        "1000",
+        ConfluencePageMetadata("1000", "Root", "SPACE", source_version="1"),
+        roots,
+    )
+    child = InventoryOccurrence(
+        run_id,
+        0,
+        "1000",
+        0,
+        0,
+        "1001",
+        ConfluencePageMetadata(
+            "1001",
+            "Child",
+            "SPACE",
+            parent_page_id="1000",
+            ancestor_page_ids=("1000",),
+            ancestor_titles=("Root",),
+            source_version="1",
+        ),
+        roots,
+    )
+
+    class State:
+        def replay_raw_page(self, *_args):
+            raise AssertionError("page-bound failure must precede replay")
+
+        def acknowledge_raw_page(self, *_args):
+            raise AssertionError("page-bound failure must precede acknowledgement")
+
+    class Inspector:
+        def inspect_raw_page(self, *_args):
+            raise AssertionError("page-bound failure must precede inspection")
+
+    class Store:
+        def read_page(self, **_kwargs):
+            raise AssertionError("page-bound failure must precede raw reads")
+
+        def publish_page(self, **_kwargs):
+            raise AssertionError("page-bound failure must precede raw writes")
+
+    class Fetcher:
+        def fetch_page_raw(self, **_kwargs):
+            raise AssertionError("page-bound failure must precede fetch")
+
+    use_case = CaptureConfluenceSubtreePages(
+        state_session=State(),
+        orphan_inspector=Inspector(),
+        page_fetcher=Fetcher(),
+        raw_page_store=Store(),
+        max_pages=1,
+    )
+
+    with pytest.raises(ValueError, match="page budget"):
+        use_case.run(run_id=run_id, occurrences=(root, child))
+
+
 def test_two_batch_controlled_stop_resumes_without_refetching_committed_pages(tmp_path):
     run_id = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
     roots = CanonicalIncludeRoots(("1000",))

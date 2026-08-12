@@ -45,7 +45,8 @@ class CaptureConfluenceSubtreePages:
     """Capture pages in deterministic inventory order using approved M7 seams."""
 
     def __init__(self, *, state_session: object, orphan_inspector: object,
-                 page_fetcher: object, raw_page_store: object) -> None:
+                 page_fetcher: object, raw_page_store: object,
+                 max_pages: int | None = None) -> None:
         for name in ("replay_raw_page", "acknowledge_raw_page"):
             if not callable(getattr(state_session, name, None)):
                 raise TypeError("state_session is invalid")
@@ -53,9 +54,12 @@ class CaptureConfluenceSubtreePages:
             raise TypeError("orphan_inspector is invalid")
         if not callable(getattr(raw_page_store, "read_page", None)):
             raise TypeError("raw_page_store is invalid")
+        if max_pages is not None and (type(max_pages) is not int or max_pages <= 0):
+            raise ValueError("max_pages is invalid")
         self._state = state_session
         self._inspector = orphan_inspector
         self._raw_store = raw_page_store
+        self._max_pages = max_pages
         self._fetch = FetchAndStoreConfluenceRawPageGeneration(
             page_fetcher=page_fetcher, raw_page_store=raw_page_store
         )
@@ -67,6 +71,8 @@ class CaptureConfluenceSubtreePages:
         items = tuple(occurrences)
         if any(type(item) not in (InventoryRootCommit, InventoryOccurrence) for item in items):
             raise TypeError("occurrences are invalid")
+        if self._max_pages is not None and len(items) > self._max_pages:
+            raise ValueError("occurrences exceed page budget")
         page_ids = tuple(item.metadata.page_id for item in items)
         if len(set(page_ids)) != len(page_ids):
             raise ValueError("occurrences contain duplicate pages")

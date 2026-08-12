@@ -162,6 +162,9 @@ class _PublicActivation:
     ) -> RawPageReplayResult | RawPageReplayFailure:
         return self._resolve().acknowledge_raw_page(acknowledgement)
 
+    def guard_raw_publication(self):
+        return self._resolve().guard_raw_publication()
+
     def replay_raw_restriction(
         self,
         command: RawRestrictionReplayCommand,

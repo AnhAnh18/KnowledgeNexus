@@ -563,7 +563,7 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
     profile = _validated_page_bound(
         args, _load_reliability_profile(args.reliability_profile_path)
     )
-    _corpus_config(args, profile)
+    config = _corpus_config(args, profile)
     source_config = _source_config(args, profile)
     selection_path = _selection_file(args, state, run_id)
     selection_payload, selection_items = _load_selection_payload(selection_path, run_id=run_id, max_pages=args.max_pages)
@@ -587,7 +587,8 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
             state_session=session,
             orphan_inspector=ConfluenceRawPageOrphanInspector(raw_root=Path(args.raw_root)),
             page_fetcher=ConfluenceDataCenterPageAdapter(transport=transport),
-            raw_page_store=composition.raw_page_store,
+            raw_page_store=composition.guarded_raw_page_store(activation=session),
+            max_pages=config.max_pages,
         )
         captured = use_case.run(
             run_id=run_id,

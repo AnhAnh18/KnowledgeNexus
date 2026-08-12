@@ -715,6 +715,7 @@ def test_activation_scope_retains_lock_and_exposes_only_metadata_and_invalidatio
                 "commit_inventory_window",
                 "replay_raw_page",
                 "acknowledge_raw_page",
+                "guard_raw_publication",
                 "replay_raw_restriction",
                 "stream_inventory_occurrences",
                 "complete_session",
