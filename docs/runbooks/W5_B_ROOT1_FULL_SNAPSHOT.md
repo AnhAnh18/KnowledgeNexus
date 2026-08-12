@@ -20,6 +20,25 @@ the main machine only; never commit or transmit them.
 
 ## Authorized sequence
 
+For the preferred guarded one-command execution, copy
+`W5_B_ONE_SHOT_CONFIG.template.json` to an external private directory, replace
+its placeholders, set both authorization booleans explicitly, and run in a
+fresh PowerShell process:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\run-w5-root1-live.ps1 `
+  -OperatorConfig "<ABS-PRIVATE-W5-B-CONFIG.json>"
+```
+
+The one-shot script performs the sequence below, including the clean stop,
+resume, two deterministic exports, strict snapshot inspection, and sanitized
+evidence write. Do not dot-source it: the dedicated process intentionally
+clears its credential environment after the final live phase. The expanded
+commands below remain the normative phase-by-phase reference and recovery aid.
+Before authorization, the same private config can be checked without creating
+runtime directories or starting a live process by adding `-PreflightOnly`.
+
 The frozen subtree CLI uses a positional phase and requires `--state-dir` and
 `--max-pages` for every phase. The operator fills the placeholders privately
 and keeps the resulting command transcript off-repository.
