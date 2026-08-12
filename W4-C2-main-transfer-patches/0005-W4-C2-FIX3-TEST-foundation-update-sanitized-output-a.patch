@@ -1,0 +1,23 @@
+From 26a1274ee76a9a5bad27a4ee3cb20905070b0259 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 16:32:41 +0700
+Subject: [PATCH 5/9] [W4-C2-FIX3-TEST] foundation: update sanitized output
+ assertion
+
+---
+ tests/foundation/cli/test_m10_operator_cli_e2e.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/foundation/cli/test_m10_operator_cli_e2e.py b/tests/foundation/cli/test_m10_operator_cli_e2e.py
+index 1f75d6e..44caa05 100644
+--- a/tests/foundation/cli/test_m10_operator_cli_e2e.py
++++ b/tests/foundation/cli/test_m10_operator_cli_e2e.py
+@@ -145,7 +145,7 @@ def test_determinism_two_publishes(monkeypatch, tmp_path, capsys):
+             state=state, raw_root=raw_root, tok=tok, run_id=run_id, dataset_root=dataset_root,
+         )))
+     assert payloads[0]["counts"] == payloads[1]["counts"]
+-    assert payloads[0]["digest"] == payloads[1]["digest"], "snapshot digest is not deterministic"
++    assert payloads[0]["dataset_version"] == payloads[1]["dataset_version"], "snapshot version is not deterministic"
+ 
+ 
+ def test_drawio_media_path(monkeypatch, tmp_path, capsys):

@@ -1,0 +1,265 @@
+From 1fd08ed1a4957e8aee32b81af7c9755f600b177f Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 16:16:44 +0700
+Subject: [PATCH 1/9] [W4-C2] foundation: expose operator-runnable M10 delta
+ publication
+
+---
+ .../cli/confluence_subtree_corpus.py          | 77 ++++++++++++++++++-
+ .../foundation/cli/export_m10_snapshot.py     | 41 +++++++++-
+ .../exporters/delta_snapshot_reader.py        | 27 +++++--
+ 3 files changed, 134 insertions(+), 11 deletions(-)
+
+diff --git a/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py b/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py
+index ad26954..f90f33c 100644
+--- a/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py
++++ b/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py
+@@ -29,7 +29,7 @@ from knowledgenexus.foundation.ports.path_safety import require_plain_directory_
+ 
+ _SELECTION_FORMAT = "confluence-subtree-selection-v1"
+ _PROCESSING_FORMAT = "confluence-subtree-processing-state-v1"
+-_STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json"})
++_STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json", "delta-inventory.json"})
+ _MAX_STATE_BYTES = 64 * 1024 * 1024
+ _SELECTION_FIELDS = frozenset({"format_version", "run_id", "generation_id", "selection_identity", "items"})
+ _PROCESSING_FIELDS = frozenset({
+@@ -328,7 +328,7 @@ def _load_processing_payload(path: Path, *, run_id: CrawlRunId, selection_identi
+ def _parser() -> argparse.ArgumentParser:
+     parser = argparse.ArgumentParser(prog="confluence-subtree-corpus")
+     subparsers = parser.add_subparsers(dest="phase", required=True)
+-    for name in ("inventory", "capture-pages", "process-pages", "capture-drawio", "export"):
++    for name in ("inventory", "capture-pages", "process-pages", "capture-drawio", "capture-delta-inventory", "export"):
+         phase = subparsers.add_parser(name)
+         phase.add_argument("--state-dir", required=True)
+         phase.add_argument("--max-pages", type=int, required=True)
+@@ -344,6 +344,11 @@ def _parser() -> argparse.ArgumentParser:
+         phase.add_argument("--resume-unique", action="store_true")
+         phase.add_argument("--space-key")
+         phase.add_argument("--root-page-id")
++        phase.add_argument("--include-root-page-id", action="append", dest="include_root_page_ids")
++        phase.add_argument("--exclude-page-id", action="append", dest="excluded_page_ids")
++        phase.add_argument("--exclude-ancestor-page-id", action="append", dest="excluded_ancestor_page_ids")
++        phase.add_argument("--base-dataset-version")
++        phase.add_argument("--dataset-root")
+     return parser
+ 
+ 
+@@ -764,6 +769,73 @@ def _export_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
+     return {"status": "complete", "phase": "export", "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": packet["media_asset_count"]}
+ 
+ 
++def _capture_delta_inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
++    if not args.run_id or not args.raw_root or not args.dataset_root or not args.base_dataset_version:
++        raise ValueError("delta inventory inputs are required")
++    run_id = _require_run_id(args.run_id)
++    selection, items = _load_selection_payload(_selection_file(args, state, run_id), run_id=run_id, max_pages=args.max_pages)
++    from knowledgenexus.foundation.application.use_cases.capture_delta_inventory import (
++        CaptureDeltaInventory, DeltaInventoryCaptureRequest, selection_identity, scope_identity,
++    )
++    from knowledgenexus.foundation.domain.models.delta_inventory import (
++        CurrentSelectionPage, DeltaInventoryScope, PriorConfluenceDocument,
++    )
++    from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import PublishedSnapshotReader
++    from knowledgenexus.foundation.infrastructure.raw_store import ConfluenceRawPageGenerationStore
++    from knowledgenexus.foundation.infrastructure.sidecars import DeltaInventoryArtifactStore
++    from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++    from knowledgenexus.foundation.infrastructure.confluence import compose_live_subtree
++    from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport import RetryingConfluenceHttpTransport
++    from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ActivateRawGenerationRequest
++
++    profile = _validated_page_bound(args, _load_reliability_profile(args.reliability_profile_path))
++    current = tuple(CurrentSelectionPage(item.page_id) for item in items)
++    current_identity = selection_identity(current)
++    payload = tuple({"page_id": item.page_id} for item in current)
++    scope = DeltaInventoryScope(
++        tuple(args.include_root_page_ids or ((args.root_page_id,) if args.root_page_id else ())),
++        tuple(args.excluded_page_ids or ()),
++        tuple(args.excluded_ancestor_page_ids or ()),
++    )
++    current_scope_identity = scope_identity(scope)
++    reader = PublishedSnapshotReader(dataset_root=Path(args.dataset_root), validator=FoundationSchemaValidator())
++    base = reader.read(args.base_dataset_version)
++    prior: list[PriorConfluenceDocument] = []
++    for row in base.streams["documents"]:
++        if row.get("source_system") != "confluence" or row.get("source_type") not in {"wiki_page", "page"}:
++            continue
++        document_id = row.get("document_id")
++        source_version = row.get("source_version")
++        if type(document_id) is not str or not document_id.startswith("confluence:page:") or type(source_version) is not str or not source_version:
++            raise ValueError("prior snapshot is invalid")
++        page_id = document_id.removeprefix("confluence:page:")
++        prior.append(PriorConfluenceDocument(page_id, document_id, source_version))
++    source_config = _source_config(args, profile)
++    composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=profile["max_inventory_windows_per_root"])
++    request = ActivateRawGenerationRequest(workspace=state, run_id=run_id, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
++    with composition.checkpoint_run_port.activate_raw_generation(request) as session:
++        transport = RetryingConfluenceHttpTransport(inner=composition.http_inner, profile=composition.retry_profile, monotonic_clock=time.monotonic, sleeper=time.sleep, attempt_reserver=session)
++        capture_request = DeltaInventoryCaptureRequest(
++            run_id=run_id, generation_id=run_id,
++            accepted_base_dataset_version=args.base_dataset_version,
++            current_selection_identity=current_identity,
++            current_scope_identity=current_scope_identity,
++            prior_documents=tuple(prior), current_selection=current, scope=scope,
++            transport=transport,
++            raw_page_store=ConfluenceRawPageGenerationStore(raw_root=Path(args.raw_root)),
++            artifact_store=DeltaInventoryArtifactStore(state_root=state / "runs"),
++            selection_payload=payload,
++            max_response_bytes=profile["max_response_bytes_per_request"],
++            max_artifact_bytes=profile["max_response_bytes_per_request"],
++            max_artifacts=profile["max_raw_artifacts_per_run"],
++            minimum_free_disk_bytes=profile["minimum_free_disk_reserve_bytes"],
++            max_requests=profile["max_total_requests_per_run"],
++        )
++        result = CaptureDeltaInventory().execute(capture_request)
++        session.complete_session()
++    return {"status": "complete", "phase": "capture-delta-inventory", "present_count": result.metrics.present_count, "source_deleted_count": result.metrics.source_deleted_count, "access_revoked_count": result.metrics.access_revoked_count, "moved_out_of_scope_count": result.metrics.moved_out_of_scope_count}
++
++
+ def main(argv: list[str] | None = None) -> int:
+     try:
+         args = _parser().parse_args(argv)
+@@ -775,6 +847,7 @@ def main(argv: list[str] | None = None) -> int:
+             "capture-pages": _capture_pages_phase,
+             "process-pages": _process_pages_phase,
+             "capture-drawio": _capture_drawio_phase,
++            "capture-delta-inventory": _capture_delta_inventory_phase,
+             "export": _export_phase,
+         }
+         result = handlers[args.phase](args, state)
+diff --git a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+index 4dc26dc..fa366ff 100644
+--- a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
++++ b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+@@ -21,7 +21,11 @@ from typing import NoReturn
+ 
+ from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import (
+     M10SnapshotExportFailure,
+ )
+-from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
++from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter, M10DeltaSnapshotExporter
++from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import PublishedSnapshotReader
++from knowledgenexus.foundation.infrastructure.sidecars import DeltaInventoryArtifactStore
++from knowledgenexus.foundation.application.use_cases.capture_delta_inventory import selection_identity, scope_identity
++from knowledgenexus.foundation.domain.models.delta_inventory import CurrentSelectionPage, DeltaInventoryScope
+ from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotResult
+ from knowledgenexus.foundation.domain.models.media_body_materialization import MediaBodyStoreBudget
+ from knowledgenexus.foundation.domain.models.media_materialization import ConfluenceAttachmentObservation, MediaMaterializationResult, MediaRelationIntent
+@@ -331,9 +335,16 @@ def _build_operator_inputs(args: argparse.Namespace) -> tuple[M10SnapshotRequest
+     return request, confluence, _EmptyGitAdapter()
+ 
+ 
+-def run(*, request: object, confluence_adapter: object, git_adapter: object, validator: FoundationSchemaValidator | None = None):
++def run(*, request: object, confluence_adapter: object, git_adapter: object, validator: FoundationSchemaValidator | None = None, prior_snapshot_reader: object | None = None, delta_inventory: tuple[object, ...] = ()):
+     """Run the injected offline boundary; useful for tests and embedding."""
+-    exporter = M10FullSnapshotExporter(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=validator)
++    if type(request) is M10SnapshotRequest and request.export_mode == "delta":
++        if prior_snapshot_reader is None or not delta_inventory:
++            raise M10SnapshotExportFailure("invalid_request")
++        exporter = M10DeltaSnapshotExporter(prior_snapshot_reader=prior_snapshot_reader, delta_inventory=tuple(delta_inventory), confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=validator)
++    else:
++        if prior_snapshot_reader is not None or delta_inventory:
++            raise M10SnapshotExportFailure("invalid_request")
++        exporter = M10FullSnapshotExporter(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=validator)
+     return exporter.execute(request)
+ 
+ 
+@@ -361,9 +372,31 @@ def main(
+                 raise
+             except (OSError, TypeError, ValueError):
+                 raise _ConfigurationError from None
++            prior_reader = None
++            inventory_entries: tuple[object, ...] = ()
++            if request.export_mode == "delta":
++                if not parsed.state_dir or request.base_dataset_version is None:
++                    raise _ConfigurationError
++                try:
++                    store = DeltaInventoryArtifactStore(state_root=Path(parsed.state_dir) / "runs")
++                    envelope = store.read(generation_id=request.generation_id)
++                    expected_selection = selection_identity(tuple(CurrentSelectionPage(page_id) for page_id in request.ordered_page_ids))
++                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.include_root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), ()))
++                    if (envelope.run_id != request.run_id or envelope.generation_id != request.generation_id or envelope.accepted_base_dataset_version != request.base_dataset_version or envelope.current_selection_identity != expected_selection or envelope.current_scope_identity != expected_scope):
++                        raise ValueError
++                    prior_reader = PublishedSnapshotReader(dataset_root=request.dataset_root, validator=validator or FoundationSchemaValidator())
++                    inventory_entries = tuple(envelope.entries)
++                except Exception:
++                    raise _ConfigurationError from None
++            else:
++                prior_reader = None
++                inventory_entries = ()
+         elif request is None or confluence_adapter is None or git_adapter is None:
+             raise M10SnapshotExportFailure("invalid_request")
+-        result = run(request=request, confluence_adapter=confluence_adapter, git_adapter=git_adapter, validator=validator)
++        else:
++            prior_reader = None
++            inventory_entries = ()
++        result = run(request=request, confluence_adapter=confluence_adapter, git_adapter=git_adapter, validator=validator, prior_snapshot_reader=prior_reader, delta_inventory=inventory_entries)
+     except SystemExit as exc:
+         if type(exc.code) is int:
+             return exc.code
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+index b11f309..c252523 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+@@ -112,11 +112,11 @@ class PublishedSnapshotReader:
+         path = self._dataset_root / dataset_version
+         if path.parent != self._dataset_root or not path.is_dir() or _has_reparse_component(path):
+             raise ValueError("published snapshot is unavailable")
+-        result = read_published_snapshot(
++        result = _read_published_snapshot_impl(
+             path,
+             validator=self._validator,
+             expected_dataset_version=dataset_version,
+-            _allow_unbound_delta=True,
++            allow_unbound_delta=True,
+         )
+         if result.manifest.get("export_mode") == "delta":
+             base = result.manifest.get("base_dataset_version")
+@@ -230,13 +230,13 @@ def read_delta_snapshot(
+     return DeltaSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
+ 
+ 
+-def read_published_snapshot(
++def _read_published_snapshot_impl(
+     path: object,
+     *,
+     validator: FoundationSchemaValidator,
+     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+     expected_dataset_version: str | None = None,
+-    _allow_unbound_delta: bool = False,
++    allow_unbound_delta: bool = False,
+ ) -> PublishedSnapshotReadback:
+     """Read either a full or delta publication through the same strict seam."""
+     if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or _has_reparse_component(path):
+@@ -250,7 +250,7 @@ def read_published_snapshot(
+     manifest = _strict_json(path / "manifest.json")
+     if type(manifest) is not dict or manifest.get("export_mode") not in {"full_snapshot", "delta"}:
+         raise ValueError("snapshot mode is invalid")
+-    if manifest.get("export_mode") == "delta" and prior_streams is None and not _allow_unbound_delta:
++    if manifest.get("export_mode") == "delta" and prior_streams is None and not allow_unbound_delta:
+         raise ValueError("delta base streams are required")
+     if not _quality_report_bytes(path / "quality_report.md"):
+         raise ValueError("snapshot quality report is invalid")
+@@ -314,6 +314,23 @@ def read_published_snapshot(
+     return PublishedSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
+ 
+ 
++def read_published_snapshot(
++    path: object,
++    *,
++    validator: FoundationSchemaValidator,
++    prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
++    expected_dataset_version: str | None = None,
++) -> PublishedSnapshotReadback:
++    """Public strict reader; delta publications require an accepted base."""
++    return _read_published_snapshot_impl(
++        path,
++        validator=validator,
++        prior_streams=prior_streams,
++        expected_dataset_version=expected_dataset_version,
++        allow_unbound_delta=False,
++    )
++
++
+ def _stream_shape_for_reader(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> None:
+     expected = {"documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones"}
+     if set(streams) != expected:

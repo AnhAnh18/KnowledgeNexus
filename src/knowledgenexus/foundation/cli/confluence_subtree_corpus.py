@@ -29,7 +29,7 @@ from knowledgenexus.foundation.ports.path_safety import require_plain_directory_
 
 _SELECTION_FORMAT = "confluence-subtree-selection-v1"
 _PROCESSING_FORMAT = "confluence-subtree-processing-state-v1"
-_STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json"})
+_STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json", "delta-inventory.json"})
 _MAX_STATE_BYTES = 64 * 1024 * 1024
 _SELECTION_FIELDS = frozenset({"format_version", "run_id", "generation_id", "selection_identity", "items"})
 _PROCESSING_FIELDS = frozenset({

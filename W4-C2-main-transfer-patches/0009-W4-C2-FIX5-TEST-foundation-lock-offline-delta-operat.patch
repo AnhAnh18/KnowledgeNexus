@@ -1,0 +1,113 @@
+From cec2a8cc44e36f1ef38988207ebccf6287d7245f Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 17:02:09 +0700
+Subject: [PATCH 9/9] [W4-C2-FIX5-TEST] foundation: lock offline delta operator
+ publication
+
+---
+ .../foundation/cli/test_w4_c2_composition.py  | 81 +++++++++++++++++++
+ 1 file changed, 81 insertions(+)
+
+diff --git a/tests/foundation/cli/test_w4_c2_composition.py b/tests/foundation/cli/test_w4_c2_composition.py
+index ddda6e2..9e1490e 100644
+--- a/tests/foundation/cli/test_w4_c2_composition.py
++++ b/tests/foundation/cli/test_w4_c2_composition.py
+@@ -13,6 +13,10 @@ from knowledgenexus.foundation.cli import export_m10_snapshot as export_cli
+ from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+ from knowledgenexus.foundation.domain.models.delta_inventory import (
+     CurrentSelectionPage,
++    DeltaInventoryEntry,
++    DeltaInventoryEnvelope,
++    DeltaInventoryMetrics,
++    DeltaInventoryState,
+     DeltaInventoryScope,
+     PriorConfluenceDocument,
+ )
+@@ -22,6 +26,8 @@ from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter im
+ )
+ from knowledgenexus.foundation.infrastructure.raw_store import ConfluenceRawPageGenerationStore
+ from knowledgenexus.foundation.infrastructure.sidecars import DeltaInventoryArtifactStore
++from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import PublishedSnapshotReader
++from knowledgenexus.foundation.domain.rules.dataset_version_generator import DatasetVersionGenerator
+ import knowledgenexus.foundation.infrastructure.confluence as confluence_infra
+ import knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport as retry_infra
+ from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
+@@ -175,3 +181,78 @@ def test_offline_export_socket_guards(monkeypatch: pytest.MonkeyPatch, tmp_path:
+         confluence_adapter=_Adapter(confluence), git_adapter=_Adapter(git)
+     ).execute(request)
+     assert type(result) is M10SnapshotResult
++
++
++def _empty_git(git):
++    from knowledgenexus.foundation.domain.models.m10_composition import M10GitHandoff
++    return M10GitHandoff(git.repository, git.branch, git.commit, (), (), (), (), (), (), ())
++
++
++def _publish_delta_artifact(*, state: Path, request, base_streams, accepted_base: str) -> None:
++    entries = []
++    for row in base_streams["documents"]:
++        if row.get("source_system") != "confluence":
++            continue
++        document_id = row["document_id"]
++        entries.append(DeltaInventoryEntry(document_id, DeltaInventoryState.PRESENT))
++    entries.sort(key=lambda item: item.document_id)
++    metrics = DeltaInventoryMetrics(present_count=len(entries), source_deleted_count=0, access_revoked_count=0, moved_out_of_scope_count=0)
++    from knowledgenexus.foundation.application.use_cases.capture_delta_inventory import selection_identity, scope_identity
++    selection = selection_identity(tuple(CurrentSelectionPage(page_id) for page_id in request.ordered_page_ids))
++    scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), ()))
++    envelope = DeltaInventoryEnvelope("1.0.0", request.run_id, request.generation_id, selection, accepted_base, scope, tuple(entries), metrics)
++    DeltaInventoryArtifactStore(state_root=state / "runs").publish(envelope=envelope)
++
++
++def test_real_offline_delta_main_publishes_sparse_delta_and_reuses_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
++    dataset = tmp_path / "dataset"
++    dataset.mkdir()
++    base_request = _request(dataset)
++    confluence, git = _handoffs()
++    empty_git = _empty_git(git)
++    base = M10FullSnapshotExporter(
++        confluence_adapter=_Adapter(confluence), git_adapter=_Adapter(empty_git)
++    ).execute(base_request)
++    delta_request = replace(base_request, generated_at="2026-08-05T00:01:00Z", export_mode="delta", base_dataset_version=base.dataset_version)
++    base_read = PublishedSnapshotReader(dataset_root=dataset, validator=__import__("knowledgenexus.shared.contracts.foundation.schema_validator", fromlist=["FoundationSchemaValidator"]).FoundationSchemaValidator()).read(base.dataset_version)
++    state = tmp_path / "state"
++    (state / "runs").mkdir(parents=True)
++    _publish_delta_artifact(state=state, request=delta_request, base_streams=base_read.streams, accepted_base=base.dataset_version)
++    stored = DeltaInventoryArtifactStore(state_root=state / "runs").read(generation_id=RUN)
++    assert stored.accepted_base_dataset_version == base.dataset_version
++    from knowledgenexus.foundation.application.use_cases.capture_delta_inventory import selection_identity, scope_identity
++    assert stored.current_selection_identity == selection_identity(tuple(CurrentSelectionPage(page_id) for page_id in delta_request.ordered_page_ids))
++    assert stored.current_scope_identity == scope_identity(DeltaInventoryScope(tuple(delta_request.confluence_scope.root_page_ids), (), ()))
++    monkeypatch.setattr(export_cli, "_build_operator_inputs", lambda parsed: (delta_request, _Adapter(confluence), _Adapter(empty_git)))
++    forbidden = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network"))
++    monkeypatch.setattr(socket, "socket", forbidden)
++    monkeypatch.setattr(socket, "create_connection", forbidden)
++    assert export_cli.main([
++        "--export-mode", "delta", "--state-dir", str(state), "--run-id", str(RUN),
++        "--generation-id", str(RUN), "--base-dataset-version", base.dataset_version,
++    ]) == 0
++    payload = json.loads(capsys.readouterr().out)
++    assert "digest" not in payload
++    published_version = DatasetVersionGenerator.generate(instant=__import__("datetime").datetime.fromisoformat(delta_request.generated_at.replace("Z", "+00:00")))
++    published = PublishedSnapshotReader(dataset_root=dataset, validator=__import__("knowledgenexus.shared.contracts.foundation.schema_validator", fromlist=["FoundationSchemaValidator"]).FoundationSchemaValidator()).read(published_version)
++    assert published.manifest["export_mode"] == "delta"
++    assert published.manifest["base_dataset_version"] == base.dataset_version
++
++
++def test_real_delta_main_rejects_inventory_base_mismatch_without_publication(tmp_path: Path, monkeypatch, capsys) -> None:
++    dataset = tmp_path / "dataset"
++    dataset.mkdir()
++    base_request = _request(dataset)
++    confluence, git = _handoffs()
++    empty_git = _empty_git(git)
++    base = M10FullSnapshotExporter(confluence_adapter=_Adapter(confluence), git_adapter=_Adapter(empty_git)).execute(base_request)
++    delta_request = replace(base_request, generated_at="2026-08-05T00:01:00Z", export_mode="delta", base_dataset_version=base.dataset_version)
++    validator = __import__("knowledgenexus.shared.contracts.foundation.schema_validator", fromlist=["FoundationSchemaValidator"]).FoundationSchemaValidator()
++    base_read = PublishedSnapshotReader(dataset_root=dataset, validator=validator).read(base.dataset_version)
++    state = tmp_path / "state"
++    (state / "runs").mkdir(parents=True)
++    _publish_delta_artifact(state=state, request=delta_request, base_streams=base_read.streams, accepted_base="v20260806-000000-000000Z")
++    monkeypatch.setattr(export_cli, "_build_operator_inputs", lambda parsed: (delta_request, _Adapter(confluence), _Adapter(empty_git)))
++    assert export_cli.main(["--export-mode", "delta", "--state-dir", str(state), "--run-id", str(RUN), "--generation-id", str(RUN), "--base-dataset-version", base.dataset_version]) == export_cli.EXIT_CONFIGURATION
++    assert json.loads(capsys.readouterr().err)["category"] == "configuration"
++    assert (dataset / base.dataset_version).is_dir()

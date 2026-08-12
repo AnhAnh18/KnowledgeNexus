@@ -1,0 +1,66 @@
+From 6cdc342c7f8616ccb061a1fd418f5b278d5b1f70 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 17:02:09 +0700
+Subject: [PATCH 8/9] [W4-C2-FIX5-PROD] foundation: harden real delta readback
+ path
+
+---
+ .../foundation/application/use_cases/project_m10_delta.py | 8 +++++++-
+ src/knowledgenexus/foundation/cli/export_m10_snapshot.py  | 2 +-
+ .../infrastructure/exporters/delta_snapshot_reader.py     | 4 ++--
+ 3 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py b/src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py
+index f522df9..e07ef4f 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py
++++ b/src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py
+@@ -84,7 +84,13 @@ def _canonical_hash(value: object) -> str:
+ 
+ 
+ def _canonical_bytes(value: Mapping[str, object]) -> bytes:
+-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
++    def plain(item: object) -> object:
++        if isinstance(item, Mapping):
++            return {str(key): plain(value) for key, value in item.items()}
++        if isinstance(item, (list, tuple)):
++            return [plain(value) for value in item]
++        return item
++    return json.dumps(plain(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+ 
+ 
+ def _stream_view(value: object) -> dict[str, tuple[dict[str, object], ...]]:
+diff --git a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+index baa29d0..167c577 100644
+--- a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
++++ b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+@@ -386,7 +386,7 @@ def main(
+                     store = DeltaInventoryArtifactStore(state_root=Path(parsed.state_dir) / "runs")
+                     envelope = store.read(generation_id=request.generation_id)
+                     expected_selection = selection_identity(tuple(CurrentSelectionPage(page_id) for page_id in request.ordered_page_ids))
+-                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.include_root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), tuple(parsed.excluded_ancestor_page_ids or ())))
++                    expected_scope = scope_identity(DeltaInventoryScope(tuple(request.confluence_scope.root_page_ids), tuple(item.page_id for item in request.confluence_exclusions), tuple(parsed.excluded_ancestor_page_ids or ())))
+                     if (envelope.run_id != request.run_id or envelope.generation_id != request.generation_id or envelope.accepted_base_dataset_version != request.base_dataset_version or envelope.current_selection_identity != expected_selection or envelope.current_scope_identity != expected_scope):
+                         raise ValueError
+                     prior_reader = PublishedSnapshotReader(dataset_root=request.dataset_root, validator=validator or FoundationSchemaValidator())
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+index c252523..03f17f5 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+@@ -59,7 +59,7 @@ class DeltaSnapshotReadback:
+     digest: str
+ 
+     def __post_init__(self) -> None:
+-        if type(self.manifest) is not dict or type(self.streams) is not dict:
++        if not isinstance(self.manifest, Mapping) or not isinstance(self.streams, Mapping):
+             raise TypeError("readback mappings are invalid")
+         frozen_manifest = _freeze_value(self.manifest)
+         frozen_streams = {
+@@ -79,7 +79,7 @@ class PublishedSnapshotReadback:
+     digest: str
+ 
+     def __post_init__(self) -> None:
+-        if type(self.manifest) is not dict or type(self.streams) is not dict:
++        if not isinstance(self.manifest, Mapping) or not isinstance(self.streams, Mapping):
+             raise TypeError("readback mappings are invalid")
+         frozen_manifest = _freeze_value(self.manifest)
+         frozen_streams = {

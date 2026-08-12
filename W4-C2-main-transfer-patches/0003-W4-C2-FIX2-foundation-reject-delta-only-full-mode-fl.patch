@@ -1,0 +1,23 @@
+From 79ecc36d5939eeda7c03ead7d72b2544764ff03d Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 16:20:33 +0700
+Subject: [PATCH 3/9] [W4-C2-FIX2] foundation: reject delta-only full-mode
+ flags
+
+---
+ src/knowledgenexus/foundation/cli/export_m10_snapshot.py | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+index 8db2f66..053617e 100644
+--- a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
++++ b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+@@ -364,6 +364,8 @@ def main(
+         parse_argv = [] if argv is None and request is not None else argv
+         parsed = _parse_args(parse_argv)
+         _media_policy(parsed.media_policy)
++        if parsed.export_mode == "full_snapshot" and (parsed.base_dataset_version is not None or parsed.excluded_ancestor_page_ids):
++            raise _ConfigurationError
+         if request is None and confluence_adapter is None and git_adapter is None:
+             if argv is not None and len(argv) == 0:
+                 raise M10SnapshotExportFailure("invalid_request")

@@ -1,0 +1,23 @@
+From 1da2c820884471fb381fca376032ca7d46360745 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 16:50:52 +0700
+Subject: [PATCH 6/9] [W4-C2-FIX4-PROD] foundation: accept platform path
+ subclasses
+
+---
+ .../infrastructure/sidecars/delta_inventory_artifact_store.py   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/knowledgenexus/foundation/infrastructure/sidecars/delta_inventory_artifact_store.py b/src/knowledgenexus/foundation/infrastructure/sidecars/delta_inventory_artifact_store.py
+index d5b70c3..fb4489b 100644
+--- a/src/knowledgenexus/foundation/infrastructure/sidecars/delta_inventory_artifact_store.py
++++ b/src/knowledgenexus/foundation/infrastructure/sidecars/delta_inventory_artifact_store.py
+@@ -29,7 +29,7 @@ class DeltaInventoryArtifactStore:
+     """Atomic, no-clobber storage for one generation's derived inventory."""
+ 
+     def __init__(self, *, state_root: Path) -> None:
+-        if type(state_root) is not Path or not state_root.is_absolute():
++        if not isinstance(state_root, Path) or not state_root.is_absolute():
+             raise DeltaInventoryArtifactStoreError("invalid_artifact_path")
+         try:
+             require_plain_directory_chain(state_root)
