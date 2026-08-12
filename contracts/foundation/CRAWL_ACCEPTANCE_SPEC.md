@@ -493,6 +493,24 @@ The live gate MUST use an approved transferred execution tree and repository-
 local provenance under `REPOSITORY_TRANSFER_POLICY.md`. Foreign Git SHAs are
 not checkout requirements.
 
+### 13.1 W5 bounded media acceptance scope
+
+The W5 gate request records exactly one explicit `media_scope` value:
+
+```text
+all_media
+drawio_only
+```
+
+`all_media` preserves the complete bounded-media gate: Draw.io, PDF, image,
+chart, and unsupported media outcomes are all required by the existing gate.
+`drawio_only` is the text-first Root-1 acceptance variant. It requires only
+Draw.io outcomes, rejects every non-Draw.io media outcome in the request and
+result, and does not claim PDF, image, chart, OCR, audio, or video acceptance.
+The selected scope is part of the sanitized gate result and determinism
+evidence. It is never inferred from missing media and must not weaken the
+complete `all_media` gate.
+
 ## 14. Live prohibitions
 
 The live acceptance MUST NOT:

@@ -7,8 +7,9 @@ the main machine only; never commit or transmit them.
 ## Required controls
 
 - Freeze and record the approved execution head; require a clean tracked tree.
-- Use fresh absent output roots with plain existing parents; reject symlink or
-  reparse components and insufficient free disk.
+- Use existing empty plain dataset roots outside the repository; reject
+  symlink/reparse components and insufficient free disk. The generated
+  version/staging directories and `LATEST.txt` must be absent before publish.
 - Keep credentials in the live process environment only and clear them before
   offline processing/export.
 - Use the active reliability profile and explicit BGE-M3 tokenizer directory.
@@ -33,18 +34,33 @@ $common = @(
   "--space-key", "<SPACE-KEY>",
   "--root-page-id", "<ROOT-PAGE-ID>"
 )
- $inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
- $run = $inventory.run_id
- if (-not $run) { throw "inventory did not return a run identity" }
-# COMMAND 1: start page capture. The operator must interrupt this process with
-# Ctrl+C only after its output confirms a committed batch. This is the one
-# controlled stop; do not rerun COMMAND 1 after interruption.
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
-  --run-id $run
-# COMMAND 2: run exactly once after COMMAND 1 was interrupted. It resumes the
-# same run and raw root; do not execute it if COMMAND 1 completed normally.
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
-  --run-id $run
+# The first call durably completes inventory work. The second call reads the
+# unique completed run and publishes its bound selection. Neither is a page
+# body capture invocation.
+$inventoryStarted = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw "inventory start failed" }
+$inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common `
+  --resume-unique | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $inventory.status -ne "complete") {
+  throw "inventory completion readback failed"
+}
+$run = $inventory.run_id
+if (-not $run) { throw "inventory did not return a run identity" }
+# COMMAND 1: stop cleanly after two committed 100-page batches. The command
+# must return exit 0 with semantic status "stopped"; do not use Ctrl+C.
+$stopped = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+  --run-id $run --stop-after-batches 2 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $stopped.status -ne "stopped") {
+  throw "controlled page-capture stop did not complete"
+}
+# COMMAND 2: resume the same durable run and raw root without a stop limit.
+# It must return exit 0 with semantic status "complete" and must not refetch
+# pages already committed by COMMAND 1.
+$resumed = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+  --run-id $run | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $resumed.status -ne "complete") {
+  throw "resumed page capture did not complete"
+}
 python -m knowledgenexus.foundation.cli.confluence_subtree_corpus process-pages @common `
   --run-id $run
 python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-drawio @common `
@@ -69,11 +85,12 @@ and prove committed windows/pages were not fetched again. Do not start a second
 live sequence after the authorized sequence completes.
 
 Repeat only the offline export command with `--dataset-root
-<ABS-DATASET-ROOT-B>` and the same semantic inputs and `generated_at`. Both
-dataset roots must be fresh and absent before each publish. Verify privately
-that version directories, dataset version, digest, eight streams, strict
-readback, counts, cross-stream closure, `LATEST.txt`, and raw/state inputs are
-byte-identical.
+<ABS-DATASET-ROOT-B>` and the same semantic inputs and `generated_at`. Before
+each publish, its dataset root must already exist as an empty plain directory
+outside the repository. The generated version directory, its staging sibling,
+and `LATEST.txt` must be absent. Verify privately that version directories,
+dataset version, digest, eight streams, strict readback, counts, cross-stream
+closure, `LATEST.txt`, and raw/state inputs are byte-identical.
 
 ## Sanitized return packet
 

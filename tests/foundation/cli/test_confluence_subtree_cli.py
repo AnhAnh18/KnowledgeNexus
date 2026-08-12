@@ -114,6 +114,42 @@ def test_help_exits_zero_without_failure_payload(capsys):
     assert '"status":"failed"' not in capsys.readouterr().out
 
 
+def test_capture_pages_parser_accepts_only_positive_controlled_batch_stop() -> None:
+    parsed = cli._parser().parse_args([
+        "capture-pages", "--state-dir", "C:/state", "--max-pages", "5000",
+        "--stop-after-batches", "2",
+    ])
+    assert parsed.stop_after_batches == 2
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args([
+            "capture-pages", "--state-dir", "C:/state", "--max-pages", "5000",
+            "--stop-after-batches", "0",
+        ])
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args([
+            "inventory", "--state-dir", "C:/state", "--max-pages", "5000",
+            "--stop-after-batches", "2",
+        ])
+
+
+def test_capture_pages_main_forwards_controlled_batch_stop(monkeypatch, tmp_path, capsys) -> None:
+    observed = {}
+
+    def capture(args, state):
+        observed["stop_after_batches"] = args.stop_after_batches
+        observed["state"] = state
+        return {"status": "stopped", "phase": "capture-pages"}
+
+    monkeypatch.setattr(cli, "_capture_pages_phase", capture)
+    state = tmp_path.resolve()
+    assert main([
+        "capture-pages", "--state-dir", str(state), "--max-pages", "5000",
+        "--stop-after-batches", "2",
+    ]) == 0
+    assert observed == {"stop_after_batches": 2, "state": state}
+    assert json.loads(capsys.readouterr().out)["status"] == "stopped"
+
+
 def test_drawio_phase_fails_closed_without_production_adapters(capsys, tmp_path):
     result = main(["capture-drawio", "--state-dir", str(tmp_path), "--max-pages", "5000"])
     assert result == 2

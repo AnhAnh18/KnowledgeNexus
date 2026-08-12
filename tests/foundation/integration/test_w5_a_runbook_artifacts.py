@@ -27,6 +27,8 @@ def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
     assert "--export-mode delta" in c_text
     assert "--phase" not in b_text + c_text
     assert "confluence_subtree_corpus inventory @common" in b_text
+    assert "--resume-unique | ConvertFrom-Json" in b_text + c_text
+    assert "inventory completion readback failed" in b_text + c_text
     assert "confluence_subtree_corpus capture-delta-inventory @common" in c_text
     assert '"--raw-root", "<ABS-RAW-ROOT>"' in b_text
     assert '"--raw-root", "<ABS-SECOND-RAW-ROOT>"' in c_text
@@ -37,9 +39,25 @@ def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
     assert '--raw-generation-root "<ABS-SECOND-RAW-ROOT>"' in c_text
     assert "COMMAND 1" in b_text + c_text
     assert "COMMAND 2" in b_text + c_text
+    assert "--stop-after-batches 2" in b_text + c_text
+    assert "must interrupt" not in (b_text + c_text).lower()
+    assert "do not use Ctrl+C" in b_text + c_text
     assert "<ABS-DATASET-ROOT-A>" in b_text
     assert "<ABS-DATASET-ROOT-B>" in b_text
+    assert "dataset root must already exist as an empty plain directory" in b_text
+    assert "and `LATEST.txt` must be absent" in b_text
+    assert "delta dataset root must already exist as an empty plain directory" in c_text
     assert "--jira-relation-profile" in b_text + c_text
+
+
+def test_w5_media_scope_is_registered_in_the_active_acceptance_contract() -> None:
+    text = (
+        _ROOT / "contracts" / "foundation" / "CRAWL_ACCEPTANCE_SPEC.md"
+    ).read_text(encoding="utf-8")
+    assert "### 13.1 W5 bounded media acceptance scope" in text
+    assert "all_media" in text
+    assert "drawio_only" in text
+    assert "does not claim PDF, image, chart, OCR, audio, or video acceptance" in text
 
 
 def test_w5_a_sanitized_templates_are_valid_pending_envelopes() -> None:
