@@ -1,0 +1,814 @@
+From a67d0200d483f808f67a124eb3737c40908c2c97 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Thu, 6 Aug 2026 08:27:21 +0700
+Subject: [PATCH] feat: add bounded crawl batch orchestration
+
+---
+ .local_ai/IMPLEMENTATION_STATE.md             |  26 ++-
+ .local_ai/ROADMAP.md                          |   9 +-
+ .../process_confluence_page_batches.py        | 163 ++++++++++++++++++
+ .../domain/models/confluence_crawl_batch.py   | 160 +++++++++++++++++
+ .../rules/confluence_batch_retry_policy.py    |  13 ++
+ .../in_memory_confluence_crawl_batch_store.py |  69 ++++++++
+ .../ports/confluence_crawl_batch_port.py      |  15 ++
+ .../test_process_confluence_page_batches.py   | 155 +++++++++++++++++
+ .../models/test_confluence_crawl_batch.py     |  33 ++++
+ ..._in_memory_confluence_crawl_batch_store.py |  65 +++++++
+ 10 files changed, 704 insertions(+), 4 deletions(-)
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/process_confluence_page_batches.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/confluence_crawl_batch.py
+ create mode 100644 src/knowledgenexus/foundation/domain/rules/confluence_batch_retry_policy.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/checkpoint/in_memory_confluence_crawl_batch_store.py
+ create mode 100644 src/knowledgenexus/foundation/ports/confluence_crawl_batch_port.py
+ create mode 100644 tests/foundation/application/use_cases/test_process_confluence_page_batches.py
+ create mode 100644 tests/foundation/domain/models/test_confluence_crawl_batch.py
+ create mode 100644 tests/foundation/infrastructure/checkpoint/test_in_memory_confluence_crawl_batch_store.py
+
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index c932483..b86a2b3 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -1759,9 +1759,29 @@ are recorded without using repository-local commit SHAs as status.
+ ## Current Execution Boundary
+ 
+ The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
+-replay/checkpoint stages are complete with their independent gates and are
+-owner-accepted as the roadmap closeout. The 100k performance gate remains a
+-separate deferred follow-up; no 100k scale PASS is claimed.
++replay/checkpoint stages are complete with their independent gates. Stage A's
++in-memory batch orchestration/checkpoint-resume reference slice is also
++complete and independently reviewed `PASS`; it provides runtime-validated
++batch contracts, deterministic partitioning, lease fencing/reclaim, retry and
++resume accounting, bounded resource budgets, and adversarial tests. SQLite v2,
++production transport, RSS sampling, real-scale validation, and the 100k
++performance gate remain deferred; no 100k scale PASS is claimed.
++
++## Stage A Bounded Batch Orchestration State
++
++- Status: complete and independently reviewed `PASS`.
++- Review workflow artifacts: `.codex-workflow/20260805-scale-ocr/17-scale-fix3-plan-final.md`,
++  `.codex-workflow/20260805-scale-ocr/21-scale-fix4-plan-final.md`,
++  `.codex-workflow/20260805-scale-ocr/25-scale-fix5-plan-final.md`,
++  `.codex-workflow/20260805-scale-ocr/29-scale-fix6-plan-final.md`,
++  `.codex-workflow/20260805-scale-ocr/33-scale-fix7-plan-final.md`, and fresh
++  review `.codex-workflow/20260805-scale-ocr/35-scale-fix7-independent-review.md`.
++- Implementation is intentionally bounded to an in-memory/reference slice.
++  It does not replace the durable SQLite checkpoint store or establish a live
++  crawl/10k/100k acceptance gate.
++- Validation: focused Stage A suite `20 passed` (domain-inclusive review run
++  `23 passed`); `python -m compileall -q src tests` passed; `git diff --check`
++  passed.
+ 
+ ## M10-A Wire Contract and Trusted Input Models
+ 
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index ee950d2..7775e52 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -90,7 +90,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
+ | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
+ | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
+-| M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
++| M7 - Crawl reliability and scale | Bounded stages complete through D5-B; Stage A batch-orchestration reference slice independently reviewed `PASS`; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages plus the bounded in-memory batch/checkpoint-resume slice are independently reviewed `PASS`; SQLite v2, production transport, RSS, optimization, and 100k evidence remain deferred | Owner accepts bounded-stage progress; no 100k scale PASS or production transport claim is made. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+ | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
+ | M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+@@ -895,6 +895,13 @@ Contract decomposition:
+   workspace raw-page replay/checkpoint integration only. M7-D5-B restriction
+   replay is also complete and separately reviewed `PASS`; neither stage closes
+   the 100k scale gate.
++- Stage A bounded batch orchestration: complete and independently reviewed
++  `PASS`; adds runtime-validated batch identity/request/lease/checkpoint/
++  metrics/result contracts, deterministic partitioning, in-memory CAS lease
++  reclaim, per-batch retry and resume accounting, bounded queue/byte/page
++  budgets, and adversarial coverage. This is a reference slice only; it does
++  not claim SQLite durability, production transport, RSS sampling, or 100k
++  scale evidence.
+ 
+ ### M7-C Durable Milestone Ledger
+ 
+diff --git a/src/knowledgenexus/foundation/application/use_cases/process_confluence_page_batches.py b/src/knowledgenexus/foundation/application/use_cases/process_confluence_page_batches.py
+new file mode 100644
+index 0000000..3622693
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/process_confluence_page_batches.py
+@@ -0,0 +1,163 @@
++from __future__ import annotations
++import hashlib
++import math
++import time
++from dataclasses import dataclass
++from typing import Callable, Iterable
++from knowledgenexus.foundation.domain.models.confluence_crawl_batch import *
++from knowledgenexus.foundation.domain.rules.confluence_batch_retry_policy import is_retryable, backoff_seconds
++from knowledgenexus.foundation.ports.confluence_crawl_batch_port import ConfluenceCrawlBatchPort, BatchLeaseConflict
++from knowledgenexus.foundation.ports.confluence_page_fetch_port import ConfluencePageFetchPort
++
++@dataclass(frozen=True)
++class BatchRunConfig:
++    batch_size: int = 100
++    max_attempts: int = 3
++    lease_seconds: float = 300.0
++    queue_capacity: int = 1
++    max_pages: int | None = None
++    max_bytes: int | None = None
++    max_requests: int | None = None
++    max_page_bytes: int | None = None
++    sleep: Callable[[float], None] = time.sleep
++    def __post_init__(self) -> None:
++        if type(self.batch_size) is not int or not 1 <= self.batch_size <= 1000: raise ValueError("batch_size is invalid")
++        if type(self.max_attempts) is not int or not 1 <= self.max_attempts <= 100: raise ValueError("max_attempts is invalid")
++        if type(self.lease_seconds) not in (int,float) or isinstance(self.lease_seconds, bool) or not math.isfinite(self.lease_seconds) or self.lease_seconds <= 0: raise ValueError("lease_seconds is invalid")
++        if type(self.queue_capacity) is not int or not 1 <= self.queue_capacity <= 1000: raise ValueError("queue_capacity is invalid")
++        for value in (self.max_pages, self.max_bytes, self.max_requests, self.max_page_bytes):
++            if value is not None and (type(value) is not int or isinstance(value, bool) or value < 0): raise ValueError("budget is invalid")
++        if not callable(self.sleep): raise TypeError("sleep is invalid")
++
++@dataclass(frozen=True)
++class BatchRunResult:
++    committed: int
++    failed: int
++    retries: int
++    page_count: int
++    byte_count: int
++    queue_high_watermark: int
++    digest: str
++    total_batches: int = 0
++    total_requests: int = 0
++    total_pages: int = 0
++    total_bytes: int = 0
++    total_retries: int = 0
++    def __post_init__(self) -> None:
++        for value in (self.committed, self.failed, self.retries, self.page_count, self.byte_count, self.queue_high_watermark):
++            if type(value) is not int or isinstance(value, bool) or value < 0: raise ValueError("result counter is invalid")
++        if type(self.digest) is not str or len(self.digest) != 64 or any(c not in "0123456789abcdef" for c in self.digest): raise ValueError("result digest is invalid")
++        if type(self.total_batches) is not int or self.total_batches < 0: raise ValueError("total_batches is invalid")
++        if self.committed + self.failed != self.total_batches: raise ValueError("result batch count is incoherent")
++        if self.queue_high_watermark > 1: raise ValueError("queue watermark is unbounded")
++        for value in (self.total_requests, self.total_pages, self.total_bytes, self.total_retries):
++            if type(value) is not int or value < 0: raise ValueError("total accounting is invalid")
++        if self.total_requests != self.total_pages or self.total_pages != self.page_count or self.total_bytes != self.byte_count or self.total_retries != self.retries: raise ValueError("total accounting mismatch")
++        expected = hashlib.sha256(f"{self.committed}:{self.failed}:{self.total_requests}:{self.total_pages}:{self.total_bytes}:{self.total_retries}:{self.queue_high_watermark}".encode()).hexdigest()
++        if self.digest != expected: raise ValueError("result digest mismatch")
++
++class ProcessConfluencePageBatches:
++    """Synchronous bounded driver; transport and page-set processing are injected."""
++    def __init__(self, *, store: ConfluenceCrawlBatchPort, fetcher: ConfluencePageFetchPort,
++                 process_page_set: Callable[[tuple[tuple[str, bytes], ...]], object] | None = None,
++                 clock: Callable[[], float] = time.monotonic, token_factory: Callable[[str], str] = lambda batch_id: hashlib.sha256(batch_id.encode()).hexdigest()):
++        self._store = store; self._fetcher = fetcher; self._process = process_page_set or (lambda pages: None); self._clock = clock; self._token = token_factory
++
++    @staticmethod
++    def partition(*, run_id: str, generation_digest: str, config_digest: str, inventory_digest: str,
++                  occurrences: Iterable, batch_size: int = 100) -> tuple[BatchRequest, ...]:
++        if type(batch_size) is not int or not 1 <= batch_size <= 1000: raise ValueError("batch_size is invalid")
++        values = tuple(occurrences)
++        if any(type(x) is not type(values[0]) for x in values) if values else False: raise TypeError("occurrences are invalid")
++        result = []
++        for ordinal in range(0, len(values), batch_size):
++            result.append(BatchRequest(run_id, generation_digest, config_digest, inventory_digest, ordinal // batch_size, values[ordinal:ordinal + batch_size]))
++        return tuple(result)
++
++    def run(self, requests: Iterable[BatchRequest], *, config: BatchRunConfig = BatchRunConfig()) -> BatchRunResult:
++        reqs = tuple(requests)
++        self._validate_requests(reqs, config)
++        committed = failed = retries = pages = bytes_total = qmax = requests_total = 0
++        # Physical transport usage includes failed attempts in this invocation.
++        # It is deliberately invocation-scoped because the reference port does
++        # not persist failed-attempt resource counters across process restarts.
++        physical_requests = physical_bytes = 0
++        for request in reqs:
++            try:
++                self._store.create(BatchCheckpoint(request))
++            except BatchLeaseConflict:
++                # Re-entry is the normal resume path for an already-created batch.
++                existing = self._store.get(request.batch_id)
++                if existing.request != request:
++                    raise
++            done = False
++            while not done:
++                current = self._store.get(request.batch_id)
++                if current.state is BatchState.COMMITTED:
++                    committed += 1; pages += current.metrics.page_count; bytes_total += current.metrics.byte_count; requests_total += current.metrics.request_count; retries += current.metrics.retry_count
++                    physical_requests += current.metrics.request_count; physical_bytes += current.metrics.byte_count
++                    done = True; continue
++                if current.state is BatchState.FAILED:
++                    # Failed checkpoints are terminal; re-entry reports the same
++                    # batch outcome without claiming or invoking transport.
++                    failed += 1
++                    done = True
++                    continue
++                lease = self._store.claim(request.batch_id, token=self._token(request.batch_id), now=self._clock(), lease_seconds=config.lease_seconds)
++                try:
++                    payload = []
++                    batch_bytes = 0
++                    batch_retries = lease.attempt - 1
++                    attempt_requests = 0
++                    attempt_bytes = 0
++                    for occurrence in request.occurrences:
++                        if config.max_requests is not None and physical_requests + 1 > config.max_requests: raise ValueError("policy budget exceeded")
++                        if config.max_pages is not None and pages + len(payload) >= config.max_pages: raise ValueError("policy budget exceeded")
++                        if hasattr(self._fetcher, "estimate_page_bytes"):
++                            estimate = self._fetcher.estimate_page_bytes(page_id=occurrence.page_id)
++                            if type(estimate) is not int or estimate < 0: raise ValueError("policy budget exceeded")
++                            if config.max_page_bytes is not None and batch_bytes + estimate > config.max_page_bytes: raise ValueError("policy budget exceeded")
++                            if config.max_bytes is not None and physical_bytes + estimate > config.max_bytes: raise ValueError("policy budget exceeded")
++                        attempt_requests += 1
++                        physical_requests += 1
++                        body = self._fetcher.fetch_page_raw(page_id=occurrence.page_id)
++                        if type(body) is not bytes: raise TypeError("fetcher returned invalid body")
++                        if config.max_page_bytes is not None and batch_bytes + len(body) > config.max_page_bytes: raise ValueError("policy budget exceeded")
++                        physical_bytes += len(body)
++                        payload.append((occurrence.page_id, body)); attempt_bytes += len(body); batch_bytes += len(body)
++                        if config.max_bytes is not None and physical_bytes > config.max_bytes: raise ValueError("policy budget exceeded")
++                    digest = hashlib.sha256(b"".join(body for _, body in payload)).hexdigest()
++                    page_bytes = sum(len(b) for _, b in payload)
++                    if config.max_pages is not None and pages + len(payload) > config.max_pages or config.max_bytes is not None and physical_bytes > config.max_bytes:
++                        raise ValueError("policy budget exceeded")
++                    self._process(tuple(payload))
++                    self._store.commit(lease, batch_digest=digest, metrics=BatchMetrics(len(payload), page_bytes, len(payload), batch_retries, 0.0, 1), now=self._clock())
++                    committed += 1; pages += len(payload); bytes_total += attempt_bytes; requests_total += attempt_requests; retries += batch_retries; done = True
++                except Exception as error:
++                    category = BatchFailureCategory.MALFORMED if isinstance(error, (TypeError, ValueError)) else BatchFailureCategory.TRANSPORT
++                    try:
++                        if is_retryable(category) and lease.attempt < config.max_attempts:
++                            self._store.requeue(lease, category=category, now=self._clock())
++                            config.sleep(backoff_seconds(attempt=lease.attempt))
++                        else:
++                            self._store.fail(lease, category=category, now=self._clock())
++                    except BatchLeaseConflict: pass
++                    if not is_retryable(category) or lease.attempt >= config.max_attempts:
++                        failed += 1; done = True
++                    else: pass
++        qmax = 1 if reqs else 0
++        digest = hashlib.sha256(f"{committed}:{failed}:{requests_total}:{pages}:{bytes_total}:{retries}:{qmax}".encode()).hexdigest()
++        return BatchRunResult(committed, failed, retries, pages, bytes_total, qmax, digest, len(reqs), requests_total, pages, bytes_total, retries)
++
++    @staticmethod
++    def _validate_requests(reqs: tuple[BatchRequest, ...], config: BatchRunConfig) -> None:
++        if any(type(x) is not BatchRequest for x in reqs): raise TypeError("requests are invalid")
++        if [x.ordinal for x in reqs] != list(range(len(reqs))): raise ValueError("batch ordinals are not contiguous")
++        if len({x.batch_id for x in reqs}) != len(reqs): raise ValueError("duplicate batch identity")
++        if reqs:
++            identity = (reqs[0].run_id, reqs[0].generation_digest, reqs[0].config_digest, reqs[0].inventory_digest)
++            if any((x.run_id, x.generation_digest, x.config_digest, x.inventory_digest) != identity for x in reqs): raise ValueError("request identity drift")
++            pages = [page.page_id for x in reqs for page in x.occurrences]
++            if len(set(pages)) != len(pages): raise ValueError("duplicate page identity")
++            ordinals = [page.item_ordinal for x in reqs for page in x.occurrences]
++            if ordinals != list(range(len(ordinals))): raise ValueError("occurrence order drift")
+diff --git a/src/knowledgenexus/foundation/domain/models/confluence_crawl_batch.py b/src/knowledgenexus/foundation/domain/models/confluence_crawl_batch.py
+new file mode 100644
+index 0000000..fc1ab53
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/confluence_crawl_batch.py
+@@ -0,0 +1,160 @@
++from __future__ import annotations
++
++import hashlib
++import json
++import math
++from dataclasses import dataclass
++from enum import StrEnum
++from typing import Iterable
++
++from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
++
++
++class BatchState(StrEnum):
++    PENDING = "pending"
++    LEASED = "leased"
++    COMMITTED = "committed"
++    FAILED = "failed"
++
++
++class BatchFailureCategory(StrEnum):
++    RATE_LIMIT = "rate_limit"
++    TRANSPORT = "transport"
++    TIMEOUT = "timeout"
++    LOCAL_TRANSIENT = "local_transient"
++    MALFORMED = "malformed"
++    POLICY = "policy"
++    SCHEMA = "schema"
++    STALE_GENERATION = "stale_generation"
++    IDENTITY = "identity"
++
++
++def _text(value: object, name: str) -> str:
++    if type(value) is not str or not value:
++        raise ValueError(f"{name} is invalid")
++    return value
++
++
++def batch_identity(*, run_id: str, generation_digest: str, config_digest: str,
++                   inventory_digest: str, ordinal: int, occurrences: Iterable[InventoryOccurrence]) -> str:
++    if type(ordinal) is not int or ordinal < 0:
++        raise ValueError("ordinal is invalid")
++    items = tuple(occurrences)
++    if not items or any(type(item) is not InventoryOccurrence for item in items):
++        raise ValueError("occurrences are invalid")
++    ids = tuple(item.page_id for item in items)
++    if len(set(ids)) != len(ids):
++        raise ValueError("duplicate page identity")
++    payload = {"run": _text(run_id, "run_id"), "generation": _text(generation_digest, "generation_digest"),
++               "config": _text(config_digest, "config_digest"), "inventory": _text(inventory_digest, "inventory_digest"),
++               "ordinal": ordinal, "pages": ids}
++    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
++
++
++@dataclass(frozen=True)
++class BatchRequest:
++    run_id: str
++    generation_digest: str
++    config_digest: str
++    inventory_digest: str
++    ordinal: int
++    occurrences: tuple[InventoryOccurrence, ...]
++
++    def __post_init__(self) -> None:
++        _text(self.run_id, "run_id"); _text(self.generation_digest, "generation_digest")
++        _text(self.config_digest, "config_digest"); _text(self.inventory_digest, "inventory_digest")
++        if type(self.ordinal) is not int or self.ordinal < 0:
++            raise ValueError("ordinal is invalid")
++        if type(self.occurrences) is not tuple or not self.occurrences:
++            raise ValueError("occurrences are invalid")
++        if any(type(x) is not InventoryOccurrence for x in self.occurrences):
++            raise TypeError("occurrences are invalid")
++        if len({x.page_id for x in self.occurrences}) != len(self.occurrences):
++            raise ValueError("duplicate page identity")
++
++    @property
++    def batch_id(self) -> str:
++        return batch_identity(run_id=self.run_id, generation_digest=self.generation_digest,
++                              config_digest=self.config_digest, inventory_digest=self.inventory_digest,
++                              ordinal=self.ordinal, occurrences=self.occurrences)
++
++
++@dataclass(frozen=True)
++class BatchLease:
++    batch_id: str
++    token: str
++    expires_at: float
++    attempt: int
++    request_batch_id: str | None = None
++
++    def __post_init__(self) -> None:
++        _text(self.batch_id, "batch_id"); _text(self.token, "token")
++        if self.request_batch_id is not None and self.request_batch_id != self.batch_id: raise ValueError("lease/request identity mismatch")
++        if type(self.expires_at) not in (int, float) or isinstance(self.expires_at, bool) or not math.isfinite(self.expires_at) or self.expires_at < 0 or type(self.attempt) is not int or self.attempt <= 0:
++            raise ValueError("lease is invalid")
++
++
++@dataclass(frozen=True)
++class BatchMetrics:
++    page_count: int
++    byte_count: int
++    request_count: int
++    retry_count: int
++    elapsed_seconds: float
++    queue_high_watermark: int = 0
++    peak_rss_bytes: int | None = None
++
++    def __post_init__(self) -> None:
++        for value in (self.page_count, self.byte_count, self.request_count, self.retry_count, self.queue_high_watermark):
++            if type(value) is not int or isinstance(value, bool) or value < 0:
++                raise ValueError("metrics counter is invalid")
++        if type(self.elapsed_seconds) not in (int, float) or isinstance(self.elapsed_seconds, bool) or not math.isfinite(self.elapsed_seconds) or self.elapsed_seconds < 0:
++            raise ValueError("elapsed_seconds is invalid")
++        if self.peak_rss_bytes is not None and (type(self.peak_rss_bytes) is not int or isinstance(self.peak_rss_bytes, bool) or self.peak_rss_bytes < 0):
++            raise ValueError("peak_rss_bytes is invalid")
++        if self.request_count < self.page_count: raise ValueError("request/page count is incoherent")
++
++
++@dataclass(frozen=True)
++class BatchCheckpoint:
++    request: BatchRequest
++    state: BatchState = BatchState.PENDING
++    lease: BatchLease | None = None
++    attempt: int = 0
++    failure_category: BatchFailureCategory | None = None
++    batch_digest: str | None = None
++    metrics: BatchMetrics | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.request) is not BatchRequest or not isinstance(self.state, BatchState):
++            raise TypeError("checkpoint is invalid")
++        if type(self.attempt) is not int or isinstance(self.attempt, bool) or self.attempt < 0:
++            raise ValueError("attempt is invalid")
++        if self.state is BatchState.LEASED and type(self.lease) is not BatchLease:
++            raise ValueError("leased checkpoint requires lease")
++        if self.state is BatchState.LEASED and (self.lease.batch_id != self.request.batch_id or self.lease.request_batch_id != self.request.batch_id):
++            raise ValueError("leased checkpoint identity mismatch")
++        if self.state is BatchState.LEASED and self.attempt != self.lease.attempt:
++            raise ValueError("leased checkpoint attempt mismatch")
++        if self.state is not BatchState.LEASED and self.lease is not None:
++            raise ValueError("non-leased checkpoint cannot carry lease")
++        if self.failure_category is not None and not isinstance(self.failure_category, BatchFailureCategory):
++            raise TypeError("failure category is invalid")
++        if self.state is BatchState.COMMITTED and (not self.batch_digest or self.metrics is None):
++            raise ValueError("committed checkpoint is incomplete")
++        if self.state is BatchState.COMMITTED and (type(self.batch_digest) is not str or len(self.batch_digest) != 64 or any(c not in "0123456789abcdef" for c in self.batch_digest)):
++            raise ValueError("committed digest is invalid")
++        if self.state is BatchState.COMMITTED and (self.metrics.page_count != len(self.request.occurrences) or self.metrics.request_count != self.metrics.page_count or self.metrics.queue_high_watermark > 1 or self.metrics.retry_count > self.attempt - 1):
++            raise ValueError("committed metrics are incoherent")
++        if self.state is BatchState.LEASED and (self.batch_digest is not None or self.metrics is not None or self.failure_category is not None):
++            raise ValueError("leased checkpoint contains commit data")
++        if self.state is BatchState.COMMITTED and self.attempt < 1:
++            raise ValueError("committed checkpoint attempt is invalid")
++        if self.state is BatchState.COMMITTED and self.failure_category is not None:
++            raise ValueError("committed checkpoint cannot fail")
++        if self.state is BatchState.FAILED and self.failure_category is None:
++            raise ValueError("failed checkpoint requires failure category")
++        if self.state is BatchState.FAILED and (self.batch_digest is not None or self.metrics is not None):
++            raise ValueError("failed checkpoint cannot carry commit data")
++        if self.state is BatchState.PENDING and (self.failure_category is not None or self.batch_digest is not None or self.metrics is not None):
++            raise ValueError("pending checkpoint contains progress")
+diff --git a/src/knowledgenexus/foundation/domain/rules/confluence_batch_retry_policy.py b/src/knowledgenexus/foundation/domain/rules/confluence_batch_retry_policy.py
+new file mode 100644
+index 0000000..d8b85ea
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/rules/confluence_batch_retry_policy.py
+@@ -0,0 +1,13 @@
++from __future__ import annotations
++from knowledgenexus.foundation.domain.models.confluence_crawl_batch import BatchFailureCategory
++
++RETRYABLE = frozenset({BatchFailureCategory.RATE_LIMIT, BatchFailureCategory.TRANSPORT, BatchFailureCategory.TIMEOUT, BatchFailureCategory.LOCAL_TRANSIENT})
++
++def is_retryable(category: BatchFailureCategory) -> bool:
++    if not isinstance(category, BatchFailureCategory): raise TypeError("category is invalid")
++    return category in RETRYABLE
++
++def backoff_seconds(*, attempt: int, base_seconds: float = 1.0, max_seconds: float = 60.0) -> float:
++    if type(attempt) is not int or attempt < 1 or type(base_seconds) not in (int,float) or base_seconds < 0 or type(max_seconds) not in (int,float) or max_seconds < 0:
++        raise ValueError("backoff input is invalid")
++    return min(float(max_seconds), float(base_seconds) * (2 ** (attempt - 1)))
+diff --git a/src/knowledgenexus/foundation/infrastructure/checkpoint/in_memory_confluence_crawl_batch_store.py b/src/knowledgenexus/foundation/infrastructure/checkpoint/in_memory_confluence_crawl_batch_store.py
+new file mode 100644
+index 0000000..2643d63
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/checkpoint/in_memory_confluence_crawl_batch_store.py
+@@ -0,0 +1,69 @@
++from __future__ import annotations
++from dataclasses import replace
++import math
++from threading import Lock
++from knowledgenexus.foundation.domain.models.confluence_crawl_batch import *
++from knowledgenexus.foundation.ports.confluence_crawl_batch_port import BatchLeaseConflict
++
++class InMemoryConfluenceCrawlBatchStore:
++    """Deterministic reference store used by bounded/synthetic orchestration tests."""
++    def __init__(self) -> None:
++        self._lock = Lock(); self._items: dict[str, BatchCheckpoint] = {}
++    def create(self, checkpoint: BatchCheckpoint) -> BatchCheckpoint:
++        if type(checkpoint) is not BatchCheckpoint: raise TypeError("checkpoint is invalid")
++        with self._lock:
++            old = self._items.get(checkpoint.request.batch_id)
++            if old is not None and old != checkpoint: raise BatchLeaseConflict("identity_conflict")
++            self._items[checkpoint.request.batch_id] = checkpoint
++            return checkpoint
++    def get(self, batch_id: str) -> BatchCheckpoint:
++        if type(batch_id) is not str or not batch_id: raise ValueError("batch_id is invalid")
++        with self._lock: return self._items[batch_id]
++    def claim(self, batch_id: str, *, token: str, now: float, lease_seconds: float) -> BatchLease:
++        if type(batch_id) is not str or not batch_id: raise ValueError("batch_id is invalid")
++        if type(token) is not str or not token or type(now) not in (int,float) or isinstance(now, bool) or type(lease_seconds) not in (int,float) or isinstance(lease_seconds, bool) or lease_seconds <= 0: raise ValueError("lease request is invalid")
++        with self._lock:
++            current = self._items[batch_id]
++            if current.state in (BatchState.COMMITTED, BatchState.FAILED) or (current.state is BatchState.LEASED and current.lease and current.lease.expires_at > now): raise BatchLeaseConflict("already_leased")
++            if current.state is BatchState.LEASED and current.lease is not None and token == current.lease.token: raise BatchLeaseConflict("reclaim_token_reuse")
++            lease = BatchLease(batch_id, token, now + lease_seconds, current.attempt + 1, batch_id)
++            self._items[batch_id] = replace(current, state=BatchState.LEASED, lease=lease, attempt=lease.attempt, failure_category=None)
++            return lease
++    def renew(self, lease: BatchLease, *, now: float, lease_seconds: float) -> BatchLease:
++        if type(lease) is not BatchLease: raise TypeError("lease is invalid")
++        with self._lock:
++            current = self._items[lease.batch_id]
++            if type(now) not in (int,float) or isinstance(now, bool) or type(lease_seconds) not in (int,float) or isinstance(lease_seconds, bool) or lease_seconds <= 0: raise ValueError("renew input is invalid")
++            if current.state is not BatchState.LEASED or current.lease != lease or lease.expires_at <= now: raise BatchLeaseConflict("stale_lease")
++            renewed = replace(lease, expires_at=now + lease_seconds)
++            self._items[lease.batch_id] = replace(current, lease=renewed)
++            return renewed
++    def commit(self, lease: BatchLease, *, batch_digest: str, metrics: BatchMetrics, now: float) -> BatchCheckpoint:
++        if type(lease) is not BatchLease or type(metrics) is not BatchMetrics: raise TypeError("commit input is invalid")
++        if type(batch_digest) is not str or len(batch_digest) != 64 or any(c not in "0123456789abcdef" for c in batch_digest): raise ValueError("digest is invalid")
++        with self._lock:
++            current = self._items[lease.batch_id]
++            if current.state is BatchState.COMMITTED:
++                if current.batch_digest != batch_digest or current.metrics != metrics: raise BatchLeaseConflict("digest_conflict")
++                return current
++            if type(now) not in (int,float) or isinstance(now, bool) or lease.expires_at <= now: raise BatchLeaseConflict("stale_lease")
++            if current.state is not BatchState.LEASED or current.lease != lease or metrics.page_count != len(current.request.occurrences): raise BatchLeaseConflict("stale_lease")
++            committed = replace(current, state=BatchState.COMMITTED, lease=None, batch_digest=batch_digest, metrics=metrics)
++            self._items[lease.batch_id] = committed; return committed
++    def fail(self, lease: BatchLease, *, category: BatchFailureCategory, now: float) -> BatchCheckpoint:
++        if type(lease) is not BatchLease: raise TypeError("lease is invalid")
++        if not isinstance(category, BatchFailureCategory): raise TypeError("category is invalid")
++        if type(now) not in (int, float) or isinstance(now, bool) or not math.isfinite(now): raise ValueError("now is invalid")
++        with self._lock:
++            current = self._items[lease.batch_id]
++            if current.state is not BatchState.LEASED or current.lease != lease or lease.expires_at <= now: raise BatchLeaseConflict("stale_lease")
++            failed = replace(current, state=BatchState.FAILED, lease=None, failure_category=category)
++            self._items[lease.batch_id] = failed; return failed
++    def requeue(self, lease: BatchLease, *, category: BatchFailureCategory, now: float) -> BatchCheckpoint:
++        if type(lease) is not BatchLease or not isinstance(category, BatchFailureCategory): raise TypeError("requeue input is invalid")
++        if type(now) not in (int, float) or isinstance(now, bool) or not math.isfinite(now): raise ValueError("now is invalid")
++        with self._lock:
++            current = self._items[lease.batch_id]
++            if current.state is not BatchState.LEASED or current.lease != lease or lease.expires_at <= now: raise BatchLeaseConflict("stale_lease")
++            pending = replace(current, state=BatchState.PENDING, lease=None, failure_category=None)
++            self._items[lease.batch_id] = pending; return pending
+diff --git a/src/knowledgenexus/foundation/ports/confluence_crawl_batch_port.py b/src/knowledgenexus/foundation/ports/confluence_crawl_batch_port.py
+new file mode 100644
+index 0000000..6247b6e
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/confluence_crawl_batch_port.py
+@@ -0,0 +1,15 @@
++from __future__ import annotations
++from typing import Protocol
++from knowledgenexus.foundation.domain.models.confluence_crawl_batch import BatchCheckpoint, BatchFailureCategory, BatchLease, BatchMetrics
++
++class BatchLeaseConflict(Exception):
++    pass
++
++class ConfluenceCrawlBatchPort(Protocol):
++    def create(self, checkpoint: BatchCheckpoint) -> BatchCheckpoint: ...
++    def claim(self, batch_id: str, *, token: str, now: float, lease_seconds: float) -> BatchLease: ...
++    def renew(self, lease: BatchLease, *, now: float, lease_seconds: float) -> BatchLease: ...
++    def commit(self, lease: BatchLease, *, batch_digest: str, metrics: BatchMetrics, now: float) -> BatchCheckpoint: ...
++    def fail(self, lease: BatchLease, *, category: BatchFailureCategory, now: float) -> BatchCheckpoint: ...
++    def requeue(self, lease: BatchLease, *, category: BatchFailureCategory, now: float) -> BatchCheckpoint: ...
++    def get(self, batch_id: str) -> BatchCheckpoint: ...
+diff --git a/tests/foundation/application/use_cases/test_process_confluence_page_batches.py b/tests/foundation/application/use_cases/test_process_confluence_page_batches.py
+new file mode 100644
+index 0000000..1eca552
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_process_confluence_page_batches.py
+@@ -0,0 +1,155 @@
++import pytest
++from knowledgenexus.foundation.domain.models import CrawlRunId, CanonicalIncludeRoots, ConfluencePageMetadata, InventoryOccurrence
++from knowledgenexus.foundation.domain.models.confluence_crawl_batch import BatchCheckpoint
++from knowledgenexus.foundation.application.use_cases.process_confluence_page_batches import ProcessConfluencePageBatches, BatchRunConfig
++from knowledgenexus.foundation.infrastructure.checkpoint.in_memory_confluence_crawl_batch_store import InMemoryConfluenceCrawlBatchStore
++
++RUN = CrawlRunId("123e4567-e89b-42d3-a456-426614174000"); ROOTS = CanonicalIncludeRoots(("root",))
++def occurrences(count=2):
++    return tuple(InventoryOccurrence(RUN, 0, "root", 0, n, f"page-{n}", ConfluencePageMetadata(f"page-{n}", "Page", "S", parent_page_id="root", ancestor_page_ids=("root",), ancestor_titles=("Root",)), ROOTS) for n in range(count))
++class Fetch:
++    def __init__(self, fail=0): self.calls = 0; self.fail = fail
++    def fetch_page_raw(self, *, page_id):
++        self.calls += 1
++        if self.calls <= self.fail: raise RuntimeError("transport")
++        return page_id.encode()
++
++class EstimatingFetch(Fetch):
++    def estimate_page_bytes(self, *, page_id): return len(page_id)
++
++def test_partition_is_deterministic_and_default_is_100():
++    reqs = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(201))
++    assert [len(x.occurrences) for x in reqs] == [100, 100, 1]
++    assert [x.batch_id for x in reqs] == [x.batch_id for x in ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(201))]
++
++def test_retry_then_commit_and_resume_does_not_refetch():
++    fetch = Fetch(fail=1); store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(2))[0]
++    result = driver.run((req,), config=BatchRunConfig(max_attempts=2))
++    assert result.committed == 1 and result.retries == 1 and fetch.calls == 3
++    again = driver.run((req,), config=BatchRunConfig(max_attempts=2))
++    assert again.committed == 1 and fetch.calls == 3
++
++def test_malformed_processor_is_terminal_and_result_is_sanitized():
++    fetch = Fetch(); store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, process_page_set=lambda _: (_ for _ in ()).throw(ValueError("secret")), clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(1))[0]
++    result = driver.run((req,), config=BatchRunConfig(max_attempts=1))
++    assert result.failed == 1 and result.committed == 0 and "secret" not in result.digest
++    assert store.get(req.batch_id).failure_category.value == "malformed"
++
++def test_failed_checkpoint_reentry_is_terminal_and_does_not_refetch_or_process():
++    fetch = Fetch(); processed = []
++    store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(
++        store=store,
++        fetcher=fetch,
++        process_page_set=lambda pages: processed.append(pages),
++        clock=lambda: 0,
++        token_factory=lambda _: "token",
++    )
++    req = ProcessConfluencePageBatches.partition(
++        run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i",
++        occurrences=occurrences(1),
++    )[0]
++    # Seed a terminal failure, then verify both re-entry and repeated re-entry
++    # are deterministic and have no side effects.
++    failing = ProcessConfluencePageBatches(
++        store=store,
++        fetcher=fetch,
++        process_page_set=lambda _: (_ for _ in ()).throw(ValueError("bad")),
++        clock=lambda: 0,
++        token_factory=lambda _: "token",
++    )
++    first = failing.run((req,), config=BatchRunConfig(max_attempts=1))
++    assert first.failed == 1 and first.committed == 0
++    calls_after_failure = fetch.calls
++    second = driver.run((req,), config=BatchRunConfig(max_attempts=1))
++    third = driver.run((req,), config=BatchRunConfig(max_attempts=1))
++    assert second == third == first
++    assert fetch.calls == calls_after_failure
++    assert processed == []
++
++def test_mixed_committed_and_failed_resume_has_canonical_totals():
++    fetch = Fetch(); store = InMemoryConfluenceCrawlBatchStore()
++    reqs = ProcessConfluencePageBatches.partition(
++        run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i",
++        occurrences=occurrences(2), batch_size=1,
++    )
++    failing = ProcessConfluencePageBatches(
++        store=store,
++        fetcher=fetch,
++        process_page_set=lambda _: (_ for _ in ()).throw(ValueError("bad")),
++        clock=lambda: 0,
++        token_factory=lambda _: "token",
++    )
++    failing.run((reqs[0],), config=BatchRunConfig(max_attempts=1))
++    succeeding = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
++    first = succeeding.run((reqs[0], reqs[1]), config=BatchRunConfig(max_attempts=1))
++    second = succeeding.run((reqs[0], reqs[1]), config=BatchRunConfig(max_attempts=1))
++    assert first == second
++    assert (first.committed, first.failed, first.total_batches) == (1, 1, 2)
++    assert first.page_count == 1 and first.byte_count == len("page-1") and first.total_requests == 1
++
++def test_request_budget_is_terminal_before_extra_fetch():
++    fetch = Fetch(); store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(2))[0]
++    result = driver.run((req,), config=BatchRunConfig(max_attempts=1, max_requests=1))
++    assert result.failed == 1 and fetch.calls == 1
++
++def test_global_byte_budget_stops_before_next_page_with_estimator():
++    fetch = EstimatingFetch(); store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(2))[0]
++    result = driver.run((req,), config=BatchRunConfig(max_attempts=1, max_bytes=6))
++    assert result.failed == 1 and fetch.calls == 1
++
++def test_estimator_enforces_page_and_global_budgets_conjunctively_before_fetch():
++    fetch = EstimatingFetch(); store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(1))[0]
++    # The page fits the per-page limit but not the run-wide limit; transport
++    # must not be called when both known estimates are evaluated.
++    result = driver.run((req,), config=BatchRunConfig(max_attempts=1, max_page_bytes=100, max_bytes=5))
++    assert result.failed == 1 and fetch.calls == 0
++
++def test_expired_retry_requeue_cannot_reset_attempt_or_reclaim_same_token():
++    fetch = Fetch(fail=1); store = InMemoryConfluenceCrawlBatchStore()
++    times = iter((0, 2, 3))
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: next(times), token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(1))[0]
++    with pytest.raises(Exception):
++        driver.run((req,), config=BatchRunConfig(max_attempts=2, lease_seconds=1))
++    checkpoint = store.get(req.batch_id)
++    assert checkpoint.state.value == "leased" and checkpoint.attempt == 1
++
++def test_result_rejects_forged_digest_and_resume_restores_metrics():
++    fetch = Fetch(); store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(1))[0]
++    first = driver.run((req,)); second = driver.run((req,))
++    assert first.page_count == second.page_count and first.byte_count == second.byte_count and fetch.calls == 1
++    with pytest.raises(ValueError):
++        from knowledgenexus.foundation.application.use_cases.process_confluence_page_batches import BatchRunResult
++        BatchRunResult(1, 0, 0, 1, 1, 1, "x", 1, 1, 1, 1, 0)
++
++def test_retry_budget_exhaustion_does_not_fetch_again():
++    fetch = Fetch(fail=9); store = InMemoryConfluenceCrawlBatchStore()
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(1))[0]
++    result = driver.run((req,), config=BatchRunConfig(max_attempts=3, max_requests=1))
++    assert result.failed == 1 and fetch.calls == 1
++
++def test_failed_attempt_bytes_count_toward_retry_budget():
++    fetch = EstimatingFetch(); store = InMemoryConfluenceCrawlBatchStore(); calls = 0
++    def process(_pages):
++        nonlocal calls
++        calls += 1
++        if calls == 1:
++            raise RuntimeError("transient processor failure")
++    driver = ProcessConfluencePageBatches(store=store, fetcher=fetch, process_page_set=process, clock=lambda: 0, token_factory=lambda _: "token")
++    req = ProcessConfluencePageBatches.partition(run_id=str(RUN), generation_digest="g", config_digest="c", inventory_digest="i", occurrences=occurrences(1))[0]
++    result = driver.run((req,), config=BatchRunConfig(max_attempts=2, max_bytes=len("page-0")))
++    assert result.failed == 1 and fetch.calls == 1 and calls == 1
+diff --git a/tests/foundation/domain/models/test_confluence_crawl_batch.py b/tests/foundation/domain/models/test_confluence_crawl_batch.py
+new file mode 100644
+index 0000000..df7b85d
+--- /dev/null
++++ b/tests/foundation/domain/models/test_confluence_crawl_batch.py
+@@ -0,0 +1,33 @@
++import pytest
++from knowledgenexus.foundation.domain.models import CrawlRunId, CanonicalIncludeRoots, ConfluencePageMetadata, InventoryOccurrence
++from knowledgenexus.foundation.domain.models.confluence_crawl_batch import BatchCheckpoint, BatchRequest, BatchState, BatchMetrics, BatchLease
++
++RUN = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
++ROOTS = CanonicalIncludeRoots(("root",))
++def occ(page="page"):
++    meta = ConfluencePageMetadata(page, "Page", "S", parent_page_id="root", ancestor_page_ids=("root",), ancestor_titles=("Root",))
++    return InventoryOccurrence(RUN, 0, "root", 0, 0, page, meta, ROOTS)
++def request(): return BatchRequest(str(RUN), "g", "c", "i", 0, (occ(),))
++
++def test_identity_is_stable_and_checkpoint_is_runtime_validated():
++    one = request(); assert one.batch_id == request().batch_id
++    assert BatchCheckpoint(one).state is BatchState.PENDING
++    with pytest.raises((TypeError, ValueError)): BatchRequest(str(RUN), "g", "c", "i", 0, (object(),))
++    with pytest.raises(ValueError): BatchMetrics(-1, 0, 1, 0, 0)
++
++def test_committed_checkpoint_requires_digest_and_metrics():
++    with pytest.raises(ValueError): BatchCheckpoint(request(), state=BatchState.COMMITTED)
++
++def test_leased_checkpoint_requires_exact_lease_attempt():
++    req = request()
++    lease = BatchLease(req.batch_id, "token", 100.0, 1, req.batch_id)
++    for forged_attempt in (0, 2, True):
++        with pytest.raises((TypeError, ValueError)):
++            BatchCheckpoint(req, state=BatchState.LEASED, lease=lease, attempt=forged_attempt)
++    for forged_lease_attempt in (2,):
++        forged_lease = BatchLease(req.batch_id, "token", 100.0, forged_lease_attempt, req.batch_id)
++        with pytest.raises(ValueError):
++            BatchCheckpoint(req, state=BatchState.LEASED, lease=forged_lease, attempt=1)
++    for invalid_lease_attempt in (0, True):
++        with pytest.raises(ValueError):
++            BatchLease(req.batch_id, "token", 100.0, invalid_lease_attempt, req.batch_id)
+diff --git a/tests/foundation/infrastructure/checkpoint/test_in_memory_confluence_crawl_batch_store.py b/tests/foundation/infrastructure/checkpoint/test_in_memory_confluence_crawl_batch_store.py
+new file mode 100644
+index 0000000..aee2670
+--- /dev/null
++++ b/tests/foundation/infrastructure/checkpoint/test_in_memory_confluence_crawl_batch_store.py
+@@ -0,0 +1,65 @@
++import pytest
++from knowledgenexus.foundation.domain.models.confluence_crawl_batch import BatchCheckpoint, BatchFailureCategory, BatchMetrics, BatchState
++from knowledgenexus.foundation.infrastructure.checkpoint.in_memory_confluence_crawl_batch_store import InMemoryConfluenceCrawlBatchStore
++from tests.foundation.domain.models.test_confluence_crawl_batch import request
++
++def test_lease_cas_commit_and_stale_rejection():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="t", now=0, lease_seconds=10)
++    committed = store.commit(lease, batch_digest="d" * 64, metrics=BatchMetrics(1, 1, 1, 0, 0), now=0)
++    assert committed.state is BatchState.COMMITTED
++    assert store.commit(lease, batch_digest="d" * 64, metrics=BatchMetrics(1, 1, 1, 0, 0), now=0) == committed
++
++def test_expired_lease_can_be_reclaimed_and_wrong_token_fails_closed():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="t", now=0, lease_seconds=1)
++    with pytest.raises(Exception): store.claim(req.batch_id, token="x", now=0, lease_seconds=1)
++    lease2 = store.claim(req.batch_id, token="x", now=2, lease_seconds=1)
++    with pytest.raises(Exception): store.commit(lease, batch_digest="d", metrics=BatchMetrics(1, 1, 1, 0, 0))
++    assert lease2.attempt == 2
++
++def test_commit_at_expiry_is_rejected():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="t", now=0, lease_seconds=1)
++    with pytest.raises(Exception): store.commit(lease, batch_digest="d" * 64, metrics=BatchMetrics(1, 1, 1, 0, 0), now=1)
++
++def test_reclaim_requires_new_token():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="t", now=0, lease_seconds=1)
++    with pytest.raises(Exception): store.claim(req.batch_id, token="t", now=1, lease_seconds=1)
++    assert store.claim(req.batch_id, token="new", now=1, lease_seconds=1).attempt == 2
++
++def test_fail_requires_live_matching_lease_and_now():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="t", now=0, lease_seconds=1)
++    failed = store.fail(lease, category=BatchFailureCategory.TRANSPORT, now=0.5)
++    assert failed.state is BatchState.FAILED
++
++def test_fail_rejects_expired_and_reclaimed_leases():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="t", now=0, lease_seconds=1)
++    with pytest.raises(Exception):
++        store.fail(lease, category=BatchFailureCategory.TRANSPORT, now=1)
++    lease2 = store.claim(req.batch_id, token="new", now=2, lease_seconds=1)
++    with pytest.raises(Exception):
++        store.fail(lease, category=BatchFailureCategory.TRANSPORT, now=2)
++    assert lease2.attempt == 2
++
++def test_requeue_requires_finite_now_and_live_exact_lease():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="t", now=0, lease_seconds=1)
++    for malformed in (object(), None, True, float("nan"), float("inf")):
++        with pytest.raises((TypeError, ValueError)):
++            store.requeue(lease, category=BatchFailureCategory.TRANSPORT, now=malformed)
++    pending = store.requeue(lease, category=BatchFailureCategory.TRANSPORT, now=0.5)
++    assert pending.state is BatchState.PENDING and pending.attempt == 1
++
++def test_requeue_rejects_expired_and_reclaimed_stale_workers():
++    store = InMemoryConfluenceCrawlBatchStore(); req = request(); store.create(BatchCheckpoint(req))
++    lease = store.claim(req.batch_id, token="old", now=0, lease_seconds=1)
++    with pytest.raises(Exception):
++        store.requeue(lease, category=BatchFailureCategory.TRANSPORT, now=1)
++    lease2 = store.claim(req.batch_id, token="new", now=2, lease_seconds=1)
++    with pytest.raises(Exception):
++        store.requeue(lease, category=BatchFailureCategory.TRANSPORT, now=2)
++    assert store.get(req.batch_id).lease == lease2 and store.get(req.batch_id).attempt == 2
+-- 
+2.45.1.windows.1
+

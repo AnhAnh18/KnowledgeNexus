@@ -1,0 +1,1145 @@
+From 939dcde93656156d74a5f452ee968642e0e5cf92 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 5 Aug 2026 16:07:36 +0700
+Subject: [PATCH] Complete M10-C generic snapshot completion
+
+---
+ .../20260805-m10/38-m10c-plan.input.md        |  42 ++++
+ .../20260805-m10/39-m10c-plan-review.md       |  55 +++++
+ .../20260805-m10/40-m10c-plan-final.md        |  74 +++++++
+ .../20260805-m10/41-m10c-plan-approval.md     |  35 ++++
+ .../42-m10c-plan-final-approved.md            |  74 +++++++
+ .../20260805-m10/43-m10c-plan-approval.md     |  26 +++
+ .../20260805-m10/44-m10c-implementation.md    |  49 +++++
+ .../45-m10c-independent-review.md             |  22 ++
+ .../20260805-m10/46-m10c-fix-plan.input.md    |  22 ++
+ .../20260805-m10/47-m10c-fix-plan-review.md   |  25 +++
+ .../20260805-m10/48-m10c-fix-plan-final.md    |  42 ++++
+ .../20260805-m10/49-m10c-fix-plan-approval.md |  11 +
+ .../50-m10c-fix-implementation.md             |  32 +++
+ .../51-m10c-fix-independent-review-final.md   |  31 +++
+ .local_ai/IMPLEMENTATION_STATE.md             |  32 ++-
+ .local_ai/ROADMAP.md                          |   8 +-
+ .../full_snapshot_staging_completer.py        | 197 +++++++++++++++++-
+ ...est_full_snapshot_staging_completer_m10.py | 147 +++++++++++++
+ 18 files changed, 915 insertions(+), 9 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m10/38-m10c-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/39-m10c-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/40-m10c-plan-final.md
+ create mode 100644 .codex-workflow/20260805-m10/41-m10c-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/42-m10c-plan-final-approved.md
+ create mode 100644 .codex-workflow/20260805-m10/43-m10c-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/44-m10c-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/45-m10c-independent-review.md
+ create mode 100644 .codex-workflow/20260805-m10/46-m10c-fix-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/47-m10c-fix-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/48-m10c-fix-plan-final.md
+ create mode 100644 .codex-workflow/20260805-m10/49-m10c-fix-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/50-m10c-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md
+ create mode 100644 tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py
+
+diff --git a/.codex-workflow/20260805-m10/38-m10c-plan.input.md b/.codex-workflow/20260805-m10/38-m10c-plan.input.md
+new file mode 100644
+index 0000000..02121bd
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/38-m10c-plan.input.md
+@@ -0,0 +1,42 @@
++# M10-C Cross-Stream Projection and Generic Completion
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++M10-B is complete and independently reviewed `PASS`; M8-AC remains
++`pending_external_input` and is not required for this synthetic completion
++stage. Implement only the approved M10-C boundary:
++
++1. Extend `FullSnapshotStagingCompleter.complete` additively with a generic
++   `m10_quality` keyword accepting `M10QualityReportInput`. Preserve the exact
++   old `one_page_quality=None|OnePageExportQualityReportInput` behavior,
++   report bytes, file-set checks, no-clobber semantics, cleanup, and golden
++   output. Reject passing both quality modes or wrong runtime objects before
++   filesystem mutation.
++
++2. In generic M10 mode, validate the manifest and every JSONL record against
++   the shared Foundation schemas on strict duplicate-key/non-finite-safe
++   readback. Require exact eight count keys, counts equal on-disk records and
++   `m10_quality.expected_counts`, deterministic source scopes, and the initial
++   `tombstones.jsonl` file to be empty. Unlike M6G deferred mode, permit the
++   M10 media, symbols, and sync streams to be non-empty. Detect validator
++   mutation/exception and quality-input mutation; fail atomically without
++   leaving `quality_report.md`.
++
++3. Render a deterministic generic M10 quality report from only typed profile,
++   count, source-scope, relation/ACL/media/symbol/sync/tombstone metrics, and
++   completion-check fields. Use stable section/key order, canonical scalar
++   formatting, no record text, secrets, exception strings, or raw content,
++   and include `PENDING_AT_REPORT_COMPLETION` publication markers. Report
++   counts and manifest metadata exactly; do not derive a dataset version or
++   write `LATEST.txt` in M10-C.
++
++4. Add adversarial tests for `None`, `object()`, wrong quality mode/type,
++   both modes, malformed/extra manifest counts, duplicate JSON keys, NaN,
++   schema-invalid records, count drift, non-empty initial tombstones,
++   non-empty media/symbol/sync acceptance, unsafe report paths, validator or
++   quality mutation/exception, report no-clobber and cleanup, deterministic
++   repeated bytes, and M6G one-page golden compatibility.
++
++No M10 CLI, publisher, connector, network, raw/checkpoint store, delta
++export, or real external run is included. Use the existing staging writer and
++validator; do not add a parallel writer or alter M6G models/CLI.
+diff --git a/.codex-workflow/20260805-m10/39-m10c-plan-review.md b/.codex-workflow/20260805-m10/39-m10c-plan-review.md
+new file mode 100644
+index 0000000..b2eb18c
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/39-m10c-plan-review.md
+@@ -0,0 +1,55 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-C Plan Review
++
++The plan is correctly scoped to an additive completer API and explicitly
++protects the existing M6G one-page behavior, but several contracts need to be
++made precise before implementation.
++
++## Required Clarifications
++
++- Define the exact `complete` signature and mode precedence. Validate
++  `m10_quality` and `one_page_quality` runtime types, mutual exclusion, and
++  validator type before any `exists`, directory, report, or staging mutation;
++  preserve old `one_page_quality=None|OnePageExportQualityReportInput` bytes and
++  exception/no-clobber behavior byte-for-byte.
++- Make schema validation authoritative and ordering explicit: strict JSONL and
++  manifest readback (duplicate-key/non-finite rejection) first, then validate
++  untouched deep copies with the shared validator before count or field access.
++  Detect validator mutation/exception and ensure report rendering uses a
++  separate defensive copy; no malformed record may reach report generation.
++- Specify all generic invariants: exact eight manifest count keys and integer
++  values, exact on-disk counts, exact `M10QualityReportInput.expected_counts`,
++  `tombstones.jsonl` empty, and media/symbol/sync streams allowed non-empty.
++  Require manifest `source_scopes` to be schema-valid, deterministically keyed,
++  and equal to the typed quality input source scopes (with a defined canonical
++  representation), not merely present.
++- Define the deterministic report schema in the plan: exact section order from
++  the approved M10 quality contract (`Snapshot`, `Active Profiles`, `Record
++  Counts`, `Jira Relation Quality`, `ACL Quality`, `Media Quality`, `Symbol
++  Quality`, `Sync State`, `Tombstones`, `Completion Checks`, `Publication
++  State`, `Scope`), exact key order, scalar types/formatting, and required
++  `PENDING_AT_REPORT_COMPLETION` markers. Reject or sanitize arbitrary metric
++  dict values so paths, IDs, URLs, principals, hashes, exception text, secrets,
++  record text, and raw content can never enter the report.
++- Define quality-input mutation detection and exact-field/forged-instance
++  handling at the boundary, including nested dict/list values and wrong runtime
++  containers. Report rendering must be pure and deterministic across repeated
++  runs.
++- Preserve existing completer cleanup/no-clobber/race behavior: all generic
++  validation must finish before creating `quality_report.md`; any write or
++  final file-set failure removes only the owned report and leaves staging
++  streams unchanged. Do not derive versions or touch `LATEST.txt`.
++
++## Acceptance and Scope
++
++Add tests for both quality modes, wrong types, mutual exclusion, strict parser
++duplicates/NaN, schema-invalid and validator mutation/exception cases, count
++drift, source-scope drift, non-empty media/symbol/sync acceptance, non-empty
++tombstones rejection, unsafe/pre-existing report paths, cleanup, deterministic
++report bytes, and all existing M6G golden/one-page tests. Keep changes limited
++to the completer, generic report helpers/models/tests, and additive exports;
++do not alter M6G models/CLI, writers, publishers, connectors, network, raw or
++checkpoint stores, or dataset-version/LATEST behavior.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/40-m10c-plan-final.md b/.codex-workflow/20260805-m10/40-m10c-plan-final.md
+new file mode 100644
+index 0000000..d03618d
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/40-m10c-plan-final.md
+@@ -0,0 +1,74 @@
++# M10-C Cross-Stream Projection and Generic Completion - Final
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Scope and compatibility
++
++M10-B is complete and independently reviewed `PASS`; M8-AC remains
++`pending_external_input`. Add only generic M10 completion behavior; do not
++alter M6G models, CLI, legacy report bytes, writer/publisher behavior,
++dataset-version generation, `LATEST.txt`, or external/run boundaries.
++
++The additive signature is:
++
++```text
++FullSnapshotStagingCompleter.complete(
++    *, staging_path, validator,
++    one_page_quality=None,
++    m10_quality=None,
++)
++```
++
++When `m10_quality is None`, execute the existing legacy path unchanged. When
++`m10_quality` is supplied, require exact `M10QualityReportInput`, require
++`one_page_quality is None`, require a callable shared validator, and reject
++all mode/type/forged/mutual-exclusion errors before filesystem inspection or
++mutation.
++
++## Generic M10 completion contract
++
++1. Strictly read `manifest.json` and all eight JSONL streams with duplicate-key
++   and non-finite-constant rejection. Validate untouched deep copies using the
++   shared Foundation validator before any count/field access; detect validator
++   mutation or exception and fail without creating `quality_report.md`.
++   Require manifest schema validity, exact count keys and non-negative integer
++   values, on-disk counts equal manifest counts, and
++   `m10_quality.expected_counts` equal manifest counts. Require canonical
++   source scopes with only sorted `confluence`/optional `git` keys and exact
++   canonical equality with `m10_quality.source_scopes`. Permit non-empty
++   `media_assets`, `symbols`, and `sync_state`; require initial
++   `tombstones.jsonl` to be empty.
++
++2. Validate the quality input before rendering: exact concrete fields,
++   defensive nested copies, expected-count invariants, scalar metric values
++   restricted to deterministic `bool|int|str` (no newlines, paths, URLs,
++   exception text, raw content, principals, or secrets), fixed metric-section
++   key sets, and boolean/string completion checks. Any mutation during
++   validation/rendering fails closed. Rendering is pure and repeated runs
++   produce identical UTF-8 bytes.
++
++3. Render exactly these sections in this order, with fixed labels and sorted
++   keys within each approved mapping: `Snapshot`, `Active Profiles`, `Record
++   Counts`, `Jira Relation Quality`, `ACL Quality`, `Media Quality`, `Symbol
++   Quality`, `Sync State`, `Tombstones`, `Completion Checks`, `Publication
++   State`, and `Scope`. Include only typed profile/count/source-scope/metric/
++   completion data and the required
++   `PENDING_AT_REPORT_COMPLETION` markers; never include record text, raw
++   content, secrets, exception text, or uncontrolled values.
++
++4. Reuse existing report writer and cleanup/no-clobber semantics. All generic
++   validation completes before report creation; a write or final-file-set
++   failure removes only the owned report and leaves machine streams unchanged.
++   No dataset version, final directory, or `LATEST.txt` is derived or written.
++
++## Tests and acceptance
++
++Add adversarial generic-mode tests for `None`, `object()`, wrong/forged
++quality inputs, both modes, invalid validator, strict duplicate keys/NaN,
++schema-invalid records, validator/quality mutation or exception, count and
++source-scope drift, non-empty media/symbol/sync acceptance, non-empty
++tombstones rejection, unsafe/pre-existing report paths, cleanup/no-clobber,
++deterministic repeated report bytes, sanitization probes, and M6G golden
++compatibility. Run focused M10-C plus the existing M6G exporter suite,
++architecture tests, compileall, and diff-check before a fresh independent
++review; only then update roadmap/state and commit/push.
+diff --git a/.codex-workflow/20260805-m10/41-m10c-plan-approval.md b/.codex-workflow/20260805-m10/41-m10c-plan-approval.md
+new file mode 100644
+index 0000000..a739605
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/41-m10c-plan-approval.md
+@@ -0,0 +1,35 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-C Final Plan Review
++
++The final plan incorporates the requested legacy compatibility, generic stream
++invariants, report sections, validator ordering, mutation detection, and
++cleanup/no-clobber requirements. One boundary remains underspecified before
++approval.
++
++## Required Correction
++
++- Make the shared `FoundationSchemaValidator` concrete and authoritative for
++  generic mode, as in the closed M10-B boundary. “Require a callable shared
++  validator” must not permit a no-op/protocol fake to bypass manifest or JSONL
++  schema validation. Reject wrong types/subclasses or otherwise construct the
++  canonical shared validator before filesystem inspection, and sanitize
++  construction/validation exceptions without adapter or report side effects.
++
++Also enumerate the fixed metric-section key sets and source-scope value schema
++used by `M10QualityReportInput`; generic scalar filtering alone cannot reliably
++prevent IDs, URLs, paths, principals, hashes, or exception text from entering
++the deterministic report.
++
++## Confirmed Coverage
++
++- Legacy `one_page_quality` behavior and golden bytes are explicitly preserved;
++  generic mode is additive and mutually exclusive.
++- Strict duplicate-key/non-finite readback, exact counts, source-scope equality,
++  non-empty media/symbol/sync acceptance, empty tombstones, and quality-input
++  mutation checks are specified.
++- The exact twelve report sections/order, publication markers, pure rendering,
++  no-clobber cleanup, unchanged machine streams, no `LATEST.txt`, and bounded
++  M6G/architecture/compileall/diff-check gates are included.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/42-m10c-plan-final-approved.md b/.codex-workflow/20260805-m10/42-m10c-plan-final-approved.md
+new file mode 100644
+index 0000000..3de9609
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/42-m10c-plan-final-approved.md
+@@ -0,0 +1,74 @@
++# M10-C Cross-Stream Projection and Generic Completion - Final Approved
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++M10-B is complete and independently reviewed `PASS`; M8-AC remains
++`pending_external_input`. Add only generic M10 completion behavior and keep
++the legacy M6G path byte-identical.
++
++## Boundary and authoritative validation
++
++The additive signature is
++`complete(*, staging_path, validator, one_page_quality=None, m10_quality=None)`.
++When `m10_quality is None`, execute the existing legacy path unchanged. In
++generic mode, require exact `M10QualityReportInput`, `one_page_quality is None`,
++and the exact concrete shared `FoundationSchemaValidator` (reject protocol
++fakes/subclasses) before filesystem inspection or report mutation. Constructing
++the canonical validator, strict parsing, schema validation, or report checks
++must sanitize failures and leave no report/stream side effects.
++
++Strictly read manifest/JSONL (duplicate keys and non-finite constants rejected),
++then validate untouched deep copies with the canonical validator before counts
++or field access; detect validator mutation/exception. Use separate defensive
++copies for all later checks/rendering and detect quality-input/renderer
++mutation.
++
++## Generic invariants and report contract
++
++- Manifest counts contain exactly the eight stream keys, non-negative integers,
++  and equal both on-disk counts and `m10_quality.expected_counts`.
++- Manifest `source_scopes` contains exactly sorted `confluence` and optional
++  `git`; Confluence fields are exactly `source_id`, `space_keys`,
++  `root_page_ids`, `page_ids`; Git fields are exactly `repository`, `branch`,
++  `commit`. Values are non-empty one-line identifiers, ordered unique arrays,
++  and lowercase 40-hex commit. Canonical JSON must equal the typed quality
++  input source scopes.
++- `media_assets`, `symbols`, and `sync_state` may be non-empty;
++  `tombstones.jsonl` must be empty for initial M10 full snapshot.
++- Generic quality metric sections have exact integer-key sets:
++  `jira_metrics = (relations_total, resolved, unresolved,
++  unresolved_without_jira_api, deferred_mvp, unresolved_target)`,
++  `acl_metrics = (documents_total, documents_with_acl, restricted_documents,
++  default_deny_chunks)`,
++  `media_metrics = (assets_total, processed, failed, not_processed)`,
++  `symbol_metrics = (symbols_total, resolved)`,
++  `sync_metrics = (rows_total, active, pages, attachments, files, repos)`, and
++  `tombstone_metrics = (rows_total, initial_empty)`. Values are actual
++  non-negative integers and cross-counts are consistent. Completion checks have
++  exactly `(schema_validation, counts_match, tombstones_empty,
++  projection_consistency)` with boolean values.
++- Profile strings are non-empty one-line safe identifiers; report rendering
++  accepts no arbitrary strings in metric/check mappings and therefore cannot
++  emit paths, URLs, principals, hashes, exception text, secrets, record text,
++  or raw content.
++
++Render exactly twelve UTF-8 sections in this order: `Snapshot`, `Active
++Profiles`, `Record Counts`, `Jira Relation Quality`, `ACL Quality`, `Media
++Quality`, `Symbol Quality`, `Sync State`, `Tombstones`, `Completion Checks`,
++`Publication State`, `Scope`. Keys are fixed as above; publication includes
++`PENDING_AT_REPORT_COMPLETION` markers. Rendering is pure and deterministic.
++
++Reuse existing no-clobber/cleanup behavior: validate before writing, remove
++only an owned report on write/final-set failure, preserve machine streams, and
++do not derive versions or write `LATEST.txt`.
++
++## Acceptance
++
++Add adversarial generic-mode tests for wrong/forged quality inputs, both modes,
++fake/subclass validators, strict duplicate/NaN input, schema-invalid records,
++validator/quality mutation or exception, count/source-scope drift, non-empty
++media/symbol/sync, non-empty tombstones, unsafe/pre-existing report paths,
++cleanup/no-clobber, deterministic repeated bytes, sanitization, and all M6G
++golden/one-page tests. Run focused M10-C, existing M6G exporter, architecture,
++compileall, diff-check, then fresh independent review before roadmap/state and
++commit/push. No CLI/publisher/network/raw/checkpoint/real-run changes.
+diff --git a/.codex-workflow/20260805-m10/43-m10c-plan-approval.md b/.codex-workflow/20260805-m10/43-m10c-plan-approval.md
+new file mode 100644
+index 0000000..290ac99
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/43-m10c-plan-approval.md
+@@ -0,0 +1,26 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-C Plan Approval
++
++The final approved plan closes the outstanding review requirements.
++
++- Generic mode requires the exact concrete shared `FoundationSchemaValidator`
++  before filesystem inspection; protocol fakes/subclasses are rejected and
++  construction, parsing, validation, and rendering failures are sanitized with
++  no report or stream side effects.
++- Manifest source scopes have an exact deterministic schema and canonical
++  equality with typed quality input. All eight count keys, exact stream counts,
++  empty initial tombstones, and permitted non-empty media/symbol/sync streams
++  are explicit.
++- Quality metric sections and completion checks have fixed key sets, integer/
++  boolean constraints, cross-count consistency, and controlled scalar values;
++  report output is limited to the twelve fixed sections with deterministic
++  ordering and publication markers.
++- Legacy `one_page_quality` behavior remains byte-identical and mutually
++  exclusive with generic mode. Validation precedes report creation, existing
++  no-clobber/cleanup semantics are preserved, machine streams remain unchanged,
++  and no dataset version or `LATEST.txt` is written.
++- Adversarial, M6G golden, architecture, compileall, diff-check, and fresh
++  independent-review gates are included, with no scope expansion.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/44-m10c-implementation.md b/.codex-workflow/20260805-m10/44-m10c-implementation.md
+new file mode 100644
+index 0000000..ff104db
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/44-m10c-implementation.md
+@@ -0,0 +1,49 @@
++# M10-C Implementation
++
++Implemented the approved additive `m10_quality` mode for
++`FullSnapshotStagingCompleter` while preserving the legacy one-page and M6G
++paths.
++
++## Changes
++
++- Added strict `m10_quality` completion dispatch: exact
++  `M10QualityReportInput`, no simultaneous `one_page_quality`, and exact
++  concrete shared `FoundationSchemaValidator` before filesystem inspection.
++- Added strict duplicate-key/non-finite JSON parsing, canonical validation on
++  untouched copies for Manifest and all seven non-tombstone streams, mutation
++  detection, defensive rendering copies, exact eight count keys, source-scope
++  validation, and initial-empty tombstone enforcement.
++- Added actual stream-derived checks for relation status counts, ACL coverage /
++  restricted/default-deny counts, media processed/failed/not-processed counts,
++  symbol resolution, sync status/entity-type counts, and tombstone counts.
++- Added deterministic sanitized twelve-section report rendering in fixed order:
++  Snapshot, Active Profiles, Record Counts, Jira Relation Quality, ACL Quality,
++  Media Quality, Symbol Quality, Sync State, Tombstones, Completion Checks,
++  Publication State, and Scope.
++- Preserved no-clobber report creation and owned-report cleanup on final-set
++  failure; generic failures are sanitized without changing machine streams.
++- Added adversarial generic-mode tests for fake validators, wrong quality
++  combinations, count drift, non-empty tombstones, duplicate JSON keys,
++  deterministic bytes, sanitization, and pre-existing reports.
++
++## Validation
++
++```text
++python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py --basetemp=.codex-workflow/20260805-m10/pytest-m10c-focused-final
++42 passed, 1 skipped in 1.14s
++
++python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py tests/foundation/infrastructure/exporters/test_one_page_full_snapshot_exporter.py --basetemp=.codex-workflow/20260805-m10/pytest-m10c-m6g
++118 passed, 8 skipped in 2.85s
++
++python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10c-arch
++88 passed in 1.39s
++
++python -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warnings only)
++```
++
++No CLI, publisher, writer, roadmap/state, connector, network, or operator run
++was changed. No commit or push was performed.
+diff --git a/.codex-workflow/20260805-m10/45-m10c-independent-review.md b/.codex-workflow/20260805-m10/45-m10c-independent-review.md
+new file mode 100644
+index 0000000..f40db5c
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/45-m10c-independent-review.md
+@@ -0,0 +1,22 @@
++# M10-C Independent Review
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++Verdict: NEEDS_FIX
++
++## Findings
++
++- P1 - Unsafe profile values are emitted into `quality_report.md`. `src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py:52` accepts any non-whitespace string as `_SAFE_IDENTIFIER`, and `:72`/the renderer emit profile fields verbatim. A fresh adversarial run accepted `active_profile=r'C:\\secrets\\embedding.yaml'` and wrote `- Active profile: `C:\\secrets\\embedding.yaml``; it also accepted `https://evil.example/secret`. This violates the approved M10-C report sanitization contract (safe identifiers only; no paths, URLs, secrets, or uncontrolled strings).
++
++- P1 - Generic mode does not reject a wrong `staging_path` runtime type before field access/side effects. `src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py:163-165` calls `.exists()` directly. A fresh run passed a wrong path-like object whose `exists()` created a marker file; completion then raised sanitized `M10QualityCompletionError`, but the marker proved the untrusted object was invoked. AGENTS.md requires wrong runtime types to fail closed before field access or side effects.
++
++- P2 - Blank JSONL lines are silently ignored by `_read_strict_jsonl_records` at `src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py:350-352`. Inserting an interior blank line into `documents.jsonl` still produced a report (`accepted_blank True`) instead of rejecting malformed JSONL. This is inconsistent with the strict JSONL boundary and the shared validator's documented malformed-line behavior.
++
++## Commands and Results
++
++- `python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py --basetemp=.codex-workflow/20260805-m10/review-m10c-focused-independent` -> `42 passed, 1 skipped`.
++- `python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py tests/foundation/infrastructure/exporters/test_one_page_full_snapshot_exporter.py --basetemp=.codex-workflow/20260805-m10/review-m10c-m6g-independent` -> `118 passed, 8 skipped`.
++- `python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/review-m10c-arch-independent` -> `88 passed`.
++- `python -m compileall -q src tests` -> passed.
++- `git diff --check` -> passed (line-ending warning only).
++- Adversarial inline probes: unsafe path/URL profiles accepted and rendered; wrong path-like `exists()` side effect executed; interior blank JSONL accepted.
+diff --git a/.codex-workflow/20260805-m10/46-m10c-fix-plan.input.md b/.codex-workflow/20260805-m10/46-m10c-fix-plan.input.md
+new file mode 100644
+index 0000000..3731ac6
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/46-m10c-fix-plan.input.md
+@@ -0,0 +1,22 @@
++# M10-C Fix Plan Input
++
++Address every confirmed finding from the independent review in
++`.codex-workflow/20260805-m10/45-m10c-independent-review.md` without
++broadening M10-C:
++
++1. Restrict the three generic report profile fields to safe identifier values
++   that cannot be paths, URLs, secrets, or arbitrary report text, while keeping
++   approved values such as `medium`, `provisional_until_benchmark`, and
++   `1.2.0` valid.
++2. Reject any non-exact `pathlib.Path` runtime value at the generic public
++   `complete` boundary before invoking methods or inspecting the filesystem;
++   preserve legacy behavior when `m10_quality is None`.
++3. Make generic JSONL parsing reject blank lines as malformed input, retaining
++   duplicate-key and non-finite-number rejection.
++
++Add adversarial tests for path/URL profile values, wrong path-like objects with
++side effects, and blank JSONL lines. Re-run focused M10-C tests, all M6G
++completer/writer/publisher/one-page regression tests, architecture tests,
++compileall, and diff-check. Use sanitized errors, preserve machine streams and
++no-clobber cleanup, and do not change CLI, publisher, writer, network, or
++roadmap/state until an independent re-review passes.
+diff --git a/.codex-workflow/20260805-m10/47-m10c-fix-plan-review.md b/.codex-workflow/20260805-m10/47-m10c-fix-plan-review.md
+new file mode 100644
+index 0000000..2f7e4a7
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/47-m10c-fix-plan-review.md
+@@ -0,0 +1,25 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-C Fix Plan Review
++
++Verdict: PASS with bounded scope.
++
++The remediation must address all three confirmed findings without changing
++the legacy one-page path or any writer, publisher, CLI, network, roadmap, or
++state behavior:
++
++- Use a dedicated strict profile-identifier validator for the three generic
++  profile fields. It must accept the approved alphanumeric/underscore/dot/
++  hyphen values but reject path separators, URL schemes, whitespace, control
++  characters, and arbitrary report text before rendering.
++- Check `type(staging_path) is Path` at the generic `complete` boundary before
++  invoking any path method. Return the existing sanitized generic error and
++  leave the legacy branch unchanged.
++- Treat blank JSONL lines as malformed in strict generic parsing; preserve
++  duplicate-key and non-finite-number rejection.
++
++Acceptance requires adversarial tests for Windows/Unix paths, HTTP(S) URLs,
++wrong path-like objects with side effects, `object()`/`None`, blank lines,
++and all existing deterministic/no-clobber/sanitization cases. Run focused
++M10-C, M6G exporter/writer/publisher/one-page regression, architecture,
++compileall, and diff-check, then a fresh independent review.
+diff --git a/.codex-workflow/20260805-m10/48-m10c-fix-plan-final.md b/.codex-workflow/20260805-m10/48-m10c-fix-plan-final.md
+new file mode 100644
+index 0000000..e1807f8
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/48-m10c-fix-plan-final.md
+@@ -0,0 +1,42 @@
++# M10-C Fix Plan - Final
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Scope
++
++Fix only the three findings in `45-m10c-independent-review.md`:
++
++1. Add a dedicated safe profile identifier check for
++   `active_profile`, `profile_status`, and `chunker_version`. The accepted
++   grammar is a non-empty ASCII identifier beginning with an alphanumeric and
++   continuing only with alphanumerics, `.`, `_`, or `-`, bounded to 256
++   characters. Reject paths, URLs, whitespace, control characters, and
++   arbitrary report text before report rendering.
++2. In generic `FullSnapshotStagingCompleter.complete`, reject any
++   `staging_path` whose exact runtime type is not `Path` before any method
++   call or filesystem inspection. Preserve the legacy branch byte-for-byte
++   when `m10_quality is None`.
++3. In `_read_strict_jsonl_records`, reject empty lines rather than silently
++   skipping them. Keep duplicate-key and non-finite-number rejection.
++
++## Tests
++
++Extend the M10-C tests with unsafe Windows/Unix path and HTTP(S) profile
++values, wrong path-like objects whose `exists()` would cause a side effect,
++`object()`/`None` path values, and interior/trailing blank JSONL lines. Assert
++sanitized errors, no report creation, no marker side effects, preserved
++machine streams, and legacy output compatibility.
++
++## Validation and handoff
++
++Run focused M10-C plus existing completer regression, exact M6G
++exporter/writer/publisher/one-page regression, architecture, `python -m
++compileall -q src tests`, and `git diff --check`. Produce an implementation
++report, then commission a fresh independent review. Only after final review
++`PASS` may `.local_ai/ROADMAP.md` and `.local_ai/IMPLEMENTATION_STATE.md` be
++updated and the bounded files/artifacts staged, committed, and pushed.
++
++## Non-goals
++
++No changes to the legacy one-page/M6G branch, schemas, writer, publisher,
++CLI, connector, network, real-run gate, or M8-AC status.
+diff --git a/.codex-workflow/20260805-m10/49-m10c-fix-plan-approval.md b/.codex-workflow/20260805-m10/49-m10c-fix-plan-approval.md
+new file mode 100644
+index 0000000..b420027
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/49-m10c-fix-plan-approval.md
+@@ -0,0 +1,11 @@
++# M10-C Fix Plan Approval
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++The final fix plan in `48-m10c-fix-plan-final.md` is approved for bounded
++implementation. It covers all confirmed P1/P2 findings, adds the required
++adversarial tests, preserves the legacy path, and requires focused/regression
++validation plus a fresh independent review before roadmap/state or git
++handoff.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/50-m10c-fix-implementation.md b/.codex-workflow/20260805-m10/50-m10c-fix-implementation.md
+new file mode 100644
+index 0000000..5b68457
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/50-m10c-fix-implementation.md
+@@ -0,0 +1,32 @@
++# M10-C Fix Implementation
++
++Implemented the approved bounded remediation for all findings in the
++independent review. Generic mode now uses a strict profile identifier grammar,
++accepts only the concrete platform `Path` type before any path method, and
++rejects blank JSONL lines. The legacy one-page/M6G branch is unchanged.
++
++Added adversarial tests for unsafe Windows/Unix paths and URLs, wrong path
++runtime values including a side-effecting path-like object, and trailing or
++interior blank JSONL lines.
++
++## Validation
++
++```text
++py -m pytest -q --basetemp=.pytest-m10c-fix-focused2 tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py
++50 passed, 1 skipped
++
++py -m pytest -q --basetemp=.pytest-m10c-fix-m6g tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py tests/foundation/infrastructure/exporters/test_one_page_full_snapshot_exporter.py
++118 passed, 8 skipped
++
++py -m pytest -q --basetemp=.pytest-m10c-fix-arch tests/architecture
++88 passed
++
++py -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warning only)
++```
++
++No roadmap/state, CLI, writer, publisher, connector, network, or commit/push
++changes were made.
+diff --git a/.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md b/.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md
+new file mode 100644
+index 0000000..cfd153d
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md
+@@ -0,0 +1,31 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-C Fix Independent Review - Final
++
++Verdict: PASS
++
++## Findings
++
++No P0-P3 findings. The three findings from `45-m10c-independent-review.md`
++are resolved in the current implementation:
++
++- Profile values use the bounded ASCII identifier grammar before report
++  rendering; path and URL probes are rejected without creating a report.
++- Generic M10 completion checks the exact concrete `Path` runtime type before
++  any path method or filesystem inspection; `object()`, `None`, and the
++  side-effecting path-like probe fail closed.
++- Strict JSONL readback rejects trailing and interior blank lines while
++  retaining duplicate-key and non-finite-number rejection.
++
++Legacy compatibility remains covered by the existing completer tests,
++including the two-keyword legacy call shape and byte-identical golden report.
++
++## Validation
++
++Command:
++
++```text
++py -m pytest -q --basetemp=.pytest-m10c-review-final2 tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer.py
++```
++
++Result: `50 passed, 1 skipped`.
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index f568823..96904ab 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -29,9 +29,10 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
+ explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+ reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
+-export/store/checkpoint side effects. M10-A wire models and M10-B trusted
+-multi-source composition are complete and independently reviewed `PASS`. No
+-M10 exporter/CLI or real full-snapshot run has started.
++export/store/checkpoint side effects. M10-A wire models, M10-B trusted
++multi-source composition, and M10-C cross-stream projection/generic
++completion are complete and independently reviewed `PASS`. M10-D CLI and
++publication remain next; no real full-snapshot run has started.
+ 
+ ## Durable State Convention
+ 
+@@ -1796,6 +1797,27 @@ separate deferred follow-up; no 100k scale PASS is claimed.
+   diff-check passed. Final fresh review is
+   `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` with
+   `VERDICT: PASS`.
+-- Residual boundary: no exporter, generic completion, CLI/publication, or
+-  real full-snapshot invocation is included; M10-C is next and M8-AC remains
++- Residual boundary: no CLI/publication or real full-snapshot invocation is
++  included; M10-D and M10-E remain pending and M8-AC remains
+   `pending_external_input`.
++
++## M10-C Cross-Stream Projection and Generic Completion
++
++- Status: complete and independently reviewed `PASS`.
++- Added additive `m10_quality` completion to the staging completer while
++  preserving the legacy one-page/M6G path. Generic mode performs strict
++  duplicate-key/non-finite JSON parsing, canonical schema validation on
++  defensive copies, exact eight-stream counts, source-scope equality, actual
++  relation/ACL/media/symbol/sync/tombstone metric checks, and deterministic
++  sanitized twelve-section reporting with no-clobber cleanup.
++- The independent review found unsafe profile strings, wrong path runtime
++  side effects, and blank JSONL acceptance. A bounded fix added strict ASCII
++  profile identifiers, concrete platform `Path` validation before method
++  calls, and blank-line rejection, with adversarial coverage.
++- Validation: focused `50 passed, 1 skipped`; M6G
++  completer/writer/publisher/one-page `118 passed, 8 skipped`; architecture
++  `88 passed`; compileall/diff-check passed. Final independent review is
++  `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` with
++  `VERDICT: PASS`.
++- Residual boundary: M10-D CLI/publication and M10-E synthetic/external gate
++  remain pending; M8-AC real mini-corpus remains `pending_external_input`.
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 61d587f..681088f 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -93,7 +93,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+ | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
+-| M10 - First full POC Foundation snapshot | in progress; M10-A/B complete | M10-A wire models and M10-B trusted composition independently reviewed `PASS`; M10-C/D remain pending; M10-E remains `pending_external_input`; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
++| M10 - First full POC Foundation snapshot | in progress; M10-A/B/C complete | M10-A wire models, M10-B trusted composition, and M10-C generic completion independently reviewed `PASS`; M10-D remains pending; M10-E remains `pending_external_input`; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+ 
+@@ -120,7 +120,9 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are independently approved. M9-D1 tombstone contract and
+ explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+ approved. M9-D2 remains read-only and does not perform export/store/checkpoint
+-side effects. No M10 full-snapshot work has started.
++side effects. M10-A, M10-B, and M10-C are complete and independently reviewed
++`PASS`; M10-D is next. No CLI/publication boundary or real full-snapshot run
++has started.
+ 
+ - M2C1 `CanonicalDocumentRecordBuilder` - done.
+ - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
+@@ -1075,7 +1077,7 @@ Acceptance categories:
+ |---|---|---|
+ | M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
+ | M10-B trusted multi-source composition | complete; independently reviewed `PASS` | Added typed Confluence/Git handoffs, canonical shared-schema validation, source ownership/provenance, ACL inheritance, relation/media/symbol/sync gates, deterministic composition, empty initial tombstones, and sanitized application boundary. Focused `51 passed`; M9 `120 passed`; M6G `37 passed`; architecture `88 passed`; compileall/diff-check passed. Final review `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` is `VERDICT: PASS`. |
+-| M10-C cross-stream projection and generic completion | pending | Requires M10-B approved output; must preserve M6G one-page behavior. |
++| M10-C cross-stream projection and generic completion | complete; independently reviewed `PASS` | Added additive generic `m10_quality` completion with strict canonical validation, exact stream/metric/source-scope invariants, deterministic sanitized 12-section reporting, no-clobber cleanup, and preserved M6G behavior. Focused `50 passed, 1 skipped`; M6G exporter/writer/publisher/one-page `118 passed, 8 skipped`; architecture `88 passed`; compileall/diff-check passed. Initial review found two P1 and one P2 boundary issues; bounded fix plan/review artifacts `47-49` addressed them. Final independent review `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` is `PASS`. |
+ | M10-D CLI and publication boundary | pending | Requires M10-C approved generic projection/completion path. |
+ | M10-E synthetic acceptance and external real-run gate | pending_external_input | Synthetic acceptance follows M10-D; real operator evidence requires approved inputs and remains separate. |
+ 
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py
+index 8a049db..6a2730a 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_staging_completer.py
+@@ -9,12 +9,14 @@ import tempfile
+ from collections.abc import Mapping
+ from copy import deepcopy
+ from pathlib import Path
++import re
+ 
+ from knowledgenexus.foundation.domain.models.one_page_export_snapshot import (
+     ACL_METRICS_KEY_ORDER,
+     JIRA_METRICS_KEY_ORDER,
+     OnePageExportQualityReportInput,
+ )
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10QualityReportInput
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import (
+     EXPECTED_MACHINE_FILES,
+     JSONL_FILE_SCHEMA_PAIRS,
+@@ -38,6 +40,19 @@ COUNT_KEYS: tuple[str, ...] = (
+     "tombstones",
+ )
+ EXPECTED_COMPLETE_FILES = EXPECTED_MACHINE_FILES | {QUALITY_REPORT_FILE_NAME}
++_M10_METRIC_KEYS: dict[str, tuple[str, ...]] = {
++    "jira_metrics": ("relations_total", "resolved", "unresolved", "unresolved_without_jira_api", "deferred_mvp", "unresolved_target"),
++    "acl_metrics": ("documents_total", "documents_with_acl", "restricted_documents", "default_deny_chunks"),
++    "media_metrics": ("assets_total", "processed", "failed", "not_processed"),
++    "symbol_metrics": ("symbols_total", "resolved"),
++    "sync_metrics": ("rows_total", "active", "pages", "attachments", "files", "repos"),
++    "tombstone_metrics": ("rows_total", "initial_empty"),
++    "completion_checks": ("schema_validation", "counts_match", "tombstones_empty", "projection_consistency"),
++}
++_SAFE_IDENTIFIER = re.compile(r"^[^\s\r\n]{1,256}$")
++_SAFE_PROFILE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
++_HEX40 = re.compile(r"^[0-9a-f]{40}$")
++_CONCRETE_PATH_TYPE = type(Path())
+ 
+ _DEFERRED_STREAM_FILE_NAMES: tuple[str, ...] = (
+     "media_assets.jsonl",
+@@ -47,6 +62,173 @@ _DEFERRED_STREAM_FILE_NAMES: tuple[str, ...] = (
+ )
+ 
+ 
++class M10QualityCompletionError(ValueError):
++    """Sanitized failure for the additive generic M10 report boundary."""
++
++
++def _validate_m10_quality_input(quality: object) -> None:
++    if type(quality) is not M10QualityReportInput or set(vars(quality)) != set(M10QualityReportInput.__dataclass_fields__):
++        raise TypeError("m10_quality has invalid fields")
++    for name in ("active_profile", "profile_status", "chunker_version"):
++        value = getattr(quality, name)
++        if type(value) is not str or _SAFE_PROFILE_IDENTIFIER.fullmatch(value) is None:
++            raise ValueError("m10_quality profile value is invalid")
++    counts = quality.expected_counts
++    if type(counts) is not dict or set(counts) != set(COUNT_KEYS):
++        raise ValueError("m10_quality expected counts are invalid")
++    for value in counts.values():
++        if type(value) is not int or value < 0:
++            raise ValueError("m10_quality expected counts are invalid")
++    for name, keys in _M10_METRIC_KEYS.items():
++        value = getattr(quality, name)
++        if type(value) is not dict or set(value) != set(keys):
++            raise ValueError("m10_quality metric keys are invalid")
++        for metric in keys:
++            item = value[metric]
++            if name == "completion_checks":
++                if type(item) is not bool or not item:
++                    raise ValueError("m10_quality completion checks are invalid")
++            elif type(item) is not int or item < 0:
++                raise ValueError("m10_quality metric values are invalid")
++    j = quality.jira_metrics
++    if j["resolved"] + j["unresolved"] != j["relations_total"] or j["unresolved"] != j["unresolved_without_jira_api"] + j["deferred_mvp"] + j["unresolved_target"]:
++        raise ValueError("m10_quality Jira metrics are inconsistent")
++    a = quality.acl_metrics
++    if a["documents_with_acl"] > a["documents_total"] or a["restricted_documents"] > a["documents_total"] or a["default_deny_chunks"] > quality.expected_counts["chunks"]:
++        raise ValueError("m10_quality ACL metrics are inconsistent")
++    m = quality.media_metrics
++    if m["processed"] + m["failed"] + m["not_processed"] != m["assets_total"]:
++        raise ValueError("m10_quality media metrics are inconsistent")
++    s = quality.symbol_metrics
++    if s["resolved"] > s["symbols_total"] or s["symbols_total"] != quality.expected_counts["symbols"]:
++        raise ValueError("m10_quality symbol metrics are inconsistent")
++    sy = quality.sync_metrics
++    if sy["active"] != sy["rows_total"] or sy["pages"] + sy["attachments"] + sy["files"] + sy["repos"] != sy["rows_total"]:
++        raise ValueError("m10_quality sync metrics are inconsistent")
++    t = quality.tombstone_metrics
++    if t["rows_total"] != quality.expected_counts["tombstones"] or t["initial_empty"] != 1 or t["rows_total"] != 0:
++        raise ValueError("m10_quality tombstone metrics are inconsistent")
++    scopes = quality.source_scopes
++    if type(scopes) is not dict or tuple(scopes) != tuple(sorted(scopes)) or set(scopes) not in ({"confluence"}, {"confluence", "git"}):
++        raise ValueError("m10_quality source scopes are invalid")
++    _validate_m10_scope(scopes)
++
++
++def _validate_m10_scope(scopes: dict[str, object]) -> None:
++    confluence = scopes["confluence"]
++    if type(confluence) is not dict or set(confluence) != {"source_id", "space_keys", "root_page_ids", "page_ids"}:
++        raise ValueError("m10_quality Confluence scope is invalid")
++    for name in ("space_keys", "root_page_ids", "page_ids"):
++        values = confluence[name]
++        if type(values) not in (tuple, list) or not values or tuple(sorted(values)) != tuple(values) or len(set(values)) != len(values) or any(type(x) is not str or _SAFE_IDENTIFIER.fullmatch(x) is None for x in values):
++            raise ValueError("m10_quality scope arrays are invalid")
++    if type(confluence["source_id"]) is not str or _SAFE_IDENTIFIER.fullmatch(confluence["source_id"]) is None:
++        raise ValueError("m10_quality source ID is invalid")
++    if not set(confluence["root_page_ids"]).issubset(confluence["page_ids"]):
++        raise ValueError("m10_quality roots are outside page scope")
++    if "git" in scopes:
++        git = scopes["git"]
++        if type(git) is not dict or set(git) != {"repository", "branch", "commit"} or any(type(git[x]) is not str or _SAFE_IDENTIFIER.fullmatch(git[x]) is None for x in ("repository", "branch")) or _HEX40.fullmatch(git["commit"]) is None:
++            raise ValueError("m10_quality Git scope is invalid")
++
++
++def _strict_json_object(path: Path) -> dict[str, object]:
++    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_object_keys, parse_constant=_reject_non_finite_constant)
++    if type(value) is not dict:
++        raise TypeError("manifest must be an object")
++    return value
++
++
++def _validate_m10_streams(*, staging_path: Path, manifest: dict[str, object], validator: FoundationSchemaValidator) -> dict[str, list[dict[str, object]]]:
++    streams: dict[str, list[dict[str, object]]] = {}
++    for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
++        records = _read_strict_jsonl_records(staging_path / file_name)
++        if count_key == "tombstones":
++            if records:
++                raise ValueError("initial tombstones must be empty")
++            streams[count_key] = records
++            continue
++        if len(records) != manifest["counts"][count_key]:
++            raise ValueError("stream count does not match manifest")
++        checked: list[dict[str, object]] = []
++        for record in records:
++            before = deepcopy(record)
++            isolated = deepcopy(record)
++            validator.validate_record(schema_name, isolated)
++            if isolated != before:
++                raise ValueError("canonical validator mutated a record")
++            checked.append(deepcopy(record))
++        streams[count_key] = checked
++    return streams
++
++
++def _complete_m10_quality(*, staging_path: Path, validator: FoundationSchemaValidator, quality: M10QualityReportInput) -> dict[str, object]:
++    quality_before = deepcopy(quality)
++    if not staging_path.exists() or not staging_path.is_dir():
++        raise FileNotFoundError("staging path is unavailable")
++    report_path = staging_path / QUALITY_REPORT_FILE_NAME
++    if report_path.exists() or report_path.is_symlink():
++        raise FileExistsError("quality report already exists")
++    _verify_file_set(staging_path, EXPECTED_MACHINE_FILES)
++    manifest = _strict_json_object(staging_path / "manifest.json")
++    manifest_before = deepcopy(manifest)
++    validator.validate_record("Manifest", manifest_before)
++    if manifest_before != manifest:
++        raise ValueError("canonical validator mutated manifest")
++    _verify_full_snapshot_invariants(manifest)
++    _validate_m10_scope(manifest.get("source_scopes"))
++    if _canonical_json(manifest["source_scopes"]) != _canonical_json(quality.source_scopes):
++        raise ValueError("source scope mismatch")
++    streams = _validate_m10_streams(staging_path=staging_path, manifest=manifest, validator=validator)
++    if _canonical_json(manifest["counts"]) != _canonical_json(quality.expected_counts):
++        raise ValueError("quality expected counts mismatch")
++    _verify_m10_metric_counts(quality, streams)
++    report = _render_m10_quality_report(manifest, quality)
++    if quality != quality_before:
++        raise ValueError("m10_quality was mutated")
++    _write_quality_report(report_path, report)
++    try:
++        _verify_file_set(staging_path, EXPECTED_COMPLETE_FILES)
++    except Exception:
++        _remove_owned_file(report_path)
++        raise
++    return manifest
++
++
++def _verify_m10_metric_counts(quality: M10QualityReportInput, streams: dict[str, list[dict[str, object]]]) -> None:
++    relation_statuses = {key: sum(1 for row in streams["relations"] if row.get("resolution_status") == key) for key in ("resolved", "unresolved_without_jira_api", "deferred_mvp", "unresolved_target")}
++    if quality.jira_metrics["relations_total"] != len(streams["relations"]) or quality.jira_metrics["resolved"] != relation_statuses["resolved"] or quality.jira_metrics["unresolved_without_jira_api"] != relation_statuses["unresolved_without_jira_api"] or quality.jira_metrics["deferred_mvp"] != relation_statuses["deferred_mvp"] or quality.jira_metrics["unresolved_target"] != relation_statuses["unresolved_target"]:
++        raise ValueError("Jira relation count mismatch")
++    if quality.acl_metrics["documents_total"] != len(streams["documents"]):
++        raise ValueError("ACL document count mismatch")
++    if quality.acl_metrics["documents_with_acl"] != len(streams["acl"]) or quality.acl_metrics["restricted_documents"] != sum(1 for row in streams["acl"] if row.get("is_restricted") is True) or quality.acl_metrics["default_deny_chunks"] != sum(1 for row in streams["chunks"] if row.get("acl_tags") == ["restricted:unresolved"]):
++        raise ValueError("ACL count mismatch")
++    media_statuses = {key: sum(1 for row in streams["media_assets"] if row.get("processing_status") == key) for key in ("parsed", "ocr", "summarized", "failed", "not_processed")}
++    if quality.media_metrics["assets_total"] != len(streams["media_assets"]):
++        raise ValueError("media count mismatch")
++    if quality.media_metrics["processed"] != media_statuses["parsed"] + media_statuses["ocr"] + media_statuses["summarized"] or quality.media_metrics["failed"] != media_statuses["failed"] or quality.media_metrics["not_processed"] != media_statuses["not_processed"]:
++        raise ValueError("media status count mismatch")
++    if quality.symbol_metrics["symbols_total"] != len(streams["symbols"]) or quality.symbol_metrics["resolved"] != sum(1 for row in streams["symbols"] if row.get("chunk_id") is not None):
++        raise ValueError("symbol count mismatch")
++    sync_types = {key: sum(1 for row in streams["sync_state"] if row.get("entity_type") == source_type) for key, source_type in (("pages", "page"), ("attachments", "attachment"), ("files", "file"), ("repos", "repo"))}
++    if quality.sync_metrics["rows_total"] != len(streams["sync_state"]) or quality.sync_metrics["active"] != sum(1 for row in streams["sync_state"] if row.get("status") == "active") or any(quality.sync_metrics[key] != sync_types[key] for key in ("pages", "attachments", "files", "repos")):
++        raise ValueError("sync count mismatch")
++    if quality.tombstone_metrics["rows_total"] != len(streams["tombstones"]):
++        raise ValueError("tombstone count mismatch")
++
++
++def _render_m10_quality_report(manifest: Mapping[str, object], quality: M10QualityReportInput) -> str:
++    counts = quality.expected_counts
++    lines = ["# Foundation Export Quality Report", "", "## Snapshot", "", "- Export mode: `full_snapshot`", f"- Dataset version: `{manifest['dataset_version']}`", f"- Generated at: `{manifest['generated_at']}`", f"- Schemas version: `{manifest['schemas_version']}`", "", "## Active Profiles", "", f"- Active profile: `{quality.active_profile}`", f"- Profile status: `{quality.profile_status}`", f"- Chunker version: `{quality.chunker_version}`", "", "## Record Counts", "", "| Record type | Count |", "|---|---:|"]
++    lines.extend(f"| {key} | {counts[key]} |" for key in COUNT_KEYS)
++    for title, field in (("Jira Relation Quality", "jira_metrics"), ("ACL Quality", "acl_metrics"), ("Media Quality", "media_metrics"), ("Symbol Quality", "symbol_metrics"), ("Sync State", "sync_metrics"), ("Tombstones", "tombstone_metrics"), ("Completion Checks", "completion_checks")):
++        lines.extend(["", f"## {title}", ""])
++        metric_mapping = getattr(quality, field)
++        lines.extend(f"- {key}: {metric_mapping[key]}" for key in _M10_METRIC_KEYS[field])
++    lines.extend(["", "## Publication State", "", "- Report completion: PENDING_AT_REPORT_COMPLETION", "- Final-directory verification: PENDING_AT_REPORT_COMPLETION", "- Post-publication acceptance: PENDING_AT_REPORT_COMPLETION", "", "## Scope", "", "- Confluence scope: present", f"- Git scope: {'present' if 'git' in quality.source_scopes else 'absent'}", ""])
++    return "\n".join(lines)
++
++
+ class FullSnapshotStagingCompleter:
+     """Add the human-readable sidecar to an existing M3D staging directory."""
+ 
+@@ -56,7 +238,20 @@ class FullSnapshotStagingCompleter:
+         staging_path: Path,
+         validator: FoundationSchemaValidator,
+         one_page_quality: OnePageExportQualityReportInput | None = None,
++        m10_quality: M10QualityReportInput | None = None,
+     ) -> dict[str, object]:
++        if m10_quality is not None:
++            try:
++                if type(staging_path) is not _CONCRETE_PATH_TYPE:
++                    raise TypeError("m10_quality staging path must be Path")
++                if one_page_quality is not None:
++                    raise TypeError("one_page_quality is incompatible with m10_quality")
++                if type(validator) is not FoundationSchemaValidator:
++                    raise TypeError("m10_quality requires the shared FoundationSchemaValidator")
++                _validate_m10_quality_input(m10_quality)
++                return _complete_m10_quality(staging_path=staging_path, validator=validator, quality=m10_quality)
++            except Exception:
++                raise M10QualityCompletionError("m10_quality completion failed") from None
+         if not staging_path.exists():
+             raise FileNotFoundError(f"Staging path does not exist: {staging_path}")
+         if not staging_path.is_dir():
+@@ -158,7 +353,7 @@ def _read_strict_jsonl_records(path: Path) -> list[dict[str, object]]:
+     records: list[dict[str, object]] = []
+     for line in path.read_text(encoding="utf-8").splitlines():
+         if not line:
+-            continue
++            raise ValueError(f"JSONL record in {path.name} must not be blank")
+         record = json.loads(
+             line,
+             object_pairs_hook=_reject_duplicate_object_keys,
+diff --git a/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py b/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py
+new file mode 100644
+index 0000000..a103ee5
+--- /dev/null
++++ b/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py
+@@ -0,0 +1,147 @@
++from __future__ import annotations
++
++import copy
++import json
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10QualityReportInput
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import (
++    FullSnapshotStagingCompleter,
++    M10QualityCompletionError,
++)
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import FullSnapshotStagingWriter
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++from tests.fixtures.foundation.record_factories import (
++    build_sample_acl_record,
++    build_sample_chunk_record,
++    build_sample_document_record,
++    build_sample_relation_record,
++)
++
++
++def _scopes():
++    return {"confluence": {"source_id": "src", "space_keys": ["SVMC"], "root_page_ids": ["123"], "page_ids": ["123"]}}
++
++
++def _quality() -> M10QualityReportInput:
++    return M10QualityReportInput(
++        "medium", "provisional_until_benchmark", "1.2.0",
++        {"documents": 1, "chunks": 1, "relations": 1, "acl": 1, "media_assets": 0, "symbols": 0, "sync_state": 0, "tombstones": 0},
++        {"confluence": {"source_id": "src", "space_keys": ("SVMC",), "root_page_ids": ("123",), "page_ids": ("123",)}},
++        {"relations_total": 1, "resolved": 0, "unresolved": 1, "unresolved_without_jira_api": 1, "deferred_mvp": 0, "unresolved_target": 0},
++        {"documents_total": 1, "documents_with_acl": 1, "restricted_documents": 0, "default_deny_chunks": 0},
++        {"assets_total": 0, "processed": 0, "failed": 0, "not_processed": 0},
++        {"symbols_total": 0, "resolved": 0},
++        {"rows_total": 0, "active": 0, "pages": 0, "attachments": 0, "files": 0, "repos": 0},
++        {"rows_total": 0, "initial_empty": 1},
++        {"schema_validation": True, "counts_match": True, "tombstones_empty": True, "projection_consistency": True},
++    )
++
++
++def _write(staging: Path, *, tombstones=(), source_scopes=None):
++    return FullSnapshotStagingWriter.write(
++        staging_path=staging, validator=FoundationSchemaValidator(), dataset_version="v20260805-000000-000000Z", generated_at="2026-08-05T00:00:00Z", config_hash="a" * 64, chunker_version="1.2.0", schemas_version="1.0",
++        documents=[build_sample_document_record()], chunks=[build_sample_chunk_record()], relations=[build_sample_relation_record()], acl=[build_sample_acl_record()], media_assets=[], symbols=[], sync_state=[], tombstones=tombstones, source_scopes=source_scopes or _scopes(),
++    )
++
++
++def _complete(staging: Path, *, quality=None, **kwargs):
++    return FullSnapshotStagingCompleter.complete(staging_path=staging, validator=FoundationSchemaValidator(), m10_quality=quality or _quality(), **kwargs)
++
++
++def test_m10_quality_report_has_exact_twelve_sections_and_is_deterministic(tmp_path):
++    first = tmp_path / "first"; second = tmp_path / "second"
++    _write(first); _write(second)
++    _complete(first); _complete(second)
++    first_bytes = (first / "quality_report.md").read_bytes()
++    assert first_bytes == (second / "quality_report.md").read_bytes()
++    report = first_bytes.decode()
++    sections = ["Snapshot", "Active Profiles", "Record Counts", "Jira Relation Quality", "ACL Quality", "Media Quality", "Symbol Quality", "Sync State", "Tombstones", "Completion Checks", "Publication State", "Scope"]
++    assert [report.index(f"## {section}") for section in sections] == sorted(report.index(f"## {section}") for section in sections)
++    assert report.count("## ") == 12
++    assert "PENDING_AT_REPORT_COMPLETION" in report
++    assert "space:SVMC" not in report and "config_hash" not in report
++
++
++def test_m10_quality_rejects_legacy_quality_or_fake_validator_before_filesystem(tmp_path):
++    staging = tmp_path / "missing"
++    with pytest.raises(M10QualityCompletionError):
++        FullSnapshotStagingCompleter.complete(staging_path=staging, validator=object(), m10_quality=_quality())
++    _write(staging)
++    with pytest.raises(M10QualityCompletionError):
++        FullSnapshotStagingCompleter.complete(staging_path=staging, validator=FoundationSchemaValidator(), one_page_quality=object(), m10_quality=_quality())
++    assert not (staging / "quality_report.md").exists()
++
++
++def test_m10_quality_rejects_count_drift_and_nonempty_tombstones(tmp_path):
++    staging = tmp_path / "staging"; _write(staging)
++    bad = copy.deepcopy(_quality()); bad.expected_counts["documents"] = 2
++    with pytest.raises(M10QualityCompletionError): _complete(staging, quality=bad)
++    assert not (staging / "quality_report.md").exists()
++    staging2 = tmp_path / "staging2"
++    # Writer schema-validates tombstones; an empty initial stream is the only accepted M10-C case.
++    _write(staging2, tombstones=[])
++    (staging2 / "tombstones.jsonl").write_text('{"schema_version":"1.0"}\n', encoding="utf-8")
++    with pytest.raises(M10QualityCompletionError): _complete(staging2)
++    assert not (staging2 / "quality_report.md").exists()
++
++
++def test_m10_quality_rejects_duplicate_json_and_quality_mutation(tmp_path):
++    staging = tmp_path / "staging"; _write(staging)
++    (staging / "manifest.json").write_text('{"schema_version":"1.0","schema_version":"1.0"}\n', encoding="utf-8")
++    with pytest.raises(M10QualityCompletionError): _complete(staging)
++    assert not (staging / "quality_report.md").exists()
++
++    staging2 = tmp_path / "staging2"; _write(staging2)
++    quality = _quality(); before = copy.deepcopy(quality)
++    _complete(staging2, quality=quality)
++    assert quality == before
++
++
++def test_m10_quality_preserves_preexisting_report(tmp_path):
++    staging = tmp_path / "staging"; _write(staging)
++    report = staging / "quality_report.md"; report.write_text("sentinel", encoding="utf-8")
++    with pytest.raises(M10QualityCompletionError): _complete(staging)
++    assert report.read_text(encoding="utf-8") == "sentinel"
++
++
++@pytest.mark.parametrize("unsafe", [r"C:\\secrets\\embedding.yaml", "/etc/secret", "https://evil.example/secret"])
++def test_m10_quality_rejects_unsafe_profile_identifiers(tmp_path, unsafe):
++    staging = tmp_path / "staging"; _write(staging)
++    quality = replace(_quality(), active_profile=unsafe)
++    with pytest.raises(M10QualityCompletionError): _complete(staging, quality=quality)
++    assert not (staging / "quality_report.md").exists()
++
++
++class _SideEffectPath:
++    def __init__(self, marker: Path):
++        self.marker = marker
++
++    def exists(self):
++        self.marker.write_text("touched", encoding="utf-8")
++        return False
++
++
++@pytest.mark.parametrize("bad_kind", ["object", "none", "side_effect"])
++def test_m10_quality_rejects_wrong_path_types_before_side_effects(tmp_path, bad_kind):
++    marker = tmp_path / "marker"
++    bad_path = {"object": object(), "none": None, "side_effect": _SideEffectPath(marker)}[bad_kind]
++    with pytest.raises(M10QualityCompletionError):
++        FullSnapshotStagingCompleter.complete(
++            staging_path=bad_path,
++            validator=FoundationSchemaValidator(),
++            m10_quality=_quality(),
++        )
++    assert not marker.exists()
++
++
++@pytest.mark.parametrize("blank", ["\n", "\n\n"])
++def test_m10_quality_rejects_blank_jsonl_lines(tmp_path, blank):
++    staging = tmp_path / "staging"; _write(staging)
++    documents = staging / "documents.jsonl"
++    documents.write_text(documents.read_text(encoding="utf-8") + blank, encoding="utf-8")
++    with pytest.raises(M10QualityCompletionError): _complete(staging)
++    assert not (staging / "quality_report.md").exists()
+-- 
+2.45.1.windows.1
+

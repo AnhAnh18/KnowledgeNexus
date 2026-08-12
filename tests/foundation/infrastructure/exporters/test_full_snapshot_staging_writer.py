@@ -72,6 +72,17 @@ def test_successful_full_machine_readable_staging_snapshot(tmp_path: Path) -> No
     FoundationSchemaValidator().validate_record("Manifest", manifest)
 
 
+def test_delta_staging_manifest_declares_base_and_allows_tombstones(tmp_path: Path) -> None:
+    manifest = _write_staging(
+        tmp_path / "delta",
+        export_mode="delta",
+        base_dataset_version="v20260712-093015-123456Z",
+    )
+    assert manifest["export_mode"] == "delta"
+    assert manifest["base_dataset_version"] == "v20260712-093015-123456Z"
+    assert manifest["counts"]["tombstones"] == 1
+
+
 def test_successful_staging_contains_exact_filename_set(tmp_path: Path) -> None:
     staging_path = tmp_path / "staging"
 

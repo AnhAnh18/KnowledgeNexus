@@ -15,6 +15,14 @@ original input plan.
   `P1`, `P2`, or `P3`; do not report style-only issues.
 - Fixers address every confirmed finding in scope, add or adjust tests when
   needed, and do not broaden the task.
+- Every public/application boundary requires an adversarial negative pass in
+  addition to happy-path coverage: wrong runtime types must fail closed before
+  field access or side effects, and typed result/status objects must reject
+  impossible field combinations and cross-field counts.
+- Reviewers must test malformed inputs such as `object()`, `None`, wrong enum
+  values, missing required fields, forbidden extra fields, and impossible
+  counters. Type annotations and dataclass construction are not runtime
+  validation.
 
 Never treat a review as independent if it shares a session with the agent that
 implemented or fixed the code. A focused re-review uses the same `review`

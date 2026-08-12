@@ -1,0 +1,1768 @@
+From c5d8c51d911821372786a4ffe9ad747976892bfe Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 5 Aug 2026 18:20:17 +0700
+Subject: [PATCH] Complete M10-D/E synthetic snapshot acceptance
+
+---
+ .../20260805-m10/52-m10de-plan-review.md      | 182 +++++++
+ .../20260805-m10/53-m10de-plan-final.md       |  45 ++
+ .../20260805-m10/54-m10de-plan-approval.md    |  10 +
+ .../20260805-m10/55-m10de-implementation.md   |  55 +++
+ .../56-m10de-independent-review.md            |  59 +++
+ .../20260805-m10/57-m10de-fix-plan.input.md   |  21 +
+ .../20260805-m10/58-m10de-fix-plan-review.md  |  12 +
+ .../20260805-m10/59-m10de-fix-plan-final.md   |  20 +
+ .../60-m10de-fix-plan-approval.md             |   9 +
+ .../61-m10de-fix-implementation.md            |  52 ++
+ .../62-m10de-fix-independent-review-final.md  |  43 ++
+ .local_ai/IMPLEMENTATION_STATE.md             |  35 +-
+ .local_ai/ROADMAP.md                          |  13 +-
+ .../use_cases/export_m10_snapshot.py          | 460 ++++++++++++++++++
+ .../foundation/cli/export_m10_snapshot.py     | 112 +++++
+ .../foundation/domain/models/m10_snapshot.py  |   3 +-
+ .../infrastructure/exporters/__init__.py      |   4 +
+ .../exporters/m10_snapshot_exporter.py        |  22 +
+ .../foundation/ports/__init__.py              |   8 +
+ .../ports/m10_snapshot_export_port.py         |  20 +
+ .../use_cases/test_export_m10_snapshot.py     | 217 +++++++++
+ .../cli/test_export_m10_snapshot_cli.py       |  61 +++
+ .../test_m10_synthetic_acceptance.py          |  56 +++
+ 23 files changed, 1506 insertions(+), 13 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m10/52-m10de-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/53-m10de-plan-final.md
+ create mode 100644 .codex-workflow/20260805-m10/54-m10de-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/55-m10de-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/56-m10de-independent-review.md
+ create mode 100644 .codex-workflow/20260805-m10/57-m10de-fix-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/58-m10de-fix-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/59-m10de-fix-plan-final.md
+ create mode 100644 .codex-workflow/20260805-m10/60-m10de-fix-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/61-m10de-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+ create mode 100644 src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
+ create mode 100644 src/knowledgenexus/foundation/ports/m10_snapshot_export_port.py
+ create mode 100644 tests/foundation/application/use_cases/test_export_m10_snapshot.py
+ create mode 100644 tests/foundation/cli/test_export_m10_snapshot_cli.py
+ create mode 100644 tests/foundation/integration/test_m10_synthetic_acceptance.py
+
+diff --git a/.codex-workflow/20260805-m10/52-m10de-plan-review.md b/.codex-workflow/20260805-m10/52-m10de-plan-review.md
+new file mode 100644
+index 0000000..a05b2ee
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/52-m10de-plan-review.md
+@@ -0,0 +1,182 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-D/E Plan Critique
++
++## Review posture
++
++The repository currently has M10-A, M10-B, and M10-C implementation plus fresh
++independent `PASS` evidence. The existing M3 writer/completer/publisher are the
++authoritative filesystem seams. No M10 CLI/orchestrator, publication acceptance
++readback, or M10 synthetic end-to-end test exists yet. `.local_ai` records M10-D
++as next and M10-E as pending; M8-AC's real mini-corpus gate is explicitly
++`pending_external_input`.
++
++The safe meaning of "finish M10" is therefore: prove the bounded synthetic
++full-snapshot CLI/publication contract (M10-D) and its synthetic acceptance
++matrix (M10-E), obtain a fresh independent review `PASS`, and record that the
++real operator full-POC gate remains `pending_external_input`. Synthetic output
++must not be called a real Confluence/Git POC PASS, and this milestone must not
++start delta export, indexing, retrieval, network access, or M8-AC evidence
++fabrication.
++
++## Requirements to lock before implementation
++
++### 1. One explicit application/CLI boundary
++
++Define one M10 application use case and one CLI entry point that accept a
++runtime-validated `M10SnapshotRequest` (or a sanitized config factory) and
++injected `M10ConfluenceAdapter`/`M10GitAdapter` ports. The CLI must not import
++HTTP transports, Confluence credentials, Jira clients, raw/checkpoint stores,
++or private M6G CLI state. Validate exact runtime types, enums, field sets,
++paths, profile identity, and export mode before invoking adapters or touching
++the filesystem. `None`, `object()`, path-like probes, forged dataclass
++instances, and malformed nested config must fail closed with zero dependency
++calls and no output artifacts.
++
++The boundary needs a closed error mapping for every M10 failure category,
++including `invalid_request` and `adapter`, not only the existing export
++projection/staging/completion/publication/acceptance categories. Preserve the
++M6G exit values 1-19 and its one-line sanitized JSON stderr vocabulary. A
++generic unexpected exception must never include exception text, paths, IDs,
++URLs, principals, content, hashes, or traceback data.
++
++### 2. Derive quality data; do not trust caller counts
++
++M10-C validates a typed `M10QualityReportInput`, but M10-D must construct that
++input from the trusted `M10SnapshotProjection` and the actual stream records.
++CLI/config values must not be able to lie about counts, relation statuses, ACL
++coverage, media statuses, symbol resolution, sync cardinality, or tombstone
++emptiness. Revalidate the canonical profile/config hash and loaded chunker
++version at this boundary. Source scopes and generated timestamp must be copied
++from the request/projection and compared byte-for-byte with the manifest.
++
++Use `FullSnapshotStagingWriter` once with the eight projection streams, then
++`FullSnapshotStagingCompleter.complete(..., m10_quality=...)`; do not add a
++second writer or emit partial streams. The initial `tombstones` stream is
++always empty. Media, symbols, and diagnostic sync streams may be populated,
++but only when policy/provenance permits them.
++
++### 3. Deterministic version and owned staging lifecycle
++
++Use the existing `DatasetVersionGenerator`/M3 convention as the only source of
++`vYYYYMMDD-HHMMSS-ffffffZ`; no caller-supplied folder name or arbitrary digest
++may influence the path. Create an owned staging directory as a direct child of
++the validated dataset root, reject existing staging/final entries, and clean up
++only that owned directory on pre-publication failure. Enforce a plain,
++non-symlink/non-reparse dataset root and direct-child containment before any
++adapter or writer call. Keep generated-at deterministic for repeated fixture
++runs (for example, an injected fixed instant) so byte comparison is meaningful.
++
++The existing publisher renames staging to the final directory and only then
++atomically replaces `LATEST.txt`. Its tested failure contract intentionally
++allows an unadvertised final directory when the `LATEST` replacement fails,
++while preserving the old pointer. M10 must either adopt and document this
++contract or add a bounded compensating policy; it must not claim rollback of
++the rename that the shared publisher does not provide. In every failure case,
++the prior pointer must remain byte-identical and no existing final version may
++be clobbered.
++
++### 4. Publication acceptance is a separate postcondition
++
++After `FullSnapshotPublisher.publish`, perform a read-only acceptance pass on
++the returned final path and root pointer:
++
++- exactly ten regular non-symlink files in the version directory (eight JSONL,
++  `manifest.json`, `quality_report.md`) and no `LATEST.txt` inside it;
++- strict JSON/JSONL parsing (duplicate keys and non-finite constants rejected),
++  schema validation for every record, exact eight counts, manifest/folder
++  dataset-version equality, and empty initial tombstones;
++- manifest source scopes, profile/config/chunker metadata, report bytes, and
++  all graph/ACL/relation/media/symbol/sync invariants equal the pre-publication
++  projection; `LATEST.txt` contains exactly `<dataset_version>\n` and points to
++  the verified directory;
++- no post-completion mutation of report or machine files.
++
++The M3 publisher itself only validates a manifest and complete file set. Do not
++treat that as the full M10 acceptance gate. A failed post-publication readback
++must map to `export_acceptance` (19), preserve the old pointer where possible,
++and never report success.
++
++### 5. Synthetic fixture must exercise every allowed stream
++
++Use immutable in-memory adapters with non-empty Confluence and Git documents,
++chunks, ACL records, and at least one relation. Include a policy-allowed media
++asset with parent/raw provenance, a Git symbol that resolves to an emitted
++chunk, and diagnostic `sync_state` rows covering page/attachment/file/repo
++entity types. Keep `tombstones` explicitly empty. Include an unresolved Jira
++relation with its explicit closed status/target grammar, not a fabricated Jira
++record. Verify deterministic ordering and cross-source IDs.
++
++Run the complete CLI twice against equivalent immutable fixtures and separate
++roots (or a fixed version generator), then compare every stream byte, manifest,
++quality report, counts, final file set, and pointer bytes. A second publication
++into the same root must be a no-clobber failure, not an overwrite.
++
++## Adversarial acceptance matrix
++
++Every public/application boundary needs both happy-path and negative tests:
++
++- malformed config: `None`, `object()`, wrong enum/status, missing/extra keys,
++  wrong tuple/list/dict/path types, forged frozen models, unsafe root,
++  symlink/reparse root, bad timestamp, bad commit, profile/hash drift, and
++  `export_mode != full_snapshot`;
++- adapter boundary: wrong result type, `None`, adapter exception/category
++  leakage, generation/run/source-version drift, Git branch/commit/path drift,
++  unexpected source ownership, duplicate IDs, forbidden streams, and any
++  adapter call after an invalid request;
++- projection/graph: schema-invalid records, malformed relation target or
++  status, unresolved target silently dropped, missing/duplicate ACL, empty or
++  inherited ACL mismatch, media parent/provenance/status/budget mismatch,
++  symbol file/commit/line mismatch or missing chunk, sync entity/version drift,
++  count mismatch, non-empty initial tombstones, and validator mutation or
++  exception;
++- staging/publication: existing staging/final paths, nested/sibling/outside
++  roots, symlink entries, unexpected files, pre-existing/corrupt directory
++  `LATEST.txt`, rename failure, `LATEST` temp/replace failure, report write or
++  cleanup failure, no-clobber second run, and no leaked M3 logger traceback;
++- acceptance/report security: duplicate-key/NaN JSON, post-publication file or
++  report mutation, folder/LATEST mismatch, report containing record text,
++  source IDs, URLs, paths, principals, secrets, hashes, or exception strings.
++
++For each negative case assert the sanitized category/exit code, no stdout on
++failure, no partial staging/report/LATEST side effects (except the shared
++publisher's documented unadvertised final on post-rename `LATEST` failure),
++and unchanged pre-existing files. Test wrong runtime types before field access
++or side effects; annotations/dataclass construction alone are insufficient.
++
++## Recommended bounded tests and commands
++
++Add focused tests rather than broad unbounded integration:
++
++```text
++python -m pytest -q tests/foundation/application/use_cases/test_export_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10d-usecase
++python -m pytest -q tests/foundation/cli/test_export_m10_snapshot_cli.py --basetemp=.codex-workflow/20260805-m10/pytest-m10d-cli
++python -m pytest -q tests/foundation/integration/test_m10_synthetic_acceptance.py --basetemp=.codex-workflow/20260805-m10/pytest-m10e-synthetic
++python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py --basetemp=.codex-workflow/20260805-m10/pytest-m10d-export
++python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10abc
++python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-m6g
++python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_page_set.py tests/foundation/domain/models/test_chunk_stability.py tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/pytest-m10-m8m9
++python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10-arch
++python -m compileall -q src tests
++git diff --check
++```
++
++The implementer must report exact commands/results and use a fresh independent
++review session before roadmap/state changes. A real Confluence/Git invocation,
++credentials, tokenizer assets, raw pages, or unsanitized evidence are outside
++this synthetic gate.
++
++## Acceptance and closeout decision
++
++M10-D/E is ready for closeout only when the synthetic CLI proves deterministic
++ten-file publication, exact graph/count/report/pointer invariants, atomic
++failure/no-clobber behavior, and sanitized boundaries; all focused and
++bounded-regression commands pass; and a fresh independent reviewer reports
++`PASS`. The roadmap/state closeout should say:
++
++`M10-A/B/C/D complete; M10-E synthetic acceptance complete; M8-AC real gate and
++real M10 full-POC invocation remain pending_external_input.`
++
++Do not claim a real M10 PASS, M8-AC PASS, delta readiness, or operator evidence
++until the approved generation/scope, pinned assets, credential handling, and
++sanitized aggregate report are supplied externally.
+diff --git a/.codex-workflow/20260805-m10/53-m10de-plan-final.md b/.codex-workflow/20260805-m10/53-m10de-plan-final.md
+new file mode 100644
+index 0000000..190cf05
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/53-m10de-plan-final.md
+@@ -0,0 +1,45 @@
++# M10-D/E Synthetic Publication - Final Plan
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Objective
++
++Complete the bounded M10-D CLI/publication boundary and M10-E synthetic
++acceptance. This does not claim a real Confluence/Git POC or close the M8-AC
++real gate.
++
++## Implementation
++
++- Add one generic M10 export use case that accepts an exact validated
++  `M10SnapshotRequest`, injected Confluence/Git adapters, canonical validator,
++  export root, and deterministic generated timestamp.
++- Compose through the existing `ComposeM10Snapshot`, derive all quality
++  metrics from actual projection streams, and reject metric/provenance drift.
++- Reuse `DatasetVersionGenerator`, `FullSnapshotStagingWriter`,
++  `FullSnapshotStagingCompleter(m10_quality=...)`, and
++  `FullSnapshotPublisher`; do not add parallel writer/publisher/version code.
++- Add a sanitized M10 CLI entry point for the offline synthetic boundary. It
++  must reject malformed inputs before adapter/filesystem side effects, map all
++  failure categories to stable exit codes, and never import network,
++  credentials, raw stores, or checkpoint state.
++- Add post-publication readback acceptance for the exact ten-file snapshot,
++  strict JSON/JSONL/schema validation, folder/manifest/LATEST consistency,
++  projection equality, report immutability, and no-clobber behavior.
++- Add synthetic fixtures with non-empty Confluence/Git streams, relation,
++  ACL, media, symbol, page/attachment/file/repo sync rows, and empty initial
++  tombstones. Run two equivalent exports and compare all bytes.
++
++## Tests and validation
++
++Add adversarial application/CLI/publication tests for `None`, `object()`,
++forged requests, unsafe roots, adapter failures/wrong handoffs, schema and
++provenance drift, duplicate IDs, existing final/LATEST paths, symlinks,
++rename/LATEST failures, post-publication mutation, and sanitized output.
++Run focused M10-D/E, M10-A/B/C, M6G, M8/M9, architecture, compileall, and
++diff-check suites. Produce implementation report, then fresh independent
++review; only after `PASS` update roadmap/state and commit/push.
++
++## Non-goals
++
++No live network/Confluence/Git run, credentials, tokenizer assets, raw
++production evidence, delta export, indexing, retrieval, or M8-AC gate claim.
+diff --git a/.codex-workflow/20260805-m10/54-m10de-plan-approval.md b/.codex-workflow/20260805-m10/54-m10de-plan-approval.md
+new file mode 100644
+index 0000000..04cceb1
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/54-m10de-plan-approval.md
+@@ -0,0 +1,10 @@
++# M10-D/E Plan Approval
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++The bounded synthetic publication plan in `53-m10de-plan-final.md` is
++approved. It reuses the authoritative M3 seams, derives quality from actual
++streams, requires a sanitized CLI/application boundary and post-publication
++readback, and keeps real M10/M8-AC evidence external.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/55-m10de-implementation.md b/.codex-workflow/20260805-m10/55-m10de-implementation.md
+new file mode 100644
+index 0000000..ed7b699
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/55-m10de-implementation.md
+@@ -0,0 +1,55 @@
++# M10-D/E Implementation Report
++
++## Scope
++
++Implemented the bounded offline M10 full-snapshot application and CLI boundary
++plus synthetic publication acceptance. The implementation reuses the existing
++M3 staging writer, completer, publisher, and dataset-version generator. It
++does not construct network, credential, raw-store, or checkpoint dependencies.
++
++## Changes
++
++- Added `ExportM10Snapshot` with exact runtime request validation, injected
++  Confluence/Git composition and explicit M3 seam ports, sanitized failure
++  categories, derived quality metrics, owned staging cleanup, deterministic
++  versioning, and strict post-publication readback.
++- Added infrastructure wiring in `M10FullSnapshotExporter` so the application
++  boundary depends only on ports while the existing M3 implementations remain
++  authoritative.
++- Added the sanitized `export_m10_snapshot` CLI entry point with stable exit
++  codes, one-line JSON diagnostics, and offline/credential-free success
++  metadata.
++- Added synthetic application, CLI, and integration acceptance tests covering
++  malformed requests, adapter failures, no-clobber publication, deterministic
++  ten-file output, and populated media/symbol/sync streams.
++- Adjusted `M10SnapshotResult` to accept the platform's concrete `Path` type
++  for published results on Windows.
++
++## Validation
++
++Commands and results:
++
++```text
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/cli/test_export_m10_snapshot_cli.py tests/foundation/application/use_cases/test_export_m10_snapshot.py tests/foundation/integration/test_m10_synthetic_acceptance.py tests/architecture/test_application_import_boundary.py --basetemp=.codex-workflow/20260805-m10/pytest-m10de-local9
++35 passed
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py --basetemp=.codex-workflow/20260805-m10/pytest-m10de-m10abc3
++98 passed, 6 skipped
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/pytest-m10de-m6g
++37 passed
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_page_set.py tests/foundation/domain/models/test_chunk_stability.py tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/pytest-m10de-m8m9
++125 passed
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/architecture/test_application_import_boundary.py --basetemp=.codex-workflow/20260805-m10/pytest-m10de-arch3
++23 passed
++
++python -m compileall -q src tests
++completed successfully
++
++git diff --check
++completed successfully
++```
++
++No roadmap/state files were changed, and no commit or push was performed.
+diff --git a/.codex-workflow/20260805-m10/56-m10de-independent-review.md b/.codex-workflow/20260805-m10/56-m10de-independent-review.md
+new file mode 100644
+index 0000000..f9f98cd
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/56-m10de-independent-review.md
+@@ -0,0 +1,59 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-D/E Independent Review
++
++Scope reviewed: `.local_ai/ROADMAP.md` M10 section, approved plan/critique artifacts `52`-`54`, implementation report `55`, current M10 source/tests, application/import wiring, CLI mapping, M3 writer/completer/publisher seams, and the M10-A/B/C/M6G/M8/M9 regression surfaces. No source, test, roadmap, or state files were edited.
++
++## Findings
++
++### P1 - Acceptance failure leaves the new pointer advertised
++
++`src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py:321-331` maps any post-publication readback failure to `acceptance` but does not restore the pre-publication `LATEST.txt` bytes or remove/quarantine the newly advertised final directory. A mutating publisher probe delegated to `FullSnapshotPublisher`, then changed `quality_report.md`; the use case raised `acceptance`, but `LATEST.txt` changed from the old pointer to `v20260805-000000-000000Z\n` and the tampered final directory remained. This violates the approved postcondition to preserve the old pointer where possible and means a failed acceptance can leave a corrupt snapshot as the advertised one.
++
++### P1 - Readback trusts a mutable injected validator
++
++`src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py:232-239` validates parsed manifest/records in place and never checks that the validator left them unchanged (unlike the M10-C completer). A stateful exact-`FoundationSchemaValidator` probe tampered the published `manifest.json` on disk to `dataset_version: wrong-version`, then mutated the parsed manifest back during the fourth manifest validation call. The use case returned `published` while the final file still contained `wrong-version`. Strict post-publication acceptance must validate an isolated copy and reject validator mutation, or use a separately trusted canonical validator for readback.
++
++### P2 - Non-integer `SystemExit` escapes the CLI sanitizer
++
++`src/knowledgenexus/foundation/cli/export_m10_snapshot.py:97-98` does `int(exc.code or 0)` without guarding conversion. An adversarial boundary probe monkeypatched `_parse_args` to raise `SystemExit("secret")`; `cli.main([])` raised `ValueError: invalid literal for int() with base 10: 'secret'` instead of returning a sanitized exit code/JSON diagnostic. Real argparse paths currently use integer codes, but the public boundary should fail closed for every `SystemExit` payload.
++
++### P2 - Digest errors occur outside the sanitized failure mapping
++
++`src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py:332` computes `_snapshot_digest(final_path)` after the acceptance `try` block. A probe replacing `_snapshot_digest` with `RuntimeError("secret path")` produced that raw exception after publication, bypassing the closed M10 failure categories. A filesystem race or read failure at this final step has the same shape; digest computation should be inside the sanitized post-publication handling.
++
++## Verification
++
++Focused M10-D/E and architecture:
++
++```text
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/cli/test_export_m10_snapshot_cli.py tests/foundation/application/use_cases/test_export_m10_snapshot.py tests/foundation/integration/test_m10_synthetic_acceptance.py tests/architecture/test_application_import_boundary.py --basetemp=.codex-workflow/20260805-m10/56-pytest-m10de-focused-final
++35 passed in 0.73s
++```
++
++Regression suites:
++
++```text
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/56-pytest-m10abc
++51 passed in 0.74s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/56-pytest-m6g
++37 passed in 1.38s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_page_set.py tests/foundation/domain/models/test_chunk_stability.py tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/56-pytest-m8m9
++125 passed in 0.83s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/56-pytest-architecture
++89 passed in 1.37s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py --basetemp=.codex-workflow/20260805-m10/56-pytest-m3-export
++47 passed, 6 skipped in 1.30s
++
++python -m compileall -q src tests
++completed successfully
++
++git diff --check
++completed successfully (only existing LF/CRLF warnings)
++```
++
++Additional probes confirmed malformed requests fail before adapter calls, existing staging is rejected before adapter calls, application import loads no `knowledgenexus.foundation.infrastructure` modules, and the deterministic synthetic export produces the required ten files. The P1/P2 findings above prevent a clean independent `PASS` until bounded fixes and a fresh re-review.
+diff --git a/.codex-workflow/20260805-m10/57-m10de-fix-plan.input.md b/.codex-workflow/20260805-m10/57-m10de-fix-plan.input.md
+new file mode 100644
+index 0000000..1b4461e
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/57-m10de-fix-plan.input.md
+@@ -0,0 +1,21 @@
++# M10-D/E Fix Plan Input
++
++Address only the four findings in `56-m10de-independent-review.md`:
++
++1. Make post-publication acceptance failure restore the exact pre-run
++   `LATEST.txt` state where possible and remove only the newly owned final
++   directory, without touching an existing snapshot or hiding the shared
++   publisher's documented rename/LATEST failure semantics.
++2. Make acceptance readback fail closed on validator mutation or validator
++   side effects: validate defensive copies, compare them, and ensure the
++   on-disk manifest/JSONL bytes are unchanged during each validation pass.
++3. Sanitize non-integer `SystemExit` payloads in the CLI instead of calling
++   `int()` on arbitrary values.
++4. Include digest computation in the sanitized post-publication acceptance
++   handling so filesystem/hash failures map to `acceptance`.
++
++Add adversarial tests for pointer/final cleanup after report mutation,
++stateful validator mutation and on-disk tampering, `SystemExit("secret")`,
++and digest exceptions. Re-run focused M10-D/E, M10-A/B/C/M6G/M8/M9,
++architecture, compileall, diff-check, and a fresh independent review before
++roadmap/state, commit, or push.
+diff --git a/.codex-workflow/20260805-m10/58-m10de-fix-plan-review.md b/.codex-workflow/20260805-m10/58-m10de-fix-plan-review.md
+new file mode 100644
+index 0000000..f861af5
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/58-m10de-fix-plan-review.md
+@@ -0,0 +1,12 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-D/E Fix Plan Review
++
++Verdict: PASS.
++
++The bounded fix input addresses every confirmed P1/P2 finding without
++changing the application/ports architecture, legacy M6G behavior, publisher
++contract, real-run gate, or M8-AC status. Acceptance rollback is limited to
++the newly owned final directory and exact prior pointer bytes; validator
++readback is isolated and byte-stable; CLI and digest failures remain
++sanitized. Required adversarial tests and fresh review are included.
+diff --git a/.codex-workflow/20260805-m10/59-m10de-fix-plan-final.md b/.codex-workflow/20260805-m10/59-m10de-fix-plan-final.md
+new file mode 100644
+index 0000000..104eafb
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/59-m10de-fix-plan-final.md
+@@ -0,0 +1,20 @@
++# M10-D/E Fix Plan - Final
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++Implement exactly the four fixes listed in `57-m10de-fix-plan.input.md`:
++
++- Snapshot prior `LATEST.txt` bytes/existence and the new final path before
++  publication. If post-publication acceptance fails, restore the pointer
++  atomically (or remove the newly advertised pointer when none existed) and
++  remove only the newly created final directory; preserve prior snapshots.
++- During acceptance, validate deep-copied records and reject validator
++  mutation. Capture manifest/JSONL bytes before validation and reject any
++  validator-induced on-disk mutation.
++- Handle `SystemExit` only with an actual integer code; all other payloads
++  return sanitized unexpected JSON and exit code 1.
++- Compute the snapshot digest inside the acceptance try/except and map all
++  failures to `M10SnapshotExportFailure("acceptance")`.
++
++Add focused adversarial tests, rerun the bounded regression matrix, then
++commission a fresh independent review. No roadmap/state changes before PASS.
+diff --git a/.codex-workflow/20260805-m10/60-m10de-fix-plan-approval.md b/.codex-workflow/20260805-m10/60-m10de-fix-plan-approval.md
+new file mode 100644
+index 0000000..94e35f2
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/60-m10de-fix-plan-approval.md
+@@ -0,0 +1,9 @@
++# M10-D/E Fix Plan Approval
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++The four-finding remediation in `59-m10de-fix-plan-final.md` is approved for
++bounded implementation. It preserves existing publisher semantics and limits
++cleanup to M10-owned post-publication artifacts.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/61-m10de-fix-implementation.md b/.codex-workflow/20260805-m10/61-m10de-fix-implementation.md
+new file mode 100644
+index 0000000..61ad6ce
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/61-m10de-fix-implementation.md
+@@ -0,0 +1,52 @@
++# M10-D/E Fix Implementation
++
++## Scope
++
++Implemented only the four approved findings from `59-m10de-fix-plan-final.md`.
++No roadmap/state files, commits, or pushes were made.
++
++## Changes
++
++- Snapshot the pre-publication `LATEST.txt` state and final-version path. If
++  post-publication acceptance (including digest calculation) fails, restore the
++  exact prior pointer bytes atomically when available, remove a newly advertised
++  pointer only when it still contains this run's value, and remove only the
++  newly created final directory.
++- Acceptance readback now parses bytes captured before validation, validates
++  defensive copies, rejects validator mutation, and detects validator changes
++  to manifest/JSONL files (including replacement by symlinks/non-files).
++- CLI `SystemExit` handling accepts only an exact integer code; all other
++  payloads emit sanitized `unexpected` JSON and return exit code `1`.
++- Digest calculation is inside post-publication acceptance handling, so hash
++  or filesystem failures map to `M10SnapshotExportFailure("acceptance")`.
++
++## Adversarial Tests
++
++Added coverage for report tampering rollback, exact prior pointer restoration,
++stateful validator record mutation, validator on-disk tampering, digest
++exceptions, and `SystemExit("secret payload")` sanitization.
++
++## Validation
++
++```text
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/application/use_cases/test_export_m10_snapshot.py tests/foundation/cli/test_export_m10_snapshot_cli.py tests/foundation/integration/test_m10_synthetic_acceptance.py tests/architecture/test_application_import_boundary.py --basetemp=.codex-workflow/20260805-m10/61-pytest-m10de-focused
++40 passed in 1.19s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py --basetemp=.codex-workflow/20260805-m10/61-pytest-m10abc
++98 passed, 6 skipped in 2.11s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/61-pytest-m6g
++37 passed in 1.63s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_page_set.py tests/foundation/domain/models/test_chunk_stability.py tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/61-pytest-m8m9
++125 passed in 0.91s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/61-pytest-architecture
++89 passed in 1.62s
++
++python -m compileall -q src tests
++completed successfully
++
++git diff --check
++completed successfully (only existing LF/CRLF warnings)
++```
+diff --git a/.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md b/.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md
+new file mode 100644
+index 0000000..5e551b2
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md
+@@ -0,0 +1,43 @@
++# M10-D/E Fix Independent Review
++
++## Scope
++
++Fresh independent re-review of the approved fixes in `61-m10de-fix-implementation.md` against the four findings in `56-m10de-independent-review.md`. No source, test, roadmap, or state files were edited. Synthetic fixtures only; no credentials, network, raw/runtime data, or unsanitized Confluence content were accessed.
++
++## Adversarial verification
++
++- Acceptance rollback: report-tampering publisher probe raised sanitized `acceptance`, restored the exact pre-existing `LATEST.txt` bytes (including CRLF), preserved the prior final directory, and removed the newly published final directory.
++- Validator mutation: stateful validator probes that mutate parsed manifest records and mutate `manifest.json` on disk were rejected as `acceptance`; the new pointer/final directory were cleaned up.
++- CLI `SystemExit`: `SystemExit("secret payload")` returned exit code `1` and emitted only `{"status":"failed","category":"unexpected"}`; payload text did not leak.
++- Digest failure: injected digest `RuntimeError` was converted to `acceptance`, with no leaked exception text and publication rollback performed.
++
++## Verification
++
++```text
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/application/use_cases/test_export_m10_snapshot.py tests/foundation/cli/test_export_m10_snapshot_cli.py tests/foundation/integration/test_m10_synthetic_acceptance.py tests/architecture/test_application_import_boundary.py --basetemp=.codex-workflow/20260805-m10/62-m10de-focused
++40 passed in 1.53s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py tests/foundation/infrastructure/exporters/test_full_snapshot_staging_completer_m10.py tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py --basetemp=.codex-workflow/20260805-m10/62-m10abc
++98 passed, 6 skipped in 2.37s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/62-m6g
++37 passed in 1.83s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_page_set.py tests/foundation/domain/models/test_chunk_stability.py tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/62-m8m9
++125 passed in 1.00s
++
++$env:PYTHONPATH='src'; python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/62-architecture
++89 passed in 1.87s
++
++python -m compileall -q src tests
++completed successfully
++
++git diff --check
++completed successfully (only pre-existing LF/CRLF warnings)
++```
++
++## Findings
++
++No P0, P1, P2, or P3 findings.
++
++PASS
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 96904ab..c932483 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -29,10 +29,10 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
+ explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+ reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
+-export/store/checkpoint side effects. M10-A wire models, M10-B trusted
+-multi-source composition, and M10-C cross-stream projection/generic
+-completion are complete and independently reviewed `PASS`. M10-D CLI and
+-publication remain next; no real full-snapshot run has started.
++export/store/checkpoint side effects. M10-A through M10-D are complete and
++independently reviewed `PASS`. M10-E synthetic acceptance is complete and
++independently reviewed `PASS`; no real full-snapshot run has started, and the
++M8-AC real gate remains `pending_external_input`.
+ 
+ ## Durable State Convention
+ 
+@@ -1819,5 +1819,28 @@ separate deferred follow-up; no 100k scale PASS is claimed.
+   `88 passed`; compileall/diff-check passed. Final independent review is
+   `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` with
+   `VERDICT: PASS`.
+-- Residual boundary: M10-D CLI/publication and M10-E synthetic/external gate
+-  remain pending; M8-AC real mini-corpus remains `pending_external_input`.
++- Residual boundary: M10-E real full-snapshot evidence remains
++  `pending_external_input`; M8-AC real mini-corpus remains
++  `pending_external_input`.
++
++## M10-D/E CLI, Publication, and Synthetic Acceptance
++
++- Status: bounded implementation complete and independently reviewed `PASS`.
++- Added an offline sanitized CLI and infrastructure wiring over the existing
++  M3 staging writer, completer, and publisher seams. Publication performs
++  strict ten-file readback, deterministic digesting, no-clobber preflight, and
++  rollback that restores the exact prior pointer/final state after acceptance
++  failure.
++- Acceptance validates defensive copies and detects validator mutation of
++  parsed records or published bytes. Non-integer `SystemExit` payloads and
++  digest/filesystem failures are sanitized at the public boundary.
++- Synthetic acceptance proves deterministic ten-file output and repeatability;
++  no network, credentials, raw/runtime data, or real snapshot was used.
++- Validation: focused `40 passed`; M10-A/B/C `98 passed, 6 skipped`; M6G `37
++  passed`; M8/M9 `125 passed`; architecture `89 passed`; compileall and
++  diff-check passed. Fresh independent review is
++  `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` with
++  verdict `PASS`.
++- Residual boundary: real M10 full-snapshot evidence remains
++  `pending_external_input`; M8-AC real mini-corpus remains
++  `pending_external_input`.
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 681088f..ee950d2 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -93,7 +93,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+ | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
+-| M10 - First full POC Foundation snapshot | in progress; M10-A/B/C complete | M10-A wire models, M10-B trusted composition, and M10-C generic completion independently reviewed `PASS`; M10-D remains pending; M10-E remains `pending_external_input`; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
++| M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+ 
+@@ -120,9 +120,10 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are independently approved. M9-D1 tombstone contract and
+ explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+ approved. M9-D2 remains read-only and does not perform export/store/checkpoint
+-side effects. M10-A, M10-B, and M10-C are complete and independently reviewed
+-`PASS`; M10-D is next. No CLI/publication boundary or real full-snapshot run
+-has started.
++side effects. M10-A through M10-D are complete and independently reviewed
++`PASS`. M10-E synthetic acceptance is complete and independently reviewed
++`PASS`; no real full-snapshot run has started, and the M8-AC real gate remains
++`pending_external_input`.
+ 
+ - M2C1 `CanonicalDocumentRecordBuilder` - done.
+ - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
+@@ -1078,8 +1079,8 @@ Acceptance categories:
+ | M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
+ | M10-B trusted multi-source composition | complete; independently reviewed `PASS` | Added typed Confluence/Git handoffs, canonical shared-schema validation, source ownership/provenance, ACL inheritance, relation/media/symbol/sync gates, deterministic composition, empty initial tombstones, and sanitized application boundary. Focused `51 passed`; M9 `120 passed`; M6G `37 passed`; architecture `88 passed`; compileall/diff-check passed. Final review `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` is `VERDICT: PASS`. |
+ | M10-C cross-stream projection and generic completion | complete; independently reviewed `PASS` | Added additive generic `m10_quality` completion with strict canonical validation, exact stream/metric/source-scope invariants, deterministic sanitized 12-section reporting, no-clobber cleanup, and preserved M6G behavior. Focused `50 passed, 1 skipped`; M6G exporter/writer/publisher/one-page `118 passed, 8 skipped`; architecture `88 passed`; compileall/diff-check passed. Initial review found two P1 and one P2 boundary issues; bounded fix plan/review artifacts `47-49` addressed them. Final independent review `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` is `PASS`. |
+-| M10-D CLI and publication boundary | pending | Requires M10-C approved generic projection/completion path. |
+-| M10-E synthetic acceptance and external real-run gate | pending_external_input | Synthetic acceptance follows M10-D; real operator evidence requires approved inputs and remains separate. |
++| M10-D CLI and publication boundary | complete; independently reviewed `PASS` | Added offline sanitized CLI, M3 writer/completer/publisher wiring, no-clobber preflight, strict post-publication acceptance, and bounded rollback on acceptance failure. Focused M10-D/E suite `40 passed`; architecture `89 passed`; fresh review `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` is `PASS`. |
++| M10-E synthetic acceptance and external real-run gate | synthetic acceptance complete; real gate `pending_external_input` | Deterministic synthetic ten-file acceptance and repeatability are complete and independently reviewed `PASS`; real operator evidence still requires approved Confluence/Git inputs, ordered scope, and tokenizer assets. |
+ 
+ ## 13. Current Execution Boundary
+ 
+diff --git a/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+new file mode 100644
+index 0000000..9c83e01
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+@@ -0,0 +1,460 @@
++"""Generic, offline M10 full-snapshot application boundary.
++
++The use case deliberately owns no connector, checkpoint, or credential state.
++It composes two injected handoffs and then delegates filesystem work to the
++authoritative M3 writer, completer, and publisher seams.
++"""
++from __future__ import annotations
++
++import hashlib
++import json
++import shutil
++import tempfile
++from collections.abc import Mapping
++from copy import deepcopy
++from datetime import datetime
++from enum import StrEnum
++from pathlib import Path
++
++from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
++    ComposeM10Snapshot,
++    M10CompositionFailure,
++)
++from knowledgenexus.foundation.domain.models.m10_snapshot import (
++    M10QualityReportInput,
++    M10SnapshotProjection,
++    M10SnapshotRequest,
++    M10SnapshotResult,
++)
++from knowledgenexus.foundation.domain.rules.dataset_version_generator import (
++    DatasetVersionGenerator,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
++    M10PublisherPort,
++    M10StagingCompleterPort,
++    M10StagingWriterPort,
++)
++
++
++_JSONL_FILE_SCHEMA_PAIRS = (
++    ("documents.jsonl", "documents", "CanonicalDocument"),
++    ("chunks.jsonl", "chunks", "ChunkRecord"),
++    ("relations.jsonl", "relations", "RelationRecord"),
++    ("acl.jsonl", "acl", "ACLRecord"),
++    ("media_assets.jsonl", "media_assets", "MediaAsset"),
++    ("symbols.jsonl", "symbols", "SymbolRecord"),
++    ("sync_state.jsonl", "sync_state", "SyncStateRecord"),
++    ("tombstones.jsonl", "tombstones", "TombstoneRecord"),
++)
++_COUNT_KEYS = tuple(key for _, key, _ in _JSONL_FILE_SCHEMA_PAIRS)
++_PUBLISHED_NAMES = frozenset({name for name, _, _ in _JSONL_FILE_SCHEMA_PAIRS} | {"manifest.json", "quality_report.md"})
++_LATEST_FILE_NAME = "LATEST.txt"
++_CONCRETE_PATH_TYPE = type(Path())
++
++
++class M10SnapshotExportFailureCategory(StrEnum):
++    INVALID_REQUEST = "invalid_request"
++    ADAPTER = "adapter"
++    PROJECTION = "projection"
++    STAGING = "staging"
++    COMPLETION = "completion"
++    PUBLICATION = "publication"
++    ACCEPTANCE = "acceptance"
++
++
++class M10SnapshotExportFailure(Exception):
++    """Sanitized application failure; only a closed category is exposed."""
++
++    _CATEGORIES = frozenset(item.value for item in M10SnapshotExportFailureCategory)
++
++    def __init__(self, category: str | M10SnapshotExportFailureCategory):
++        if isinstance(category, M10SnapshotExportFailureCategory):
++            category = category.value
++        if type(category) is not str or category not in self._CATEGORIES:
++            raise TypeError("invalid M10 failure category")
++        self.category = M10SnapshotExportFailureCategory(category)
++        super().__init__(self.category.value)
++
++
++def _canonical_json(value: object) -> str:
++    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
++
++
++def _strict_object(path: Path) -> dict[str, object]:
++    return _strict_object_bytes(path.read_bytes())
++
++
++def _strict_object_bytes(raw: bytes) -> dict[str, object]:
++    value = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys, parse_constant=_reject_constant)
++    if type(value) is not dict:
++        raise TypeError("JSON object expected")
++    return value
++
++
++def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
++    result: dict[str, object] = {}
++    for key, value in pairs:
++        if key in result:
++            raise ValueError("duplicate JSON object key")
++        result[key] = value
++    return result
++
++
++def _reject_constant(value: str) -> object:
++    raise ValueError("non-finite JSON constant")
++
++
++def _strict_jsonl(path: Path) -> tuple[dict[str, object], ...]:
++    return _strict_jsonl_bytes(path.read_bytes())
++
++
++def _strict_jsonl_bytes(raw: bytes) -> tuple[dict[str, object], ...]:
++    records: list[dict[str, object]] = []
++    for line in raw.decode("utf-8").splitlines():
++        if not line:
++            raise ValueError("blank JSONL line")
++        value = json.loads(line, object_pairs_hook=_reject_duplicate_keys, parse_constant=_reject_constant)
++        if type(value) is not dict:
++            raise TypeError("JSONL object expected")
++        records.append(value)
++    return tuple(records)
++
++
++def _validated_request(request: object) -> M10SnapshotRequest:
++    # Read dataclass storage directly so a forged path-like object cannot run
++    # filesystem methods before the exact runtime type check completes.
++    if type(request) is not M10SnapshotRequest:
++        raise M10SnapshotExportFailure("invalid_request")
++    try:
++        fields = vars(request)
++        if set(fields) != set(M10SnapshotRequest.__dataclass_fields__):
++            raise ValueError
++        if type(fields["dataset_root"]) is not _CONCRETE_PATH_TYPE:
++            raise ValueError
++        M10SnapshotRequest.__post_init__(request)
++    except Exception:
++        raise M10SnapshotExportFailure("invalid_request") from None
++    return request
++
++
++def _derive_quality(request: M10SnapshotRequest, projection: M10SnapshotProjection) -> M10QualityReportInput:
++    streams = {name: tuple(deepcopy(dict(row)) for row in getattr(projection, name)) for name in _COUNT_KEYS}
++    expected_counts = {name: len(streams[name]) for name in _COUNT_KEYS}
++    if expected_counts != {name: getattr(projection.metrics, name) for name in _COUNT_KEYS}:
++        raise ValueError("projection metric count drift")
++    relations = streams["relations"]
++    jira = {
++        "relations_total": len(relations),
++        "resolved": sum(row.get("resolution_status") == "resolved" for row in relations),
++        "unresolved": sum(row.get("resolution_status") != "resolved" for row in relations),
++        "unresolved_without_jira_api": sum(row.get("resolution_status") == "unresolved_without_jira_api" for row in relations),
++        "deferred_mvp": sum(row.get("resolution_status") == "deferred_mvp" for row in relations),
++        "unresolved_target": sum(row.get("resolution_status") == "unresolved_target" for row in relations),
++    }
++    acl = {
++        "documents_total": len(streams["documents"]),
++        "documents_with_acl": len(streams["acl"]),
++        "restricted_documents": sum(row.get("is_restricted") is True for row in streams["acl"]),
++        "default_deny_chunks": sum(row.get("acl_tags") == ["restricted:unresolved"] for row in streams["chunks"]),
++    }
++    media = {
++        "assets_total": len(streams["media_assets"]),
++        "processed": sum(row.get("processing_status") in {"parsed", "ocr", "summarized"} for row in streams["media_assets"]),
++        "failed": sum(row.get("processing_status") == "failed" for row in streams["media_assets"]),
++        "not_processed": sum(row.get("processing_status") == "not_processed" for row in streams["media_assets"]),
++    }
++    symbols = {"symbols_total": len(streams["symbols"]), "resolved": sum(row.get("chunk_id") is not None for row in streams["symbols"])}
++    sync = {
++        "rows_total": len(streams["sync_state"]),
++        "active": sum(row.get("status") == "active" for row in streams["sync_state"]),
++        "pages": sum(row.get("entity_type") == "page" for row in streams["sync_state"]),
++        "attachments": sum(row.get("entity_type") == "attachment" for row in streams["sync_state"]),
++        "files": sum(row.get("entity_type") == "file" for row in streams["sync_state"]),
++        "repos": sum(row.get("entity_type") == "repo" for row in streams["sync_state"]),
++    }
++    tombstones = {"rows_total": len(streams["tombstones"]), "initial_empty": int(not streams["tombstones"])}
++    if tombstones["rows_total"] != 0:
++        raise ValueError("initial tombstones must be empty")
++    quality = M10QualityReportInput(
++        active_profile=request.profile_bundle.chunking_profile.active_profile,
++        profile_status=request.profile_bundle.chunking_profile.profile_status,
++        chunker_version=projection.chunker_version,
++        expected_counts=expected_counts,
++        source_scopes=deepcopy(projection.source_scopes),
++        jira_metrics=jira,
++        acl_metrics=acl,
++        media_metrics=media,
++        symbol_metrics=symbols,
++        sync_metrics=sync,
++        tombstone_metrics=tombstones,
++        completion_checks={"schema_validation": True, "counts_match": True, "tombstones_empty": True, "projection_consistency": True},
++    )
++    if projection.config_hash != request.profile_bundle.config_hash or projection.chunker_version != request.profile_bundle.chunking_profile.chunker_version:
++        raise ValueError("profile or chunker drift")
++    return quality
++
++
++def _cleanup_staging(path: Path) -> None:
++    try:
++        if type(path) is _CONCRETE_PATH_TYPE and path.name.startswith(".staging-") and path.parent.is_dir() and not path.is_symlink() and path.is_dir():
++            shutil.rmtree(path)
++    except OSError:
++        pass
++
++
++def _snapshot_digest(final_path: Path) -> str:
++    digest = hashlib.sha256()
++    for name in sorted(_PUBLISHED_NAMES):
++        digest.update(name.encode("utf-8"))
++        digest.update(b"\0")
++        digest.update((final_path / name).read_bytes())
++    return digest.hexdigest()
++
++
++def _restore_latest_pointer(
++    *,
++    latest_path: Path,
++    prior_exists: bool,
++    prior_bytes: bytes | None,
++    dataset_version: str,
++) -> None:
++    """Restore only the pointer state observed immediately before publication."""
++    try:
++        if prior_exists:
++            if prior_bytes is None:
++                return
++            temp_path: Path | None = None
++            try:
++                with tempfile.NamedTemporaryFile(
++                    "wb",
++                    dir=latest_path.parent,
++                    prefix=f".{latest_path.name}.",
++                    suffix=".rollback.tmp",
++                    delete=False,
++                ) as handle:
++                    temp_path = Path(handle.name)
++                    handle.write(prior_bytes)
++                temp_path.replace(latest_path)
++            finally:
++                if temp_path is not None:
++                    try:
++                        temp_path.unlink(missing_ok=True)
++                    except OSError:
++                        pass
++            return
++
++        # Do not remove an unrelated pointer created by another actor.
++        if latest_path.is_symlink() or not latest_path.is_file():
++            return
++        if latest_path.read_bytes() == f"{dataset_version}\n".encode("utf-8"):
++            latest_path.unlink()
++    except Exception:
++        pass
++
++
++def _rollback_publication(
++    *,
++    root: Path,
++    final_candidate: Path,
++    final_preexisting: bool,
++    latest_preexisting: bool,
++    latest_bytes: bytes | None,
++    dataset_version: str,
++) -> None:
++    """Best-effort cleanup of only this run's post-publication artifacts."""
++    _restore_latest_pointer(
++        latest_path=root / _LATEST_FILE_NAME,
++        prior_exists=latest_preexisting,
++        prior_bytes=latest_bytes,
++        dataset_version=dataset_version,
++    )
++    if final_preexisting:
++        return
++    try:
++        if (
++            type(final_candidate) is _CONCRETE_PATH_TYPE
++            and final_candidate.parent == root
++            and final_candidate.name == dataset_version
++            and final_candidate.is_dir()
++            and not final_candidate.is_symlink()
++        ):
++            shutil.rmtree(final_candidate)
++    except Exception:
++        pass
++
++
++def _sensitive_values(records: Mapping[str, tuple[dict[str, object], ...]], projection: M10SnapshotProjection, request: M10SnapshotRequest) -> set[str]:
++    values: set[str] = {request.profile_bundle.config_hash}
++    for stream in records.values():
++        for record in stream:
++            for key, value in record.items():
++                if not isinstance(value, str):
++                    continue
++                lowered = key.lower()
++                if any(token in lowered for token in ("id", "url", "path", "uri", "hash", "principal", "repo", "branch", "commit")) or value.startswith(("http://", "https://", "raw://")):
++                    values.add(value)
++    return {value for value in values if len(value) >= 8}
++
++
++def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10SnapshotProjection, dataset_version: str, generated_at: str, expected_counts: dict[str, int], quality_report: bytes, validator: FoundationSchemaValidator) -> None:
++    root = request.dataset_root
++    if final_path != root / dataset_version or type(final_path) is not _CONCRETE_PATH_TYPE or final_path.is_symlink() or not final_path.is_dir():
++        raise ValueError
++    entries = list(final_path.iterdir())
++    if {entry.name for entry in entries} != _PUBLISHED_NAMES or any(not entry.is_file() or entry.is_symlink() for entry in entries):
++        raise ValueError
++    validation_paths = {
++        "manifest.json": final_path / "manifest.json",
++        **{file_name: final_path / file_name for file_name, _, _ in _JSONL_FILE_SCHEMA_PAIRS},
++    }
++    validation_bytes = {name: path.read_bytes() for name, path in validation_paths.items()}
++
++    def assert_validation_bytes_unchanged() -> None:
++        for name, path in validation_paths.items():
++            if path.is_symlink() or not path.is_file() or path.read_bytes() != validation_bytes[name]:
++                raise ValueError("validator mutated published bytes")
++
++    manifest = _strict_object_bytes(validation_bytes["manifest.json"])
++    isolated_manifest = deepcopy(manifest)
++    validator.validate_record("Manifest", isolated_manifest)
++    if isolated_manifest != manifest:
++        raise ValueError("validator mutated manifest")
++    assert_validation_bytes_unchanged()
++    if manifest.get("dataset_version") != dataset_version or manifest.get("generated_at") != generated_at or manifest.get("config_hash") != projection.config_hash or manifest.get("chunker_version") != projection.chunker_version or manifest.get("schemas_version") != projection.schemas_version or _canonical_json(manifest.get("source_scopes")) != _canonical_json(projection.source_scopes) or _canonical_json(manifest.get("counts")) != _canonical_json(expected_counts):
++        raise ValueError
++    streams = {
++        name: _strict_jsonl_bytes(validation_bytes[f"{name}.jsonl"])
++        for name in _COUNT_KEYS
++    }
++    for file_name, name, schema in _JSONL_FILE_SCHEMA_PAIRS:
++        for row in streams[name]:
++            isolated_row = deepcopy(row)
++            validator.validate_record(schema, isolated_row)
++            if isolated_row != row:
++                raise ValueError("validator mutated record")
++            assert_validation_bytes_unchanged()
++    if streams["tombstones"]:
++        raise ValueError
++    expected_streams = {name: tuple(getattr(projection, name)) for name in _COUNT_KEYS}
++    if any(_canonical_json(list(streams[name])) != _canonical_json(list(expected_streams[name])) for name in _COUNT_KEYS):
++        raise ValueError
++    if (final_path / "quality_report.md").read_bytes() != quality_report:
++        raise ValueError
++    report = quality_report.decode("utf-8")
++    if any(secret in report for secret in _sensitive_values(streams, projection, request)):
++        raise ValueError
++    latest = root / _LATEST_FILE_NAME
++    if latest.is_symlink() or not latest.is_file() or latest.read_bytes() != f"{dataset_version}\n".encode("utf-8"):
++        raise ValueError
++
++
++class ExportM10Snapshot:
++    """Compose and publish one validated M10 full snapshot."""
++
++    def __init__(self, *, confluence_adapter: object, git_adapter: object, schema_validator: FoundationSchemaValidator | None = None, canonical_schema_validator: FoundationSchemaValidator | None = None, staging_writer: M10StagingWriterPort | None = None, staging_completer: M10StagingCompleterPort | None = None, publisher: M10PublisherPort | None = None) -> None:
++        try:
++            if not callable(getattr(confluence_adapter, "collect", None)) or not callable(getattr(git_adapter, "collect", None)):
++                raise TypeError
++            if schema_validator is None:
++                schema_validator = FoundationSchemaValidator()
++            if type(schema_validator) is not FoundationSchemaValidator:
++                raise TypeError
++            if canonical_schema_validator is not None and type(canonical_schema_validator) is not FoundationSchemaValidator:
++                raise TypeError
++            if not callable(getattr(staging_writer, "write", None)) or not callable(getattr(staging_completer, "complete", None)) or not callable(getattr(publisher, "publish", None)):
++                raise TypeError
++        except Exception:
++            raise M10SnapshotExportFailure("adapter") from None
++        self._composer = ComposeM10Snapshot(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=schema_validator, canonical_schema_validator=canonical_schema_validator)
++        self._validator = schema_validator
++        self._staging_writer = staging_writer
++        self._staging_completer = staging_completer
++        self._publisher = publisher
++
++    def execute(self, request: object, *, export_root: object | None = None, generated_at: object | None = None) -> M10SnapshotResult:
++        request = _validated_request(request)
++        if export_root is not None and (type(export_root) is not _CONCRETE_PATH_TYPE or export_root != request.dataset_root):
++            raise M10SnapshotExportFailure("invalid_request")
++        if generated_at is not None and (type(generated_at) is not str or generated_at != request.generated_at):
++            raise M10SnapshotExportFailure("invalid_request")
++        try:
++            parsed = datetime.fromisoformat(request.generated_at.replace("Z", "+00:00"))
++            dataset_version = DatasetVersionGenerator.generate(instant=parsed)
++        except Exception:
++            raise M10SnapshotExportFailure("projection") from None
++        staging_path = request.dataset_root / f".staging-{dataset_version}"
++        final_candidate = request.dataset_root / dataset_version
++        if staging_path.exists() or staging_path.is_symlink():
++            raise M10SnapshotExportFailure("staging")
++        if final_candidate.exists() or final_candidate.is_symlink():
++            raise M10SnapshotExportFailure("publication")
++        try:
++            composed = self._composer.execute(request)
++            projection = composed.projection
++            if type(projection) is not M10SnapshotProjection:
++                raise ValueError
++            projection_before = deepcopy(projection)
++            quality = _derive_quality(request, projection)
++            generated_at = request.generated_at
++        except M10CompositionFailure as exc:
++            raise M10SnapshotExportFailure(exc.category.value) from None
++        except Exception:
++            raise M10SnapshotExportFailure("projection") from None
++
++        try:
++            manifest = self._staging_writer.write(staging_path=staging_path, validator=self._validator, dataset_version=dataset_version, generated_at=generated_at, config_hash=projection.config_hash, chunker_version=projection.chunker_version, schemas_version=projection.schemas_version, documents=projection.documents, chunks=projection.chunks, relations=projection.relations, acl=projection.acl, media_assets=projection.media_assets, symbols=projection.symbols, sync_state=projection.sync_state, tombstones=projection.tombstones, source_scopes=projection.source_scopes)
++        except Exception:
++            _cleanup_staging(staging_path)
++            raise M10SnapshotExportFailure("staging") from None
++        try:
++            completed_manifest = self._staging_completer.complete(staging_path=staging_path, validator=self._validator, m10_quality=quality)
++            if _canonical_json(completed_manifest) != _canonical_json(manifest):
++                raise ValueError
++            report_snapshot = (staging_path / "quality_report.md").read_bytes()
++        except Exception:
++            _cleanup_staging(staging_path)
++            raise M10SnapshotExportFailure("completion") from None
++        latest_path = request.dataset_root / _LATEST_FILE_NAME
++        try:
++            latest_preexisting = latest_path.exists() or latest_path.is_symlink()
++            latest_bytes = (
++                latest_path.read_bytes()
++                if latest_preexisting and latest_path.is_file() and not latest_path.is_symlink()
++                else None
++            )
++            final_preexisting = final_candidate.exists() or final_candidate.is_symlink()
++            final_path = self._publisher.publish(staging_path=staging_path, dataset_root=request.dataset_root, validator=self._validator)
++        except Exception:
++            _cleanup_staging(staging_path)
++            raise M10SnapshotExportFailure("publication") from None
++        try:
++            _accept(final_path, request, projection, dataset_version, generated_at, quality.expected_counts, report_snapshot, self._validator)
++            if projection != projection_before:
++                raise ValueError
++            digest = _snapshot_digest(final_path)
++        except Exception:
++            _rollback_publication(
++                root=request.dataset_root,
++                final_candidate=final_candidate,
++                final_preexisting=final_preexisting,
++                latest_preexisting=latest_preexisting,
++                latest_bytes=latest_bytes,
++                dataset_version=dataset_version,
++            )
++            raise M10SnapshotExportFailure("acceptance") from None
++        return M10SnapshotResult(status="published", metrics=projection.metrics, digest=digest, dataset_version=dataset_version, final_path=final_path)
++
++
++M10SnapshotExporter = ExportM10Snapshot
++M10FullSnapshotExporter = ExportM10Snapshot
++M10SnapshotExportError = M10SnapshotExportFailure
++ExportM10SnapshotUseCase = ExportM10Snapshot
++
++__all__ = [
++    "ExportM10Snapshot", "ExportM10SnapshotUseCase", "M10SnapshotExporter",
++    "M10FullSnapshotExporter", "M10SnapshotExportFailure", "M10SnapshotExportError",
++    "M10SnapshotExportFailureCategory",
++]
+diff --git a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+new file mode 100644
+index 0000000..09531b0
+--- /dev/null
++++ b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+@@ -0,0 +1,112 @@
++"""Sanitized offline M10 full-snapshot CLI boundary.
++
++Adapters are dependencies of the application boundary and are intentionally
++not constructed here; this entry point cannot reach network, credential, raw,
++or checkpoint stores.
++"""
++from __future__ import annotations
++
++import argparse
++import json
++import logging
++import sys
++from collections.abc import Sequence
++from typing import NoReturn
++
++from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import (
++    M10SnapshotExportFailure,
++)
++from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++
++
++EXIT_UNEXPECTED = 1
++EXIT_CONFIGURATION = 2
++EXIT_INVALID_REQUEST = 20
++EXIT_ADAPTER = 21
++EXIT_PROJECTION = 15
++EXIT_STAGING = 16
++EXIT_COMPLETION = 17
++EXIT_PUBLICATION = 18
++EXIT_ACCEPTANCE = 19
++
++_EXIT_CODES = {
++    "invalid_request": EXIT_INVALID_REQUEST,
++    "adapter": EXIT_ADAPTER,
++    "projection": EXIT_PROJECTION,
++    "staging": EXIT_STAGING,
++    "completion": EXIT_COMPLETION,
++    "publication": EXIT_PUBLICATION,
++    "acceptance": EXIT_ACCEPTANCE,
++}
++
++_LEAKY_M3_LOGGERS = (
++    "knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer",
++    "knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer",
++    "knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher",
++)
++
++
++def _silence_m3_loggers() -> None:
++    for name in _LEAKY_M3_LOGGERS:
++        logger = logging.getLogger(name)
++        logger.handlers = [logging.NullHandler()]
++        logger.propagate = False
++
++
++class _ConfigurationError(Exception):
++    pass
++
++
++class _SanitizedParser(argparse.ArgumentParser):
++    def error(self, message: str) -> NoReturn:
++        raise _ConfigurationError
++
++
++def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
++    parser = _SanitizedParser(prog="export-m10-snapshot", add_help=True)
++    parser.parse_args([] if argv is None else argv)
++    return argparse.Namespace()
++
++
++def _fail(category: str, code: int) -> int:
++    sys.stderr.write(json.dumps({"status": "failed", "category": category}, sort_keys=True, allow_nan=False) + "\n")
++    return code
++
++
++def run(*, request: object, confluence_adapter: object, git_adapter: object, validator: FoundationSchemaValidator | None = None):
++    """Run the injected offline boundary; useful for tests and embedding."""
++    exporter = M10FullSnapshotExporter(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=validator)
++    return exporter.execute(request)
++
++
++def main(
++    argv: Sequence[str] | None = None,
++    *,
++    request: object | None = None,
++    confluence_adapter: object | None = None,
++    git_adapter: object | None = None,
++    validator: FoundationSchemaValidator | None = None,
++) -> int:
++    _silence_m3_loggers()
++    try:
++        _parse_args(argv)
++        if request is None or confluence_adapter is None or git_adapter is None:
++            raise M10SnapshotExportFailure("invalid_request")
++        result = run(request=request, confluence_adapter=confluence_adapter, git_adapter=git_adapter, validator=validator)
++    except SystemExit as exc:
++        if type(exc.code) is int:
++            return exc.code
++        return _fail("unexpected", EXIT_UNEXPECTED)
++    except _ConfigurationError:
++        return _fail("configuration", EXIT_CONFIGURATION)
++    except M10SnapshotExportFailure as exc:
++        return _fail(exc.category, _EXIT_CODES[exc.category])
++    except BaseException:
++        return _fail("unexpected", EXIT_UNEXPECTED)
++    sys.stdout.write(json.dumps({"status": "success", "dataset_version": result.dataset_version, "digest": result.digest, "counts": {key: getattr(result.metrics, key) for key in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")}, "network_used": False, "credentials_used": False}, sort_keys=True, allow_nan=False) + "\n")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/src/knowledgenexus/foundation/domain/models/m10_snapshot.py b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+index 1a06ef4..fd16f62 100644
+--- a/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
++++ b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+@@ -26,6 +26,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+ _POSIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+ _PROCESSING = ("failed", "not_processed", "ocr", "parsed", "summarized")
+ _RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
++_CONCRETE_PATH_TYPE = type(Path())
+ 
+ class M10SnapshotError(ValueError):
+     pass
+@@ -265,7 +266,7 @@ class M10SnapshotResult:
+             if type(self.digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", self.digest) or self.failure_category is not None: raise M10SnapshotError("invalid successful result")
+             if self.status == "composed" and self.dataset_version is not None: raise M10SnapshotError("composed result cannot have dataset version")
+             if self.status in ("staged", "published") and (type(self.dataset_version) is not str or not self.dataset_version): raise M10SnapshotError("missing dataset version")
+-            if self.status == "published" and (type(self.final_path) is not Path or not self.final_path.is_absolute()): raise M10SnapshotError("missing final path")
++            if self.status == "published" and (type(self.final_path) is not _CONCRETE_PATH_TYPE or not self.final_path.is_absolute()): raise M10SnapshotError("missing final path")
+             if self.status != "published" and self.final_path is not None: raise M10SnapshotError("unexpected final path")
+ 
+ @dataclass(frozen=True)
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+index 077c366..2cdb4c4 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+@@ -10,10 +10,14 @@ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_wr
+ from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer import (
+     JsonlRecordWriter,
+ )
++from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import (
++    M10FullSnapshotExporter,
++)
+ 
+ __all__ = [
+     "FullSnapshotPublisher",
+     "FullSnapshotStagingCompleter",
+     "FullSnapshotStagingWriter",
+     "JsonlRecordWriter",
++    "M10FullSnapshotExporter",
+ ]
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py b/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
+new file mode 100644
+index 0000000..a488440
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
+@@ -0,0 +1,22 @@
++"""Concrete M10 exporter wiring for the shared M3 filesystem seams."""
++from __future__ import annotations
++
++from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import (
++    ExportM10Snapshot,
++)
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher import FullSnapshotPublisher
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import FullSnapshotStagingCompleter
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import FullSnapshotStagingWriter
++
++
++class M10FullSnapshotExporter(ExportM10Snapshot):
++    def __init__(self, **kwargs: object) -> None:
++        super().__init__(
++            staging_writer=FullSnapshotStagingWriter,
++            staging_completer=FullSnapshotStagingCompleter,
++            publisher=FullSnapshotPublisher,
++            **kwargs,
++        )
++
++
++__all__ = ["M10FullSnapshotExporter"]
+diff --git a/src/knowledgenexus/foundation/ports/__init__.py b/src/knowledgenexus/foundation/ports/__init__.py
+index f304047..99b1d65 100644
+--- a/src/knowledgenexus/foundation/ports/__init__.py
++++ b/src/knowledgenexus/foundation/ports/__init__.py
+@@ -116,6 +116,11 @@ from knowledgenexus.foundation.ports.media_processing_port import (
+     ImageOcrPort,
+     PdfTextExtractionPort,
+ )
++from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
++    M10PublisherPort,
++    M10StagingCompleterPort,
++    M10StagingWriterPort,
++)
+ 
+ __all__ = [
+     "ConfluenceInventoryPort",
+@@ -198,4 +203,7 @@ __all__ = [
+     "StartNewRunRequest",
+     "ImageOcrPort",
+     "PdfTextExtractionPort",
++    "M10PublisherPort",
++    "M10StagingCompleterPort",
++    "M10StagingWriterPort",
+ ]
+diff --git a/src/knowledgenexus/foundation/ports/m10_snapshot_export_port.py b/src/knowledgenexus/foundation/ports/m10_snapshot_export_port.py
+new file mode 100644
+index 0000000..bec483c
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/m10_snapshot_export_port.py
+@@ -0,0 +1,20 @@
++"""Ports for the generic M10 exporter to consume the shared M3 seams."""
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Protocol
++
++
++class M10StagingWriterPort(Protocol):
++    def write(self, **kwargs: object) -> dict[str, object]: ...
++
++
++class M10StagingCompleterPort(Protocol):
++    def complete(self, **kwargs: object) -> dict[str, object]: ...
++
++
++class M10PublisherPort(Protocol):
++    def publish(self, **kwargs: object) -> Path: ...
++
++
++__all__ = ["M10StagingWriterPort", "M10StagingCompleterPort", "M10PublisherPort"]
+diff --git a/tests/foundation/application/use_cases/test_export_m10_snapshot.py b/tests/foundation/application/use_cases/test_export_m10_snapshot.py
+new file mode 100644
+index 0000000..d07f757
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_export_m10_snapshot.py
+@@ -0,0 +1,217 @@
++from __future__ import annotations
++
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++
++import knowledgenexus.foundation.application.use_cases.export_m10_snapshot as export_m10
++from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import ExportM10Snapshot, M10SnapshotExportFailure
++from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher import FullSnapshotPublisher
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import FullSnapshotStagingCompleter
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import FullSnapshotStagingWriter
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++from knowledgenexus.foundation.domain.models.m10_composition import (
++    M10ConfluenceHandoff,
++    M10GitHandoff,
++)
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10MediaPolicy
++from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
++
++
++class _Adapter:
++    def __init__(self, value):
++        self.value = value
++        self.calls = 0
++
++    def collect(self, request):
++        self.calls += 1
++        return self.value
++
++
++def _custom_exporter(*, validator=None, publisher=None, confluence, git):
++    return ExportM10Snapshot(
++        confluence_adapter=_Adapter(confluence),
++        git_adapter=_Adapter(git),
++        schema_validator=validator,
++        staging_writer=FullSnapshotStagingWriter,
++        staging_completer=FullSnapshotStagingCompleter,
++        publisher=publisher or FullSnapshotPublisher,
++    )
++
++
++class _ReportMutatingPublisher:
++    @staticmethod
++    def publish(**kwargs):
++        final_path = FullSnapshotPublisher.publish(**kwargs)
++        (final_path / "quality_report.md").write_bytes(b"tampered report")
++        return final_path
++
++
++class _TrackingPublisher:
++    def __init__(self, validator):
++        self.validator = validator
++
++    def publish(self, **kwargs):
++        final_path = FullSnapshotPublisher.publish(**kwargs)
++        self.validator.final_path = final_path
++        return final_path
++
++
++def test_acceptance_failure_restores_pointer_and_removes_new_final(tmp_path):
++    request = _request(tmp_path)
++    previous = tmp_path / "v-previous"
++    previous.mkdir()
++    marker = previous / "keep.txt"
++    marker.write_bytes(b"prior snapshot")
++    prior_latest = b"v-previous\r\n"
++    (tmp_path / "LATEST.txt").write_bytes(prior_latest)
++    confluence, git = _handoffs()
++
++    exporter = _custom_exporter(
++        confluence=confluence,
++        git=git,
++        publisher=_ReportMutatingPublisher,
++    )
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        exporter.execute(request)
++
++    assert exc.value.category == "acceptance"
++    assert (tmp_path / "LATEST.txt").read_bytes() == prior_latest
++    assert not (tmp_path / "v20260805-000000-000000Z").exists()
++    assert marker.read_bytes() == b"prior snapshot"
++
++
++def test_acceptance_rejects_validator_mutation_and_cleans_publication(tmp_path):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++    validator = FoundationSchemaValidator()
++    original_validate = validator.validate_record
++    validator.final_path = None
++
++    def mutating_validate(schema_name, record, *args, **kwargs):
++        if validator.final_path is not None and schema_name == "Manifest":
++            record["generated_at"] = "2026-08-05T00:00:01Z"
++        return original_validate(schema_name, record, *args, **kwargs)
++
++    validator.validate_record = mutating_validate
++    exporter = _custom_exporter(
++        confluence=confluence,
++        git=git,
++        validator=validator,
++        publisher=_TrackingPublisher(validator),
++    )
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        exporter.execute(request)
++
++    assert exc.value.category == "acceptance"
++    assert not (tmp_path / "v20260805-000000-000000Z").exists()
++    assert not (tmp_path / "LATEST.txt").exists()
++
++
++def test_acceptance_rejects_validator_on_disk_tampering(tmp_path):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++    validator = FoundationSchemaValidator()
++    original_validate = validator.validate_record
++    validator.final_path = None
++
++    def tampering_validate(schema_name, record, *args, **kwargs):
++        if validator.final_path is not None and schema_name == "Manifest":
++            (validator.final_path / "manifest.json").write_bytes(b"{}")
++        return original_validate(schema_name, record, *args, **kwargs)
++
++    validator.validate_record = tampering_validate
++    exporter = _custom_exporter(
++        confluence=confluence,
++        git=git,
++        validator=validator,
++        publisher=_TrackingPublisher(validator),
++    )
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        exporter.execute(request)
++
++    assert exc.value.category == "acceptance"
++    assert not (tmp_path / "v20260805-000000-000000Z").exists()
++    assert not (tmp_path / "LATEST.txt").exists()
++
++
++def test_digest_failure_is_sanitized_and_rolls_back(tmp_path, monkeypatch):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++
++    def explode(_path):
++        raise RuntimeError("secret digest path")
++
++    monkeypatch.setattr(export_m10, "_snapshot_digest", explode)
++    exporter = _custom_exporter(confluence=confluence, git=git)
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        exporter.execute(request)
++
++    assert exc.value.category == "acceptance"
++    assert not (tmp_path / "v20260805-000000-000000Z").exists()
++    assert not (tmp_path / "LATEST.txt").exists()
++
++
++def test_export_m10_publishes_using_m3_and_derives_counts(tmp_path):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++    left, right = _Adapter(confluence), _Adapter(git)
++    result = M10FullSnapshotExporter(confluence_adapter=left, git_adapter=right).execute(request)
++    assert result.status == "published"
++    assert result.dataset_version == "v20260805-000000-000000Z"
++    assert result.metrics.documents == 2
++    assert sorted(path.name for path in result.final_path.iterdir()) == sorted([
++        "acl.jsonl", "chunks.jsonl", "documents.jsonl", "manifest.json", "media_assets.jsonl",
++        "quality_report.md", "relations.jsonl", "symbols.jsonl", "sync_state.jsonl", "tombstones.jsonl",
++    ])
++    assert left.calls == right.calls == 1
++
++
++@pytest.mark.parametrize("bad", [None, object(), {"request": True}])
++def test_invalid_request_fails_before_adapter_calls(tmp_path, bad):
++    confluence, git = _handoffs()
++    left, right = _Adapter(confluence), _Adapter(git)
++    exporter = M10FullSnapshotExporter(confluence_adapter=left, git_adapter=right)
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        exporter.execute(bad)
++    assert exc.value.category == "invalid_request"
++    assert left.calls == right.calls == 0
++
++
++def test_adapter_errors_are_sanitized(tmp_path):
++    class Exploding:
++        def collect(self, request):
++            raise RuntimeError("secret path and page body")
++
++    _, git = _handoffs()
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        M10FullSnapshotExporter(confluence_adapter=Exploding(), git_adapter=_Adapter(git)).execute(_request(tmp_path))
++    assert exc.value.category == "adapter"
++    assert "secret" not in str(exc.value)
++
++
++def test_constructor_sanitizes_throwing_dependency_attributes():
++    class Bad:
++        @property
++        def collect(self):
++            raise RuntimeError("secret adapter detail")
++
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        M10FullSnapshotExporter(confluence_adapter=Bad(), git_adapter=object())
++    assert exc.value.category == "adapter"
++    assert "secret" not in str(exc.value)
++
++
++def test_second_export_is_no_clobber(tmp_path):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++    left, right = _Adapter(confluence), _Adapter(git)
++    exporter = M10FullSnapshotExporter(confluence_adapter=left, git_adapter=right)
++    exporter.execute(request)
++    with pytest.raises(M10SnapshotExportFailure) as exc:
++        exporter.execute(request)
++    assert exc.value.category == "publication"
++    assert left.calls == right.calls == 1
++    assert (tmp_path / "LATEST.txt").read_text(encoding="utf-8") == "v20260805-000000-000000Z\n"
+diff --git a/tests/foundation/cli/test_export_m10_snapshot_cli.py b/tests/foundation/cli/test_export_m10_snapshot_cli.py
+new file mode 100644
+index 0000000..2c7b3e2
+--- /dev/null
++++ b/tests/foundation/cli/test_export_m10_snapshot_cli.py
+@@ -0,0 +1,61 @@
++from __future__ import annotations
++
++import json
++
++from knowledgenexus.foundation.cli import export_m10_snapshot as cli
++from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
++
++
++class _Adapter:
++    def __init__(self, value):
++        self.value = value
++        self.calls = 0
++
++    def collect(self, request):
++        self.calls += 1
++        return self.value
++
++
++def test_cli_rejects_missing_injected_boundary_without_output(capsys):
++    assert cli.main([]) == cli.EXIT_INVALID_REQUEST
++    captured = capsys.readouterr()
++    assert captured.out == ""
++    assert json.loads(captured.err) == {"category": "invalid_request", "status": "failed"}
++
++
++def test_cli_success_is_sanitized_and_offline(tmp_path, capsys):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++    assert cli.main(request=request, confluence_adapter=_Adapter(confluence), git_adapter=_Adapter(git)) == 0
++    captured = capsys.readouterr()
++    payload = json.loads(captured.out)
++    assert payload["status"] == "success"
++    assert payload["network_used"] is False
++    assert payload["credentials_used"] is False
++    assert captured.err == ""
++
++
++def test_cli_unknown_argument_is_stable_and_silent(capsys):
++    assert cli.main(["--unknown-sensitive-path=C:/secret"]) == cli.EXIT_CONFIGURATION
++    captured = capsys.readouterr()
++    assert captured.out == ""
++    assert "secret" not in captured.err
++
++
++def test_cli_help_returns_success(capsys):
++    assert cli.main(["--help"]) == 0
++    captured = capsys.readouterr()
++    assert "export-m10-snapshot" in captured.out
++    assert captured.err == ""
++
++
++def test_cli_sanitizes_non_integer_system_exit(monkeypatch, capsys):
++    def raise_secret(_argv):
++        raise SystemExit("secret payload")
++
++    monkeypatch.setattr(cli, "_parse_args", raise_secret)
++    assert cli.main([]) == cli.EXIT_UNEXPECTED
++    captured = capsys.readouterr()
++    assert captured.out == ""
++    assert json.loads(captured.err) == {"category": "unexpected", "status": "failed"}
++    assert "secret" not in captured.err
+diff --git a/tests/foundation/integration/test_m10_synthetic_acceptance.py b/tests/foundation/integration/test_m10_synthetic_acceptance.py
+new file mode 100644
+index 0000000..e27b6c3
+--- /dev/null
++++ b/tests/foundation/integration/test_m10_synthetic_acceptance.py
+@@ -0,0 +1,56 @@
++from __future__ import annotations
++
++import hashlib
++from dataclasses import replace
++
++from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
++from knowledgenexus.foundation.domain.models.m10_composition import M10ConfluenceHandoff, M10GitHandoff
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10MediaPolicy
++from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
++
++
++class _Adapter:
++    def __init__(self, value):
++        self.value = value
++
++    def collect(self, request):
++        return self.value
++
++
++def _extended(tmp_path):
++    request = replace(_request(tmp_path), media_policy=M10MediaPolicy(True, False, ("failed", "not_processed", "parsed"), 1))
++    confluence, git = _handoffs()
++    stamp = "2026-08-05T00:00:00Z"
++    media = {
++        "schema_version": "1.0", "media_id": "confluence:attachment:1", "parent_document_id": "confluence:page:123",
++        "source_system": "confluence", "filename": "diagram.drawio", "mime_type": "application/xml", "size_bytes": 1,
++        "download_status": "not_attempted", "processing_status": "parsed", "relevance": "high", "extracted_text": "node",
++        "summary": None, "confidence": None, "raw_uri": None, "content_hash": None, "source_version": "1", "updated_at": None, "crawled_at": stamp,
++    }
++    page_sync = {"schema_version": "1.0", "source_id": "src", "entity_id": "confluence:page:123", "entity_type": "page", "last_seen_version": "1", "last_content_hash": None, "last_synced_at": stamp, "status": "active"}
++    attachment_sync = {**page_sync, "entity_id": "confluence:attachment:1", "entity_type": "attachment"}
++    symbol = {
++        "schema_version": "1.0", "symbol_id": "sym:org-repo:src-a.py:f", "repo": "org-repo", "branch": "main", "commit_hash": request.git_commit,
++        "file_path": "src/a.py", "language": "cpp", "symbol_type": "function", "name": "f", "qualified_name": "f", "signature": None,
++        "line_start": 1, "line_end": 1, "parent_symbol": None, "chunk_id": git.chunks[0]["chunk_id"], "parse_status": "ok", "scanned_at": stamp,
++    }
++    file_sync = {"schema_version": "1.0", "source_id": "org-repo", "entity_id": git.documents[0]["document_id"], "entity_type": "file", "last_seen_version": request.git_commit, "last_content_hash": None, "last_synced_at": stamp, "status": "active"}
++    repo_sync = {"schema_version": "1.0", "source_id": "org-repo", "entity_id": "org-repo", "entity_type": "repo", "last_seen_version": request.git_commit, "last_content_hash": None, "last_synced_at": stamp, "status": "active"}
++    confluence = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (media,), (), (page_sync, attachment_sync), confluence.raw_artifact_identity)
++    git = M10GitHandoff(git.repository, git.branch, git.commit, git.documents, git.chunks, (), git.acl, (), (symbol,), (file_sync, repo_sync))
++    return request, confluence, git
++
++
++def test_two_equivalent_exports_have_identical_ten_file_bytes(tmp_path):
++    first_root, second_root = tmp_path / "first", tmp_path / "second"
++    first_root.mkdir(); second_root.mkdir()
++    first_request, first_confluence, first_git = _extended(first_root)
++    second_request, second_confluence, second_git = _extended(second_root)
++    first = M10FullSnapshotExporter(confluence_adapter=_Adapter(first_confluence), git_adapter=_Adapter(first_git)).execute(first_request)
++    second = M10FullSnapshotExporter(confluence_adapter=_Adapter(second_confluence), git_adapter=_Adapter(second_git)).execute(second_request)
++    assert first.dataset_version == second.dataset_version
++    first_files = {path.name: path.read_bytes() for path in first.final_path.iterdir()}
++    second_files = {path.name: path.read_bytes() for path in second.final_path.iterdir()}
++    assert first_files == second_files
++    assert hashlib.sha256(first_files["quality_report.md"]).hexdigest() not in first_files["quality_report.md"].decode()
++    assert (first_root / "LATEST.txt").read_bytes() == (second_root / "LATEST.txt").read_bytes()
+-- 
+2.45.1.windows.1
+

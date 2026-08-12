@@ -1,0 +1,23 @@
+{
+  "schema": "w5-c-sanitized-v1",
+  "authorization_consumed": false,
+  "base_binding_verified": false,
+  "safe_scenario_attested": false,
+  "scenario_cases": {
+    "content_changed": false,
+    "source_deleted_404": false,
+    "access_revoked_403": false,
+    "moved_out_of_scope": false,
+    "acl_only": false
+  },
+  "invocation_count": 0,
+  "offline_socket_forbidden": false,
+  "zero_gets_during_export": false,
+  "sparse_delta": false,
+  "strict_overlay_readback": false,
+  "unchanged_empty_delta": false,
+  "deterministic_repeat": false,
+  "base_raw_state_unchanged": false,
+  "status": "pending_external_input",
+  "failure_category": null
+}

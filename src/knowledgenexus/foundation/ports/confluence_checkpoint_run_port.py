@@ -69,6 +69,31 @@ class ResumeExplicitRunRequest:
 
 
 @dataclass(frozen=True, repr=False)
+class ActivateRawGenerationRequest:
+    workspace: Path
+    run_id: CrawlRunId
+    endpoint_url: str
+    source_config: ConfluenceSourceConfig
+    reliability_profile: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        _validate_request_fields(
+            self,
+            self.workspace,
+            self.endpoint_url,
+            self.source_config,
+            self.reliability_profile,
+        )
+        try:
+            _validated_run_id(self.run_id)
+        except (TypeError, ValueError):
+            raise ValueError("invalid checkpoint run request") from None
+
+    def __repr__(self) -> str:
+        return "ActivateRawGenerationRequest()"
+
+
+@dataclass(frozen=True, repr=False)
 class ResumeUniqueIncompleteRunRequest:
     workspace: Path
     endpoint_url: str
@@ -160,6 +185,8 @@ class CheckpointRunActivation(ConfluenceCheckpointStatePort, Protocol):
     snapshot: CrawlRunSnapshot
     session_id: CrawlSessionId
 
+    def guard_raw_publication(self) -> ContextManager[None]: ...
+
 
 CheckpointRunOutcome = (
     CheckpointRunActivation
@@ -179,4 +206,8 @@ class ConfluenceCheckpointRunPort(Protocol):
 
     def resume_unique_incomplete_run(
         self, request: ResumeUniqueIncompleteRunRequest
+    ) -> ContextManager[CheckpointRunOutcome]: ...
+
+    def activate_raw_generation(
+        self, request: ActivateRawGenerationRequest
     ) -> ContextManager[CheckpointRunOutcome]: ...

@@ -1,0 +1,1167 @@
+From e1a32321d3fa572b30220da5eeb387632570f51e Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 17:50:51 +0700
+Subject: [PATCH] foundation: add bounded M10 delta orchestration
+
+---
+ .local_ai/IMPLEMENTATION_STATE.md             |  11 +-
+ docs/FOUNDATION_PRODUCER_MATRIX.json          |   2 +-
+ .../application/use_cases/__init__.py         |   8 +
+ .../use_cases/export_m10_snapshot.py          |  21 +-
+ .../use_cases/project_m10_delta.py            | 338 ++++++++++++++++++
+ .../domain/rules/snapshot_readback.py         |  40 ++-
+ .../infrastructure/exporters/__init__.py      |   8 +
+ .../exporters/delta_snapshot_reader.py        | 158 +++++++-
+ .../exporters/m10_snapshot_exporter.py        |  24 +-
+ .../use_cases/test_project_m10_delta.py       | 247 +++++++++++++
+ .../exporters/test_delta_snapshot_reader.py   |  53 +++
+ 11 files changed, 887 insertions(+), 23 deletions(-)
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py
+ create mode 100644 tests/foundation/application/use_cases/test_project_m10_delta.py
+ create mode 100644 tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py
+
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 14916b6..923233b 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -2032,16 +2032,17 @@ performance gate remain deferred; no 100k scale PASS is claimed.
+ - F5: full-snapshot exporter, publication, readback, and deterministic
+   synthetic acceptance are complete; bounded real Confluence/Git snapshot
+   evidence is still pending.
+-- F6: delta projection, tombstone cascades, ACL-only re-emission intents,
+-  prior-target membership checks, strict readback, and full-to-delta publisher
+-  wiring are complete. A real second-sync run is still pending.
++- F6: delta projection, bounded M10 second-sync orchestration, tombstone
++  cascades, ACL-only re-emission intents, prior-target membership checks,
++  recursive strict readback, and full-to-delta publisher wiring are complete.
++  A real second-sync run is still pending.
+ - F7: scale gate models/evaluator and production-transport enforcement are
+   complete; 10k synthetic repeatability passed, while 100k and sanitized real
+   production evidence remain pending.
+ - Operator evaluation CLI validation: `10 passed` focused; F4/F7 evaluator and
+   CLI suite `16 passed` in the current workspace.
+-- Verification on 2026-08-08: `3152 passed, 39 skipped` with the pinned local
+-  tokenizer bundle; focused gate/exporter suite `59 passed, 6 skipped`.
++- Verification on 2026-08-08: `3199 passed, 40 skipped` with the pinned local
++  tokenizer bundle; M10 delta/readback focused suite `11 passed`.
+ 
+ ## M11 PLM Read-Only Ingestion (HOLD)
+ 
+diff --git a/docs/FOUNDATION_PRODUCER_MATRIX.json b/docs/FOUNDATION_PRODUCER_MATRIX.json
+index b40468e..4f1d53b 100644
+--- a/docs/FOUNDATION_PRODUCER_MATRIX.json
++++ b/docs/FOUNDATION_PRODUCER_MATRIX.json
+@@ -7,7 +7,7 @@
+     {"name": "relations", "schema": "RelationRecord", "producers": ["Jira relation builder", "generic page/media relation materializer"], "closure": "source and resolved targets exist; unresolved targets use stable markers"},
+     {"name": "acl", "schema": "ACLRecord", "producers": ["Confluence ACL composer", "Git ACL composer"], "closure": "exactly one ACL per document"},
+     {"name": "media_assets", "schema": "MediaAsset", "producers": ["Confluence media batch processor"], "closure": "parent_document_id exists and status is truthful"},
+-    {"name": "symbols", "schema": "SymbolRecord", "producers": ["Git symbol builder"], "closure": "document_id and source provenance exist"},
++    {"name": "symbols", "schema": "SymbolRecord", "producers": ["Git symbol builder"], "closure": "Git file provenance exists and optional chunk_id points to an emitted chunk"},
+     {"name": "sync_state", "schema": "SyncStateRecord", "producers": ["SyncStateRecordBuilder"], "closure": "entity belongs to emitted source scope"},
+     {"name": "tombstones", "schema": "TombstoneRecord", "producers": ["PropagateDelta", "ProjectTombstones"], "closure": "target existed in prior snapshot and cascades by contract"}
+   ],
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index 7962e03..82d4a93 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -72,6 +72,11 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
+ from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
+ from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
+ from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
++from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
++    M10DeltaOrchestrationError,
++    M10DeltaOrchestrationResult,
++    M10DeltaOrchestrator,
++)
+ from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
+     ComposeM10Snapshot,
+     M10CompositionFailure,
+@@ -128,6 +133,9 @@ __all__ = [
+     "BuildGitSymbols",
+     "ProjectTombstones",
+     "PropagateDelta",
++    "M10DeltaOrchestrationError",
++    "M10DeltaOrchestrationResult",
++    "M10DeltaOrchestrator",
+     "ComposeM10Snapshot",
+     "M10CompositionFailure",
+     "M10CompositionFailureCategory",
+diff --git a/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+index 6377763..139490d 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
++++ b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+@@ -20,6 +20,10 @@ from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import
+     ComposeM10Snapshot,
+     M10CompositionFailure,
+ )
++from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
++    M10DeltaOrchestrationResult,
++)
++from knowledgenexus.foundation.domain.models.delta_propagation import DeltaInventoryEntry
+ from knowledgenexus.foundation.domain.models.m10_snapshot import (
+     M10QualityReportInput,
+     M10SnapshotProjection,
+@@ -364,7 +368,7 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
+ class ExportM10Snapshot:
+     """Compose and publish one validated M10 full snapshot."""
+ 
+-    def __init__(self, *, confluence_adapter: object, git_adapter: object, schema_validator: FoundationSchemaValidator | None = None, canonical_schema_validator: FoundationSchemaValidator | None = None, staging_writer: M10StagingWriterPort | None = None, staging_completer: M10StagingCompleterPort | None = None, publisher: M10PublisherPort | None = None) -> None:
++    def __init__(self, *, confluence_adapter: object, git_adapter: object, schema_validator: FoundationSchemaValidator | None = None, canonical_schema_validator: FoundationSchemaValidator | None = None, staging_writer: M10StagingWriterPort | None = None, staging_completer: M10StagingCompleterPort | None = None, publisher: M10PublisherPort | None = None, delta_orchestrator: object | None = None, delta_inventory: tuple[DeltaInventoryEntry, ...] = ()) -> None:
+         try:
+             if not callable(getattr(confluence_adapter, "collect", None)) or not callable(getattr(git_adapter, "collect", None)):
+                 raise TypeError
+@@ -376,6 +380,10 @@ class ExportM10Snapshot:
+                 raise TypeError
+             if not callable(getattr(staging_writer, "write", None)) or not callable(getattr(staging_completer, "complete", None)) or not callable(getattr(publisher, "publish", None)):
+                 raise TypeError
++            if delta_orchestrator is not None and not callable(getattr(delta_orchestrator, "execute", None)):
++                raise TypeError
++            if type(delta_inventory) is not tuple or any(type(item) is not DeltaInventoryEntry for item in delta_inventory):
++                raise TypeError
+         except Exception:
+             raise M10SnapshotExportFailure("adapter") from None
+         self._composer = ComposeM10Snapshot(confluence_adapter=confluence_adapter, git_adapter=git_adapter, schema_validator=schema_validator, canonical_schema_validator=canonical_schema_validator)
+@@ -383,6 +391,8 @@ class ExportM10Snapshot:
+         self._staging_writer = staging_writer
+         self._staging_completer = staging_completer
+         self._publisher = publisher
++        self._delta_orchestrator = delta_orchestrator
++        self._delta_inventory = delta_inventory
+ 
+     def execute(self, request: object, *, export_root: object | None = None, generated_at: object | None = None) -> M10SnapshotResult:
+         request = _validated_request(request)
+@@ -406,6 +416,15 @@ class ExportM10Snapshot:
+             projection = composed.projection
+             if type(projection) is not M10SnapshotProjection:
+                 raise ValueError
++            if request.export_mode == "delta" and self._delta_orchestrator is not None:
++                orchestrated = self._delta_orchestrator.execute(
++                    request,
++                    projection,
++                    inventory=self._delta_inventory,
++                )
++                if type(orchestrated) is not M10DeltaOrchestrationResult:
++                    raise ValueError
++                projection = orchestrated.projection
+             projection_before = deepcopy(projection)
+             quality = _derive_quality(request, projection)
+             generated_at = request.generated_at
+diff --git a/src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py b/src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py
+new file mode 100644
+index 0000000..554aafc
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/project_m10_delta.py
+@@ -0,0 +1,338 @@
++"""Bounded orchestration for a second M10 snapshot.
++
++The exporter owns publication; this seam only compares an already published
++stream (obtained through an explicit reader) with the current in-memory M10
++projection.  It deliberately performs no filesystem or network I/O.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++from collections.abc import Mapping, Sequence
++from dataclasses import dataclass, replace
++from datetime import datetime
++
++from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
++from knowledgenexus.foundation.domain.models.chunk_stability import (
++    ACTIVE_CHUNKER_VERSION,
++    ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++    ChunkStabilityEntry,
++    DocumentChunkSetSummary,
++)
++from knowledgenexus.foundation.domain.models.delta_propagation import (
++    DeltaInventoryEntry,
++    DeltaPropagationRequest,
++    DeltaPropagationResult,
++    DeltaPropagationStatus,
++)
++from knowledgenexus.foundation.domain.models.m10_snapshot import (
++    M10SnapshotProjection,
++    M10SnapshotRequest,
++)
++from knowledgenexus.foundation.domain.models.tombstone_propagation import (
++    TombstoneEntityType,
++    TombstoneTarget,
++)
++from knowledgenexus.foundation.domain.rules.dataset_version_generator import DatasetVersionGenerator
++from knowledgenexus.foundation.domain.rules.snapshot_readback import (
++    SnapshotReadbackError,
++    validate_snapshot_streams,
++)
++
++
++_STREAMS = ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")
++_STREAM_IDS = {
++    "documents": "document_id",
++    "chunks": "chunk_id",
++    "relations": "relation_id",
++    "acl": "acl_id",
++    "media_assets": "media_id",
++    "symbols": "symbol_id",
++    "sync_state": "entity_id",
++    "tombstones": "tombstone_id",
++}
++
++
++class M10DeltaOrchestrationError(ValueError):
++    """Sanitized failure at the M10 delta composition boundary."""
++
++
++@dataclass(frozen=True)
++class M10DeltaOrchestrationResult:
++    projection: M10SnapshotProjection
++    propagation: DeltaPropagationResult
++
++    def __post_init__(self) -> None:
++        if type(self.projection) is not M10SnapshotProjection or type(self.propagation) is not DeltaPropagationResult:
++            raise TypeError("delta result is invalid")
++
++
++def _canonical_hash(value: object) -> str:
++    return hashlib.sha256(
++        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
++    ).hexdigest()
++
++
++def _stream_view(value: object) -> dict[str, tuple[dict[str, object], ...]]:
++    """Copy a reader result without retaining mutable or proxy-backed rows."""
++    streams = getattr(value, "streams", value)
++    if type(streams) is not dict and not isinstance(streams, Mapping):
++        raise M10DeltaOrchestrationError("prior snapshot streams are invalid")
++    if set(streams) != set(_STREAMS):
++        raise M10DeltaOrchestrationError("prior snapshot streams are incomplete")
++    result: dict[str, tuple[dict[str, object], ...]] = {}
++    for name in _STREAMS:
++        rows = streams[name]
++        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
++            raise M10DeltaOrchestrationError("prior snapshot stream is invalid")
++        copied: list[dict[str, object]] = []
++        identity_field = _STREAM_IDS[name]
++        seen_ids: set[str] = set()
++        for row in rows:
++            if not isinstance(row, Mapping) or any(type(key) is not str for key in row):
++                raise M10DeltaOrchestrationError("prior snapshot record is invalid")
++            record = dict(row)
++            identity = record.get(identity_field)
++            if type(identity) is not str or not identity or identity in seen_ids:
++                raise M10DeltaOrchestrationError("prior snapshot identity is invalid")
++            seen_ids.add(identity)
++            copied.append(record)
++        result[name] = tuple(copied)
++    return result
++
++
++def _reader_result(reader: object, base_dataset_version: str) -> object:
++    try:
++        if callable(reader):
++            return reader(base_dataset_version)
++        read = getattr(reader, "read", None)
++        if callable(read):
++            return read(base_dataset_version)
++    except Exception:
++        raise M10DeltaOrchestrationError("prior snapshot read failed") from None
++    raise M10DeltaOrchestrationError("prior snapshot reader is invalid")
++
++
++def _records_by_document(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> dict[str, dict[str, object]]:
++    records: dict[str, dict[str, object]] = {}
++    for row in streams["documents"]:
++        document_id = row.get("document_id")
++        if type(document_id) is not str or document_id in records:
++            raise M10DeltaOrchestrationError("document identity is invalid")
++        records[document_id] = dict(row)
++    return records
++
++
++def _summary_stream(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> tuple[DocumentChunkSetSummary, ...]:
++    documents = _records_by_document(streams)
++    chunks_by_document: dict[str, list[ChunkStabilityEntry]] = {document_id: [] for document_id in documents}
++    for row in streams["chunks"]:
++        document_id = row.get("document_id")
++        if document_id not in chunks_by_document:
++            raise M10DeltaOrchestrationError("chunk parent is invalid")
++        try:
++            chunks_by_document[document_id].append(
++                ChunkStabilityEntry(
++                    row["chunk_id"],
++                    row["content_hash"],
++                    row["content_kind"],
++                    row["token_count"],
++                    row.get("part_index"),
++                    row.get("part_total"),
++                )
++            )
++        except Exception:
++            raise M10DeltaOrchestrationError("chunk stability data is invalid") from None
++
++    summaries: list[DocumentChunkSetSummary] = []
++    for document_id in sorted(documents):
++        entries = tuple(sorted(chunks_by_document[document_id], key=lambda entry: entry.chunk_id))
++        counts: dict[str, int] = {}
++        for entry in entries:
++            counts[entry.content_kind] = counts.get(entry.content_kind, 0) + 1
++        try:
++            summaries.append(
++                DocumentChunkSetSummary(
++                    format_version="1",
++                    document_id=document_id,
++                    document_content_hash=documents[document_id]["content_hash"],
++                    chunker_version=ACTIVE_CHUNKER_VERSION,
++                    profile_identity=ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++                    entries=entries,
++                    chunk_count=len(entries),
++                    content_kind_counts=tuple(sorted(counts.items())),
++                )
++            )
++        except Exception:
++            raise M10DeltaOrchestrationError("document stability data is invalid") from None
++    return tuple(summaries)
++
++
++def _acl_fingerprints(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> tuple[tuple[str, str], ...]:
++    result: list[tuple[str, str]] = []
++    for row in streams["acl"]:
++        document_id = row.get("document_id")
++        if type(document_id) is not str:
++            raise M10DeltaOrchestrationError("ACL document identity is invalid")
++        semantic = {
++            "acl_id": row.get("acl_id"),
++            "acl_tags": row.get("acl_tags"),
++            "document_id": document_id,
++            "is_restricted": row.get("is_restricted"),
++            "source_system": row.get("source_system"),
++        }
++        result.append((document_id, _canonical_hash(semantic)))
++    return tuple(sorted(result))
++
++
++def _chunk_records(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> tuple[dict[str, object], ...]:
++    return tuple(sorted((dict(row) for row in streams["chunks"]), key=lambda row: str(row.get("chunk_id", ""))))
++
++
++def _targets_by_document(streams: Mapping[str, Sequence[Mapping[str, object]]]) -> tuple[tuple[str, tuple[TombstoneTarget, ...]], ...]:
++    documents = _records_by_document(streams)
++    chunks = {row.get("chunk_id"): row.get("document_id") for row in streams["chunks"]}
++    git_documents = {
++        (row.get("repo"), row.get("branch"), row.get("source_version"), row.get("file_path")): document_id
++        for document_id, row in documents.items()
++        if row.get("source_system") == "git"
++    }
++    targets: dict[str, dict[tuple[TombstoneEntityType, str], TombstoneTarget]] = {document_id: {} for document_id in documents}
++
++    def add(document_id: object, entity_type: TombstoneEntityType, entity_id: object) -> None:
++        if type(document_id) is not str or document_id not in targets or type(entity_id) is not str:
++            return
++        try:
++            target = TombstoneTarget(entity_type, entity_id)
++        except Exception:
++            raise M10DeltaOrchestrationError("dependent identity is invalid") from None
++        targets[document_id][(entity_type, entity_id)] = target
++
++    for row in streams["acl"]:
++        add(row.get("document_id"), TombstoneEntityType.ACL, row.get("acl_id"))
++    for row in streams["media_assets"]:
++        add(row.get("parent_document_id"), TombstoneEntityType.MEDIA, row.get("media_id"))
++    for row in streams["symbols"]:
++        owner = row.get("document_id") or chunks.get(row.get("chunk_id"))
++        if owner is None:
++            owner = git_documents.get(
++                (row.get("repo"), row.get("branch"), row.get("commit_hash"), row.get("file_path"))
++            )
++        add(owner, TombstoneEntityType.SYMBOL, row.get("symbol_id"))
++    for row in streams["relations"]:
++        relation_id = row.get("relation_id")
++        owner = row.get("source_id")
++        add(chunks.get(owner, owner), TombstoneEntityType.RELATION, relation_id)
++        if row.get("resolution_status") == "resolved":
++            add(row.get("target_id"), TombstoneEntityType.RELATION, relation_id)
++    return tuple(
++        (document_id, tuple(targets[document_id][key] for key in sorted(targets[document_id], key=lambda item: (item[0].value, item[1]))))
++        for document_id in sorted(targets)
++    )
++
++
++def _merge_tombstones(existing: Sequence[Mapping[str, object]], generated: Sequence[Mapping[str, object]]) -> tuple[dict[str, object], ...]:
++    by_id: dict[str, dict[str, object]] = {}
++    for row in tuple(existing) + tuple(generated):
++        if not isinstance(row, Mapping) or type(row.get("tombstone_id")) is not str:
++            raise M10DeltaOrchestrationError("tombstone record is invalid")
++        copied = dict(row)
++        prior = by_id.get(copied["tombstone_id"])
++        if prior is not None and prior != copied:
++            raise M10DeltaOrchestrationError("conflicting tombstone record")
++        by_id[copied["tombstone_id"]] = copied
++    return tuple(sorted(by_id.values(), key=lambda row: (str(row.get("entity_type")), str(row.get("entity_id")), row["tombstone_id"])))
++
++
++class M10DeltaOrchestrator:
++    """Turn a prior published stream and current M10 projection into a delta."""
++
++    def __init__(self, *, prior_snapshot_reader: object, schema_validator: object) -> None:
++        if not callable(getattr(schema_validator, "validate_record", None)):
++            raise TypeError("schema validator is invalid")
++        if not callable(prior_snapshot_reader) and not callable(getattr(prior_snapshot_reader, "read", None)):
++            raise TypeError("prior snapshot reader is invalid")
++        self._reader = prior_snapshot_reader
++        self._propagator = PropagateDelta(schema_validator=schema_validator)
++
++    def execute(
++        self,
++        request: object,
++        projection: object,
++        *,
++        inventory: tuple[DeltaInventoryEntry, ...] = (),
++    ) -> M10DeltaOrchestrationResult:
++        if type(request) is not M10SnapshotRequest or type(projection) is not M10SnapshotProjection:
++            raise M10DeltaOrchestrationError("M10 delta input is invalid")
++        if request.export_mode != "delta" or projection.export_mode != "delta" or request.base_dataset_version is None:
++            raise M10DeltaOrchestrationError("delta export is required")
++        try:
++            M10SnapshotRequest.__post_init__(request)
++            M10SnapshotProjection.__post_init__(projection)
++        except Exception:
++            raise M10DeltaOrchestrationError("M10 delta input is invalid") from None
++        prior_result = _reader_result(self._reader, request.base_dataset_version)
++        try:
++            prior = _stream_view(prior_result)
++            prior_manifest = getattr(prior_result, "manifest", {})
++        except M10DeltaOrchestrationError:
++            raise
++        except Exception:
++            raise M10DeltaOrchestrationError("prior snapshot read failed") from None
++        current = {name: tuple(dict(row) for row in getattr(projection, name)) for name in _STREAMS}
++        if not isinstance(prior_manifest, Mapping):
++            raise M10DeltaOrchestrationError("prior snapshot manifest is invalid")
++        if prior_manifest.get("dataset_version") != request.base_dataset_version:
++            raise M10DeltaOrchestrationError("prior dataset version mismatch")
++        # Stability summaries are pinned to the active chunker/profile. Do not
++        # compare an older snapshot as if it used the same chunk semantics.
++        if prior_manifest.get("chunker_version") != projection.chunker_version:
++            raise M10DeltaOrchestrationError("prior chunker version mismatch")
++        try:
++            current_version = DatasetVersionGenerator.generate(instant=datetime.fromisoformat(request.generated_at.replace("Z", "+00:00")))
++        except Exception:
++            raise M10DeltaOrchestrationError("current dataset version is invalid") from None
++        previous_config_hash = prior_manifest.get("config_hash")
++        if type(previous_config_hash) is not str:
++            raise M10DeltaOrchestrationError("prior config hash is invalid")
++        try:
++            prior_mode = prior_manifest.get("export_mode", "full_snapshot") if isinstance(prior_manifest, Mapping) else "full_snapshot"
++            if prior_mode not in {"full_snapshot", "delta"}:
++                raise ValueError
++            validate_snapshot_streams(prior, export_mode=prior_mode)
++            validate_snapshot_streams(
++                current,
++                export_mode="delta",
++                prior_streams=prior,
++            )
++        except (SnapshotReadbackError, TypeError, ValueError):
++            raise M10DeltaOrchestrationError("snapshot streams are invalid") from None
++        propagation_request = DeltaPropagationRequest(
++            previous_dataset_version=request.base_dataset_version,
++            current_dataset_version=current_version,
++            previous_config_hash=previous_config_hash,
++            current_config_hash=projection.config_hash,
++            detected_at=request.generated_at,
++            previous_summaries=_summary_stream(prior),
++            current_summaries=_summary_stream(current),
++            inventory=tuple(inventory),
++            previous_dependents=_targets_by_document(prior),
++            current_dependents=_targets_by_document(current),
++            previous_acl_hashes=_acl_fingerprints(prior),
++            current_acl_hashes=_acl_fingerprints(current),
++            previous_acl_records=tuple(dict(row) for row in prior["acl"]),
++            current_acl_records=tuple(dict(row) for row in current["acl"]),
++            previous_chunk_records=_chunk_records(prior),
++            current_chunk_records=_chunk_records(current),
++        )
++        result = self._propagator.execute(propagation_request)
++        if result.status is not DeltaPropagationStatus.SUCCESS:
++            raise M10DeltaOrchestrationError("delta propagation failed")
++        tombstones = _merge_tombstones(current["tombstones"], result.records)
++        metrics = replace(projection.metrics, tombstones=len(tombstones))
++        next_projection = replace(projection, tombstones=tombstones, metrics=metrics)
++        return M10DeltaOrchestrationResult(projection=next_projection, propagation=result)
++
++
++__all__ = ["M10DeltaOrchestrationError", "M10DeltaOrchestrationResult", "M10DeltaOrchestrator"]
+diff --git a/src/knowledgenexus/foundation/domain/rules/snapshot_readback.py b/src/knowledgenexus/foundation/domain/rules/snapshot_readback.py
+index fc84ef9..da8a98b 100644
+--- a/src/knowledgenexus/foundation/domain/rules/snapshot_readback.py
++++ b/src/knowledgenexus/foundation/domain/rules/snapshot_readback.py
+@@ -34,25 +34,26 @@ def validate_snapshot_streams(
+     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+ ) -> SnapshotClosureReport:
+     """Validate cross-stream identity and ownership without mutating input."""
+-    if type(streams) is not dict or set(streams) != set(_STREAMS):
++    if not isinstance(streams, Mapping) or set(streams) != set(_STREAMS):
+         raise SnapshotReadbackError("stream set is invalid")
+     if export_mode not in {"full_snapshot", "delta"}:
+         raise SnapshotReadbackError("export mode is invalid")
+     normalized: dict[str, tuple[dict[str, object], ...]] = {}
+     for name in _STREAMS:
+         value = streams[name]
+-        if type(value) is not tuple:
++        if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+             raise SnapshotReadbackError("stream type is invalid")
+         rows: list[dict[str, object]] = []
+         seen: set[str] = set()
+         for row in value:
+-            if type(row) is not dict:
++            if not isinstance(row, Mapping):
+                 raise SnapshotReadbackError("stream record is invalid")
+-            identity = row.get(_IDS[name])
++            record = dict(row)
++            identity = record.get(_IDS[name])
+             if type(identity) is not str or not identity or identity in seen:
+                 raise SnapshotReadbackError("stream identity is invalid")
+             seen.add(identity)
+-            rows.append(dict(row))
++            rows.append(record)
+         normalized[name] = tuple(rows)
+ 
+     document_ids = {row["document_id"] for row in normalized["documents"]}
+@@ -83,8 +84,9 @@ def validate_snapshot_streams(
+ 
+     def _relation_refs(row: dict[str, object]) -> None:
+         references = row.get("relation_ids", [])
+-        if type(references) is not list:
++        if not isinstance(references, Sequence) or isinstance(references, (str, bytes, bytearray)):
+             raise SnapshotReadbackError("relation references are invalid")
++        references = tuple(references)
+         try:
+             duplicate = len(references) != len(set(references))
+         except TypeError:
+@@ -152,14 +154,28 @@ def validate_snapshot_streams(
+     if export_mode == "full_snapshot" and normalized["tombstones"]:
+         raise SnapshotReadbackError("full snapshot contains tombstones")
+     if prior_streams is not None:
+-        if type(prior_streams) is not dict or set(prior_streams) != set(_STREAMS):
++        if not isinstance(prior_streams, Mapping) or set(prior_streams) != set(_STREAMS):
+             raise SnapshotReadbackError("prior stream set is invalid")
+-        prior_ids = {
+-            row.get(_IDS[name])
++        if any(
++            not isinstance(prior_streams[name], Sequence)
++            or isinstance(prior_streams[name], (str, bytes, bytearray))
+             for name in _STREAMS
+-            for row in prior_streams[name]
+-            if type(row) is dict
+-        }
++        ):
++            raise SnapshotReadbackError("prior stream type is invalid")
++        prior_ids: set[str] = set()
++        # Tombstones are delta metadata; they are not valid targets for a
++        # subsequent tombstone and therefore are excluded from the entity set.
++        for name in _STREAMS:
++            if name == "tombstones":
++                continue
++            identity_field = _IDS[name]
++            for row in prior_streams[name]:
++                if not isinstance(row, Mapping):
++                    raise SnapshotReadbackError("prior stream record is invalid")
++                identity = row.get(identity_field)
++                if type(identity) is not str or not identity:
++                    raise SnapshotReadbackError("prior stream identity is invalid")
++                prior_ids.add(identity)
+         if any(row.get("entity_id") not in prior_ids for row in normalized["tombstones"]):
+             raise SnapshotReadbackError("tombstone target is not in prior snapshot")
+ 
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+index 714439e..a8718c7 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+@@ -13,11 +13,15 @@ from knowledgenexus.foundation.infrastructure.exporters.jsonl_record_writer impo
+     JsonlRecordWriter,
+ )
+ from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import (
++    M10DeltaSnapshotExporter,
+     M10FullSnapshotExporter,
+ )
+ from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import (
+     DeltaSnapshotReadback,
++    PublishedSnapshotReadback,
++    PublishedSnapshotReader,
+     read_delta_snapshot,
++    read_published_snapshot,
+ )
+ 
+ __all__ = [
+@@ -28,6 +32,10 @@ __all__ = [
+     "FullSnapshotStagingWriter",
+     "JsonlRecordWriter",
+     "M10FullSnapshotExporter",
++    "M10DeltaSnapshotExporter",
+     "DeltaSnapshotReadback",
++    "PublishedSnapshotReadback",
++    "PublishedSnapshotReader",
+     "read_delta_snapshot",
++    "read_published_snapshot",
+ ]
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+index 66091ea..af3c772 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+@@ -7,6 +7,7 @@ from __future__ import annotations
+ 
+ import hashlib
+ import json
++import re
+ from copy import deepcopy
+ from dataclasses import dataclass
+ from pathlib import Path
+@@ -21,6 +22,10 @@ from knowledgenexus.foundation.domain.rules.snapshot_readback import (
+ from .full_snapshot_staging_writer import JSONL_FILE_SCHEMA_PAIRS
+ 
+ 
++_DATASET_VERSION = re.compile(r"^v[0-9]{8}-[0-9]{6}-[0-9]{6}Z$")
++_CONCRETE_PATH_TYPE = type(Path())
++
++
+ @dataclass(frozen=True)
+ class DeltaSnapshotReadback:
+     manifest: Mapping[str, object]
+@@ -39,6 +44,69 @@ class DeltaSnapshotReadback:
+         object.__setattr__(self, "streams", MappingProxyType(frozen_streams))
+ 
+ 
++@dataclass(frozen=True)
++class PublishedSnapshotReadback:
++    """Immutable readback view for a prior full or delta snapshot."""
++
++    manifest: Mapping[str, object]
++    streams: Mapping[str, tuple[Mapping[str, object], ...]]
++    digest: str
++
++    def __post_init__(self) -> None:
++        if type(self.manifest) is not dict or type(self.streams) is not dict:
++            raise TypeError("readback mappings are invalid")
++        frozen_manifest = _freeze_value(self.manifest)
++        frozen_streams = {
++            name: tuple(_freeze_value(row) for row in rows)
++            for name, rows in self.streams.items()
++        }
++        object.__setattr__(self, "manifest", frozen_manifest)
++        object.__setattr__(self, "streams", MappingProxyType(frozen_streams))
++
++
++class PublishedSnapshotReader:
++    """Read a previously published snapshot by its dataset version."""
++
++    def __init__(self, *, dataset_root: Path, validator: FoundationSchemaValidator) -> None:
++        if type(dataset_root) is not _CONCRETE_PATH_TYPE or not dataset_root.is_absolute() or not dataset_root.is_dir() or dataset_root.is_symlink():
++            raise ValueError("invalid dataset root")
++        if type(validator) is not FoundationSchemaValidator:
++            raise TypeError("invalid validator")
++        self._dataset_root = dataset_root
++        self._validator = validator
++
++    def read(self, dataset_version: str) -> PublishedSnapshotReadback:
++        return self._read(dataset_version, seen=())
++
++    def _read(self, dataset_version: str, *, seen: tuple[str, ...]) -> PublishedSnapshotReadback:
++        if type(dataset_version) is not str or _DATASET_VERSION.fullmatch(dataset_version) is None:
++            raise ValueError("invalid dataset version")
++        if dataset_version in seen or len(seen) >= 32:
++            raise ValueError("snapshot version chain is invalid")
++        path = self._dataset_root / dataset_version
++        if path.parent != self._dataset_root or not path.is_dir() or path.is_symlink():
++            raise ValueError("published snapshot is unavailable")
++        result = read_published_snapshot(
++            path,
++            validator=self._validator,
++            expected_dataset_version=dataset_version,
++        )
++        if result.manifest.get("export_mode") == "delta":
++            base = result.manifest.get("base_dataset_version")
++            if type(base) is not str:
++                raise ValueError("delta snapshot version chain is invalid")
++            prior = self._read(base, seen=seen + (dataset_version,))
++            try:
++                validate_snapshot_streams(
++                    result.streams,
++                    export_mode="delta",
++                    prior_streams=prior.streams,
++                )
++            except SnapshotReadbackError:
++                raise ValueError("delta snapshot target closure is invalid") from None
++        return result
++
++
+ def _freeze_value(value: object) -> object:
+     if type(value) is dict:
+         return MappingProxyType({key: _freeze_value(item) for key, item in value.items()})
+@@ -67,7 +135,7 @@ def read_delta_snapshot(
+     validator: FoundationSchemaValidator,
+     prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+ ) -> DeltaSnapshotReadback:
+-    if type(path) is not Path or not path.is_absolute() or not path.is_dir() or path.is_symlink():
++    if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or path.is_symlink():
+         raise ValueError("invalid snapshot path")
+     if type(validator) is not FoundationSchemaValidator:
+         raise TypeError("invalid validator")
+@@ -83,7 +151,7 @@ def read_delta_snapshot(
+         raise ValueError("delta quality report is invalid")
+     base = manifest.get("base_dataset_version")
+     dataset = manifest.get("dataset_version")
+-    if type(base) is not str or not base or type(dataset) is not str or not dataset or base == dataset:
++    if type(base) is not str or _DATASET_VERSION.fullmatch(base) is None or type(dataset) is not str or _DATASET_VERSION.fullmatch(dataset) is None or base == dataset:
+         raise ValueError("delta manifest version chain is invalid")
+     validator_copy = deepcopy(manifest)
+     validator.validate_record("Manifest", validator_copy)
+@@ -129,6 +197,84 @@ def read_delta_snapshot(
+     return DeltaSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
+ 
+ 
++def read_published_snapshot(
++    path: object,
++    *,
++    validator: FoundationSchemaValidator,
++    prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
++    expected_dataset_version: str | None = None,
++) -> PublishedSnapshotReadback:
++    """Read either a full or delta publication through the same strict seam."""
++    if type(path) is not _CONCRETE_PATH_TYPE or not path.is_absolute() or not path.is_dir() or path.is_symlink():
++        raise ValueError("invalid snapshot path")
++    if type(validator) is not FoundationSchemaValidator:
++        raise TypeError("invalid validator")
++    expected_files = {"manifest.json", "quality_report.md"} | {file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS}
++    entries = tuple(path.iterdir())
++    if {entry.name for entry in entries} != expected_files or any(not entry.is_file() or entry.is_symlink() for entry in entries):
++        raise ValueError("snapshot file set is invalid")
++    manifest = _strict_json(path / "manifest.json")
++    if type(manifest) is not dict or manifest.get("export_mode") not in {"full_snapshot", "delta"}:
++        raise ValueError("snapshot mode is invalid")
++    if not (path / "quality_report.md").read_bytes():
++        raise ValueError("snapshot quality report is invalid")
++    dataset_version = manifest.get("dataset_version")
++    if type(dataset_version) is not str or _DATASET_VERSION.fullmatch(dataset_version) is None:
++        raise ValueError("snapshot dataset version is invalid")
++    if expected_dataset_version is not None and dataset_version != expected_dataset_version:
++        raise ValueError("snapshot path/version mismatch")
++    if manifest.get("export_mode") == "full_snapshot":
++        if "base_dataset_version" in manifest:
++            raise ValueError("full snapshot version chain is invalid")
++    else:
++        base = manifest.get("base_dataset_version")
++        if type(base) is not str or _DATASET_VERSION.fullmatch(base) is None or base == dataset_version:
++            raise ValueError("delta snapshot version chain is invalid")
++    checked_manifest = deepcopy(manifest)
++    validator.validate_record("Manifest", checked_manifest)
++    if checked_manifest != manifest:
++        raise ValueError("validator mutated manifest")
++    counts = manifest.get("counts")
++    if type(counts) is not dict or set(counts) != {key for _, key, _ in JSONL_FILE_SCHEMA_PAIRS} or any(type(value) is not int or value < 0 for value in counts.values()):
++        raise ValueError("snapshot counts are invalid")
++    streams: dict[str, tuple[dict[str, object], ...]] = {}
++    digest = hashlib.sha256()
++    digest.update(b"manifest.json\0")
++    digest.update((path / "manifest.json").read_bytes())
++    report = path / "quality_report.md"
++    digest.update(b"quality_report.md\0")
++    digest.update(report.read_bytes())
++    for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
++        stream_path = path / file_name
++        records: list[dict[str, object]] = []
++        for line in stream_path.read_text(encoding="utf-8").splitlines():
++            if not line:
++                raise ValueError("stream contains a blank line")
++            value = _strict_json_line(line)
++            if type(value) is not dict:
++                raise ValueError("stream record is invalid")
++            checked = deepcopy(value)
++            validator.validate_record(schema_name, checked)
++            if checked != value:
++                raise ValueError("validator mutated stream record")
++            records.append(deepcopy(value))
++        if len(records) != counts[count_key]:
++            raise ValueError("stream count mismatch")
++        streams[count_key] = tuple(records)
++        digest.update(file_name.encode("utf-8"))
++        digest.update(b"\0")
++        digest.update(stream_path.read_bytes())
++    try:
++        validate_snapshot_streams(
++            streams,
++            export_mode=manifest["export_mode"],
++            prior_streams=prior_streams,
++        )
++    except SnapshotReadbackError:
++        raise ValueError("snapshot cross-stream closure is invalid") from None
++    return PublishedSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
++
++
+ def _strict_json_line(line: str) -> object:
+     def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+         result: dict[str, object] = {}
+@@ -141,4 +287,10 @@ def _strict_json_line(line: str) -> object:
+     return json.loads(line, object_pairs_hook=reject_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite JSON")))
+ 
+ 
+-__all__ = ["DeltaSnapshotReadback", "read_delta_snapshot"]
++__all__ = [
++    "DeltaSnapshotReadback",
++    "PublishedSnapshotReadback",
++    "PublishedSnapshotReader",
++    "read_delta_snapshot",
++    "read_published_snapshot",
++]
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py b/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
+index 34c11b5..e072f8a 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
+@@ -7,6 +7,9 @@ from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher import M10SnapshotPublisher
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import FullSnapshotStagingCompleter
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import FullSnapshotStagingWriter
++from knowledgenexus.foundation.application.use_cases.project_m10_delta import M10DeltaOrchestrator
++from knowledgenexus.foundation.domain.models.delta_propagation import DeltaInventoryEntry
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
+ 
+ 
+ class M10FullSnapshotExporter(ExportM10Snapshot):
+@@ -19,4 +22,23 @@ class M10FullSnapshotExporter(ExportM10Snapshot):
+         super().__init__(**kwargs)
+ 
+ 
+-__all__ = ["M10FullSnapshotExporter"]
++class M10DeltaSnapshotExporter(ExportM10Snapshot):
++    """Export a delta after diffing the current projection with a prior reader."""
++
++    def __init__(self, *, prior_snapshot_reader: object, schema_validator: FoundationSchemaValidator | None = None, delta_inventory: tuple[DeltaInventoryEntry, ...] = (), **kwargs: object) -> None:
++        if "delta_orchestrator" in kwargs:
++            raise TypeError("delta_orchestrator is owned by M10DeltaSnapshotExporter")
++        validator = schema_validator if schema_validator is not None else FoundationSchemaValidator()
++        kwargs.setdefault("schema_validator", validator)
++        kwargs.setdefault("staging_writer", FullSnapshotStagingWriter)
++        kwargs.setdefault("staging_completer", FullSnapshotStagingCompleter)
++        kwargs.setdefault("publisher", M10SnapshotPublisher)
++        kwargs["delta_orchestrator"] = M10DeltaOrchestrator(
++            prior_snapshot_reader=prior_snapshot_reader,
++            schema_validator=validator,
++        )
++        kwargs["delta_inventory"] = delta_inventory
++        super().__init__(**kwargs)
++
++
++__all__ = ["M10FullSnapshotExporter", "M10DeltaSnapshotExporter"]
+diff --git a/tests/foundation/application/use_cases/test_project_m10_delta.py b/tests/foundation/application/use_cases/test_project_m10_delta.py
+new file mode 100644
+index 0000000..feda6c8
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_project_m10_delta.py
+@@ -0,0 +1,247 @@
++from __future__ import annotations
++
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
++    M10DeltaOrchestrationError,
++    M10DeltaOrchestrator,
++)
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotMetrics
++from knowledgenexus.foundation.domain.models.delta_propagation import (
++    DeltaInventoryEntry,
++    DeltaInventoryState,
++)
++from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import (
++    M10DeltaSnapshotExporter,
++    M10FullSnapshotExporter,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++from tests.foundation.integration.test_m10_synthetic_acceptance import _Adapter
++from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
++
++
++_BASE_VERSION = "v20260805-000000-000000Z"
++
++
++class _PriorSnapshot:
++    def __init__(self, projection: object) -> None:
++        self.streams = {
++            name: tuple(getattr(projection, name))
++            for name in (
++                "documents", "chunks", "relations", "acl", "media_assets",
++                "symbols", "sync_state", "tombstones",
++            )
++        }
++        self.manifest = {
++            "dataset_version": _BASE_VERSION,
++            "config_hash": projection.config_hash,
++            "chunker_version": projection.chunker_version,
++        }
++
++
++def _composed(tmp_path: Path):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++    exporter = M10FullSnapshotExporter(
++        confluence_adapter=_Adapter(confluence),
++        git_adapter=_Adapter(git),
++    )
++    return request, exporter._composer.execute(request).projection
++
++
++def _orchestrator(projection: object) -> M10DeltaOrchestrator:
++    prior = _PriorSnapshot(projection)
++    return M10DeltaOrchestrator(
++        prior_snapshot_reader=lambda version: prior,
++        schema_validator=FoundationSchemaValidator(),
++    )
++
++
++def test_orchestrator_cascades_removed_document_dependents(tmp_path: Path) -> None:
++    request, full = _composed(tmp_path)
++    git_documents = tuple(row for row in full.documents if row["source_system"] == "git")
++    git_document_ids = {row["document_id"] for row in git_documents}
++    current_chunks = tuple(row for row in full.chunks if row["document_id"] in git_document_ids)
++    current_acl = tuple(row for row in full.acl if row["document_id"] in git_document_ids)
++    current_symbols = tuple(row for row in full.symbols if row["repo"] == "org-repo")
++    current_sync = tuple(
++        row for row in full.sync_state
++        if row["entity_id"] in git_document_ids or row["entity_id"] == "org-repo"
++    )
++    metrics = M10SnapshotMetrics(
++        documents=len(git_documents),
++        chunks=len(current_chunks),
++        relations=0,
++        acl=len(current_acl),
++        media_assets=0,
++        symbols=len(current_symbols),
++        sync_state=len(current_sync),
++        tombstones=0,
++        confluence_documents=0,
++        git_documents=len(git_documents),
++        unresolved_relations=0,
++        media_processed=0,
++        media_failed=0,
++        symbols_resolved=sum(row.get("chunk_id") is not None for row in current_symbols),
++        default_deny_chunks=0,
++    )
++    current = replace(
++        full,
++        generated_at="2026-08-05T00:01:00Z",
++        documents=git_documents,
++        chunks=current_chunks,
++        relations=(),
++        acl=current_acl,
++        media_assets=(),
++        symbols=current_symbols,
++        sync_state=current_sync,
++        tombstones=(),
++        metrics=metrics,
++        export_mode="delta",
++    )
++    delta_request = replace(
++        request,
++        generated_at="2026-08-05T00:01:00Z",
++        export_mode="delta",
++        base_dataset_version=_BASE_VERSION,
++    )
++
++    result = _orchestrator(full).execute(
++        delta_request,
++        current,
++        inventory=(
++            DeltaInventoryEntry(
++                "confluence:page:123",
++                DeltaInventoryState.ACCESS_REVOKED,
++                "1",
++            ),
++        ),
++    )
++
++    assert result.propagation.status.value == "success"
++    removed = {
++        (row["entity_type"], row["entity_id"])
++        for row in result.propagation.records
++    }
++    assert ("document", "confluence:page:123") in removed
++    assert any(kind == "chunk" for kind, _ in removed)
++    assert ("relation", "rel:96241a2bb59f352b") in removed
++    assert ("acl", "acl:confluence:page:123") in removed
++    document_tombstone = next(
++        row for row in result.projection.tombstones
++        if row["entity_type"] == "document"
++    )
++    assert document_tombstone["reason"] == "access_revoked"
++    assert len(result.projection.tombstones) == result.projection.metrics.tombstones
++
++
++def test_orchestrator_reemits_acl_and_chunks_without_content_tombstones(tmp_path: Path) -> None:
++    request, full = _composed(tmp_path)
++    acl = []
++    for row in full.acl:
++        copied = dict(row)
++        if copied["document_id"] == "confluence:page:123":
++            copied["acl_tags"] = ["space:NEW"]
++        acl.append(copied)
++    chunks = []
++    for row in full.chunks:
++        copied = dict(row)
++        if copied["document_id"] == "confluence:page:123":
++            copied["acl_tags"] = ["space:NEW"]
++        chunks.append(copied)
++    current = replace(
++        full,
++        generated_at="2026-08-05T00:01:00Z",
++        acl=tuple(acl),
++        chunks=tuple(chunks),
++        tombstones=(),
++        metrics=replace(full.metrics, tombstones=0),
++        export_mode="delta",
++    )
++    delta_request = replace(
++        request,
++        generated_at="2026-08-05T00:01:00Z",
++        export_mode="delta",
++        base_dataset_version=_BASE_VERSION,
++    )
++
++    result = _orchestrator(full).execute(delta_request, current)
++
++    assert result.propagation.reemit_document_ids == ("confluence:page:123",)
++    assert len(result.propagation.reemit_acl_records) == 1
++    assert len(result.propagation.reemit_chunk_records) == 1
++    assert result.propagation.records == ()
++    assert result.projection.tombstones == ()
++
++
++@pytest.mark.parametrize("bad_reader", [None, object()])
++def test_orchestrator_rejects_invalid_reader_before_execution(bad_reader: object) -> None:
++    with pytest.raises(TypeError):
++        M10DeltaOrchestrator(
++            prior_snapshot_reader=bad_reader,
++            schema_validator=FoundationSchemaValidator(),
++        )
++
++
++def test_orchestrator_sanitizes_prior_read_failure(tmp_path: Path) -> None:
++    request, full = _composed(tmp_path)
++    orchestrator = M10DeltaOrchestrator(
++        prior_snapshot_reader=lambda version: (_ for _ in ()).throw(RuntimeError("private path")),
++        schema_validator=FoundationSchemaValidator(),
++    )
++    delta_request = replace(
++        request,
++        export_mode="delta",
++        base_dataset_version=_BASE_VERSION,
++    )
++    current = replace(full, export_mode="delta")
++
++    with pytest.raises(M10DeltaOrchestrationError, match="prior snapshot read failed") as exc:
++        orchestrator.execute(delta_request, current)
++    assert "private" not in str(exc.value)
++
++
++def test_delta_exporter_runs_orchestrator_before_delta_publication(tmp_path: Path) -> None:
++    request, full = _composed(tmp_path)
++    confluence, git = _handoffs()
++    full_export = M10FullSnapshotExporter(
++        confluence_adapter=_Adapter(confluence),
++        git_adapter=_Adapter(git),
++    ).execute(request)
++    assert full_export.dataset_version == _BASE_VERSION
++
++    prior = _PriorSnapshot(full)
++    delta_request = replace(
++        request,
++        generated_at="2026-08-05T00:01:00Z",
++        export_mode="delta",
++        base_dataset_version=_BASE_VERSION,
++    )
++    inventory = (
++        DeltaInventoryEntry("confluence:page:123", DeltaInventoryState.PRESENT, "1"),
++    )
++    exporter = M10DeltaSnapshotExporter(
++        prior_snapshot_reader=lambda version: prior,
++        confluence_adapter=_Adapter(confluence),
++        git_adapter=_Adapter(git),
++        delta_inventory=inventory,
++    )
++    orchestrator = exporter._delta_orchestrator
++    observed: dict[str, object] = {}
++    original_execute = orchestrator.execute
++
++    def recording_execute(request_value, projection_value, *, inventory=()):
++        observed["inventory"] = inventory
++        return original_execute(request_value, projection_value, inventory=inventory)
++
++    orchestrator.execute = recording_execute
++    result = exporter.execute(delta_request)
++
++    assert result.status == "published"
++    assert observed["inventory"] == inventory
++    assert result.metrics is not None
++    assert result.metrics.tombstones == 0
++    assert '"export_mode":"delta"' in (result.final_path / "manifest.json").read_text(encoding="utf-8")
+diff --git a/tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py b/tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py
+new file mode 100644
+index 0000000..915edbf
+--- /dev/null
++++ b/tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py
+@@ -0,0 +1,53 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader import (
++    PublishedSnapshotReader,
++    read_published_snapshot,
++)
++from knowledgenexus.foundation.domain.rules.snapshot_readback import validate_snapshot_streams
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++
++
++_VERSION = "v20260714-000000-000000Z"
++
++
++def _fixture() -> Path:
++    return Path(__file__).parents[3] / "fixtures" / "foundation" / "golden_full_snapshot" / _VERSION
++
++
++def test_published_reader_validates_and_freezes_full_snapshot() -> None:
++    root = _fixture().parents[0]
++    reader = PublishedSnapshotReader(
++        dataset_root=root,
++        validator=FoundationSchemaValidator(),
++    )
++
++    result = reader.read(_VERSION)
++
++    assert result.manifest["export_mode"] == "full_snapshot"
++    assert len(result.streams["documents"]) == 1
++    assert validate_snapshot_streams(result.streams, export_mode="full_snapshot").acl_closed
++    with pytest.raises(TypeError):
++        result.streams["documents"][0]["document_id"] = "changed"  # type: ignore[index]
++
++
++def test_published_reader_rejects_invalid_version_and_snapshot_path() -> None:
++    root = _fixture().parents[0]
++    reader = PublishedSnapshotReader(
++        dataset_root=root,
++        validator=FoundationSchemaValidator(),
++    )
++    with pytest.raises(ValueError):
++        reader.read("../secret")
++    with pytest.raises(ValueError):
++        read_published_snapshot(root, validator=FoundationSchemaValidator())
++    with pytest.raises(ValueError, match="path/version mismatch"):
++        read_published_snapshot(
++            _fixture(),
++            validator=FoundationSchemaValidator(),
++            expected_dataset_version="v20260715-000000-000000Z",
++        )
+-- 
+2.45.1.windows.1
+

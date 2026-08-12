@@ -85,14 +85,20 @@ def build_golden_record_set() -> dict[str, list[dict[str, object]]]:
     content_hash = document["content_hash"]
     assert isinstance(content_hash, str)
 
+    media = _build_media_asset_record()
+    media_hash = media["content_hash"]
+    assert isinstance(media_hash, str)
     return {
         "documents": [document],
         "chunks": [_build_prose_chunk_record(), _build_code_chunk_record()],
         "relations": [_build_relation_record()],
         "acl": [_build_acl_record()],
-        "media_assets": [_build_media_asset_record()],
+        "media_assets": [media],
         "symbols": [],
-        "sync_state": [_build_sync_state_record(content_hash)],
+        "sync_state": [
+            _build_sync_state_record(content_hash),
+            _build_sync_attachment_state_record(media_hash),
+        ],
         "tombstones": [],
     }
 
@@ -254,6 +260,19 @@ def _build_sync_state_record(content_hash: str) -> dict[str, object]:
         "source_id": "confluence_golden_fixture",
         "entity_id": GOLDEN_DOCUMENT_ID,
         "entity_type": "page",
+        "last_seen_version": "1",
+        "last_content_hash": content_hash,
+        "last_synced_at": GOLDEN_GENERATED_AT,
+        "status": "active",
+    }
+
+
+def _build_sync_attachment_state_record(content_hash: str) -> dict[str, object]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "source_id": "confluence_golden_fixture",
+        "entity_id": GOLDEN_MEDIA_ID,
+        "entity_type": "attachment",
         "last_seen_version": "1",
         "last_content_hash": content_hash,
         "last_synced_at": GOLDEN_GENERATED_AT,

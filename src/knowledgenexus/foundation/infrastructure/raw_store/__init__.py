@@ -13,6 +13,12 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_restricti
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_generation_store import (
     ConfluenceRawPageGenerationStore,
 )
+from knowledgenexus.foundation.infrastructure.raw_store.budgeted_confluence_raw_page_store import (
+    BudgetedConfluenceRawPageStore,
+)
+from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store import (
+    ConfluenceRawAttachmentStore,
+)
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector import (
     ConfluenceRawPageOrphanInspector,
 )
@@ -28,6 +34,8 @@ __all__ = [
     "ConfluenceRawPageReadError",
     "ConfluenceRawRestrictionEvidenceStore",
     "ConfluenceRawPageGenerationStore",
+    "BudgetedConfluenceRawPageStore",
+    "ConfluenceRawAttachmentStore",
     "ConfluenceRawPageOrphanInspector",
     "ConfluenceRawRestrictionOrphanInspector",
 ]

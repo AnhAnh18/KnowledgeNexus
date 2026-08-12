@@ -40,8 +40,15 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
 )
 
 
-class _ConfigurationError(Exception):
-    pass
+class MiniCorpusOperatorInputError(Exception):
+    """Shared sanitized operator-input failure for bounded mini-corpus CLIs.
+
+    Both `accept_confluence_mini_corpus` and
+    `build_confluence_mini_corpus_indexing_packet` raise and catch this
+    exact exception type, so a rejected operator input (bad path, missing
+    parent, argparse failure, ...) is always reported as `"configuration"`
+    rather than falling through to the generic `"unexpected"` category.
+    """
 
 
 _MAX_SELECTION_BYTES = 128 * 1024
@@ -49,14 +56,14 @@ _MAX_SELECTION_BYTES = 128 * 1024
 
 class _SanitizedParser(argparse.ArgumentParser):
     def error(self, _message: str) -> NoReturn:
-        raise _ConfigurationError
+        raise MiniCorpusOperatorInputError
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = _parse_args(argv)
         summary = _run(args)
-    except _ConfigurationError:
+    except MiniCorpusOperatorInputError:
         return _fail("configuration")
     except MiniCorpusAcceptanceError as exc:
         return _fail(exc.category.value)
@@ -79,7 +86,7 @@ def _run(args: argparse.Namespace):
     tokenizer_assets_dir = _safe_path(args.tokenizer_assets_dir)
     selection_path = _safe_path(args.selection_path)
     if not raw_root.is_dir() or not profile_path.is_file() or not tokenizer_assets_dir.is_dir() or not selection_path.is_file():
-        raise _ConfigurationError
+        raise MiniCorpusOperatorInputError
     run_id = CrawlRunId(args.run_id)
     generation_id = CrawlRunId(args.generation_id)
     items = _load_selection(selection_path)
@@ -134,12 +141,12 @@ def _run(args: argparse.Namespace):
 def _load_selection(path: Path) -> tuple[ConfluencePageWorkItem, ...]:
     try:
         if path.stat().st_size > _MAX_SELECTION_BYTES:
-            raise _ConfigurationError
+            raise MiniCorpusOperatorInputError
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        raise _ConfigurationError from None
+        raise MiniCorpusOperatorInputError from None
     if type(payload) is not list or not 10 <= len(payload) <= 20:
-        raise _ConfigurationError
+        raise MiniCorpusOperatorInputError
     items: list[ConfluencePageWorkItem] = []
     try:
         for entry in payload:
@@ -148,7 +155,7 @@ def _load_selection(path: Path) -> tuple[ConfluencePageWorkItem, ...]:
                 "crawled_at",
                 "expected_source_version",
             }:
-                raise _ConfigurationError
+                raise MiniCorpusOperatorInputError
             items.append(
                 ConfluencePageWorkItem(
                     page_id=entry["page_id"],
@@ -157,30 +164,30 @@ def _load_selection(path: Path) -> tuple[ConfluencePageWorkItem, ...]:
                 )
             )
     except (TypeError, ValueError):
-        raise _ConfigurationError from None
+        raise MiniCorpusOperatorInputError from None
     return tuple(items)
 
 
 def _safe_path(value: object) -> Path:
     if type(value) is not str or not value:
-        raise _ConfigurationError
+        raise MiniCorpusOperatorInputError
     path = Path(value)
     if not path.is_absolute():
-        raise _ConfigurationError
+        raise MiniCorpusOperatorInputError
     forbidden = {".env", ".local_ai", "evidence", "tool_trreport"}
     if any(part.lower() in forbidden for part in path.parts):
-        raise _ConfigurationError
+        raise MiniCorpusOperatorInputError
     try:
         resolved = path.resolve(strict=False)
     except OSError:
-        raise _ConfigurationError from None
+        raise MiniCorpusOperatorInputError from None
     if any(part.lower() in forbidden for part in resolved.parts):
-        raise _ConfigurationError
+        raise MiniCorpusOperatorInputError
     current = Path(path.anchor)
     for part in path.parts[1:]:
         current = current / part
         if os.path.lexists(current) and _is_reparse_point(current):
-            raise _ConfigurationError
+            raise MiniCorpusOperatorInputError
     return path
 
 
@@ -219,7 +226,7 @@ def _tree_fingerprint(root: Path) -> str:
                         break
                     digest.update(block)
     except (OSError, ValueError):
-        raise _ConfigurationError from None
+        raise MiniCorpusOperatorInputError from None
     return digest.hexdigest()
 
 
@@ -237,6 +244,14 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def _fail(category: str) -> int:
     sys.stderr.write(json.dumps({"status": "failed", "category": category}, sort_keys=True) + "\n")
     return 1
+
+
+# Public operator-input seams shared by bounded mini-corpus commands.  The
+# underscore names remain as compatibility aliases for the approved M8-AC
+# tests and callers.
+load_mini_corpus_selection = _load_selection
+safe_mini_corpus_path = _safe_path
+fingerprint_mini_corpus_tree = _tree_fingerprint
 
 
 if __name__ == "__main__":

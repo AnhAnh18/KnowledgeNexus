@@ -1,0 +1,166 @@
+From c65e6a360c492feb8b88e4c221cefd4e5796cb01 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:47:52 +0700
+Subject: [PATCH] foundation: harden delta ACL and readback gates
+
+---
+ .../application/use_cases/propagate_delta.py  |  9 +++++-
+ .../domain/models/delta_propagation.py        | 27 ++++++++++++++---
+ .../exporters/delta_snapshot_reader.py        |  4 +++
+ .../use_cases/test_propagate_delta.py         | 30 ++++++++++++++++++-
+ 4 files changed, 64 insertions(+), 6 deletions(-)
+
+diff --git a/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+index a21ab81..0b54c4a 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
++++ b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+@@ -80,6 +80,12 @@ class PropagateDelta:
+                     raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+                 inventory[entry.document_id] = entry
+             dependents = {document_id: targets for document_id, targets in request.previous_dependents}
++            if not set(dependents).issubset(previous):
++                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++            previous_acl = dict(request.previous_acl_hashes)
++            current_acl = dict(request.current_acl_hashes)
++            if not set(previous_acl).issubset(previous) or not set(current_acl).issubset(current):
++                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+ 
+             records: list[dict[str, object]] = []
+             document_outcomes: list[tuple[str, str]] = []
+@@ -134,7 +140,8 @@ class PropagateDelta:
+                     )
+                     continue
+ 
+-                if old.document_content_hash == new.document_content_hash:
++                acl_changed = bool(previous_acl or current_acl) and previous_acl.get(document_id) != current_acl.get(document_id)
++                if old.document_content_hash == new.document_content_hash and not acl_changed:
+                     unchanged_count += 1
+                     document_outcomes.append((document_id, "unchanged"))
+                     continue
+diff --git a/src/knowledgenexus/foundation/domain/models/delta_propagation.py b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+index dc2eb96..3f5ab97 100644
+--- a/src/knowledgenexus/foundation/domain/models/delta_propagation.py
++++ b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+@@ -131,19 +131,23 @@ class DeltaPropagationRequest:
+     current_summaries: tuple[DocumentChunkSetSummary, ...]
+     inventory: tuple[DeltaInventoryEntry, ...] = ()
+     previous_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
++    previous_acl_hashes: tuple[tuple[str, str], ...] = ()
++    current_acl_hashes: tuple[tuple[str, str], ...] = ()
+ 
+     def __post_init__(self) -> None:
+         expected_fields = frozenset({
+             "previous_dataset_version", "current_dataset_version", "previous_config_hash",
+-            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents",
++            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents", "previous_acl_hashes", "current_acl_hashes",
+         })
+         actual_fields = frozenset(vars(self))
+         # previous_dependents was introduced as an optional wire extension;
+         # accept legacy in-memory requests and normalize the absent field.
+-        if actual_fields == expected_fields - {"previous_dependents"}:
+-            object.__setattr__(self, "previous_dependents", ())
+-        elif actual_fields != expected_fields:
++        missing_optional = expected_fields - actual_fields
++        if (actual_fields - expected_fields) or not missing_optional.issubset({"previous_dependents", "previous_acl_hashes", "current_acl_hashes"}):
+             raise TypeError("model fields are invalid")
++        if missing_optional:
++            for field in missing_optional:
++                object.__setattr__(self, field, ())
+         previous = _opaque("previous_dataset_version", self.previous_dataset_version)
+         current = _opaque("current_dataset_version", self.current_dataset_version)
+         if previous == current:
+@@ -199,6 +203,21 @@ class DeltaPropagationRequest:
+                     raise ValueError("previous dependent targets contain duplicate IDs")
+                 target_keys.add(key)
+         object.__setattr__(self, "previous_dependents", tuple(self.previous_dependents))
++        for field in ("previous_acl_hashes", "current_acl_hashes"):
++            values = getattr(self, field)
++            if type(values) is not tuple:
++                raise TypeError(f"{field} is invalid")
++            seen_acl: set[str] = set()
++            for item in values:
++                if type(item) is not tuple or len(item) != 2:
++                    raise TypeError(f"{field} entries are invalid")
++                document_id, fingerprint = item
++                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_acl:
++                    raise ValueError(f"{field} document ID is invalid")
++                if type(fingerprint) is not str or _SHA256.fullmatch(fingerprint) is None:
++                    raise ValueError(f"{field} fingerprint is invalid")
++                seen_acl.add(document_id)
++            object.__setattr__(self, field, tuple(values))
+ 
+ 
+ @dataclass(frozen=True, repr=False)
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+index be26008..811b027 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+@@ -39,6 +39,10 @@ def read_delta_snapshot(path: object, *, validator: FoundationSchemaValidator) -
+         raise ValueError("invalid snapshot path")
+     if type(validator) is not FoundationSchemaValidator:
+         raise TypeError("invalid validator")
++    expected_files = {"manifest.json"} | {file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS}
++    entries = tuple(path.iterdir())
++    if {entry.name for entry in entries} != expected_files or any(not entry.is_file() or entry.is_symlink() for entry in entries):
++        raise ValueError("delta snapshot file set is invalid")
+     manifest = _strict_json(path / "manifest.json")
+     if type(manifest) is not dict or manifest.get("export_mode") != "delta":
+         raise ValueError("snapshot is not a delta export")
+diff --git a/tests/foundation/application/use_cases/test_propagate_delta.py b/tests/foundation/application/use_cases/test_propagate_delta.py
+index 04188fe..460f21b 100644
+--- a/tests/foundation/application/use_cases/test_propagate_delta.py
++++ b/tests/foundation/application/use_cases/test_propagate_delta.py
+@@ -43,7 +43,7 @@ def _summary(document_id: str, content_hash: str = "a" * 64, entries=()) -> Docu
+     )
+ 
+ 
+-def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=()):
++def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=(), previous_acl_hashes=(), current_acl_hashes=()):
+     return DeltaPropagationRequest(
+         previous_dataset_version="base",
+         current_dataset_version="next",
+@@ -54,6 +54,8 @@ def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64,
+         current_summaries=tuple(current),
+         inventory=tuple(inventory),
+         previous_dependents=tuple(previous_dependents),
++        previous_acl_hashes=tuple(previous_acl_hashes),
++        current_acl_hashes=tuple(current_acl_hashes),
+     )
+ 
+ 
+@@ -188,6 +190,32 @@ def test_dependents_reject_document_root_and_duplicate_targets() -> None:
+         _request(previous=(old,), previous_dependents=((old.document_id, (TombstoneTarget(TombstoneEntityType.DOCUMENT, old.document_id),)),))
+ 
+ 
++def test_acl_only_change_is_marked_changed_without_content_tombstones() -> None:
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    current = _summary("confluence:page:1", entries=old.entries)
++    result = PropagateDelta(schema_validator=Validator()).execute(
++        _request(
++            previous=(old,),
++            current=(current,),
++            previous_acl_hashes=((old.document_id, "a" * 64),),
++            current_acl_hashes=((current.document_id, "b" * 64),),
++        )
++    )
++    assert result.status is DeltaPropagationStatus.SUCCESS
++    assert result.document_outcomes == ((old.document_id, "changed"),)
++    assert result.records == ()
++
++
++def test_dependents_for_non_prior_document_fail_closed() -> None:
++    old = _summary("confluence:page:1")
++    target = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1")
++    result = PropagateDelta(schema_validator=Validator()).execute(
++        _request(previous=(old,), previous_dependents=(("confluence:page:2", (target,)),))
++    )
++    assert result.status is DeltaPropagationStatus.FAILED
++    assert result.error_category is DeltaPropagationFailureCategory.INVENTORY_CONFLICT
++
++
+ def test_conflicting_inventory_is_atomic() -> None:
+     old = _summary("confluence:page:1")
+     request = object.__new__(DeltaPropagationRequest)
+-- 
+2.45.1.windows.1
+

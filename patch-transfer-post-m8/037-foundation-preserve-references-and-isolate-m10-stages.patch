@@ -1,0 +1,197 @@
+From dbd92a45db02a6d584c8f97f726cec72add302ff Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 18:25:41 +0700
+Subject: [PATCH] foundation: preserve references and isolate M10 stages
+
+---
+ .local_ai/IMPLEMENTATION_STATE.md             | 23 ++++++++------
+ .../domain/rules/chunk_stability_builder.py   |  1 +
+ .../adapters/m10_source_adapters.py           |  9 ++++--
+ .../domain/models/test_chunk_stability.py     | 23 ++++++++++++++
+ .../adapters/test_m10_source_adapters.py      | 31 ++++++++++++++++++-
+ 5 files changed, 74 insertions(+), 13 deletions(-)
+
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 0d63c77..6fa8d56 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -1578,7 +1578,7 @@ are recorded without using repository-local commit SHAs as status.
+ ## M8-AC Controlled Mini-Corpus Acceptance (M8-D.5)
+ 
+ - Status: implementation and independent re-review complete `PASS`; real gate
+-  remains `pending_external_input`.
++  complete on the operator-supplied bounded corpus.
+ - Objective: run two fresh deterministic, aggregate-only passes over an
+   operator-approved 10-20 page M7 generation before relying on M10 for the
+   first real-corpus signal. The seam is retroactive M8-D.5 evidence and does
+@@ -1602,9 +1602,12 @@ are recorded without using repository-local commit SHAs as status.
+ - Review artifacts:
+   `.codex-workflow/20260805-m8ac/05-review-1.md` (`CHANGES_REQUIRED`),
+   `.codex-workflow/20260805-m8ac/08-review-2.md` (`PASS`).
+-- Real acceptance is not claimed until the operator supplies a sanitized
+-  aggregate report from an approved generation, ordered 10-20 page selection,
+-  and pinned tokenizer assets. No raw/runtime artifact is tracked.
++- Real acceptance receipt (2026-08-08, aggregate-only): 10 requested and 10
++  succeeded pages; 401 chunks; 20 reference intents across 7 pages; 8 table
++  pages; content kinds `code_block=143`, `prose=231`, `table=27`; deterministic
++  repeat, source/selection stability, negative probe, and no-write checks all
++  passed. The pinned tokenizer asset digest matched the active profile. Raw
++  pages and runtime artifacts remain outside Git.
+ 
+ ## M9-A1 Metadata-First Media Contract
+ 
+@@ -2013,14 +2016,16 @@ performance gate remain deferred; no 100k scale PASS is claimed.
+ 
+ ## Foundation Goal F4 Progress
+ 
+-- Status: bounded media orchestration implemented; real OCR activation remains
+-  an external approval gate.
++- Status: M8-AC real mini-corpus gate complete; bounded media orchestration is
++  implemented; real OCR activation and bounded media corpus acceptance remain
++  external approval gates.
+ - Added `ProcessConfluenceMediaBatch` to process materialized attachments
+   atomically, sort assets deterministically, preserve extraction-detail groups,
+   and report sanitized capability failures without partial output.
+-- M8-AC real-corpus status remains owner-supplied/external; no raw corpus or
+-  credential evidence was read or copied into the repository. OCR engine
+-  activation still requires the approved engine/runtime/model artifact.
++- The M8-AC aggregate receipt above was verified from the operator-supplied
++  corpus without copying raw pages or credential evidence into the repository.
++  OCR engine activation still requires the approved engine/runtime/model
++  artifact.
+ - Added a strict sanitized F4/F7 operator CLI for JSON metadata envelopes;
+   duplicate keys, raw/extra fields, invalid types, oversized input, and failed
+   gate status are rejected without echoing paths or payload values.
+diff --git a/src/knowledgenexus/foundation/domain/rules/chunk_stability_builder.py b/src/knowledgenexus/foundation/domain/rules/chunk_stability_builder.py
+index 29821f3..19d1ad9 100644
+--- a/src/knowledgenexus/foundation/domain/rules/chunk_stability_builder.py
++++ b/src/knowledgenexus/foundation/domain/rules/chunk_stability_builder.py
+@@ -181,6 +181,7 @@ class ChunkStabilitySummaryBuilder:
+                 chunks=result.chunks,
+                 page_metrics=result.page_metrics,
+                 metrics=result.metrics,
++                reference_intents_by_page=result.reference_intents_by_page,
+             )
+         except Exception:
+             _fail(ChunkStabilityFailureCategory.INVALID_INPUT)
+diff --git a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+index 82ea22a..f87610e 100644
+--- a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
++++ b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+@@ -96,7 +96,10 @@ def _invoke_stage_callable(callable_stage: object, *, request: M10SnapshotReques
+         return callable_stage(request)  # type: ignore[operator]
+     accepts_kwargs = any(item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values())
+     if accepts_kwargs:
+-        return callable_stage(request=request, **state)  # type: ignore[operator]
++        # Stages are trusted seams but remain side-effect constrained: never
++        # expose the adapter's mutable record dictionaries to a provider.
++        isolated_state = {name: copy.deepcopy(value) for name, value in state.items()}
++        return callable_stage(request=request, **isolated_state)  # type: ignore[operator]
+ 
+     positional: list[object] = []
+     kwargs: dict[str, object] = {}
+@@ -108,9 +111,9 @@ def _invoke_stage_callable(callable_stage: object, *, request: M10SnapshotReques
+                 kwargs[name] = request
+             continue
+         if name in state and parameter.kind is not inspect.Parameter.POSITIONAL_ONLY:
+-            kwargs[name] = state[name]
++            kwargs[name] = copy.deepcopy(state[name])
+         elif name in state and parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+-            positional.append(state[name])
++            positional.append(copy.deepcopy(state[name]))
+     return callable_stage(*positional, **kwargs)  # type: ignore[operator]
+ 
+ 
+diff --git a/tests/foundation/domain/models/test_chunk_stability.py b/tests/foundation/domain/models/test_chunk_stability.py
+index 44685ec..940f835 100644
+--- a/tests/foundation/domain/models/test_chunk_stability.py
++++ b/tests/foundation/domain/models/test_chunk_stability.py
+@@ -17,6 +17,7 @@ from knowledgenexus.foundation.domain.models import (
+     ConfluencePageSetMetrics,
+     ConfluencePageSetPageMetrics,
+     ConfluencePageSetResult,
++    NormalizationReferenceIntent,
+ )
+ from knowledgenexus.foundation.domain.records import (
+     CanonicalDocumentRecordBuilder,
+@@ -386,6 +387,28 @@ def test_page_set_adapter_preserves_document_order_and_allows_empty_document() -
+     assert [summary.chunk_count for summary in summaries] == [1, 0]
+ 
+ 
++def test_page_set_adapter_preserves_reference_intents_during_revalidation() -> None:
++    document = _document()
++    intent = NormalizationReferenceIntent(
++        ordinal=1,
++        kind="page_link",
++        status="deferred_mvp",
++        target_identity="confluence:page:2000",
++        placeholder_identity="confluence:page:2000",
++    )
++    result = ConfluencePageSetResult(
++        documents=(document,),
++        chunks=(_chunk(document),),
++        page_metrics=(ConfluencePageSetPageMetrics(1, 1, 0, 1, (("prose", 1),)),),
++        metrics=ConfluencePageSetMetrics(1, 1, 0, 1, 1, 0, 1, (("prose", 1),)),
++        reference_intents_by_page=((document["document_id"], (intent,)),),
++    )
++
++    summaries = ChunkStabilitySummaryBuilder.build_page_set(result=result)
++
++    assert len(summaries) == 1
++
++
+ def test_page_set_adapter_rejects_out_of_order_and_interleaved_chunks() -> None:
+     first = _document(document_id="confluence:page:1000")
+     second = _document(document_id="confluence:page:2000")
+diff --git a/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py b/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
+index 3e84caf..c7c20ef 100644
+--- a/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
++++ b/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
+@@ -129,6 +129,35 @@ def test_materialized_sources_compose_injected_foundation_stages(tmp_path) -> No
+     assert GitM10Adapter(source=Provider(git_input)).collect(request).documents == git.documents
+ 
+ 
++def test_materialized_source_isolates_mutable_stage_state(tmp_path) -> None:
++    confluence, _ = _handoffs()
++    request = _request(tmp_path)
++    page = _Output(
++        source_version=confluence.source_version,
++        raw_artifact_identity=confluence.raw_artifact_identity,
++        documents=confluence.documents,
++        chunks=confluence.chunks,
++    )
++
++    class PageStage:
++        def execute(self, request):
++            return page
++
++    class MutatingRelationStage:
++        def execute(self, request, **state):
++            # A provider must not be able to mutate the records retained by the
++            # materialized source while inspecting its input.
++            state["documents"][0]["title"] = "provider mutation"
++            state["chunks"][0]["text"] = "provider mutation"
++            return confluence.relations
++
++    result = ConfluenceM10MaterializedSource(
++        page_stage=PageStage(), relation_stage=MutatingRelationStage()
++    ).collect(request)
++    assert result.documents == confluence.documents
++    assert result.chunks == confluence.chunks
++
++
+ @pytest.mark.parametrize("bad", [None, object(), {"documents": ()}])
+ def test_materialized_sources_fail_closed_on_bad_stage_output(tmp_path, bad) -> None:
+     request = _request(tmp_path)
+@@ -284,7 +313,7 @@ def test_confluence_materialized_source_wires_keyword_only_media_relation_stage_
+         def execute(self, *, documents, chunks, media, page_references=(), page_targets=()):
+             assert documents == confluence.documents
+             assert chunks == confluence.chunks
+-            assert media is media_result
++            assert media == media_result
+             assert page_references == ()
+             assert page_targets == ()
+             return _Output(documents=enriched_documents, chunks=enriched_chunks, relations=())
+-- 
+2.45.1.windows.1
+

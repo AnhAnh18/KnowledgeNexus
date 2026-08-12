@@ -9,12 +9,14 @@ import tempfile
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
+import re
 
 from knowledgenexus.foundation.domain.models.one_page_export_snapshot import (
     ACL_METRICS_KEY_ORDER,
     JIRA_METRICS_KEY_ORDER,
     OnePageExportQualityReportInput,
 )
+from knowledgenexus.foundation.domain.models.m10_snapshot import M10QualityReportInput
 from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import (
     EXPECTED_MACHINE_FILES,
     JSONL_FILE_SCHEMA_PAIRS,
@@ -38,6 +40,19 @@ COUNT_KEYS: tuple[str, ...] = (
     "tombstones",
 )
 EXPECTED_COMPLETE_FILES = EXPECTED_MACHINE_FILES | {QUALITY_REPORT_FILE_NAME}
+_M10_METRIC_KEYS: dict[str, tuple[str, ...]] = {
+    "jira_metrics": ("relations_total", "resolved", "unresolved", "unresolved_without_jira_api", "deferred_mvp", "unresolved_target"),
+    "acl_metrics": ("documents_total", "documents_with_acl", "restricted_documents", "default_deny_chunks"),
+    "media_metrics": ("assets_total", "processed", "failed", "not_processed"),
+    "symbol_metrics": ("symbols_total", "resolved"),
+    "sync_metrics": ("rows_total", "active", "pages", "attachments", "files", "repos"),
+    "tombstone_metrics": ("rows_total", "initial_empty"),
+    "completion_checks": ("schema_validation", "counts_match", "tombstones_empty", "projection_consistency"),
+}
+_SAFE_IDENTIFIER = re.compile(r"^[^\s\r\n]{1,256}$")
+_SAFE_PROFILE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
+_CONCRETE_PATH_TYPE = type(Path())
 
 _DEFERRED_STREAM_FILE_NAMES: tuple[str, ...] = (
     "media_assets.jsonl",
@@ -45,6 +60,186 @@ _DEFERRED_STREAM_FILE_NAMES: tuple[str, ...] = (
     "sync_state.jsonl",
     "tombstones.jsonl",
 )
+
+
+class M10QualityCompletionError(ValueError):
+    """Sanitized failure for the additive generic M10 report boundary."""
+
+
+def _validate_m10_quality_input(quality: object, *, allow_delta: bool = False) -> None:
+    if type(quality) is not M10QualityReportInput or set(vars(quality)) != set(M10QualityReportInput.__dataclass_fields__):
+        raise TypeError("m10_quality has invalid fields")
+    for name in ("active_profile", "profile_status", "chunker_version"):
+        value = getattr(quality, name)
+        if type(value) is not str or _SAFE_PROFILE_IDENTIFIER.fullmatch(value) is None:
+            raise ValueError("m10_quality profile value is invalid")
+    counts = quality.expected_counts
+    if type(counts) is not dict or set(counts) != set(COUNT_KEYS):
+        raise ValueError("m10_quality expected counts are invalid")
+    for value in counts.values():
+        if type(value) is not int or value < 0:
+            raise ValueError("m10_quality expected counts are invalid")
+    for name, keys in _M10_METRIC_KEYS.items():
+        value = getattr(quality, name)
+        if type(value) is not dict or set(value) != set(keys):
+            raise ValueError("m10_quality metric keys are invalid")
+        for metric in keys:
+            item = value[metric]
+            if name == "completion_checks":
+                if type(item) is not bool or (not item and not (allow_delta and metric == "tombstones_empty")):
+                    raise ValueError("m10_quality completion checks are invalid")
+            elif type(item) is not int or item < 0:
+                raise ValueError("m10_quality metric values are invalid")
+    j = quality.jira_metrics
+    if j["resolved"] + j["unresolved"] != j["relations_total"] or j["unresolved"] != j["unresolved_without_jira_api"] + j["deferred_mvp"] + j["unresolved_target"]:
+        raise ValueError("m10_quality Jira metrics are inconsistent")
+    a = quality.acl_metrics
+    if a["documents_with_acl"] > a["documents_total"] or a["restricted_documents"] > a["documents_total"] or a["default_deny_chunks"] > quality.expected_counts["chunks"]:
+        raise ValueError("m10_quality ACL metrics are inconsistent")
+    m = quality.media_metrics
+    if m["processed"] + m["failed"] + m["not_processed"] != m["assets_total"]:
+        raise ValueError("m10_quality media metrics are inconsistent")
+    s = quality.symbol_metrics
+    if s["resolved"] > s["symbols_total"] or s["symbols_total"] != quality.expected_counts["symbols"]:
+        raise ValueError("m10_quality symbol metrics are inconsistent")
+    sy = quality.sync_metrics
+    if sy["active"] != sy["rows_total"] or sy["pages"] + sy["attachments"] + sy["files"] + sy["repos"] != sy["rows_total"]:
+        raise ValueError("m10_quality sync metrics are inconsistent")
+    t = quality.tombstone_metrics
+    if t["rows_total"] != quality.expected_counts["tombstones"]:
+        raise ValueError("m10_quality tombstone metrics are inconsistent")
+    if not allow_delta and (t["initial_empty"] != 1 or t["rows_total"] != 0):
+        raise ValueError("m10_quality tombstone metrics are inconsistent")
+    if allow_delta and t["initial_empty"] not in (0, 1):
+        raise ValueError("m10_quality tombstone metrics are inconsistent")
+    scopes = quality.source_scopes
+    if type(scopes) is not dict or tuple(scopes) != tuple(sorted(scopes)) or set(scopes) not in ({"confluence"}, {"confluence", "git"}):
+        raise ValueError("m10_quality source scopes are invalid")
+    _validate_m10_scope(scopes)
+
+
+def _validate_m10_scope(scopes: dict[str, object]) -> None:
+    confluence = scopes["confluence"]
+    if type(confluence) is not dict or set(confluence) != {"source_id", "space_keys", "root_page_ids", "page_ids"}:
+        raise ValueError("m10_quality Confluence scope is invalid")
+    for name in ("space_keys", "root_page_ids", "page_ids"):
+        values = confluence[name]
+        if type(values) not in (tuple, list) or not values or tuple(sorted(values)) != tuple(values) or len(set(values)) != len(values) or any(type(x) is not str or _SAFE_IDENTIFIER.fullmatch(x) is None for x in values):
+            raise ValueError("m10_quality scope arrays are invalid")
+    if type(confluence["source_id"]) is not str or _SAFE_IDENTIFIER.fullmatch(confluence["source_id"]) is None:
+        raise ValueError("m10_quality source ID is invalid")
+    if not set(confluence["root_page_ids"]).issubset(confluence["page_ids"]):
+        raise ValueError("m10_quality roots are outside page scope")
+    if "git" in scopes:
+        git = scopes["git"]
+        if type(git) is not dict or set(git) != {"repository", "branch", "commit"} or any(type(git[x]) is not str or _SAFE_IDENTIFIER.fullmatch(git[x]) is None for x in ("repository", "branch")) or _HEX40.fullmatch(git["commit"]) is None:
+            raise ValueError("m10_quality Git scope is invalid")
+
+
+def _strict_json_object(path: Path) -> dict[str, object]:
+    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_object_keys, parse_constant=_reject_non_finite_constant)
+    if type(value) is not dict:
+        raise TypeError("manifest must be an object")
+    return value
+
+
+def _validate_m10_streams(*, staging_path: Path, manifest: dict[str, object], validator: FoundationSchemaValidator) -> dict[str, list[dict[str, object]]]:
+    streams: dict[str, list[dict[str, object]]] = {}
+    for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
+        records = _read_strict_jsonl_records(staging_path / file_name)
+        if count_key == "tombstones":
+            if manifest.get("export_mode") == "full_snapshot" and records:
+                raise ValueError("full snapshots must not contain tombstones")
+            if manifest.get("export_mode") == "delta":
+                for record in records:
+                    before = deepcopy(record)
+                    isolated = deepcopy(record)
+                    validator.validate_record("TombstoneRecord", isolated)
+                    if isolated != before:
+                        raise ValueError("canonical validator mutated a tombstone")
+                    if record.get("dataset_version") != manifest.get("dataset_version"):
+                        raise ValueError("tombstone dataset version does not match manifest")
+            streams[count_key] = records
+            continue
+        if len(records) != manifest["counts"][count_key]:
+            raise ValueError("stream count does not match manifest")
+        checked: list[dict[str, object]] = []
+        for record in records:
+            before = deepcopy(record)
+            isolated = deepcopy(record)
+            validator.validate_record(schema_name, isolated)
+            if isolated != before:
+                raise ValueError("canonical validator mutated a record")
+            checked.append(deepcopy(record))
+        streams[count_key] = checked
+    return streams
+
+
+def _complete_m10_quality(*, staging_path: Path, validator: FoundationSchemaValidator, quality: M10QualityReportInput) -> dict[str, object]:
+    quality_before = deepcopy(quality)
+    if not staging_path.exists() or not staging_path.is_dir():
+        raise FileNotFoundError("staging path is unavailable")
+    report_path = staging_path / QUALITY_REPORT_FILE_NAME
+    if report_path.exists() or report_path.is_symlink():
+        raise FileExistsError("quality report already exists")
+    _verify_file_set(staging_path, EXPECTED_MACHINE_FILES)
+    manifest = _strict_json_object(staging_path / "manifest.json")
+    manifest_before = deepcopy(manifest)
+    validator.validate_record("Manifest", manifest_before)
+    if manifest_before != manifest:
+        raise ValueError("canonical validator mutated manifest")
+    _verify_export_invariants(manifest)
+    _validate_m10_scope(manifest.get("source_scopes"))
+    if _canonical_json(manifest["source_scopes"]) != _canonical_json(quality.source_scopes):
+        raise ValueError("source scope mismatch")
+    streams = _validate_m10_streams(staging_path=staging_path, manifest=manifest, validator=validator)
+    if _canonical_json(manifest["counts"]) != _canonical_json(quality.expected_counts):
+        raise ValueError("quality expected counts mismatch")
+    _verify_m10_metric_counts(quality, streams)
+    report = _render_m10_quality_report(manifest, quality)
+    if quality != quality_before:
+        raise ValueError("m10_quality was mutated")
+    _write_quality_report(report_path, report)
+    try:
+        _verify_file_set(staging_path, EXPECTED_COMPLETE_FILES)
+    except Exception:
+        _remove_owned_file(report_path)
+        raise
+    return manifest
+
+
+def _verify_m10_metric_counts(quality: M10QualityReportInput, streams: dict[str, list[dict[str, object]]]) -> None:
+    relation_statuses = {key: sum(1 for row in streams["relations"] if row.get("resolution_status") == key) for key in ("resolved", "unresolved_without_jira_api", "deferred_mvp", "unresolved_target")}
+    if quality.jira_metrics["relations_total"] != len(streams["relations"]) or quality.jira_metrics["resolved"] != relation_statuses["resolved"] or quality.jira_metrics["unresolved_without_jira_api"] != relation_statuses["unresolved_without_jira_api"] or quality.jira_metrics["deferred_mvp"] != relation_statuses["deferred_mvp"] or quality.jira_metrics["unresolved_target"] != relation_statuses["unresolved_target"]:
+        raise ValueError("Jira relation count mismatch")
+    if quality.acl_metrics["documents_total"] != len(streams["documents"]):
+        raise ValueError("ACL document count mismatch")
+    if quality.acl_metrics["documents_with_acl"] != len(streams["acl"]) or quality.acl_metrics["restricted_documents"] != sum(1 for row in streams["acl"] if row.get("is_restricted") is True) or quality.acl_metrics["default_deny_chunks"] != sum(1 for row in streams["chunks"] if row.get("acl_tags") == ["restricted:unresolved"]):
+        raise ValueError("ACL count mismatch")
+    media_statuses = {key: sum(1 for row in streams["media_assets"] if row.get("processing_status") == key) for key in ("parsed", "ocr", "summarized", "failed", "not_processed")}
+    if quality.media_metrics["assets_total"] != len(streams["media_assets"]):
+        raise ValueError("media count mismatch")
+    if quality.media_metrics["processed"] != media_statuses["parsed"] + media_statuses["ocr"] + media_statuses["summarized"] or quality.media_metrics["failed"] != media_statuses["failed"] or quality.media_metrics["not_processed"] != media_statuses["not_processed"]:
+        raise ValueError("media status count mismatch")
+    if quality.symbol_metrics["symbols_total"] != len(streams["symbols"]) or quality.symbol_metrics["resolved"] != sum(1 for row in streams["symbols"] if row.get("chunk_id") is not None):
+        raise ValueError("symbol count mismatch")
+    sync_types = {key: sum(1 for row in streams["sync_state"] if row.get("entity_type") == source_type) for key, source_type in (("pages", "page"), ("attachments", "attachment"), ("files", "file"), ("repos", "repo"))}
+    if quality.sync_metrics["rows_total"] != len(streams["sync_state"]) or quality.sync_metrics["active"] != sum(1 for row in streams["sync_state"] if row.get("status") == "active") or any(quality.sync_metrics[key] != sync_types[key] for key in ("pages", "attachments", "files", "repos")):
+        raise ValueError("sync count mismatch")
+    if quality.tombstone_metrics["rows_total"] != len(streams["tombstones"]):
+        raise ValueError("tombstone count mismatch")
+
+
+def _render_m10_quality_report(manifest: Mapping[str, object], quality: M10QualityReportInput) -> str:
+    counts = quality.expected_counts
+    lines = ["# Foundation Export Quality Report", "", "## Snapshot", "", f"- Export mode: `{manifest['export_mode']}`", f"- Dataset version: `{manifest['dataset_version']}`", f"- Generated at: `{manifest['generated_at']}`", f"- Schemas version: `{manifest['schemas_version']}`", "", "## Active Profiles", "", f"- Active profile: `{quality.active_profile}`", f"- Profile status: `{quality.profile_status}`", f"- Chunker version: `{quality.chunker_version}`", "", "## Record Counts", "", "| Record type | Count |", "|---|---:|"]
+    lines.extend(f"| {key} | {counts[key]} |" for key in COUNT_KEYS)
+    for title, field in (("Jira Relation Quality", "jira_metrics"), ("ACL Quality", "acl_metrics"), ("Media Quality", "media_metrics"), ("Symbol Quality", "symbol_metrics"), ("Sync State", "sync_metrics"), ("Tombstones", "tombstone_metrics"), ("Completion Checks", "completion_checks")):
+        lines.extend(["", f"## {title}", ""])
+        metric_mapping = getattr(quality, field)
+        lines.extend(f"- {key}: {metric_mapping[key]}" for key in _M10_METRIC_KEYS[field])
+    lines.extend(["", "## Publication State", "", "- Report completion: PENDING_AT_REPORT_COMPLETION", "- Final-directory verification: PENDING_AT_REPORT_COMPLETION", "- Post-publication acceptance: PENDING_AT_REPORT_COMPLETION", "", "## Scope", "", "- Confluence scope: present", f"- Git scope: {'present' if 'git' in quality.source_scopes else 'absent'}", ""])
+    return "\n".join(lines)
 
 
 class FullSnapshotStagingCompleter:
@@ -56,7 +251,22 @@ class FullSnapshotStagingCompleter:
         staging_path: Path,
         validator: FoundationSchemaValidator,
         one_page_quality: OnePageExportQualityReportInput | None = None,
+        m10_quality: M10QualityReportInput | None = None,
     ) -> dict[str, object]:
+        if m10_quality is not None:
+            try:
+                if type(staging_path) is not _CONCRETE_PATH_TYPE:
+                    raise TypeError("m10_quality staging path must be Path")
+                if one_page_quality is not None:
+                    raise TypeError("one_page_quality is incompatible with m10_quality")
+                if type(validator) is not FoundationSchemaValidator:
+                    raise TypeError("m10_quality requires the shared FoundationSchemaValidator")
+                manifest = _strict_json_object(staging_path / "manifest.json")
+                allow_delta = manifest.get("export_mode") == "delta"
+                _validate_m10_quality_input(m10_quality, allow_delta=allow_delta)
+                return _complete_m10_quality(staging_path=staging_path, validator=validator, quality=m10_quality)
+            except Exception:
+                raise M10QualityCompletionError("m10_quality completion failed") from None
         if not staging_path.exists():
             raise FileNotFoundError(f"Staging path does not exist: {staging_path}")
         if not staging_path.is_dir():
@@ -69,7 +279,7 @@ class FullSnapshotStagingCompleter:
         _verify_file_set(staging_path, EXPECTED_MACHINE_FILES)
         manifest = _load_manifest(staging_path / "manifest.json")
         validator.validate_record("Manifest", manifest)
-        _verify_full_snapshot_invariants(manifest)
+        _verify_export_invariants(manifest, allow_delta=m10_quality is not None)
 
         if one_page_quality is None:
             report = _render_quality_report(manifest)
@@ -103,13 +313,15 @@ def _load_manifest(path: Path) -> dict[str, object]:
     return manifest
 
 
-def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
-    if manifest.get("export_mode") != "full_snapshot":
-        raise ValueError("Manifest export_mode must be 'full_snapshot'")
-    if "base_dataset_version" in manifest:
-        raise ValueError(
-            "Full-snapshot Manifest must not contain base_dataset_version"
-        )
+def _verify_export_invariants(manifest: Mapping[str, object], *, allow_delta: bool = True) -> None:
+    mode = manifest.get("export_mode")
+    allowed_modes = {"full_snapshot", "delta"} if allow_delta else {"full_snapshot"}
+    if mode not in allowed_modes:
+        raise ValueError("Manifest export_mode is invalid")
+    if mode == "full_snapshot" and "base_dataset_version" in manifest:
+        raise ValueError("Full-snapshot Manifest must not contain base_dataset_version")
+    if mode == "delta" and (type(manifest.get("base_dataset_version")) is not str or not manifest.get("base_dataset_version") or manifest.get("base_dataset_version") == manifest.get("dataset_version")):
+        raise ValueError("Delta Manifest requires a distinct base_dataset_version")
 
     counts = manifest.get("counts")
     if not isinstance(counts, Mapping):
@@ -124,6 +336,11 @@ def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
             raise TypeError("Manifest counts values must be actual integers")
         if value < 0:
             raise ValueError("Manifest counts values must be non-negative")
+
+
+def _verify_full_snapshot_invariants(manifest: Mapping[str, object]) -> None:
+    """Keep the historical strict helper for callers that require full mode."""
+    _verify_export_invariants(manifest, allow_delta=False)
 
 
 def _canonical_json(value: object) -> str:
@@ -158,7 +375,7 @@ def _read_strict_jsonl_records(path: Path) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line:
-            continue
+            raise ValueError(f"JSONL record in {path.name} must not be blank")
         record = json.loads(
             line,
             object_pairs_hook=_reject_duplicate_object_keys,

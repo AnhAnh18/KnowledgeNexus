@@ -1,0 +1,1965 @@
+From 7ffa0e460053c6c3e13e68d6f1b9e991c7357eef Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 17:23:47 +0700
+Subject: [PATCH] foundation: close F1-F7 projection and readback seams
+
+---
+ .../use_cases/assemble_m10_handoffs.py        |   6 +
+ .../use_cases/build_sync_state_snapshot.py    |  51 +++
+ .../use_cases/evaluate_foundation_gates.py    |   8 +
+ .../use_cases/export_m10_snapshot.py          |   7 +
+ .../application/use_cases/propagate_delta.py  |  82 ++++-
+ .../cli/accept_confluence_mini_corpus.py      |   2 +-
+ .../domain/models/chunk_stability.py          |   4 +-
+ .../domain/models/delta_propagation.py        | 111 ++++--
+ .../domain/models/foundation_gate.py          |   7 +
+ .../domain/models/foundation_gate_inputs.py   |   7 +
+ .../domain/models/m10_composition.py          |  20 +-
+ .../foundation/domain/rules/__init__.py       |   8 +
+ .../domain/rules/snapshot_readback.py         | 175 +++++++++
+ .../infrastructure/adapters/__init__.py       |   8 +
+ .../adapters/m10_composition_root.py          | 336 ++++++++++++++++++
+ .../adapters/m10_source_adapters.py           |  39 +-
+ .../exporters/delta_snapshot_reader.py        |  55 ++-
+ .../test_build_sync_state_snapshot.py         |  27 ++
+ .../test_evaluate_foundation_gates.py         |  28 +-
+ .../use_cases/test_propagate_delta.py         |  74 +++-
+ .../cli/test_evaluate_foundation_gates_cli.py |   4 +-
+ .../domain/models/test_delta_propagation.py   |  18 +
+ .../domain/rules/test_snapshot_readback.py    |  71 ++++
+ .../adapters/test_m10_composition_root.py     | 106 ++++++
+ .../adapters/test_m10_source_adapters.py      |  30 ++
+ 25 files changed, 1229 insertions(+), 55 deletions(-)
+ create mode 100644 src/knowledgenexus/foundation/domain/rules/snapshot_readback.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/adapters/m10_composition_root.py
+ create mode 100644 tests/foundation/domain/rules/test_snapshot_readback.py
+ create mode 100644 tests/foundation/infrastructure/adapters/test_m10_composition_root.py
+
+diff --git a/src/knowledgenexus/foundation/application/use_cases/assemble_m10_handoffs.py b/src/knowledgenexus/foundation/application/use_cases/assemble_m10_handoffs.py
+index 678f0ad..c50cffb 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/assemble_m10_handoffs.py
++++ b/src/knowledgenexus/foundation/application/use_cases/assemble_m10_handoffs.py
+@@ -38,6 +38,7 @@ class AssembleConfluenceM10Handoff:
+         acl: object,
+         media_assets: object = (),
+         tombstones: object = (),
++        sync_inventory: object = (),
+     ) -> M10ConfluenceHandoff:
+         if type(request) is not M10SnapshotRequest:
+             raise M10HandoffAssemblyError("invalid request")
+@@ -49,12 +50,14 @@ class AssembleConfluenceM10Handoff:
+         acl_rows = _records(acl, "acl")
+         media_rows = _records(media_assets, "media_assets")
+         tombstone_rows = _records(tombstones, "tombstones")
++        inventory_rows = _records(sync_inventory, "sync_inventory")
+         try:
+             sync = BuildSyncStateSnapshot().execute(
+                 source_id=request.confluence_scope.source_id,
+                 synced_at=request.generated_at,
+                 documents=docs,
+                 media_assets=media_rows,
++                inventory=inventory_rows if inventory_rows else None,
+             )
+         except (SyncStateSnapshotError, TypeError, ValueError):
+             raise M10HandoffAssemblyError("sync state assembly failed") from None
+@@ -90,6 +93,7 @@ class AssembleGitM10Handoff:
+         acl: object,
+         symbols: object = (),
+         tombstones: object = (),
++        sync_inventory: object = (),
+     ) -> M10GitHandoff:
+         if type(request) is not M10SnapshotRequest:
+             raise M10HandoffAssemblyError("invalid request")
+@@ -98,6 +102,7 @@ class AssembleGitM10Handoff:
+         acl_rows = _records(acl, "acl")
+         symbol_rows = _records(symbols, "symbols")
+         tombstone_rows = _records(tombstones, "tombstones")
++        inventory_rows = _records(sync_inventory, "sync_inventory")
+         try:
+             sync = BuildSyncStateSnapshot().execute(
+                 source_id=request.git_repository,
+@@ -105,6 +110,7 @@ class AssembleGitM10Handoff:
+                 documents=docs,
+                 repository_id=request.git_repository,
+                 repository_version=request.git_commit,
++                inventory=inventory_rows if inventory_rows else None,
+             )
+             return M10GitHandoff(
+                 request.git_repository,
+diff --git a/src/knowledgenexus/foundation/application/use_cases/build_sync_state_snapshot.py b/src/knowledgenexus/foundation/application/use_cases/build_sync_state_snapshot.py
+index 5587fd0..e4d5129 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/build_sync_state_snapshot.py
++++ b/src/knowledgenexus/foundation/application/use_cases/build_sync_state_snapshot.py
+@@ -40,6 +40,7 @@ class BuildSyncStateSnapshot:
+         media_assets: object = (),
+         repository_id: object | None = None,
+         repository_version: object | None = None,
++        inventory: object | None = None,
+     ) -> SyncStateSnapshotResult:
+         if type(source_id) is not str or not source_id or type(synced_at) is not str or not synced_at:
+             raise SyncStateSnapshotError("invalid input")
+@@ -49,6 +50,15 @@ class BuildSyncStateSnapshot:
+             raise SyncStateSnapshotError("invalid input")
+         if repository_version is not None and (type(repository_version) is not str or not repository_version):
+             raise SyncStateSnapshotError("invalid input")
++        if inventory is not None:
++            return self._from_inventory(
++                source_id=source_id,
++                synced_at=synced_at,
++                documents=documents,
++                media_assets=media_assets,
++                repository_id=repository_id,
++                inventory=inventory,
++            )
+         rows: list[dict[str, object]] = []
+         seen: set[str] = set()
+         for document in documents:
+@@ -112,5 +122,46 @@ class BuildSyncStateSnapshot:
+         rows.sort(key=lambda record: str(record["entity_id"]))
+         return SyncStateSnapshotResult(records=tuple(rows))
+ 
++    @staticmethod
++    def _from_inventory(
++        *,
++        source_id: str,
++        synced_at: str,
++        documents: tuple[dict[str, object], ...],
++        media_assets: tuple[dict[str, object], ...],
++        repository_id: str | None,
++        inventory: object,
++    ) -> SyncStateSnapshotResult:
++        if type(inventory) is not tuple or any(type(row) is not dict for row in inventory):
++            raise SyncStateSnapshotError("invalid authoritative inventory")
++        expected: set[str] = {
++            str(row.get("document_id")) for row in documents
++        } | {str(row.get("media_id")) for row in media_assets}
++        if repository_id is not None:
++            expected.add(repository_id)
++        rows: list[dict[str, object]] = []
++        seen: set[str] = set()
++        allowed = {
++            "source_id", "entity_id", "entity_type", "last_seen_version",
++            "last_content_hash", "last_synced_at", "status",
++        }
++        for row in inventory:
++            if set(row) != allowed:
++                raise SyncStateSnapshotError("authoritative inventory fields are invalid")
++            if row.get("source_id") != source_id or row.get("last_synced_at") != synced_at:
++                raise SyncStateSnapshotError("authoritative inventory provenance is invalid")
++            entity_id = row.get("entity_id")
++            if type(entity_id) is not str or entity_id in seen or entity_id not in expected:
++                raise SyncStateSnapshotError("authoritative inventory identity is invalid")
++            seen.add(entity_id)
++            try:
++                rows.append(SyncStateRecordBuilder.build(**row))
++            except (TypeError, ValueError):
++                raise SyncStateSnapshotError("authoritative inventory record is invalid") from None
++        if seen != expected:
++            raise SyncStateSnapshotError("authoritative inventory does not cover emitted entities")
++        rows.sort(key=lambda record: str(record["entity_id"]))
++        return SyncStateSnapshotResult(records=tuple(rows))
++
+ 
+ __all__ = ["BuildSyncStateSnapshot", "SyncStateSnapshotError", "SyncStateSnapshotResult"]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+index cd389fd..0844f5d 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
++++ b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+@@ -166,6 +166,14 @@ def _scale_failure_reason(request: ScaleGateRequest) -> str | None:
+         first.transport != "production" or second.transport != "production"
+     ):
+         reasons.append("real_evidence_requires_production_transport")
++    if request.evidence_kind == "sanitized_real_capture":
++        for label, readback in (("first", first), ("second", second)):
++            if readback.rss_baseline_bytes is None:
++                reasons.append(f"{label}_rss_baseline_missing")
++            if readback.rss_peak_bytes is None:
++                reasons.append(f"{label}_rss_peak_missing")
++            if readback.duration_milliseconds is None or readback.duration_milliseconds <= 0:
++                reasons.append(f"{label}_duration_missing_or_invalid")
+     if first.observed_pages < request.target_pages or second.observed_pages < request.target_pages:
+         reasons.append("target_pages_unmet")
+     return ";".join(reasons) if reasons else None
+diff --git a/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+index 158ef69..6377763 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
++++ b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+@@ -37,6 +37,9 @@ from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
+     M10StagingCompleterPort,
+     M10StagingWriterPort,
+ )
++from knowledgenexus.foundation.domain.rules.snapshot_readback import (
++    validate_snapshot_streams,
++)
+ 
+ 
+ _JSONL_FILE_SCHEMA_PAIRS = (
+@@ -336,6 +339,10 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
+             if isolated_row != row:
+                 raise ValueError("validator mutated record")
+             assert_validation_bytes_unchanged()
++    validate_snapshot_streams(
++        streams,
++        export_mode=request.export_mode,
++    )
+     if request.export_mode == "full_snapshot" and streams["tombstones"]:
+         raise ValueError
+     if request.export_mode == "delta":
+diff --git a/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+index fdcb9a3..21379d1 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
++++ b/src/knowledgenexus/foundation/application/use_cases/propagate_delta.py
+@@ -80,16 +80,26 @@ class PropagateDelta:
+                     raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+                 inventory[entry.document_id] = entry
+             dependents = {document_id: targets for document_id, targets in request.previous_dependents}
++            current_dependents = {document_id: targets for document_id, targets in request.current_dependents}
++            has_current_dependent_inventory = bool(request.current_dependents)
+             if not set(dependents).issubset(previous):
+                 raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++            if not set(current_dependents).issubset(current):
++                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
+             previous_acl = dict(request.previous_acl_hashes)
+             current_acl = dict(request.current_acl_hashes)
+             if not set(previous_acl).issubset(previous) or not set(current_acl).issubset(current):
+                 raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++            self._validate_reemit_inventory(request.previous_acl_records, previous, "acl_id")
++            self._validate_reemit_inventory(request.current_acl_records, current, "acl_id")
++            self._validate_reemit_inventory(request.previous_chunk_records, previous, "chunk_id")
++            self._validate_reemit_inventory(request.current_chunk_records, current, "chunk_id")
+ 
+             records: list[dict[str, object]] = []
+             document_outcomes: list[tuple[str, str]] = []
+             reemit_document_ids: list[str] = []
++            reemit_acl_records: list[dict[str, object]] = []
++            reemit_chunk_records: list[dict[str, object]] = []
+             new_count = unchanged_count = changed_count = removed_count = 0
+             union_ids = set(previous) | set(current)
+             for inventory_id in inventory:
+@@ -144,20 +154,41 @@ class PropagateDelta:
+                 acl_changed = bool(previous_acl or current_acl) and previous_acl.get(document_id) != current_acl.get(document_id)
+                 if acl_changed:
+                     reemit_document_ids.append(document_id)
+-                if old.document_content_hash == new.document_content_hash and not acl_changed:
++                current_entries = {entry.chunk_id: entry for entry in new.entries}
++                prior_dependents = {(target.entity_type, target.entity_id): target for target in dependents.get(document_id, ())}
++                next_dependents = {(target.entity_type, target.entity_id): target for target in current_dependents.get(document_id, ())}
++                removed_dependents = (
++                    [prior_dependents[key] for key in sorted(set(prior_dependents) - set(next_dependents), key=lambda item: (item[0].value, item[1]))]
++                    if has_current_dependent_inventory else []
++                )
++                dependency_changed = has_current_dependent_inventory and (bool(removed_dependents) or set(prior_dependents) != set(next_dependents))
++                if old.document_content_hash == new.document_content_hash and not acl_changed and not dependency_changed:
+                     unchanged_count += 1
+                     document_outcomes.append((document_id, "unchanged"))
+                     continue
+ 
+                 changed_count += 1
+                 document_outcomes.append((document_id, "changed"))
+-                current_entries = {entry.chunk_id: entry for entry in new.entries}
++                if removed_dependents:
++                    for target in removed_dependents:
++                        records.extend(self._dependent_tombstone(target, request))
++                if acl_changed and old.document_content_hash == new.document_content_hash:
++                    acl_records = self._records_for_document(request.current_acl_records, document_id, "acl_id", required=bool(request.current_acl_records))
++                    chunk_records = self._records_for_document(request.current_chunk_records, document_id, "chunk_id", required=bool(request.current_chunk_records))
++                    if request.current_acl_records and len(acl_records) != 1:
++                        raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++                    if request.current_chunk_records and {row["chunk_id"] for row in chunk_records} != set(current_entries):
++                        raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++                    reemit_acl_records.extend(acl_records)
++                    reemit_chunk_records.extend(chunk_records)
+                 for entry in sorted(old.entries, key=lambda item: item.chunk_id):
+                     counterpart = current_entries.get(entry.chunk_id)
+                     if counterpart is None or counterpart.content_hash != entry.content_hash:
+                         records.extend(self._chunk_tombstone(entry.chunk_id, request))
+ 
+             records = self._deduplicate_and_sort(records)
++            reemit_acl_records.sort(key=lambda row: str(row["acl_id"]))
++            reemit_chunk_records.sort(key=lambda row: str(row["chunk_id"]))
+             document_tombstones = sum(record["entity_type"] == "document" for record in records)
+             chunk_tombstones = sum(record["entity_type"] == "chunk" for record in records)
+             media_tombstones = sum(record["entity_type"] == "media" for record in records)
+@@ -198,6 +229,8 @@ class PropagateDelta:
+                 },
+                 "document_outcomes": tuple(document_outcomes),
+                 "reemit_document_ids": tuple(reemit_document_ids),
++                "reemit_acl_records": tuple(reemit_acl_records),
++                "reemit_chunk_records": tuple(reemit_chunk_records),
+                 "records": tuple(records),
+                 "status": DeltaPropagationStatus.SUCCESS.value,
+             }
+@@ -214,6 +247,8 @@ class PropagateDelta:
+                 digest=digest,
+                 document_outcomes=tuple(document_outcomes),
+                 reemit_document_ids=tuple(reemit_document_ids),
++                reemit_acl_records=tuple(reemit_acl_records),
++                reemit_chunk_records=tuple(reemit_chunk_records),
+             )
+         except _Failure as exc:
+             return DeltaPropagationResult(
+@@ -267,6 +302,49 @@ class PropagateDelta:
+             raise _Failure(DeltaPropagationFailureCategory.TOMBSTONE_FAILURE)
+         return list(result.records)
+ 
++    def _dependent_tombstone(self, target: TombstoneTarget, request: DeltaPropagationRequest) -> list[dict[str, object]]:
++        result = self._projector.execute(
++            TombstoneProjectionRequest(
++                root=target,
++                reason=TombstoneReason.CONTENT_UPDATED,
++                detected_at=request.detected_at,
++                dataset_version=request.current_dataset_version,
++            )
++        )
++        if result.status is not TombstoneProjectionStatus.SUCCESS:
++            raise _Failure(DeltaPropagationFailureCategory.TOMBSTONE_FAILURE)
++        return list(result.records)
++
++    @staticmethod
++    def _records_for_document(
++        records: tuple[dict[str, object], ...],
++        document_id: str,
++        id_field: str,
++        *,
++        required: bool,
++    ) -> list[dict[str, object]]:
++        matched = [record for record in records if record.get("document_id") == document_id]
++        if required and not matched:
++            raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++        return [dict(record) for record in sorted(matched, key=lambda row: str(row[id_field]))]
++
++    @staticmethod
++    def _validate_reemit_inventory(
++        records: tuple[dict[str, object], ...],
++        summaries: dict[str, DocumentChunkSetSummary],
++        id_field: str,
++    ) -> None:
++        summary_chunks = {
++            document_id: {entry.chunk_id for entry in summary.entries}
++            for document_id, summary in summaries.items()
++        }
++        for record in records:
++            document_id = record.get("document_id")
++            if type(document_id) is not str or document_id not in summaries:
++                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++            if id_field == "chunk_id" and record.get("chunk_id") not in summary_chunks[document_id]:
++                raise _Failure(DeltaPropagationFailureCategory.INVENTORY_CONFLICT)
++
+     @staticmethod
+     def _deduplicate_and_sort(records: list[dict[str, object]]) -> list[dict[str, object]]:
+         by_id: dict[str, tuple[bytes, dict[str, object]]] = {}
+diff --git a/src/knowledgenexus/foundation/cli/accept_confluence_mini_corpus.py b/src/knowledgenexus/foundation/cli/accept_confluence_mini_corpus.py
+index c93a465..f81376f 100644
+--- a/src/knowledgenexus/foundation/cli/accept_confluence_mini_corpus.py
++++ b/src/knowledgenexus/foundation/cli/accept_confluence_mini_corpus.py
+@@ -44,7 +44,7 @@ class MiniCorpusOperatorInputError(Exception):
+     """Shared sanitized operator-input failure for bounded mini-corpus CLIs.
+ 
+     Both `accept_confluence_mini_corpus` and
+-    `export_confluence_mini_corpus_indexing_packet` raise and catch this
++    `build_confluence_mini_corpus_indexing_packet` raise and catch this
+     exact exception type, so a rejected operator input (bad path, missing
+     parent, argparse failure, ...) is always reported as `"configuration"`
+     rather than falling through to the generic `"unexpected"` category.
+diff --git a/src/knowledgenexus/foundation/domain/models/chunk_stability.py b/src/knowledgenexus/foundation/domain/models/chunk_stability.py
+index 07921a4..0ec4347 100644
+--- a/src/knowledgenexus/foundation/domain/models/chunk_stability.py
++++ b/src/knowledgenexus/foundation/domain/models/chunk_stability.py
+@@ -13,9 +13,9 @@ from knowledgenexus.foundation.domain.rules.content_hasher import ContentHasher
+ 
+ SUMMARY_FORMAT_VERSION = "1"
+ ACTIVE_CHUNKER_VERSION = "1.2.0"
+-_CHUNK_ID = re.compile(r"^chunk:confluence:[0-9a-f]{16}(?:-[1-9][0-9]*)?$")
++_CHUNK_ID = re.compile(r"^chunk:(?:confluence|git):[0-9a-f]{16}(?:-[1-9][0-9]*)?$")
+ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+-_DOCUMENT_ID = re.compile(r"^confluence:page:\S+$")
++_DOCUMENT_ID = re.compile(r"^(?:confluence:page|git):\S+$")
+ _CONTENT_KINDS = frozenset({"prose", "table", "code_block", "code_symbol", "code_window"})
+ 
+ 
+diff --git a/src/knowledgenexus/foundation/domain/models/delta_propagation.py b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+index c537b7e..8f5538e 100644
+--- a/src/knowledgenexus/foundation/domain/models/delta_propagation.py
++++ b/src/knowledgenexus/foundation/domain/models/delta_propagation.py
+@@ -25,7 +25,8 @@ from knowledgenexus.foundation.domain.models.tombstone_propagation import (
+ 
+ _OPAQUE = re.compile(r"^\S+$")
+ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+-_DOCUMENT_ID = re.compile(r"^confluence:page:\S+$")
++_DOCUMENT_ID = re.compile(r"^(?:confluence:page|git):\S+$")
++_ACL_ID = re.compile(r"^acl:\S+$")
+ _MISSING = object()
+ _ENTITY_RANK = {"document": 0, "chunk": 1, "media": 2, "relation": 3, "acl": 4, "symbol": 5}
+ _OUTCOME_STATES = frozenset({"new", "unchanged", "changed", "removed"})
+@@ -133,17 +134,23 @@ class DeltaPropagationRequest:
+     previous_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
+     previous_acl_hashes: tuple[tuple[str, str], ...] = ()
+     current_acl_hashes: tuple[tuple[str, str], ...] = ()
++    current_dependents: tuple[tuple[str, tuple[TombstoneTarget, ...]], ...] = ()
++    previous_acl_records: tuple[dict[str, object], ...] = ()
++    current_acl_records: tuple[dict[str, object], ...] = ()
++    previous_chunk_records: tuple[dict[str, object], ...] = ()
++    current_chunk_records: tuple[dict[str, object], ...] = ()
+ 
+     def __post_init__(self) -> None:
+         expected_fields = frozenset({
+             "previous_dataset_version", "current_dataset_version", "previous_config_hash",
+-            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents", "previous_acl_hashes", "current_acl_hashes",
++            "current_config_hash", "detected_at", "previous_summaries", "current_summaries", "inventory", "previous_dependents", "current_dependents", "previous_acl_hashes", "current_acl_hashes", "previous_acl_records", "current_acl_records", "previous_chunk_records", "current_chunk_records",
+         })
+         actual_fields = frozenset(vars(self))
+-        # previous_dependents was introduced as an optional wire extension;
+-        # accept legacy in-memory requests and normalize the absent field.
++        # Delta inventory extensions are optional on legacy in-memory requests;
++        # normalize any absent extension fields before validation.
+         missing_optional = expected_fields - actual_fields
+-        if (actual_fields - expected_fields) or not missing_optional.issubset({"previous_dependents", "previous_acl_hashes", "current_acl_hashes"}):
++        optional_fields = {"previous_dependents", "current_dependents", "previous_acl_hashes", "current_acl_hashes", "previous_acl_records", "current_acl_records", "previous_chunk_records", "current_chunk_records"}
++        if (actual_fields - expected_fields) or not missing_optional.issubset(optional_fields):
+             raise TypeError("model fields are invalid")
+         if missing_optional:
+             for field in missing_optional:
+@@ -183,26 +190,30 @@ class DeltaPropagationRequest:
+             seen_inventory.add(entry.document_id)
+         if type(self.previous_dependents) is not tuple:
+             raise TypeError("previous_dependents is invalid")
+-        seen_dependents: set[str] = set()
+-        for item in self.previous_dependents:
+-            if type(item) is not tuple or len(item) != 2:
+-                raise TypeError("previous_dependents entries are invalid")
+-            document_id, targets = item
+-            if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_dependents:
+-                raise ValueError("previous dependent document ID is invalid")
+-            seen_dependents.add(document_id)
+-            if type(targets) is not tuple or any(type(target) is not TombstoneTarget for target in targets):
+-                raise TypeError("previous dependent targets are invalid")
+-            target_keys: set[tuple[TombstoneEntityType, str]] = set()
+-            for target in targets:
+-                TombstoneTarget.__post_init__(target)
+-                if target.entity_type is TombstoneEntityType.DOCUMENT:
+-                    raise ValueError("document cannot be a dependent target")
+-                key = (target.entity_type, target.entity_id)
+-                if key in target_keys:
+-                    raise ValueError("previous dependent targets contain duplicate IDs")
+-                target_keys.add(key)
+-        object.__setattr__(self, "previous_dependents", tuple(self.previous_dependents))
++        for field in ("previous_dependents", "current_dependents"):
++            values = getattr(self, field)
++            if type(values) is not tuple:
++                raise TypeError(f"{field} is invalid")
++            seen_dependents: set[str] = set()
++            for item in values:
++                if type(item) is not tuple or len(item) != 2:
++                    raise TypeError(f"{field} entries are invalid")
++                document_id, targets = item
++                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None or document_id in seen_dependents:
++                    raise ValueError(f"{field} document ID is invalid")
++                seen_dependents.add(document_id)
++                if type(targets) is not tuple or any(type(target) is not TombstoneTarget for target in targets):
++                    raise TypeError(f"{field} targets are invalid")
++                target_keys: set[tuple[TombstoneEntityType, str]] = set()
++                for target in targets:
++                    TombstoneTarget.__post_init__(target)
++                    if target.entity_type is TombstoneEntityType.DOCUMENT:
++                        raise ValueError("document cannot be a dependent target")
++                    key = (target.entity_type, target.entity_id)
++                    if key in target_keys:
++                        raise ValueError(f"{field} targets contain duplicate IDs")
++                    target_keys.add(key)
++            object.__setattr__(self, field, tuple(values))
+         for field in ("previous_acl_hashes", "current_acl_hashes"):
+             values = getattr(self, field)
+             if type(values) is not tuple:
+@@ -218,6 +229,26 @@ class DeltaPropagationRequest:
+                     raise ValueError(f"{field} fingerprint is invalid")
+                 seen_acl.add(document_id)
+             object.__setattr__(self, field, tuple(values))
++        for field in ("previous_acl_records", "current_acl_records", "previous_chunk_records", "current_chunk_records"):
++            values = getattr(self, field)
++            if type(values) is not tuple or any(type(record) is not dict for record in values):
++                raise TypeError(f"{field} is invalid")
++            seen_ids: set[str] = set()
++            id_field = "acl_id" if "acl" in field else "chunk_id"
++            for record in values:
++                if id_field not in record or type(record[id_field]) is not str or not record[id_field] or record[id_field] in seen_ids:
++                    raise ValueError(f"{field} record identity is invalid")
++                if id_field == "acl_id" and _ACL_ID.fullmatch(record[id_field]) is None:
++                    raise ValueError(f"{field} record identity is invalid")
++                seen_ids.add(record[id_field])
++                document_id = record.get("document_id")
++                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None:
++                    raise ValueError(f"{field} record document identity is invalid")
++                try:
++                    json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
++                except (TypeError, ValueError):
++                    raise ValueError(f"{field} record is invalid") from None
++            object.__setattr__(self, field, tuple(copy.deepcopy(record) for record in values))
+ 
+ 
+ @dataclass(frozen=True, repr=False)
+@@ -306,6 +337,8 @@ def _canonical_payload(result: "DeltaPropagationResult") -> dict[str, object]:
+         } if metrics is not None else None,
+         "document_outcomes": result.document_outcomes,
+         "reemit_document_ids": result.reemit_document_ids,
++        "reemit_acl_records": result.reemit_acl_records,
++        "reemit_chunk_records": result.reemit_chunk_records,
+         "records": result.records,
+         "status": result.status.value,
+     }
+@@ -323,11 +356,13 @@ class DeltaPropagationResult:
+     document_outcomes: tuple[tuple[str, str], ...] = ()
+     reemit_document_ids: tuple[str, ...] = ()
+     error_category: DeltaPropagationFailureCategory | None = None
++    reemit_acl_records: tuple[dict[str, object], ...] = ()
++    reemit_chunk_records: tuple[dict[str, object], ...] = ()
+ 
+     def __post_init__(self) -> None:
+         _require_exact_fields(
+             self,
+-            frozenset({"status", "base_dataset_version", "dataset_version", "records", "count", "metrics", "digest", "document_outcomes", "reemit_document_ids", "error_category"}),
++            frozenset({"status", "base_dataset_version", "dataset_version", "records", "count", "metrics", "digest", "document_outcomes", "reemit_document_ids", "reemit_acl_records", "reemit_chunk_records", "error_category"}),
+         )
+         if type(self.status) is not DeltaPropagationStatus:
+             raise TypeError("status is invalid")
+@@ -339,6 +374,28 @@ class DeltaPropagationResult:
+             raise TypeError("document outcomes are invalid")
+         if type(self.reemit_document_ids) is not tuple or any(type(value) is not str or _DOCUMENT_ID.fullmatch(value) is None for value in self.reemit_document_ids) or tuple(sorted(set(self.reemit_document_ids))) != self.reemit_document_ids:
+             raise ValueError("reemit document IDs are invalid")
++        for field, id_field in (("reemit_acl_records", "acl_id"), ("reemit_chunk_records", "chunk_id")):
++            values = getattr(self, field)
++            if type(values) is not tuple or any(type(record) is not dict for record in values):
++                raise TypeError(f"{field} are invalid")
++            previous_id: str | None = None
++            seen_ids: set[str] = set()
++            for record in values:
++                identity = record.get(id_field)
++                document_id = record.get("document_id")
++                if type(identity) is not str or not identity or identity in seen_ids or (previous_id is not None and identity <= previous_id):
++                    raise ValueError(f"{field} identity is invalid")
++                if id_field == "acl_id" and _ACL_ID.fullmatch(identity) is None:
++                    raise ValueError(f"{field} identity is invalid")
++                if type(document_id) is not str or _DOCUMENT_ID.fullmatch(document_id) is None:
++                    raise ValueError(f"{field} document identity is invalid")
++                try:
++                    json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
++                except (TypeError, ValueError):
++                    raise ValueError(f"{field} record is invalid") from None
++                seen_ids.add(identity)
++                previous_id = identity
++            object.__setattr__(self, field, tuple(copy.deepcopy(record) for record in values))
+         previous_document_id: str | None = None
+         outcome_counts = {state: 0 for state in _OUTCOME_STATES}
+         for outcome in self.document_outcomes:
+@@ -356,7 +413,7 @@ class DeltaPropagationResult:
+         if type(self.count) is not int or self.count < 0 or self.count != len(self.records):
+             raise ValueError("count is invalid")
+         if self.status is DeltaPropagationStatus.FAILED:
+-            if self.records or self.count != 0 or self.metrics is not None or self.digest is not None or self.document_outcomes or self.reemit_document_ids:
++            if self.records or self.count != 0 or self.metrics is not None or self.digest is not None or self.document_outcomes or self.reemit_document_ids or self.reemit_acl_records or self.reemit_chunk_records:
+                 raise ValueError("failed result is inconsistent")
+             if type(self.error_category) is not DeltaPropagationFailureCategory:
+                 raise ValueError("failure category is invalid")
+diff --git a/src/knowledgenexus/foundation/domain/models/foundation_gate.py b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+index 8e8423b..6e370e8 100644
+--- a/src/knowledgenexus/foundation/domain/models/foundation_gate.py
++++ b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+@@ -264,6 +264,13 @@ class ScaleGateEvidence:
+                 raise ValueError("scale evidence is incomplete")
+             if self.evidence_kind == "sanitized_real_capture" and self.transport != "production":
+                 raise ValueError("sanitized real scale evidence requires production transport")
++            if self.evidence_kind == "sanitized_real_capture" and (
++                self.rss_baseline_bytes is None
++                or self.rss_peak_bytes is None
++                or self.duration_milliseconds is None
++                or self.duration_milliseconds <= 0
++            ):
++                raise ValueError("sanitized real scale evidence requires resource measurements")
+             if not all((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
+                 raise ValueError("scale checks are incomplete")
+             if self.evidence_kind is None or self.evidence_digest is None:
+diff --git a/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py b/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
+index a48f59b..0735d6a 100644
+--- a/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
++++ b/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
+@@ -250,6 +250,13 @@ class PublishedSnapshotReadback:
+             seen.add(stream)
+         if seen != _STREAMS:
+             raise ValueError("stream_counts must cover all Foundation streams")
++        stream_count_map = dict(self.stream_counts)
++        if stream_count_map["documents"] < self.observed_pages:
++            raise ValueError("document count cannot be below observed page count")
++        if stream_count_map["acl"] < stream_count_map["documents"]:
++            raise ValueError("ACL count cannot be below document count")
++        if stream_count_map["sync_state"] < stream_count_map["documents"] + stream_count_map["media_assets"]:
++            raise ValueError("sync-state count cannot cover emitted entities")
+         for field in (
+             "readback_valid", "relation_closed", "acl_closed", "sync_closed",
+             "atomic_publish", "no_clobber", "sanitized_output",
+diff --git a/src/knowledgenexus/foundation/domain/models/m10_composition.py b/src/knowledgenexus/foundation/domain/models/m10_composition.py
+index e699aab..d8a632f 100644
+--- a/src/knowledgenexus/foundation/domain/models/m10_composition.py
++++ b/src/knowledgenexus/foundation/domain/models/m10_composition.py
+@@ -133,6 +133,20 @@ def _path(value: object) -> str:
+     return value
+ 
+ 
++def _confluence_version_matches(record: dict[str, object], handoff_version: str) -> bool:
++    """Accept per-page versions when one bounded run spans revisions.
++
++    ``source_version`` remains mandatory on every emitted record.  A handoff
++    may use ``mixed`` as its generation-level marker when pages were captured
++    at different Confluence versions; single-version legacy handoffs retain
++    the stricter equality check.
++    """
++    value = record.get("source_version")
++    if type(value) is not str or not value:
++        return False
++    return handoff_version == "mixed" or value == handoff_version
++
++
+ def _validate_records(streams: dict[str, tuple[dict[str, object], ...]], injected_validator: M10SchemaValidator, canonical_validator: M10SchemaValidator) -> dict[str, tuple[dict[str, object], ...]]:
+     if not callable(getattr(injected_validator, "validate_record", None)) or not callable(getattr(canonical_validator, "validate_record", None)):
+         raise TypeError("schema validator is invalid")
+@@ -328,7 +342,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
+         source = record["source_system"]
+         if source == "confluence":
+             page = record.get("page_id")
+-            if type(page) is not str or page not in request.ordered_page_ids or record.get("source_version") != confluence.source_version:
++            if type(page) is not str or page not in request.ordered_page_ids or not _confluence_version_matches(record, confluence.source_version):
+                 raise M10SnapshotError("Confluence document provenance is invalid")
+             confluence_pages.append(page)
+         elif source == "git":
+@@ -359,7 +373,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
+         parent_acl = acl_by_document[parent].get("acl_tags")
+         if record.get("acl_tags") != parent_acl:
+             raise M10SnapshotError("chunk ACL inheritance is invalid")
+-        if record.get("source_system") == "confluence" and (record.get("page_id") not in request.ordered_page_ids or record.get("page_id") != next(doc.get("page_id") for doc in documents if doc["document_id"] == parent) or record.get("source_version") != confluence.source_version):
++        if record.get("source_system") == "confluence" and (record.get("page_id") not in request.ordered_page_ids or record.get("page_id") != next(doc.get("page_id") for doc in documents if doc["document_id"] == parent) or not _confluence_version_matches(record, confluence.source_version)):
+             raise M10SnapshotError("Confluence chunk provenance is invalid")
+         if record.get("source_system") == "git" and (record.get("repo") != request.git_repository or record.get("branch") != request.git_branch or record.get("source_version") != request.git_commit or record["acl_tags"] != [f"repo:{request.git_repository}"]):
+             raise M10SnapshotError("Git chunk ACL/provenance is invalid")
+@@ -421,7 +435,7 @@ def compose_m10_projection(request: M10SnapshotRequest, confluence: M10Confluenc
+             raise M10SnapshotError("media policy or budget is invalid")
+         parent = record.get("parent_document_id")
+         parent_record = next((doc for doc in documents if doc["document_id"] == parent), None)
+-        if parent_record is None or parent_record.get("source_system") != "confluence" or record.get("source_system") != "confluence" or record.get("source_version") != confluence.source_version or record.get("processing_status") not in request.media_policy.allowed_processing_statuses:
++        if parent_record is None or parent_record.get("source_system") != "confluence" or record.get("source_system") != "confluence" or not _confluence_version_matches(record, confluence.source_version) or record.get("processing_status") not in request.media_policy.allowed_processing_statuses:
+             raise M10SnapshotError("media provenance/policy is invalid")
+         downloaded = record.get("download_status") == "downloaded"
+         content_hash, raw_uri = record.get("content_hash"), record.get("raw_uri")
+diff --git a/src/knowledgenexus/foundation/domain/rules/__init__.py b/src/knowledgenexus/foundation/domain/rules/__init__.py
+index 3d13bd6..1085ad3 100644
+--- a/src/knowledgenexus/foundation/domain/rules/__init__.py
++++ b/src/knowledgenexus/foundation/domain/rules/__init__.py
+@@ -17,6 +17,11 @@ from knowledgenexus.foundation.domain.rules.tombstone_id_generator import Tombst
+ from knowledgenexus.foundation.domain.rules.symbol_id_generator import SymbolIdGenerator
+ from knowledgenexus.foundation.domain.rules.symbol_record_builder import SymbolRecordBuilder
+ from knowledgenexus.foundation.domain.rules.tombstone_record_builder import TombstoneRecordBuilder
++from knowledgenexus.foundation.domain.rules.snapshot_readback import (
++    SnapshotClosureReport,
++    SnapshotReadbackError,
++    validate_snapshot_streams,
++)
+ from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
+     WikiStructureParseError,
+     WikiStructureParser,
+@@ -36,6 +41,9 @@ __all__ = [
+     "SymbolIdGenerator",
+     "SymbolRecordBuilder",
+     "TombstoneRecordBuilder",
++    "SnapshotClosureReport",
++    "SnapshotReadbackError",
++    "validate_snapshot_streams",
+     "WikiStructureParseError",
+     "WikiStructureParser",
+     "OccurrenceResolutionConflict",
+diff --git a/src/knowledgenexus/foundation/domain/rules/snapshot_readback.py b/src/knowledgenexus/foundation/domain/rules/snapshot_readback.py
+new file mode 100644
+index 0000000..fc84ef9
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/rules/snapshot_readback.py
+@@ -0,0 +1,175 @@
++"""Independent cross-stream validation for published Foundation snapshots."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping, Sequence
++from dataclasses import dataclass
++
++_STREAMS = ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")
++_IDS = {
++    "documents": "document_id", "chunks": "chunk_id", "relations": "relation_id", "acl": "acl_id",
++    "media_assets": "media_id", "symbols": "symbol_id", "sync_state": "entity_id", "tombstones": "tombstone_id",
++}
++
++
++class SnapshotReadbackError(ValueError):
++    """Sanitized cross-stream readback failure."""
++
++
++@dataclass(frozen=True)
++class SnapshotClosureReport:
++    """Small, non-content result suitable for a gate envelope."""
++
++    stream_counts: tuple[tuple[str, int], ...]
++    relation_closed: bool
++    acl_closed: bool
++    sync_closed: bool
++    tombstone_closed: bool
++
++
++def validate_snapshot_streams(
++    streams: object,
++    *,
++    export_mode: str,
++    prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
++) -> SnapshotClosureReport:
++    """Validate cross-stream identity and ownership without mutating input."""
++    if type(streams) is not dict or set(streams) != set(_STREAMS):
++        raise SnapshotReadbackError("stream set is invalid")
++    if export_mode not in {"full_snapshot", "delta"}:
++        raise SnapshotReadbackError("export mode is invalid")
++    normalized: dict[str, tuple[dict[str, object], ...]] = {}
++    for name in _STREAMS:
++        value = streams[name]
++        if type(value) is not tuple:
++            raise SnapshotReadbackError("stream type is invalid")
++        rows: list[dict[str, object]] = []
++        seen: set[str] = set()
++        for row in value:
++            if type(row) is not dict:
++                raise SnapshotReadbackError("stream record is invalid")
++            identity = row.get(_IDS[name])
++            if type(identity) is not str or not identity or identity in seen:
++                raise SnapshotReadbackError("stream identity is invalid")
++            seen.add(identity)
++            rows.append(dict(row))
++        normalized[name] = tuple(rows)
++
++    document_ids = {row["document_id"] for row in normalized["documents"]}
++    chunk_ids = {row["chunk_id"] for row in normalized["chunks"]}
++    relation_ids = {row["relation_id"] for row in normalized["relations"]}
++    media_ids = {row["media_id"] for row in normalized["media_assets"]}
++    entity_ids = document_ids | chunk_ids | media_ids
++
++    acl_by_document: dict[str, dict[str, object]] = {}
++    for row in normalized["acl"]:
++        document_id = row.get("document_id")
++        document = next((item for item in normalized["documents"] if item["document_id"] == document_id), None)
++        if document_id not in document_ids or document_id in acl_by_document or row.get("acl_id") != document.get("acl_id") or row.get("source_system") != document.get("source_system"):
++            raise SnapshotReadbackError("ACL closure is invalid")
++        acl_by_document[document_id] = row
++    if set(acl_by_document) != document_ids:
++        raise SnapshotReadbackError("ACL closure is incomplete")
++
++    for row in normalized["chunks"]:
++        document_id = row.get("document_id")
++        if document_id not in document_ids:
++            raise SnapshotReadbackError("chunk parent is missing")
++        parent = next(item for item in normalized["documents"] if item["document_id"] == document_id)
++        if row.get("source_system") != parent.get("source_system"):
++            raise SnapshotReadbackError("chunk source ownership is invalid")
++        if row.get("acl_tags") != acl_by_document[document_id].get("acl_tags"):
++            raise SnapshotReadbackError("chunk ACL inheritance is invalid")
++
++    def _relation_refs(row: dict[str, object]) -> None:
++        references = row.get("relation_ids", [])
++        if type(references) is not list:
++            raise SnapshotReadbackError("relation references are invalid")
++        try:
++            duplicate = len(references) != len(set(references))
++        except TypeError:
++            raise SnapshotReadbackError("relation references are invalid") from None
++        if duplicate or any(type(value) is not str or value not in relation_ids for value in references):
++            raise SnapshotReadbackError("relation closure is invalid")
++
++    for row in normalized["documents"]:
++        _relation_refs(row)
++    for row in normalized["chunks"]:
++        _relation_refs(row)
++
++    relation_owners = document_ids | chunk_ids
++    for row in normalized["relations"]:
++        source_id = row.get("source_id")
++        target_id = row.get("target_id")
++        if source_id not in relation_owners or type(target_id) is not str or not target_id or row.get("resolution_status") not in {"resolved", "unresolved_without_jira_api", "deferred_mvp", "unresolved_target"}:
++            raise SnapshotReadbackError("relation source/target is invalid")
++        if row.get("resolution_status") == "resolved" and target_id not in entity_ids:
++            raise SnapshotReadbackError("resolved relation target is missing")
++        if row.get("resolution_status") != "resolved" and target_id in entity_ids:
++            raise SnapshotReadbackError("unresolved relation target is emitted")
++        if row.get("relation_type") == "embeds_media" and row.get("resolution_status") == "resolved":
++            media = next((item for item in normalized["media_assets"] if item["media_id"] == target_id), None)
++            if media is None or media.get("parent_document_id") != source_id:
++                raise SnapshotReadbackError("media relation ownership is invalid")
++        if row.get("relation_type") in {"includes_page", "links_to_page"} and row.get("resolution_status") == "resolved":
++            source = next((item for item in normalized["documents"] if item["document_id"] == source_id), None)
++            target = next((item for item in normalized["documents"] if item["document_id"] == target_id), None)
++            if source is None or target is None or source.get("source_system") != "confluence" or target.get("source_system") != "confluence":
++                raise SnapshotReadbackError("page relation ownership is invalid")
++    relation_owners_rows = {row["document_id"]: row for row in normalized["documents"]}
++    relation_owners_rows.update({row["chunk_id"]: row for row in normalized["chunks"]})
++    for row in normalized["relations"]:
++        owner = relation_owners_rows.get(row["source_id"])
++        if owner is None or row["relation_id"] not in owner.get("relation_ids", []):
++            raise SnapshotReadbackError("relation owner linkage is invalid")
++
++    for row in normalized["media_assets"]:
++        if row.get("parent_document_id") not in document_ids:
++            raise SnapshotReadbackError("media parent is missing")
++    git_files = {
++        (row.get("repo"), row.get("branch"), row.get("source_version"), row.get("file_path"))
++        for row in normalized["documents"]
++        if row.get("source_system") == "git"
++    }
++    for row in normalized["symbols"]:
++        # SymbolRecord has no document_id; provenance is keyed to its Git file.
++        if (row.get("repo"), row.get("branch"), row.get("commit_hash"), row.get("file_path")) not in git_files:
++            raise SnapshotReadbackError("symbol document is missing")
++        if row.get("chunk_id") is not None and row.get("chunk_id") not in chunk_ids:
++            raise SnapshotReadbackError("symbol chunk is missing")
++
++    sync_ids: set[str] = set()
++    for row in normalized["sync_state"]:
++        entity_id = row.get("entity_id")
++        entity_type = row.get("entity_type")
++        expected_type = "page" if entity_id in document_ids and str(entity_id).startswith("confluence:page:") else "file" if entity_id in document_ids else "attachment" if entity_id in media_ids else "repo"
++        if entity_id in sync_ids or row.get("schema_version") != "1.0" or row.get("status") != "active" or entity_type != expected_type or (entity_id not in entity_ids and entity_type != "repo"):
++            raise SnapshotReadbackError("sync entity is missing")
++        sync_ids.add(entity_id)
++    tombstone_ids = {row["tombstone_id"] for row in normalized["tombstones"]}
++    if len(tombstone_ids) != len(normalized["tombstones"]):
++        raise SnapshotReadbackError("tombstone identity is invalid")
++    if export_mode == "full_snapshot" and normalized["tombstones"]:
++        raise SnapshotReadbackError("full snapshot contains tombstones")
++    if prior_streams is not None:
++        if type(prior_streams) is not dict or set(prior_streams) != set(_STREAMS):
++            raise SnapshotReadbackError("prior stream set is invalid")
++        prior_ids = {
++            row.get(_IDS[name])
++            for name in _STREAMS
++            for row in prior_streams[name]
++            if type(row) is dict
++        }
++        if any(row.get("entity_id") not in prior_ids for row in normalized["tombstones"]):
++            raise SnapshotReadbackError("tombstone target is not in prior snapshot")
++
++    return SnapshotClosureReport(
++        stream_counts=tuple(sorted((name, len(normalized[name])) for name in _STREAMS)),
++        relation_closed=True,
++        acl_closed=True,
++        sync_closed=True,
++        tombstone_closed=True,
++    )
++
++
++__all__ = ["SnapshotClosureReport", "SnapshotReadbackError", "validate_snapshot_streams"]
+diff --git a/src/knowledgenexus/foundation/infrastructure/adapters/__init__.py b/src/knowledgenexus/foundation/infrastructure/adapters/__init__.py
+index c3bbaa8..84da0d9 100644
+--- a/src/knowledgenexus/foundation/infrastructure/adapters/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/adapters/__init__.py
+@@ -9,6 +9,11 @@ from knowledgenexus.foundation.infrastructure.adapters.m10_source_adapters impor
+     GitMaterializedSourcePort,
+     M10SourceAdapterError,
+ )
++from knowledgenexus.foundation.infrastructure.adapters.m10_composition_root import (
++    ConfluenceM10CompositionRoot,
++    GitM10CompositionRoot,
++    M10CompositionRootError,
++)
+ 
+ __all__ = [
+     "ConfluenceM10Adapter",
+@@ -20,4 +25,7 @@ __all__ = [
+     "GitMaterializedInput",
+     "GitMaterializedSourcePort",
+     "M10SourceAdapterError",
++    "ConfluenceM10CompositionRoot",
++    "GitM10CompositionRoot",
++    "M10CompositionRootError",
+ ]
+diff --git a/src/knowledgenexus/foundation/infrastructure/adapters/m10_composition_root.py b/src/knowledgenexus/foundation/infrastructure/adapters/m10_composition_root.py
+new file mode 100644
+index 0000000..86147df
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/adapters/m10_composition_root.py
+@@ -0,0 +1,336 @@
++"""Bounded production composition roots for the M10 source adapters.
++
++The M10 application boundary remains offline and dependency-injected.  These
++small roots are the explicit place where an operator binds approved raw-page,
++Git, tokenizer, and processor seams to the generic materialized-source
++adapters.  They do not read credentials, construct transports, or perform
++network calls.
++"""
++
++from __future__ import annotations
++
++import copy
++import hashlib
++from dataclasses import dataclass
++from pathlib import Path
++
++from knowledgenexus.foundation.application.use_cases.build_git_code_documents import (
++    BuildGitCodeDocuments,
++    BuildGitCodeDocumentsRequest,
++)
++from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
++from knowledgenexus.foundation.application.use_cases.process_confluence_page_set import (
++    ProcessConfluencePageSet,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_set import (
++    ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++    ConfluencePageSetRequest,
++    ConfluencePageSetResult,
++    ConfluencePageWorkItem,
++)
++from knowledgenexus.foundation.domain.models.git_code_source import (
++    GitCasePolicy,
++    GitScanBudgets,
++    GitSourceConfig,
++)
++from knowledgenexus.foundation.domain.models.git_code_source import (
++    GitCodeBuildResult,
++    GitCodeBuildStatus,
++)
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotRequest
++from knowledgenexus.foundation.domain.models.symbol_index import (
++    BuildGitSymbolsRequest,
++    GitSymbolIndexResult,
++    GitSymbolIndexStatus,
++)
++from knowledgenexus.foundation.domain.records.acl_record_builder import ACLRecordBuilder
++from knowledgenexus.foundation.infrastructure.adapters.m10_source_adapters import (
++    ConfluenceM10Adapter,
++    ConfluenceM10MaterializedSource,
++    GitM10Adapter,
++    GitM10MaterializedSource,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++
++
++class M10CompositionRootError(RuntimeError):
++    """Sanitized configuration or producer failure at the composition root."""
++
++
++@dataclass(frozen=True)
++class _StageOutput:
++    """Small JSON-safe carrier used between approved application seams."""
++
++    documents: tuple[dict[str, object], ...]
++    chunks: tuple[dict[str, object], ...]
++    source_version: str | None = None
++    raw_artifact_identity: str | None = None
++    page_references: tuple[object, ...] = ()
++    symbols: tuple[dict[str, object], ...] = ()
++    acl: tuple[dict[str, object], ...] = ()
++
++
++class _ConfluencePageSetStage:
++    def __init__(self, processor: object) -> None:
++        if not callable(getattr(processor, "execute", None)):
++            raise TypeError("page processor is invalid")
++        self._processor = processor
++
++    def execute(self, *, request: M10SnapshotRequest) -> _StageOutput:
++        if type(request) is not M10SnapshotRequest:
++            raise TypeError("invalid request")
++        try:
++            M10SnapshotRequest.__post_init__(request)
++        except Exception:
++            raise M10CompositionRootError("invalid request") from None
++        try:
++            items = tuple(
++                ConfluencePageWorkItem(page_id=page_id, crawled_at=request.generated_at)
++                for page_id in request.ordered_page_ids
++            )
++        except Exception:
++            raise M10CompositionRootError("Confluence page scope is invalid") from None
++        if not items:
++            raise M10CompositionRootError("Confluence page scope is empty")
++        try:
++            page_request = ConfluencePageSetRequest(
++                run_id=request.run_id,
++                generation_id=request.generation_id,
++                items=items,
++                profile_identity=ACTIVE_PAGE_SET_PROFILE_IDENTITY,
++            )
++        except Exception:
++            raise M10CompositionRootError("Confluence page request is invalid") from None
++        try:
++            result = self._processor.execute(request=page_request)
++        except Exception:
++            raise M10CompositionRootError("Confluence page processing failed") from None
++        if type(result) is not ConfluencePageSetResult:
++            raise M10CompositionRootError("Confluence page result is invalid")
++        documents = tuple(copy.deepcopy(result.documents))
++        chunks = tuple(copy.deepcopy(result.chunks))
++        versions: set[str] = set()
++        for record in documents:
++            version = record.get("source_version")
++            if type(version) is not str or not version:
++                raise M10CompositionRootError("Confluence source version is invalid")
++            versions.add(version)
++        source_version = next(iter(versions)) if len(versions) == 1 else "mixed"
++        return _StageOutput(
++            documents=documents,
++            chunks=chunks,
++            source_version=source_version,
++            raw_artifact_identity=request.raw_generation_id,
++            page_references=tuple(result.reference_intents_by_page),
++        )
++
++
++class ConfluenceM10CompositionRoot:
++    """Bind approved Confluence seams into a concrete ``ConfluenceM10Adapter``.
++
++    ``relation_stage``, ``acl_stage``, and ``media_stage`` are already-built
++    application seams.  Keeping them as constructor inputs makes this root
++    usable for both the production transport harness and offline replay while
++    ensuring the adapter never receives credentials or filesystem paths from an
++    M10 request.
++    """
++
++    @classmethod
++    def build(
++        cls,
++        *,
++        raw_page_store: object,
++        tokenizer: object,
++        chunking_profile: object,
++        raw_page_mapper: object,
++        storage_normalizer: object,
++        relation_stage: object | None = None,
++        acl_stage: object | None = None,
++        media_stage: object | None = None,
++        sync_inventory_stage: object | None = None,
++        schema_validator: object | None = None,
++    ) -> ConfluenceM10Adapter:
++        """Construct the read-only adapter from configured approved seams."""
++        validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++        if not callable(getattr(validator, "validate_record", None)):
++            raise TypeError("schema validator is invalid")
++        try:
++            processor = ProcessConfluencePageSet(
++                chunking_profile=chunking_profile,
++                tokenizer=tokenizer,
++                raw_page_store=raw_page_store,
++                raw_page_mapper=raw_page_mapper,
++                storage_normalizer=storage_normalizer,
++                schema_validator=validator,
++            )
++            source = ConfluenceM10MaterializedSource(
++                page_stage=_ConfluencePageSetStage(processor),
++                relation_stage=relation_stage,
++                acl_stage=acl_stage,
++                media_stage=media_stage,
++                inventory_stage=sync_inventory_stage,
++            )
++            return ConfluenceM10Adapter(source=source)
++        except (TypeError, ValueError):
++            raise
++        except Exception:
++            raise M10CompositionRootError("Confluence composition failed") from None
++
++
++class _GitApprovedStage:
++    def __init__(
++        self,
++        *,
++        repository_reader: object,
++        tokenizer: object,
++        repository_root: Path,
++        budgets: GitScanBudgets,
++        case_policy: GitCasePolicy,
++        schema_validator: object,
++        symbol_parser: object | None,
++    ) -> None:
++        if not callable(getattr(repository_reader, "read", None)):
++            raise TypeError("Git repository reader is invalid")
++        if not callable(getattr(tokenizer, "tokenize", None)):
++            raise TypeError("Git tokenizer is invalid")
++        if (
++            not isinstance(repository_root, Path)
++            or not repository_root.is_absolute()
++            or not repository_root.exists()
++            or not repository_root.is_dir()
++            or repository_root.is_symlink()
++        ):
++            raise TypeError("Git repository root is invalid")
++        if type(budgets) is not GitScanBudgets or type(case_policy) is not GitCasePolicy:
++            raise TypeError("Git scan configuration is invalid")
++        if not callable(getattr(schema_validator, "validate_record", None)):
++            raise TypeError("schema validator is invalid")
++        if symbol_parser is not None and not callable(getattr(symbol_parser, "parse", None)):
++            raise TypeError("Git symbol parser is invalid")
++        self._reader = repository_reader
++        self._tokenizer = tokenizer
++        self._repository_root = repository_root
++        self._budgets = budgets
++        self._case_policy = case_policy
++        self._validator = schema_validator
++        self._symbol_parser = symbol_parser
++
++    def execute(self, *, request: M10SnapshotRequest) -> _StageOutput:
++        if type(request) is not M10SnapshotRequest:
++            raise TypeError("invalid request")
++        try:
++            M10SnapshotRequest.__post_init__(request)
++        except Exception:
++            raise M10CompositionRootError("invalid request") from None
++        try:
++            config = GitSourceConfig(
++                clone_root=self._repository_root,
++                repo_name=request.git_repository,
++                branch=request.git_branch,
++                commit_sha=request.git_commit,
++                crawled_at=request.generated_at,
++                budgets=self._budgets,
++                case_policy=self._case_policy,
++            )
++        except Exception:
++            raise M10CompositionRootError("Git source configuration is invalid") from None
++        result = BuildGitCodeDocuments(
++            repository_reader=self._reader,
++            tokenizer=self._tokenizer,
++            schema_validator=self._validator,
++        ).execute(
++            BuildGitCodeDocumentsRequest(
++                config=config,
++                chunking_profile=request.profile_bundle.chunking_profile,
++            )
++        )
++        if type(result) is not GitCodeBuildResult or result.status is not GitCodeBuildStatus.SUCCESS or result.plan is None:
++            raise M10CompositionRootError("Git document processing failed")
++        plan = result.plan
++        symbols: tuple[dict[str, object], ...] = ()
++        chunks = tuple(copy.deepcopy(plan.chunks))
++        if self._symbol_parser is not None:
++            symbol_result = BuildGitSymbols(
++                parser=self._symbol_parser,
++                tokenizer=self._tokenizer,
++                schema_validator=self._validator,
++            ).execute(
++                BuildGitSymbolsRequest(
++                    plan=plan,
++                    chunking_profile=request.profile_bundle.chunking_profile,
++                    scanned_at=request.generated_at,
++                )
++            )
++            if type(symbol_result) is not GitSymbolIndexResult or symbol_result.status is not GitSymbolIndexStatus.SUCCESS:
++                raise M10CompositionRootError("Git symbol processing failed")
++            symbols = tuple(copy.deepcopy(symbol_result.symbol_records))
++            chunks = tuple(copy.deepcopy(symbol_result.chunks))
++        document_rows = [copy.deepcopy(document) for document in plan.documents]
++        acl_ids = [document.get("acl_id") for document in document_rows]
++        if len(set(acl_ids)) != len(acl_ids):
++            # The Git producer historically used one repository ACL ID for
++            # every file. M10 emits one ACL row per document, so derive stable
++            # per-file IDs only when that legacy shape would collide.
++            for document in document_rows:
++                document_id = str(document["document_id"])
++                suffix = hashlib.sha256(document_id.encode("utf-8")).hexdigest()[:16]
++                document["acl_id"] = f"acl:repo:{request.git_repository}:{suffix}"
++        acl = tuple(
++            ACLRecordBuilder.build(
++                acl_id=str(document["acl_id"]),
++                document_id=str(document["document_id"]),
++                source_system="git",
++                is_restricted=False,
++                acl_tags=[f"repo:{request.git_repository}"],
++                acl_extraction_status="ok",
++                extracted_at=request.generated_at,
++            )
++            for document in document_rows
++        )
++        return _StageOutput(
++            documents=tuple(document_rows),
++            chunks=chunks,
++            symbols=symbols,
++            acl=acl,
++        )
++
++
++class GitM10CompositionRoot:
++    """Bind a pinned Git reader and approved processors to ``GitM10Adapter``."""
++
++    @classmethod
++    def build(
++        cls,
++        *,
++        repository_reader: object,
++        tokenizer: object,
++        repository_root: Path,
++        budgets: GitScanBudgets,
++        case_policy: GitCasePolicy,
++        symbol_parser: object | None = None,
++        sync_inventory_stage: object | None = None,
++        schema_validator: object | None = None,
++    ) -> GitM10Adapter:
++        validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++        stage = _GitApprovedStage(
++            repository_reader=repository_reader,
++            tokenizer=tokenizer,
++            repository_root=repository_root,
++            budgets=budgets,
++            case_policy=case_policy,
++            schema_validator=validator,
++            symbol_parser=symbol_parser,
++        )
++        return GitM10Adapter(
++            source=GitM10MaterializedSource(
++                document_stage=stage,
++                inventory_stage=sync_inventory_stage,
++            )
++        )
++
++
++__all__ = [
++    "ConfluenceM10CompositionRoot",
++    "GitM10CompositionRoot",
++    "M10CompositionRootError",
++]
+diff --git a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+index 5cb489c..82ea22a 100644
+--- a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
++++ b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+@@ -37,11 +37,12 @@ class ConfluenceMaterializedInput:
+     acl: tuple[dict[str, object], ...]
+     media_assets: tuple[dict[str, object], ...] = ()
+     tombstones: tuple[dict[str, object], ...] = ()
++    sync_inventory: tuple[dict[str, object], ...] = ()
+ 
+     def __post_init__(self) -> None:
+         if type(self.source_version) is not str or not self.source_version or type(self.raw_artifact_identity) is not str or not self.raw_artifact_identity:
+             raise ValueError("Confluence materialized provenance is invalid")
+-        for name in ("documents", "chunks", "relations", "acl", "media_assets", "tombstones"):
++        for name in ("documents", "chunks", "relations", "acl", "media_assets", "tombstones", "sync_inventory"):
+             object.__setattr__(self, name, _records(getattr(self, name), name))
+ 
+ 
+@@ -52,9 +53,10 @@ class GitMaterializedInput:
+     acl: tuple[dict[str, object], ...]
+     symbols: tuple[dict[str, object], ...] = ()
+     tombstones: tuple[dict[str, object], ...] = ()
++    sync_inventory: tuple[dict[str, object], ...] = ()
+ 
+     def __post_init__(self) -> None:
+-        for name in ("documents", "chunks", "acl", "symbols", "tombstones"):
++        for name in ("documents", "chunks", "acl", "symbols", "tombstones", "sync_inventory"):
+             object.__setattr__(self, name, _records(getattr(self, name), name))
+ 
+ 
+@@ -177,10 +179,11 @@ class ConfluenceM10MaterializedSource:
+         acl_stage: object | None = None,
+         media_stage: object | None = None,
+         tombstone_stage: object | None = None,
++        inventory_stage: object | None = None,
+     ) -> None:
+         if not callable(getattr(page_stage, "execute", None)) and not callable(page_stage):
+             raise TypeError("page_stage is invalid")
+-        for name, stage in (("relation_stage", relation_stage), ("acl_stage", acl_stage), ("media_stage", media_stage), ("tombstone_stage", tombstone_stage)):
++        for name, stage in (("relation_stage", relation_stage), ("acl_stage", acl_stage), ("media_stage", media_stage), ("tombstone_stage", tombstone_stage), ("inventory_stage", inventory_stage)):
+             if stage is not None and not callable(getattr(stage, "execute", None)) and not callable(stage):
+                 raise TypeError(f"{name} is invalid")
+         self._page_stage = page_stage
+@@ -188,6 +191,7 @@ class ConfluenceM10MaterializedSource:
+         self._acl_stage = acl_stage
+         self._media_stage = media_stage
+         self._tombstone_stage = tombstone_stage
++        self._inventory_stage = inventory_stage
+ 
+     def collect(self, request: M10SnapshotRequest) -> ConfluenceMaterializedInput:
+         if type(request) is not M10SnapshotRequest:
+@@ -224,7 +228,9 @@ class ConfluenceM10MaterializedSource:
+         acl: tuple[dict[str, object], ...] = _records_from_result(page, ("acl", "acl_records"), "acl") if _field(page, "acl") is not None or _field(page, "acl_records") is not None else ()
+         media: tuple[dict[str, object], ...] = _records_from_result(page, ("media_assets", "assets"), "media_assets") if _field(page, "media_assets") is not None or _field(page, "assets") is not None else ()
+         tombstones: tuple[dict[str, object], ...] = _records_from_result(page, ("tombstones",), "tombstones") if _field(page, "tombstones") is not None else ()
++        sync_inventory: tuple[dict[str, object], ...] = _records_from_result(page, ("sync_inventory", "inventory"), "sync_inventory") if _field(page, "sync_inventory") is not None or _field(page, "inventory") is not None else ()
+         state["media_assets"] = media
++        state["sync_inventory"] = sync_inventory
+         if page_media_result is not None:
+             state["media_result"] = page_media_result
+             state["media"] = page_media_result
+@@ -234,7 +240,7 @@ class ConfluenceM10MaterializedSource:
+         # can resolve attachment intents against the current asset set. Generic
+         # relations intentionally run after ACL so their IDs are appended to
+         # the final ACL-enriched documents and chunks.
+-        for stage_name, stage in (("media_stage", self._media_stage), ("acl_stage", self._acl_stage), ("relation_stage", self._relation_stage), ("tombstone_stage", self._tombstone_stage)):
++        for stage_name, stage in (("media_stage", self._media_stage), ("acl_stage", self._acl_stage), ("relation_stage", self._relation_stage), ("tombstone_stage", self._tombstone_stage), ("inventory_stage", self._inventory_stage)):
+             if stage is None:
+                 continue
+             result = _stage_call(stage, request=request, state=state)
+@@ -246,14 +252,17 @@ class ConfluenceM10MaterializedSource:
+                 materialized_relations = _field(result, "relations")
+                 materialized_documents = _field(result, "documents")
+                 materialized_chunks = _field(result, "chunks")
++                materialized_assets = _field(result, "media_assets")
++                if materialized_assets is None:
++                    materialized_assets = _field(result, "assets")
+                 if materialized_relations is not None and (materialized_documents is not None or materialized_chunks is not None):
+                     relations = _records(materialized_relations, "relations")
+                     if materialized_documents is not None:
+                         state["documents"] = _records(materialized_documents, "documents")
+                     if materialized_chunks is not None:
+                         state["chunks"] = _records(materialized_chunks, "chunks")
+-                elif _field(result, "media_assets") is not None or _field(result, "assets") is not None:
+-                    media = _records_from_result(result, ("media_assets", "assets"), "media_assets")
++                if materialized_assets is not None:
++                    media = _records(materialized_assets, "media_assets")
+                     state["media_assets"] = media
+                 media_result = _field(result, "media_result")
+                 if media_result is None:
+@@ -295,6 +304,8 @@ class ConfluenceM10MaterializedSource:
+                     state["chunks"] = _records(chunks, "chunks")
+             elif stage_name == "tombstone_stage":
+                 tombstones = _records_from_result(result, ("tombstones", "records"), "tombstones")
++            elif stage_name == "inventory_stage":
++                sync_inventory = _records_from_result(result, ("sync_inventory", "inventory", "records"), "sync_inventory")
+         return ConfluenceMaterializedInput(
+             source_version,
+             raw_identity,
+@@ -304,20 +315,22 @@ class ConfluenceM10MaterializedSource:
+             acl,
+             media,
+             tombstones,
++            sync_inventory,
+         )
+ 
+ 
+ class GitM10MaterializedSource:
+     """Compose pinned Git document/symbol producers into an M10 source port."""
+ 
+-    def __init__(self, *, document_stage: object, symbol_stage: object | None = None, acl_stage: object | None = None, tombstone_stage: object | None = None) -> None:
+-        for name, stage in (("document_stage", document_stage), ("symbol_stage", symbol_stage), ("acl_stage", acl_stage), ("tombstone_stage", tombstone_stage)):
++    def __init__(self, *, document_stage: object, symbol_stage: object | None = None, acl_stage: object | None = None, tombstone_stage: object | None = None, inventory_stage: object | None = None) -> None:
++        for name, stage in (("document_stage", document_stage), ("symbol_stage", symbol_stage), ("acl_stage", acl_stage), ("tombstone_stage", tombstone_stage), ("inventory_stage", inventory_stage)):
+             if stage is not None and not callable(getattr(stage, "execute", None)) and not callable(stage):
+                 raise TypeError(f"{name} is invalid")
+         self._document_stage = document_stage
+         self._symbol_stage = symbol_stage
+         self._acl_stage = acl_stage
+         self._tombstone_stage = tombstone_stage
++        self._inventory_stage = inventory_stage
+ 
+     def collect(self, request: M10SnapshotRequest) -> GitMaterializedInput:
+         if type(request) is not M10SnapshotRequest:
+@@ -330,7 +343,8 @@ class GitM10MaterializedSource:
+         acl = _records_from_result(result, ("acl", "acl_records"), "acl") if _field(result, "acl") is not None or _field(result, "acl_records") is not None else ()
+         symbols = _records_from_result(result, ("symbols", "symbol_records"), "symbols") if _field(result, "symbols") is not None or _field(result, "symbol_records") is not None else ()
+         tombstones = _records_from_result(result, ("tombstones",), "tombstones") if _field(result, "tombstones") is not None else ()
+-        for name, stage in (("symbol_stage", self._symbol_stage), ("acl_stage", self._acl_stage), ("tombstone_stage", self._tombstone_stage)):
++        sync_inventory = _records_from_result(result, ("sync_inventory", "inventory"), "sync_inventory") if _field(result, "sync_inventory") is not None or _field(result, "inventory") is not None else ()
++        for name, stage in (("symbol_stage", self._symbol_stage), ("acl_stage", self._acl_stage), ("tombstone_stage", self._tombstone_stage), ("inventory_stage", self._inventory_stage)):
+             if stage is None:
+                 continue
+             output = _stage_call(stage, request=request, state=state)
+@@ -343,6 +357,9 @@ class GitM10MaterializedSource:
+                 if name == "tombstone_stage":
+                     tombstones = _records_from_result(output, ("tombstones", "records"), "tombstones")
+                     continue
++                if name == "inventory_stage":
++                    sync_inventory = _records_from_result(output, ("sync_inventory", "inventory", "records"), "sync_inventory")
++                    continue
+                 acl = _records_from_result(output, ("acl", "acl_records", "records"), "acl")
+                 docs = _field(output, "documents")
+                 chunks = _field(output, "chunks")
+@@ -350,7 +367,7 @@ class GitM10MaterializedSource:
+                     state["documents"] = _records(docs, "documents")
+                 if chunks is not None:
+                     state["chunks"] = _records(chunks, "chunks")
+-        return GitMaterializedInput(state["documents"], state["chunks"], acl, symbols, tombstones)
++        return GitMaterializedInput(state["documents"], state["chunks"], acl, symbols, tombstones, sync_inventory)
+ 
+ 
+ class ConfluenceM10Adapter:
+@@ -378,6 +395,7 @@ class ConfluenceM10Adapter:
+                 acl=materialized.acl,
+                 media_assets=materialized.media_assets,
+                 tombstones=materialized.tombstones,
++                sync_inventory=materialized.sync_inventory,
+             )
+         except M10SourceAdapterError:
+             raise
+@@ -407,6 +425,7 @@ class GitM10Adapter:
+                 acl=materialized.acl,
+                 symbols=materialized.symbols,
+                 tombstones=materialized.tombstones,
++                sync_inventory=materialized.sync_inventory,
+             )
+         except M10SourceAdapterError:
+             raise
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+index 811b027..66091ea 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/delta_snapshot_reader.py
+@@ -10,17 +10,44 @@ import json
+ from copy import deepcopy
+ from dataclasses import dataclass
+ from pathlib import Path
++from types import MappingProxyType
++from collections.abc import Mapping, Sequence
+ 
+ from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++from knowledgenexus.foundation.domain.rules.snapshot_readback import (
++    SnapshotReadbackError,
++    validate_snapshot_streams,
++)
+ from .full_snapshot_staging_writer import JSONL_FILE_SCHEMA_PAIRS
+ 
+ 
+ @dataclass(frozen=True)
+ class DeltaSnapshotReadback:
+-    manifest: dict[str, object]
+-    streams: dict[str, tuple[dict[str, object], ...]]
++    manifest: Mapping[str, object]
++    streams: Mapping[str, tuple[Mapping[str, object], ...]]
+     digest: str
+ 
++    def __post_init__(self) -> None:
++        if type(self.manifest) is not dict or type(self.streams) is not dict:
++            raise TypeError("readback mappings are invalid")
++        frozen_manifest = _freeze_value(self.manifest)
++        frozen_streams = {
++            name: tuple(_freeze_value(row) for row in rows)
++            for name, rows in self.streams.items()
++        }
++        object.__setattr__(self, "manifest", frozen_manifest)
++        object.__setattr__(self, "streams", MappingProxyType(frozen_streams))
++
++
++def _freeze_value(value: object) -> object:
++    if type(value) is dict:
++        return MappingProxyType({key: _freeze_value(item) for key, item in value.items()})
++    if type(value) is list:
++        return tuple(_freeze_value(item) for item in value)
++    if type(value) is tuple:
++        return tuple(_freeze_value(item) for item in value)
++    return value
++
+ 
+ def _strict_json(path: Path) -> object:
+     def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+@@ -34,18 +61,26 @@ def _strict_json(path: Path) -> object:
+     return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite JSON")))
+ 
+ 
+-def read_delta_snapshot(path: object, *, validator: FoundationSchemaValidator) -> DeltaSnapshotReadback:
++def read_delta_snapshot(
++    path: object,
++    *,
++    validator: FoundationSchemaValidator,
++    prior_streams: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
++) -> DeltaSnapshotReadback:
+     if type(path) is not Path or not path.is_absolute() or not path.is_dir() or path.is_symlink():
+         raise ValueError("invalid snapshot path")
+     if type(validator) is not FoundationSchemaValidator:
+         raise TypeError("invalid validator")
+-    expected_files = {"manifest.json"} | {file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS}
++    expected_files = {"manifest.json", "quality_report.md"} | {file_name for file_name, _, _ in JSONL_FILE_SCHEMA_PAIRS}
+     entries = tuple(path.iterdir())
+     if {entry.name for entry in entries} != expected_files or any(not entry.is_file() or entry.is_symlink() for entry in entries):
+         raise ValueError("delta snapshot file set is invalid")
+     manifest = _strict_json(path / "manifest.json")
+     if type(manifest) is not dict or manifest.get("export_mode") != "delta":
+         raise ValueError("snapshot is not a delta export")
++    quality_report = path / "quality_report.md"
++    if not quality_report.is_file() or quality_report.is_symlink() or not quality_report.read_bytes():
++        raise ValueError("delta quality report is invalid")
+     base = manifest.get("base_dataset_version")
+     dataset = manifest.get("dataset_version")
+     if type(base) is not str or not base or type(dataset) is not str or not dataset or base == dataset:
+@@ -61,12 +96,14 @@ def read_delta_snapshot(path: object, *, validator: FoundationSchemaValidator) -
+     digest = hashlib.sha256()
+     digest.update(b"manifest.json\0")
+     digest.update((path / "manifest.json").read_bytes())
++    digest.update(b"quality_report.md\0")
++    digest.update(quality_report.read_bytes())
+     for file_name, count_key, schema_name in JSONL_FILE_SCHEMA_PAIRS:
+         stream_path = path / file_name
+         records: list[dict[str, object]] = []
+         for line in stream_path.read_text(encoding="utf-8").splitlines():
+             if not line:
+-                continue
++                raise ValueError("stream contains a blank line")
+             value = _strict_json_line(line)
+             if type(value) is not dict:
+                 raise ValueError("stream record is invalid")
+@@ -81,6 +118,14 @@ def read_delta_snapshot(path: object, *, validator: FoundationSchemaValidator) -
+         digest.update(file_name.encode("utf-8"))
+         digest.update(b"\0")
+         digest.update(stream_path.read_bytes())
++    try:
++        validate_snapshot_streams(
++            streams,
++            export_mode="delta",
++            prior_streams=prior_streams,
++        )
++    except SnapshotReadbackError:
++        raise ValueError("delta cross-stream closure is invalid") from None
+     return DeltaSnapshotReadback(manifest=deepcopy(manifest), streams=streams, digest=digest.hexdigest())
+ 
+ 
+diff --git a/tests/foundation/application/use_cases/test_build_sync_state_snapshot.py b/tests/foundation/application/use_cases/test_build_sync_state_snapshot.py
+index ba5d0fc..44a4c27 100644
+--- a/tests/foundation/application/use_cases/test_build_sync_state_snapshot.py
++++ b/tests/foundation/application/use_cases/test_build_sync_state_snapshot.py
+@@ -59,3 +59,30 @@ def test_rejects_wrong_runtime_inputs(value: object) -> None:
+             synced_at="2026-08-08T00:00:00Z",
+             documents=value,
+         )
++
++
++def test_authoritative_inventory_must_cover_exact_emitted_entities() -> None:
++    page = _page()
++    inventory = ({
++        "source_id": "SVMC",
++        "entity_id": page["document_id"],
++        "entity_type": "page",
++        "last_seen_version": "7",
++        "last_content_hash": page["content_hash"],
++        "last_synced_at": "2026-08-08T00:00:00Z",
++        "status": "active",
++    },)
++    result = BuildSyncStateSnapshot().execute(
++        source_id="SVMC",
++        synced_at="2026-08-08T00:00:00Z",
++        documents=(page,),
++        inventory=inventory,
++    )
++    assert result.records[0]["last_seen_version"] == "7"
++    with pytest.raises(SyncStateSnapshotError, match="cover emitted"):
++        BuildSyncStateSnapshot().execute(
++            source_id="SVMC",
++            synced_at="2026-08-08T00:00:00Z",
++            documents=(page,),
++            inventory=(),
++        )
+diff --git a/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py b/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
+index 2cdb6b9..9a3de08 100644
+--- a/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
++++ b/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
+@@ -81,8 +81,8 @@ def test_ocr_approval_evaluator_accepts_only_valid_model() -> None:
+ 
+ def _readback(*, digest: str = "d" * 64, closed: bool = True) -> PublishedSnapshotReadback:
+     streams = (
+-        ("acl", 10), ("chunks", 20), ("documents", 10), ("media_assets", 3),
+-        ("relations", 4), ("symbols", 2), ("sync_state", 13), ("tombstones", 0),
++        ("acl", 10000), ("chunks", 20), ("documents", 10000), ("media_assets", 3),
++        ("relations", 4), ("symbols", 2), ("sync_state", 10003), ("tombstones", 0),
+     )
+     return PublishedSnapshotReadback(
+         dataset_version="v20260808-120000-000001Z",
+@@ -146,3 +146,27 @@ def test_gate_input_rejects_impossible_stream_counts_before_field_access() -> No
+             sanitized_output=True,
+             transport="production",
+         )
++
++
++def test_gate_input_rejects_document_count_below_observed_pages() -> None:
++    with pytest.raises(ValueError, match="document count"):
++        PublishedSnapshotReadback(
++            dataset_version="v20260808-120000-000001Z",
++            content_digest="d" * 64,
++            observed_pages=10000,
++            stream_counts=(
++                ("acl", 0), ("chunks", 0), ("documents", 0), ("media_assets", 0),
++                ("relations", 0), ("symbols", 0), ("sync_state", 0), ("tombstones", 0),
++            ),
++            readback_valid=True,
++            relation_closed=True,
++            acl_closed=True,
++            sync_closed=True,
++            atomic_publish=True,
++            no_clobber=True,
++            sanitized_output=True,
++            transport="production",
++            rss_baseline_bytes=100,
++            rss_peak_bytes=200,
++            duration_milliseconds=300,
++        )
+diff --git a/tests/foundation/application/use_cases/test_propagate_delta.py b/tests/foundation/application/use_cases/test_propagate_delta.py
+index 8c06c94..610f6dd 100644
+--- a/tests/foundation/application/use_cases/test_propagate_delta.py
++++ b/tests/foundation/application/use_cases/test_propagate_delta.py
+@@ -43,7 +43,7 @@ def _summary(document_id: str, content_hash: str = "a" * 64, entries=()) -> Docu
+     )
+ 
+ 
+-def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=(), previous_acl_hashes=(), current_acl_hashes=()):
++def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64, current_config="a" * 64, previous_dependents=(), current_dependents=(), previous_acl_hashes=(), current_acl_hashes=(), previous_acl_records=(), current_acl_records=(), previous_chunk_records=(), current_chunk_records=()):
+     return DeltaPropagationRequest(
+         previous_dataset_version="base",
+         current_dataset_version="next",
+@@ -54,8 +54,13 @@ def _request(previous=(), current=(), inventory=(), *, previous_config="a" * 64,
+         current_summaries=tuple(current),
+         inventory=tuple(inventory),
+         previous_dependents=tuple(previous_dependents),
++        current_dependents=tuple(current_dependents),
+         previous_acl_hashes=tuple(previous_acl_hashes),
+         current_acl_hashes=tuple(current_acl_hashes),
++        previous_acl_records=tuple(previous_acl_records),
++        current_acl_records=tuple(current_acl_records),
++        previous_chunk_records=tuple(previous_chunk_records),
++        current_chunk_records=tuple(current_chunk_records),
+     )
+ 
+ 
+@@ -184,6 +189,73 @@ def test_removed_document_cascades_prior_media_relation_acl_and_symbol_targets()
+     assert result.metrics.symbol_tombstone_count == 1
+ 
+ 
++def test_present_document_tombstones_dependents_missing_from_current_inventory() -> None:
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    media = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1")
++    relation = TombstoneTarget(TombstoneEntityType.RELATION, "rel:0123456789abcdef")
++    result = PropagateDelta(schema_validator=Validator()).execute(
++        _request(
++            previous=(old,), current=(old,),
++            previous_dependents=((old.document_id, (media, relation)),),
++            current_dependents=((old.document_id, (relation,)),),
++        )
++    )
++    assert result.status is DeltaPropagationStatus.SUCCESS
++    assert result.document_outcomes == ((old.document_id, "changed"),)
++    assert [row["entity_type"] for row in result.records] == ["media"]
++    assert result.records[0]["reason"] == "content_updated"
++
++
++def test_present_document_empty_current_dependent_inventory_tombstones_all_prior_targets() -> None:
++    old = _summary("confluence:page:1")
++    target = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:att-1")
++    result = PropagateDelta(schema_validator=Validator()).execute(
++        _request(
++            previous=(old,), current=(old,),
++            previous_dependents=((old.document_id, (target,)),),
++            current_dependents=((old.document_id, ()),),
++        )
++    )
++    assert result.metrics.media_tombstone_count == 1
++
++
++def test_acl_only_change_emits_current_acl_and_chunks_when_records_are_supplied() -> None:
++    old = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    acl = {"acl_id": "acl:confluence:page:1", "document_id": old.document_id, "acl_tags": ["space:NEW"]}
++    chunk = {"chunk_id": old.entries[0].chunk_id, "document_id": old.document_id, "acl_tags": ["space:NEW"], "content": "x"}
++    result = PropagateDelta(schema_validator=Validator()).execute(
++        _request(
++            previous=(old,), current=(old,),
++            previous_acl_hashes=((old.document_id, "a" * 64),),
++            current_acl_hashes=((old.document_id, "b" * 64),),
++            current_acl_records=(acl,), current_chunk_records=(chunk,),
++        )
++    )
++    assert result.reemit_document_ids == (old.document_id,)
++    assert result.reemit_acl_records == (acl,)
++    assert result.reemit_chunk_records == (chunk,)
++    assert result.records == ()
++
++
++def test_acl_only_reemission_rejects_incomplete_current_chunk_records() -> None:
++    old = _summary(
++        "confluence:page:1",
++        entries=(
++            _entry("chunk:confluence:0123456789abcdef"),
++            _entry("chunk:confluence:fedcba9876543210", "c" * 64),
++        ),
++    )
++    request = _request(
++        previous=(old,), current=(old,),
++        previous_acl_hashes=((old.document_id, "a" * 64),), current_acl_hashes=((old.document_id, "b" * 64),),
++        current_acl_records=({"acl_id": "acl:confluence:page:1", "document_id": old.document_id},),
++        current_chunk_records=({"chunk_id": old.entries[0].chunk_id, "document_id": old.document_id},),
++    )
++    result = PropagateDelta(schema_validator=Validator()).execute(request)
++    assert result.status is DeltaPropagationStatus.FAILED
++    assert result.error_category is DeltaPropagationFailureCategory.INVENTORY_CONFLICT
++
++
+ def test_dependents_reject_document_root_and_duplicate_targets() -> None:
+     old = _summary("confluence:page:1")
+     with pytest.raises(ValueError):
+diff --git a/tests/foundation/cli/test_evaluate_foundation_gates_cli.py b/tests/foundation/cli/test_evaluate_foundation_gates_cli.py
+index ea6e36f..fd2cad0 100644
+--- a/tests/foundation/cli/test_evaluate_foundation_gates_cli.py
++++ b/tests/foundation/cli/test_evaluate_foundation_gates_cli.py
+@@ -12,8 +12,8 @@ from knowledgenexus.foundation.cli import evaluate_foundation_gates as cli
+ _DIGEST = "a" * 64
+ _KINDS = ("chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf")
+ _STREAMS = (
+-    ["acl", 10], ["chunks", 20], ["documents", 10], ["media_assets", 5],
+-    ["relations", 4], ["symbols", 2], ["sync_state", 13], ["tombstones", 0],
++    ["acl", 10000], ["chunks", 20], ["documents", 10000], ["media_assets", 5],
++    ["relations", 4], ["symbols", 2], ["sync_state", 10005], ["tombstones", 0],
+ )
+ 
+ 
+diff --git a/tests/foundation/domain/models/test_delta_propagation.py b/tests/foundation/domain/models/test_delta_propagation.py
+index 1bd095c..f246598 100644
+--- a/tests/foundation/domain/models/test_delta_propagation.py
++++ b/tests/foundation/domain/models/test_delta_propagation.py
+@@ -14,6 +14,8 @@ from knowledgenexus.foundation.domain.models import (
+     DeltaPropagationResult,
+     DeltaPropagationStatus,
+     DocumentChunkSetSummary,
++    TombstoneEntityType,
++    TombstoneTarget,
+ )
+ 
+ 
+@@ -217,6 +219,22 @@ def test_nested_entry_forbidden_extra_field_is_rejected() -> None:
+         )
+ 
+ 
++def test_current_dependents_and_reemit_records_validate_and_copy_inputs() -> None:
++    summary = _summary("confluence:page:1", entries=(_entry("chunk:confluence:0123456789abcdef"),))
++    target = TombstoneTarget(TombstoneEntityType.MEDIA, "confluence:attachment:a1")
++    acl = {"acl_id": "acl:confluence:page:1", "document_id": summary.document_id}
++    chunk = {"chunk_id": summary.entries[0].chunk_id, "document_id": summary.document_id}
++    request = DeltaPropagationRequest(
++        previous_dataset_version="base", current_dataset_version="next",
++        previous_config_hash="a" * 64, current_config_hash="b" * 64,
++        detected_at="2026-08-05T00:00:00Z", previous_summaries=(summary,), current_summaries=(summary,),
++        previous_dependents=((summary.document_id, (target,)),), current_dependents=((summary.document_id, (target,)),),
++        current_acl_records=(acl,), current_chunk_records=(chunk,),
++    )
++    acl["document_id"] = "confluence:page:forged"
++    assert request.current_acl_records[0]["document_id"] == summary.document_id
++
++
+ @pytest.mark.parametrize(
+     "overrides",
+     [
+diff --git a/tests/foundation/domain/rules/test_snapshot_readback.py b/tests/foundation/domain/rules/test_snapshot_readback.py
+new file mode 100644
+index 0000000..ac2990c
+--- /dev/null
++++ b/tests/foundation/domain/rules/test_snapshot_readback.py
+@@ -0,0 +1,71 @@
++from __future__ import annotations
++
++import pytest
++
++from knowledgenexus.foundation.domain.rules.snapshot_readback import (
++    SnapshotReadbackError,
++    validate_snapshot_streams,
++)
++from tests.fixtures.foundation.record_factories import (
++    build_sample_acl_record,
++    build_sample_chunk_record,
++    build_sample_document_record,
++    build_sample_relation_record,
++)
++
++
++def _streams() -> dict[str, tuple[dict[str, object], ...]]:
++    document = build_sample_document_record()
++    chunk = build_sample_chunk_record()
++    acl = build_sample_acl_record()
++    relation = build_sample_relation_record()
++    sync = {
++        "schema_version": "1.0",
++        "source_id": "confluence",
++        "entity_id": document["document_id"],
++        "entity_type": "page",
++        "last_seen_version": "1",
++        "last_content_hash": document["content_hash"],
++        "last_synced_at": "2026-07-10T00:00:00Z",
++        "status": "active",
++    }
++    return {
++        "documents": (document,),
++        "chunks": (chunk,),
++        "relations": (relation,),
++        "acl": (acl,),
++        "media_assets": (),
++        "symbols": (),
++        "sync_state": (sync,),
++        "tombstones": (),
++    }
++
++
++def test_readback_closes_all_foundation_streams() -> None:
++    report = validate_snapshot_streams(_streams(), export_mode="full_snapshot")
++    assert report.relation_closed and report.acl_closed and report.sync_closed
++    assert dict(report.stream_counts)["documents"] == 1
++
++
++def test_readback_rejects_orphan_chunk() -> None:
++    streams = _streams()
++    orphan = dict(streams["chunks"][0], document_id="confluence:page:missing")
++    streams["chunks"] = (orphan,)
++    with pytest.raises(SnapshotReadbackError, match="chunk parent"):
++        validate_snapshot_streams(streams, export_mode="full_snapshot")
++
++
++def test_delta_readback_rejects_tombstone_outside_prior_snapshot() -> None:
++    streams = _streams()
++    streams["tombstones"] = ({
++        "tombstone_id": "tombstone:missing",
++        "entity_type": "document",
++        "entity_id": "confluence:page:missing",
++        "reason": "source_deleted",
++        "detail": None,
++        "detected_at": "2026-07-11T00:00:00Z",
++        "dataset_version": "v20260711-000000-000000Z",
++        "source_version_last_seen": None,
++    },)
++    with pytest.raises(SnapshotReadbackError, match="prior snapshot"):
++        validate_snapshot_streams(streams, export_mode="delta", prior_streams=_streams())
+diff --git a/tests/foundation/infrastructure/adapters/test_m10_composition_root.py b/tests/foundation/infrastructure/adapters/test_m10_composition_root.py
+new file mode 100644
+index 0000000..d5dcbbd
+--- /dev/null
++++ b/tests/foundation/infrastructure/adapters/test_m10_composition_root.py
+@@ -0,0 +1,106 @@
++from __future__ import annotations
++
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.domain.models import GitCasePolicy, GitScanBudgets
++from knowledgenexus.foundation.infrastructure.adapters.m10_composition_root import (
++    ConfluenceM10CompositionRoot,
++    GitM10CompositionRoot,
++)
++from knowledgenexus.foundation.infrastructure.adapters.m10_composition_root import _ConfluencePageSetStage
++from tests.foundation.application.use_cases.test_build_git_code_documents import (
++    FakeReader,
++    FakeTokenizer,
++    _snapshot,
++)
++from tests.foundation.domain.models.test_m10_composition import _request
++
++
++class _SchemaValidator:
++    def validate_record(self, schema_name: str, record: dict[str, object]) -> None:
++        return None
++
++
++def test_confluence_page_root_translates_m10_scope_to_approved_page_set(tmp_path: Path) -> None:
++    from knowledgenexus.foundation.domain.models.confluence_page_set import (
++        ConfluencePageSetMetrics,
++        ConfluencePageSetPageMetrics,
++        ConfluencePageSetResult,
++    )
++
++    class Processor:
++        def __init__(self) -> None:
++            self.request = None
++
++        def execute(self, *, request):
++            self.request = request
++            return ConfluencePageSetResult(
++                documents=({"source_version": "7"},),
++                chunks=(),
++                page_metrics=(ConfluencePageSetPageMetrics(1, 0, 0, 0, ()),),
++                metrics=ConfluencePageSetMetrics(1, 1, 0, 1, 0, 0, 0, ()),
++            )
++
++    processor = Processor()
++    request = _request(tmp_path)
++    output = _ConfluencePageSetStage(processor).execute(request=request)
++    assert output.source_version == "7"
++    assert output.raw_artifact_identity == request.raw_generation_id
++    assert processor.request.items[0].page_id == request.ordered_page_ids[0]
++
++
++def test_confluence_root_rejects_unconfigured_approved_seams() -> None:
++    with pytest.raises(TypeError, match="chunking_profile|page processor|tokenizer|raw_page_store"):
++        ConfluenceM10CompositionRoot.build(
++            raw_page_store=object(),
++            tokenizer=object(),
++            chunking_profile=object(),
++            raw_page_mapper=object(),
++            storage_normalizer=object(),
++            schema_validator=_SchemaValidator(),
++        )
++
++
++def test_git_root_binds_pinned_reader_and_materializes_acl_sync(tmp_path: Path) -> None:
++    repository_root = tmp_path / "spen-sdk"
++    repository_root.mkdir()
++    request = replace(
++        _request(tmp_path),
++        git_repository="spen-sdk",
++        git_branch="develop",
++    )
++    adapter = GitM10CompositionRoot.build(
++        repository_reader=FakeReader(_snapshot()),
++        tokenizer=FakeTokenizer(),
++        repository_root=repository_root,
++        budgets=GitScanBudgets(
++            max_tree_entries=100,
++            max_file_bytes=4096,
++            max_total_raw_bytes=8192,
++            max_files=20,
++            max_normalized_bytes=4096,
++            max_in_memory_bytes=16384,
++        ),
++        case_policy=GitCasePolicy.REJECT_CASEFOLD_COLLISIONS,
++        schema_validator=_SchemaValidator(),
++    )
++    handoff = adapter.collect(request)
++    assert handoff.documents
++    assert len(handoff.acl) == len(handoff.documents)
++    assert {row["entity_type"] for row in handoff.sync_state} == {"file", "repo"}
++
++
++def test_git_root_rejects_wrong_runtime_dependencies(tmp_path: Path) -> None:
++    root = tmp_path / "spen-sdk"
++    root.mkdir()
++    with pytest.raises(TypeError):
++        GitM10CompositionRoot.build(
++            repository_reader=object(),
++            tokenizer=FakeTokenizer(),
++            repository_root=root,
++            budgets=GitScanBudgets(100, 4096, 8192, 20, 4096, 16384),
++            case_policy=GitCasePolicy.REJECT_CASEFOLD_COLLISIONS,
++        )
+diff --git a/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py b/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
+index ee515dc..3e84caf 100644
+--- a/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
++++ b/tests/foundation/infrastructure/adapters/test_m10_source_adapters.py
+@@ -341,6 +341,36 @@ def test_confluence_materialized_source_accepts_combined_materializer_at_media_s
+     assert result.chunks == confluence.chunks
+ 
+ 
++def test_combined_media_relation_stage_preserves_assets(tmp_path) -> None:
++    confluence, _ = _handoffs()
++    request = _request(tmp_path)
++    asset = {"media_id": "confluence:attachment:1", "parent_document_id": confluence.documents[0]["document_id"]}
++    page = _Output(
++        source_version=confluence.source_version,
++        raw_artifact_identity=confluence.raw_artifact_identity,
++        documents=confluence.documents,
++        chunks=confluence.chunks,
++    )
++
++    class PageStage:
++        def execute(self, request):
++            return page
++
++    class CombinedStage:
++        def execute(self, request, **state):
++            return _Output(
++                relations=confluence.relations,
++                documents=confluence.documents,
++                chunks=confluence.chunks,
++                media_assets=(asset,),
++            )
++
++    result = ConfluenceM10MaterializedSource(
++        page_stage=PageStage(), media_stage=CombinedStage()
++    ).collect(request)
++    assert result.media_assets == (asset,)
++
++
+ @pytest.mark.parametrize(
+     "missing",
+     ["source_version", "raw_artifact_identity"],
+-- 
+2.45.1.windows.1
+

@@ -2,7 +2,8 @@
 
 This file is local execution guidance, not a normative contract.
 
-Last workspace verification: 2026-07-23.
+Last workspace verification: 2026-08-12.
+Last roadmap planning update: 2026-08-12.
 
 Precedence:
 1. `contracts/foundation/schemas/`
@@ -90,14 +91,19 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M6G-B - Reusable composition and export projection | complete; independently approved | Production head `5ee5126` (B1–B4) | Application boundary, trusted projection, profile/config derivation, and contract-consistency tests; no staging/publication. |
 | M6G-C - M3 export composition and synthetic acceptance | complete; independently approved | Production head `5f62bdb` | Reuses M3 staging/completion/publication; synthetic acceptance passed; no real export. |
 | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
-| M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+| M7 - Crawl reliability and scale | Bounded stages complete through D5-B; Stage A reference slice and Stage B durable batch sidecar independently reviewed `PASS`; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory/raw replay plus the SQLite `batch_state.sqlite3` sidecar are independently reviewed `PASS`; the sidecar preserves M7 exact-v1 and shares the writer lock. Production transport, RSS, optimization, and 100k evidence remain deferred | Owner accepts bounded-stage progress; no 100k scale PASS or production transport claim is made. |
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
-| M9 - Media, Git, symbols, and deletion propagation | planned | Media/symbol/tombstone record schemas exist; no processing tracks yet | Split into independent tracks. |
-| M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+| M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; M9-A4 contract/policy seam independently reviewed `PASS`; OCR production activation `pending_external_input` | M9-A1/A2/A3, M9-A4 Stage A, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; no OCR engine approval/evidence exists yet; M8-AC real gate remains `pending_external_input` | Delta propagation and OCR contracts are bounded seams; engine activation, M10 real inputs, and full production evidence remain gated. |
+| M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+| W4 - Evidence-bound second-sync sparse delta | complete; approved and merged | W4-A, W4-B, W4-C1, and W4-C2 are approved with no open P0/P1/P2 at source-review head `cec2a8c`; the production, contract, and test range is present in `main` | W4 proves the bounded offline delta publication path. It does not constitute real operator evidence or a deployed Indexing import. |
+| W5 - Real-input Foundation acceptance and closeout | active staged gate; no live PASS claimed | W5 plan and W5-A inspection/runbooks are merged; the guarded W5-B Root-1 one-shot packet is present at `5c79924` | W5-B and W5-C each require separate explicit owner authorization. W5-D and consolidated independent closeout follow only after sanitized evidence is accepted. |
+| Indexing I0-I3 - Snapshot consumption and activation | I0 discovery complete; I1-I3 not authorized | Source inspection found reusable storage, BGE-M3, Qdrant, shared contracts, and DI seams, but no strict immutable resolver, snapshot importer, or two-store activation barrier | For one stable full run, freeze the Indexing base after W5 closeout, then implement/review I1, I2-A/I2-B, and I3. SnapshotReady remains later. |
+| M11 - Structure-aware retrieval handoff and chunking improvements | planned; post-M10/W5 and Indexing baseline | Current chunks preserve `document_id`, `heading_path`, stable IDs, and deterministic export order; retrieval context and semantic chunking still lack benchmark evidence | Cross-boundary milestone only. Foundation may add an approved structure/order handoff; Indexing/Retrieval own context assembly, parent expansion, embedding, and search. |
+| M12 - PLM read-only ingestion | **hold** | No real PLM MCP response fixtures are available in this environment; no PLM crawler or adapter is authorized yet | Resume only after sanitized read-only MCP evidence proves the API contract. Confluence closeout and the approved Foundation-to-Indexing sequence remain the current priority. |
 
 ## 2. Current Task
 
-Current area: M6A through M6G-D are complete and approved. M7-C0 through
+Current area: Confluence closeout after M10. M6A through M6G-D are complete and approved. M7-C0 through
 M7-C4-B are implemented and covered by the durable checkpoint/run-state path.
 M7-C5 inventory durability acceptance is complete and independently reviewed
 `PASS`: the 10k correctness baseline and C5-B1 are approved, while C5-B2 is
@@ -115,8 +121,28 @@ M8-A through M8-E are complete and independently reviewed `PASS`. M8-AC
 controlled mini-corpus acceptance is implemented and independently re-reviewed
 `PASS`, but its real gate remains `pending_external_input` until an approved
 10-20 page generation/selection/tokenizer input is supplied. M9-A1 is complete
-and independently reviewed `PASS`; M9-A2 through M9-D remain staged under the
-reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
+independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+M9-B and M9-C are independently approved. M9-D1 tombstone contract and
+explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+approved. M9-D2 remains read-only and does not perform export/store/checkpoint
+side effects. M10-A through M10-D are complete and independently reviewed
+`PASS`; M10-E synthetic acceptance is also independently reviewed `PASS`.
+
+W4-A/W4-B/W4-C1/W4-C2 are now complete and approved, closing the bounded
+base-bound sparse-delta implementation path. W5 is the active real-input gate:
+its plan, W5-A inspection/runbooks, and guarded W5-B Root-1 execution packet are
+merged, but no W5-B live PASS is claimed here. The next external transition is
+the separately owner-authorized W5-B one-shot; W5-C requires another owner
+authorization after W5-B evidence is accepted, and W5-D performs sanitized
+evidence reconciliation and closeout.
+
+The Indexing handoff remains independently gated. I0 discovery is complete,
+while I1 strict resolution/validation, I2 full-snapshot import, and I3
+two-store verification/activation are not authorized or implemented. For the
+owner goal of a single stable Foundation-to-Indexing run, freeze the official
+Indexing base after W5-D closeout. PLM M12 remains held until the Confluence
+work is accepted and sanitized PLM MCP evidence becomes available.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -888,6 +914,26 @@ Contract decomposition:
   workspace raw-page replay/checkpoint integration only. M7-D5-B restriction
   replay is also complete and separately reviewed `PASS`; neither stage closes
   the 100k scale gate.
+- Stage A bounded batch orchestration: complete and independently reviewed
+  `PASS`; adds runtime-validated batch identity/request/lease/checkpoint/
+  metrics/result contracts, deterministic partitioning, in-memory CAS lease
+  reclaim, per-batch retry and resume accounting, bounded queue/byte/page
+  budgets, and adversarial coverage. This is a reference slice only; it does
+  not claim SQLite durability, production transport, RSS sampling, or 100k
+  scale evidence.
+- Stage B durable batch sidecar: complete and independently reviewed `PASS`;
+  adds `batch_state.sqlite3` with immutable full-occurrence binding, ordered
+  request/page persistence, durable CAS lease transitions, retry/failure
+  history, exact reopen/resume, catalog tamper rejection, and active M7 lock
+  composition. It is additive and does not migrate or modify the exact-v1 M7
+  database. Production transport, RSS sampling, and 100k evidence remain
+  deferred.
+- Bounded synthetic scale validation Fix 4: complete and independently
+  reviewed `PASS` for the 1,000-page artifact. The harness now verifies full
+  control/retry/terminal ledgers, all four crash/reopen phases, replay bounds,
+  adversarial side-effect isolation, and memory/SQLite observation parity.
+  The 10,000-page run remains `measurement_pending`; RSS, live transport, and
+  the 100k gate remain deferred.
 
 ### M7-C Durable Milestone Ledger
 
@@ -964,8 +1010,8 @@ Completion gate:
 |---|---|---|
 | M8-A normalization fidelity and layout semantics | complete | Transparent `layout`, `layout-section`, and `layout-cell` handling; focused normalizer `47 passed`; normalize/parser regression `98 passed`; independent review `PASS`; no chunker/schema/version change. |
 | M8-B complex-table migration | complete | `confluence-table-no-loss-v1` approved and implemented; 60 focused normalizer tests and 258 bounded regression tests passed (one asset-only skip); config identity migrated to one-page-export-v2; independent review `PASS`; next production export must be `full_snapshot`. |
-| M8-C macro/placeholder/reference intents | complete | Added immutable/runtime-validated drawio, image/attachment, and include-page intent side stream; focused `99 passed`, architecture `69 passed`; independent review `PASS`; no counter/body/config/chunker/schema/network/export changes. |
-| M8-D generation-bound page-set processing | complete | Added exact ordered request/work-item/result/metrics/error models and a read-only M7 envelope adapter composing normalize → parse → chunk; focused `17 passed`, bounded regression `147 passed`, architecture `70 passed`; independent review `PASS`; no partial result or checkpoint/raw/export mutation. |
+| M8-C macro/placeholder/reference intents | complete | Added immutable/runtime-validated drawio, image/attachment, and include-page intent side stream; focused `99 passed`, architecture `69 passed`; independent review `PASS`; no counter/body/config/chunker/schema/network/export changes; closeout pushed on `codex/m8-m9`. |
+| M8-D generation-bound page-set processing | complete | Added exact ordered request/work-item/result/metrics/error models and a read-only M7 envelope adapter composing normalize → parse → chunk; focused `17 passed`, bounded regression `147 passed`, architecture `70 passed`; independent review `PASS`; no partial result or checkpoint/raw/export mutation; closeout pushed on `codex/m8-m9`. |
 | M8-E chunk stability handoff | complete | Added immutable text-free `ChunkStabilityEntry`/`DocumentChunkSetSummary` with strict schema/hash/profile/order/count validation, canonical UTF-8 JSON and SHA-256 digest; focused `23 passed`, bounded regression `85 passed`, architecture `16 passed`; independent review `PASS`; no export/state/network/I/O changes. |
 | M8-AC controlled mini-corpus acceptance (M8-D.5) | pending_external_input | Aggregate-only 10-20 page acceptance seam implemented and independently re-reviewed `PASS`; focused `15 passed, 2 skipped`, compileall/diff-check passed; requires operator-approved generation, ordered page selection, profile, and tokenizer assets for the real gate. |
 
@@ -988,11 +1034,13 @@ M9A - Media:
 | Stage | Status | Review / gate outcome |
 |---|---|---|
 | M9-A1 metadata-first media contract | complete | Added immutable attachment observation/policy/result models, schema-valid metadata-only MediaAsset builder, deterministic media relation-intent mapper, and strict adversarial boundaries; focused `11 passed`, bounded attachment/schema regression `87 passed`, architecture `16 passed`; independent review `PASS`; no download/raw/export/I/O. |
-| M9-A2 attachment body fetch/store boundary | pending | Requires explicit `data_root`, disk budget, body-fetch port, and path-safe raw-store policy. |
-| M9-A3 offline draw.io/PDF/OCR processors | pending | Capability-pinned processors remain deferred until A2 evidence/store seam is approved. |
-| M9-B local Git repository and code-document seam | pending | M9-B starts after its own plan review; local-clone identity and fallback-window seam remain locked. |
-| M9-C minimal symbol index | pending | Depends on M9-B code-document contract; no symbol chunk stream is active yet. |
-| M9-D1/D2 tombstone/delta propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries. |
+| M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
+| M9-A3 offline draw.io/PDF/OCR processors | complete; independently reviewed `PASS` | Added bounded stdlib draw.io XML parsing, pinned digital-PDF text and image-OCR capability ports/processors, strict schema/status/detail binding, and MIME/filename dispatch over the M9-A2 envelope; focused `30 passed`, architecture `80 passed`, M9-A1/A2 regression `48 passed, 2 skipped`, compileall and diff-check passed. No engine/network/file side effects, attachment-text chunks, schema changes, or raw writes. |
+| M9-A4 OCR productionization Stage A | complete; independently reviewed `PASS`; engine activation pending external input | Added engine-neutral OCR request/result/limits contracts, PDF rasterizer capability boundary, digital-first mixed-PDF/image-only fallback, selected-image binding, quality/resource/cancellation policy, strict adversarial validation, and no-partial-result behavior. Focused Fix3 `30 passed`, M9/media regression `37 passed`; fresh review `PASS`. No engine was selected or activated. |
+| M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
+| M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
+| M9-D1 tombstone contract and explicit cascade | complete; independently reviewed `PASS` | Added runtime-validated tombstone models, schema-valid deterministic builder, atomic document-root cascade use case, exact-field/JSON/cycle-safe boundaries, and injected schema-validator dependency. Focused `31 passed`; M9/M8 regression `42 passed`; architecture/schema `37 passed`; full architecture `86 passed`; compileall/diff-check passed; final review `VERDICT: PASS` in `.codex-workflow/20260805-m9d1/19-review-final.md`. |
+| M9-D2 delta/inventory diff propagation | complete; independently reviewed `PASS` | Added deterministic M8-E summary diffing, explicit inventory-state handling, config invalidation cascades, atomic tombstone-only results, canonical digest, and strict malformed-boundary validation. Focused `90 passed`; M9-D1/M8-E `54 passed`; bounded M9-A/B/C `284 passed, 2 skipped, 1 deselected` (external tokenizer asset case); architecture `87 passed`; compileall/diff-check passed; final review in `.codex-workflow/20260805-m9d2/16-review-final.md`. |
 
 M9B - Git repository scan:
 - Configured repository and branch.
@@ -1064,7 +1112,230 @@ Acceptance categories:
 - Security: no PAT/token values in config, logs, reports, or exports.
 - Boundary: no embedding, no Qdrant, no retrieval, no chat, no Gauss.
 
-## 13. Current Execution Boundary
+### M10 Execution Ledger
+
+| Stage | Status | Review / gate outcome |
+|---|---|---|
+| M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
+| M10-B trusted multi-source composition | complete; independently reviewed `PASS` | Added typed Confluence/Git handoffs, canonical shared-schema validation, source ownership/provenance, ACL inheritance, relation/media/symbol/sync gates, deterministic composition, empty initial tombstones, and sanitized application boundary. Focused `51 passed`; M9 `120 passed`; M6G `37 passed`; architecture `88 passed`; compileall/diff-check passed. Final review `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` is `VERDICT: PASS`. |
+| M10-C cross-stream projection and generic completion | complete; independently reviewed `PASS` | Added additive generic `m10_quality` completion with strict canonical validation, exact stream/metric/source-scope invariants, deterministic sanitized 12-section reporting, no-clobber cleanup, and preserved M6G behavior. Focused `50 passed, 1 skipped`; M6G exporter/writer/publisher/one-page `118 passed, 8 skipped`; architecture `88 passed`; compileall/diff-check passed. Initial review found two P1 and one P2 boundary issues; bounded fix plan/review artifacts `47-49` addressed them. Final independent review `.codex-workflow/20260805-m10/51-m10c-fix-independent-review-final.md` is `PASS`. |
+| M10-D CLI and publication boundary | complete; independently reviewed `PASS` | Added offline sanitized CLI, M3 writer/completer/publisher wiring, no-clobber preflight, strict post-publication acceptance, and bounded rollback on acceptance failure. Focused M10-D/E suite `40 passed`; architecture `89 passed`; fresh review `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` is `PASS`. |
+| M10-E synthetic acceptance and external real-run gate | synthetic acceptance complete; real gate `pending_external_input` | Deterministic synthetic ten-file acceptance and repeatability are complete and independently reviewed `PASS`; real operator evidence still requires approved Confluence/Git inputs, ordered scope, and tokenizer assets. |
+
+### Full-snapshot capability timeline
+
+| Milestone | Proven capability | Remaining boundary |
+|---|---|---|
+| M3F/M4 | Deterministic schema-valid synthetic full snapshot, atomic publication, and `LATEST.txt` behavior | No real corpus and no Indexing import. |
+| M6G-D | One authorized real offline one-page full-snapshot export with sanitized closeout | Not the complete Root-1/Confluence-Git POC corpus. |
+| M10-A through M10-E | Complete bounded Foundation composition/export/readback implementation plus synthetic acceptance | Real bounded operator evidence remains a W5 responsibility. |
+| W4-A through W4-C2 | Approved evidence-bound second-sync sparse-delta implementation and strict effective-overlay path | No real W5-B/W5-C execution evidence. |
+| W5-A / W5-B packet | Transfer/preflight/runbooks and guarded Root-1 full-snapshot one-shot are prepared | W5-B live execution, owner acceptance, W5-C second sync, W5-D closeout, and consolidated independent review remain pending. |
+
+“Foundation can publish a full snapshot” must not be reported as “the complete
+Foundation-to-Indexing path is runnable.” The latter additionally requires the
+strict Indexing reader/import/activation stages below.
+
+### Foundation-to-Indexing execution order
+
+For the owner goal “run full once on one stable base”, use:
+
+```text
+owner-authorized W5-B Root-1 full snapshot
+-> owner accepts sanitized W5-B evidence
+-> separately authorized W5-C second sync + sparse delta
+-> W5-D reconciliation + consolidated independent review + closeout
+-> freeze the post-W5 Git head
+-> Indexing I1 strict immutable resolver and validate-before-write
+-> Indexing I2-A Foundation identity/provenance migration
+-> Indexing I2-B full-snapshot mapping, embedding, and staged writes
+-> Indexing I3 two-store verification and activation
+-> Foundation-to-Indexing full-snapshot acceptance
+-> Indexing I2-C delta/base-chain/tombstone import
+-> full + second-sync delta acceptance
+```
+
+SnapshotReady automation is deliberately later than successful
+explicit-version import and two-store activation. A library-only I1 could be
+implemented before W5 finishes only as an optional schedule optimization; it
+would not make the end-to-end system runnable and may require a post-W5 rebase.
+
+## 12.1 M11 - Structure-Aware Retrieval Handoff and Chunking Improvements
+
+Status: planned after M10/W5 and the first approved Indexing baseline. This
+milestone records future improvement work and must not be interpreted as
+permission to implement Retrieval inside Foundation or to change the active
+chunker before benchmark evidence exists.
+
+Purpose:
+- Preserve the current leaf `ChunkRecord` contract as the stable searchable
+  evidence unit while enabling later neighbor, section, parent-document, and
+  hierarchical retrieval.
+- Establish the minimum cross-boundary structure/order handoff needed by
+  Indexing and Retrieval without forcing full page text into Qdrant or changing
+  `ChunkRecord.text` silently.
+- Evaluate embedding-based semantic prose splitting against the approved
+  structural baseline before any production chunking migration.
+
+Current baseline:
+- A Confluence chunk is a retrievable leaf linked directly to its page through
+  `document_id`.
+- `heading_path` preserves logical section ancestry but is not a first-class
+  section node.
+- `part_index`/`part_total` describe forced-split parts only; they are not a
+  document-global order or parent-child model.
+- Retrieval is expected to search slim vector references and hydrate exact
+  chunk text. Full-page context is not the default contract.
+- Foundation export ordering is deterministic, but `ChunkRecord` does not
+  currently carry a global `document_order` field.
+
+### M11-A - Retrieval context baseline and policy decision
+
+Owner: Retrieval/Chat, with Indexing read-port support. Foundation scope is
+documentation/contract consultation only.
+
+Planned outcomes:
+- Implement and benchmark `leaf_only`, `same_section`, bounded neighbor, and
+  small-document/full-document fallback strategies.
+- Group results by `document_id`; use `heading_path` for same-section expansion.
+- Deduplicate overlap/repeated breadcrumb/table-header material for context
+  assembly without changing stored or embedded `ChunkRecord.text`.
+- Preserve leaf-level provenance/citations even when larger context is supplied
+  to the LLM.
+- Enforce ACL before context is returned or sent to Chat/Gauss.
+- Enforce an explicit context token budget and deterministic tie/order policy.
+
+M11-A gate:
+- Context assembly tests prove no cross-ACL leakage, deterministic ordering,
+  bounded context size, stable citations, and no implicit full-page expansion.
+- Retrieval application use cases exist; ports/adapters alone do not close the
+  stage.
+
+### M11-B - Deterministic document order handoff
+
+Initial least-invasive option:
+- Indexing derives and persists `document_order` from validated deterministic
+  `chunks.jsonl` order, scoped by `document_id`.
+
+Contract-hardening option:
+- After owner review, formalize document order in an additive structure
+  artifact or a versioned schema change.
+
+Requirements:
+- Do not reinterpret `part_index` as global chunk order.
+- Preserve order through snapshot validation/import/hydrate storage.
+- Neighbor expansion remains bounded and ACL-safe.
+- Same input and configuration produce the same order.
+- If a Foundation schema/export shape changes, update schema, manifest,
+  validators, importer, tests, and migration documentation together.
+
+M11-B gate:
+- A matched leaf can resolve deterministic previous/next siblings within the
+  same document without scanning or reparsing source systems.
+
+### M11-C - Optional additive structure artifact
+
+Candidate direction, subject to a focused plan and owner decision:
+- Add a versioned `structure.jsonl` or equivalent contract with page/section
+  nodes, parent identity, `heading_path`, deterministic document order, and
+  ordered child chunk IDs.
+- Keep `ChunkRecord` as the retrievable leaf and keep its text/ID semantics
+  unchanged unless a separate approved chunker migration requires otherwise.
+- Do not store full page text in Qdrant.
+- Define whether parent/section text is materialized by Foundation, derived by
+  Indexing from ordered child chunks, or stored as a separate hydrate-only
+  representation.
+- Define tombstone/delta behavior for structure nodes before the first delta
+  snapshot that contains them.
+
+M11-C gate:
+- Every child chunk resolves to exactly one valid owning document and, when
+  applicable, one section parent.
+- Structure graph is acyclic, ordered, schema-valid, deterministic, and coherent
+  with `documents.jsonl` and `chunks.jsonl`.
+- Existing leaf consumers can continue operating when the optional hierarchy is
+  not used, according to the approved compatibility policy.
+
+### M11-D - Parent-child retrieval
+
+Owner: Retrieval/Indexing; not Foundation runtime behavior.
+
+Target behavior:
+- Search small leaf chunks for precision.
+- Resolve the matched leaf to a parent section when more context is needed.
+- Hydrate parent/section context within a query-level token budget.
+- Retain leaf evidence for scoring, ACL, provenance, and citations.
+- Use full-document expansion only for small documents or explicit overview
+  intent.
+
+Optional later experiment:
+- Compare leaf-only vectors with leaf + section/page multi-level vectors.
+- Do not productionize multi-level indexing without benchmark evidence for
+  quality, duplicate-result handling, storage cost, and latency.
+
+M11-D gate:
+- Parent expansion improves the approved retrieval benchmark without unacceptable
+  context inflation, latency, duplicate evidence, or citation ambiguity.
+
+### M11-E - Semantic prose chunking benchmark and migration decision
+
+Prerequisites:
+- Replace placeholder retrieval cases with approved real corpus anchors.
+- Produce a retrieval baseline from the active structural BGE-M3 medium profile.
+- Keep table, fenced code, heading boundaries, exact token counting, hard
+  maximum, stable identity, and fail-closed rules in scope.
+
+Candidate experiment:
+- Run embedding-based semantic breakpoint detection only inside prose candidates
+  already isolated by the Foundation structural parser.
+- Compare at least structural baseline, semantic split only above hard maximum,
+  and an earlier activation threshold candidate.
+- Measure Recall@k, MRR/nDCG, context precision/recall, chunk count, token
+  distribution, latency, embedding cost, and chunk churn under local edits.
+
+Migration rule:
+- Do not import the archived experimental LangChain implementation directly as a
+  production dependency. If selected, implement a small pinned internal boundary
+  component according to approved architecture ownership.
+- A semantic splitting behavior change requires the approved chunker/config
+  version migration, a new full snapshot, and downstream re-index/re-embed.
+- If the benchmark does not show a material benefit, retain the structural
+  baseline and close the experiment without production migration.
+
+M11 completion gate:
+- Retrieval context policy is implemented and evidence-backed.
+- Deterministic neighbor resolution exists or is explicitly rejected by owner
+  decision.
+- Any structure artifact is contract-valid and backward-compatible according to
+  its approved migration plan.
+- Parent-child and semantic variants are adopted only with benchmark evidence;
+  otherwise the current leaf/structural baseline remains authoritative.
+- Foundation still performs no query-time retrieval, Qdrant operation, reranking,
+  chat, or Gauss work.
+
+## 13. Current Execution Boundary and Next Priority
+
+The repository remains Confluence-first. W4 is complete; W5 is now the active
+staged acceptance path. The next work must stay within the reviewed W5 safety
+boundary:
+
+1. Run W5-B only after a distinct explicit owner authorization, using the
+   guarded one-shot Root-1 packet and private external configuration.
+2. Return and reconcile aggregate sanitized W5-B evidence only; do not request
+   raw logs, page IDs, paths, principals, credentials, or source content.
+3. Begin W5-C only after the owner accepts W5-B and grants a new explicit live
+   authorization for the controlled second sync.
+4. Complete W5-D documentation-only reconciliation, consolidated independent
+   review, and owner closeout without claiming recurring-crawl readiness.
+5. Freeze the post-W5 head before authorizing the Indexing I1-I3 stage stack.
+
+The M9-A4 OCR productionization gate and other deferred media capabilities
+remain separate; W5 is explicitly text plus Draw.io only and does not grant an
+OCR/PDF/image/audio/video PASS.
+
+M12 PLM remains a deferred, read-only future track. No PLM API fields,
+pagination behavior, attachment authorization, or retry semantics may be
+implemented from tool descriptions alone.
 
 - Preserve the completed, owner-accepted bounded M7 durability/replay stages;
   the 100k scale gate and optimization remain deferred.
@@ -1378,6 +1649,7 @@ Before full POC:
 | Query-time ACL resolver | Out of Foundation scope | Retrieval/platform permission concern. | Retrieval/platform ACL task. |
 | Embedding/Qdrant | Out of Foundation scope | Owned by Indexing. | Indexing snapshot importer/indexer task. |
 | Retrieval/chat/Gauss | Out of Foundation scope | Owned by Retrieval/Chat. | Retrieval/chat milestones. |
+| M8-D profile identity source-of-truth cleanup | Post-POC product hardening | `process_confluence_page_set._profile_identity` duplicates the full active `ChunkingProfile` contract as literals, so contract changes can drift across boundaries even though validation remains strict. | After the first product/POC proves the contract, derive the page-set identity/fingerprint from one canonical profile identity/provenance helper; add drift and mutation tests, then run an independent review specifically for duplicate contract constants. |
 
 ## 16. Roadmap Maintenance Rules
 

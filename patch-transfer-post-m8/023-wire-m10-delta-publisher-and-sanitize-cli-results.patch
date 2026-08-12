@@ -1,0 +1,261 @@
+From 785f57a2ce6addfd89cf463384a3eb0062f07503 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:14:01 +0700
+Subject: [PATCH] Wire M10 delta publisher and sanitize CLI results
+
+---
+ .../foundation/cli/export_m10_snapshot.py     | 25 +++++-
+ .../infrastructure/exporters/__init__.py      |  4 +
+ .../exporters/full_snapshot_publisher.py      | 77 +++++++++++++++++++
+ .../exporters/m10_snapshot_exporter.py        | 14 ++--
+ .../cli/test_export_m10_snapshot_cli.py       | 11 +++
+ .../exporters/test_full_snapshot_publisher.py | 24 ++++++
+ 6 files changed, 147 insertions(+), 8 deletions(-)
+
+diff --git a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+index 09531b0..b6b3af7 100644
+--- a/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
++++ b/src/knowledgenexus/foundation/cli/export_m10_snapshot.py
+@@ -17,6 +17,7 @@ from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import
+     M10SnapshotExportFailure,
+ )
+ from knowledgenexus.foundation.infrastructure.exporters.m10_snapshot_exporter import M10FullSnapshotExporter
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotResult
+ from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
+ 
+ 
+@@ -104,7 +105,29 @@ def main(
+         return _fail(exc.category, _EXIT_CODES[exc.category])
+     except BaseException:
+         return _fail("unexpected", EXIT_UNEXPECTED)
+-    sys.stdout.write(json.dumps({"status": "success", "dataset_version": result.dataset_version, "digest": result.digest, "counts": {key: getattr(result.metrics, key) for key in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")}, "network_used": False, "credentials_used": False}, sort_keys=True, allow_nan=False) + "\n")
++    # Do not let a malformed injected result escape through this operator
++    # boundary; only a published, runtime-validated result is printable.
++    try:
++        if type(result) is not M10SnapshotResult:
++            raise TypeError
++        M10SnapshotResult.__post_init__(result)
++        if result.status != "published" or result.metrics is None:
++            raise ValueError
++        counts = {
++            key: getattr(result.metrics, key)
++            for key in ("documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "tombstones")
++        }
++        payload = {
++            "status": "success",
++            "dataset_version": result.dataset_version,
++            "digest": result.digest,
++            "counts": counts,
++            "network_used": False,
++            "credentials_used": False,
++        }
++        sys.stdout.write(json.dumps(payload, sort_keys=True, allow_nan=False) + "\n")
++    except BaseException:
++        return _fail("unexpected", EXIT_UNEXPECTED)
+     return 0
+ 
+ 
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+index edae1c7..714439e 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/__init__.py
+@@ -1,5 +1,7 @@
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher import (
++    DeltaSnapshotPublisher,
+     FullSnapshotPublisher,
++    M10SnapshotPublisher,
+ )
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import (
+     FullSnapshotStagingCompleter,
+@@ -20,6 +22,8 @@ from knowledgenexus.foundation.infrastructure.exporters.delta_snapshot_reader im
+ 
+ __all__ = [
+     "FullSnapshotPublisher",
++    "DeltaSnapshotPublisher",
++    "M10SnapshotPublisher",
+     "FullSnapshotStagingCompleter",
+     "FullSnapshotStagingWriter",
+     "JsonlRecordWriter",
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
+index 2dd8590..5737bcd 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
+@@ -125,6 +125,83 @@ def _verify_publisher_invariants(manifest: Mapping[str, object]) -> str:
+     return dataset_version
+ 
+ 
++def _verify_delta_publisher_invariants(manifest: Mapping[str, object], *, dataset_root: Path) -> str:
++    """Validate the version chain before publishing a delta directory.
++
++    Delta staging is completed by the M10 completer, but publication still
++    needs an independent guard that the referenced base is a local, regular
++    snapshot directory.  This prevents a malformed manifest from advertising
++    a delta detached from the prior dataset.
++    """
++    if manifest.get("export_mode") != "delta":
++        raise ValueError("Manifest export_mode must be 'delta'")
++    counts = manifest.get("counts")
++    if not isinstance(counts, Mapping):
++        raise TypeError("Manifest counts must be a mapping")
++    if set(counts) != set(COUNT_KEYS):
++        raise ValueError("Manifest counts must contain exactly the full-snapshot count keys")
++    for value in counts.values():
++        if isinstance(value, bool) or not isinstance(value, int):
++            raise TypeError("Manifest counts values must be actual integers")
++        if value < 0:
++            raise ValueError("Manifest counts values must be non-negative")
++
++    dataset_version = manifest.get("dataset_version")
++    base_version = manifest.get("base_dataset_version")
++    if not isinstance(dataset_version, str) or DATASET_VERSION_PATTERN.fullmatch(dataset_version) is None:
++        raise ValueError("Manifest dataset_version is invalid")
++    if not isinstance(base_version, str) or DATASET_VERSION_PATTERN.fullmatch(base_version) is None or base_version == dataset_version:
++        raise ValueError("Delta Manifest requires a distinct base_dataset_version")
++    base_path = dataset_root / base_version
++    if base_path.parent != dataset_root or base_path.is_symlink() or not base_path.is_dir():
++        raise FileNotFoundError("Delta base snapshot is unavailable")
++    return dataset_version
++
++
++class DeltaSnapshotPublisher:
++    """Publish one completed delta snapshot using the same atomic M3 seam."""
++
++    @staticmethod
++    def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
++        _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
++        _verify_completed_file_set(staging_path)
++        manifest = _load_manifest(staging_path / "manifest.json")
++        validator.validate_record("Manifest", manifest)
++        dataset_version = _verify_delta_publisher_invariants(manifest, dataset_root=dataset_root)
++        final_path = dataset_root / dataset_version
++        if final_path.parent.resolve() != dataset_root.resolve():
++            raise ValueError("Final snapshot path must be a direct dataset-root child")
++        if final_path.exists() or final_path.is_symlink():
++            raise FileExistsError(f"Final snapshot already exists: {final_path}")
++        latest_path = dataset_root / LATEST_FILE_NAME
++        _verify_latest_path(latest_path)
++        staging_path.rename(final_path)
++        try:
++            _write_latest(latest_path, dataset_version)
++        except Exception:
++            # Keep the staging/final transition recoverable if pointer write fails.
++            try:
++                final_path.rename(staging_path)
++            except OSError:
++                pass
++            raise
++        return final_path
++
++
++class M10SnapshotPublisher:
++    """Dispatch full and delta publications without weakening either gate."""
++
++    @staticmethod
++    def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
++        manifest = _load_manifest(staging_path / "manifest.json")
++        mode = manifest.get("export_mode")
++        if mode == "full_snapshot":
++            return FullSnapshotPublisher.publish(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
++        if mode == "delta":
++            return DeltaSnapshotPublisher.publish(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
++        raise ValueError("Manifest export_mode is invalid")
++
++
+ def _verify_latest_path(latest_path: Path) -> None:
+     if latest_path.is_symlink():
+         raise FileExistsError(f"LATEST path must not be a symlink: {latest_path}")
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py b/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
+index a488440..34c11b5 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/m10_snapshot_exporter.py
+@@ -4,19 +4,19 @@ from __future__ import annotations
+ from knowledgenexus.foundation.application.use_cases.export_m10_snapshot import (
+     ExportM10Snapshot,
+ )
+-from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher import FullSnapshotPublisher
++from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_publisher import M10SnapshotPublisher
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_completer import FullSnapshotStagingCompleter
+ from knowledgenexus.foundation.infrastructure.exporters.full_snapshot_staging_writer import FullSnapshotStagingWriter
+ 
+ 
+ class M10FullSnapshotExporter(ExportM10Snapshot):
+     def __init__(self, **kwargs: object) -> None:
+-        super().__init__(
+-            staging_writer=FullSnapshotStagingWriter,
+-            staging_completer=FullSnapshotStagingCompleter,
+-            publisher=FullSnapshotPublisher,
+-            **kwargs,
+-        )
++        # Keep the production seams as defaults while allowing tests and
++        # embedders to replace one seam without triggering duplicate kwargs.
++        kwargs.setdefault("staging_writer", FullSnapshotStagingWriter)
++        kwargs.setdefault("staging_completer", FullSnapshotStagingCompleter)
++        kwargs.setdefault("publisher", M10SnapshotPublisher)
++        super().__init__(**kwargs)
+ 
+ 
+ __all__ = ["M10FullSnapshotExporter"]
+diff --git a/tests/foundation/cli/test_export_m10_snapshot_cli.py b/tests/foundation/cli/test_export_m10_snapshot_cli.py
+index 2c7b3e2..0189183 100644
+--- a/tests/foundation/cli/test_export_m10_snapshot_cli.py
++++ b/tests/foundation/cli/test_export_m10_snapshot_cli.py
+@@ -59,3 +59,14 @@ def test_cli_sanitizes_non_integer_system_exit(monkeypatch, capsys):
+     assert captured.out == ""
+     assert json.loads(captured.err) == {"category": "unexpected", "status": "failed"}
+     assert "secret" not in captured.err
++
++
++def test_cli_rejects_malformed_success_result_without_leaking(monkeypatch, tmp_path, capsys):
++    request = _request(tmp_path)
++    confluence, git = _handoffs()
++
++    monkeypatch.setattr(cli, "run", lambda **_: object())
++    assert cli.main(request=request, confluence_adapter=_Adapter(confluence), git_adapter=_Adapter(git)) == cli.EXIT_UNEXPECTED
++    captured = capsys.readouterr()
++    assert captured.out == ""
++    assert json.loads(captured.err) == {"category": "unexpected", "status": "failed"}
+diff --git a/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py b/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py
+index 19913b6..bae19af 100644
+--- a/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py
++++ b/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py
+@@ -8,6 +8,7 @@ from pathlib import Path
+ import pytest
+ 
+ from knowledgenexus.foundation.infrastructure.exporters import (
++    DeltaSnapshotPublisher,
+     FullSnapshotPublisher,
+     FullSnapshotStagingCompleter,
+     FullSnapshotStagingWriter,
+@@ -285,6 +286,29 @@ def test_delta_manifest_is_rejected_before_publication(tmp_path: Path) -> None:
+     assert staging_path.is_dir()
+ 
+ 
++def test_delta_publisher_requires_and_publishes_against_existing_base(tmp_path: Path) -> None:
++    dataset_root = tmp_path / "dataset"
++    dataset_root.mkdir()
++    base = dataset_root / OLD_DATASET_VERSION
++    base.mkdir()
++    staging_path = _create_completed_staging(dataset_root / "staging")
++    _mutate_manifest(
++        staging_path,
++        lambda manifest: (manifest.__setitem__("export_mode", "delta"), manifest.__setitem__("base_dataset_version", OLD_DATASET_VERSION)),
++    )
++
++    final_path = DeltaSnapshotPublisher.publish(
++        staging_path=staging_path,
++        dataset_root=dataset_root,
++        validator=FoundationSchemaValidator(),
++    )
++
++    assert final_path == dataset_root / VALID_DATASET_VERSION
++    assert not staging_path.exists()
++    assert base.is_dir()
++    assert (dataset_root / "LATEST.txt").read_bytes() == f"{VALID_DATASET_VERSION}\n".encode()
++
++
+ def test_full_snapshot_with_base_version_is_rejected(tmp_path: Path) -> None:
+     dataset_root = tmp_path / "dataset"
+     dataset_root.mkdir()
+-- 
+2.45.1.windows.1
+

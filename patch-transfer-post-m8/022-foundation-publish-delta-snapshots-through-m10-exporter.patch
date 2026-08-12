@@ -1,0 +1,66 @@
+From 6b0ea2c282684ef1018e6ebc901595d8ccac26b6 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:04:43 +0700
+Subject: [PATCH] foundation: publish delta snapshots through M10 exporter
+
+---
+ .../application/use_cases/export_m10_snapshot.py      |  6 +++---
+ .../exporters/test_full_snapshot_staging_writer.py    | 11 +++++++++++
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+index 9c83e01..1505c0f 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
++++ b/src/knowledgenexus/foundation/application/use_cases/export_m10_snapshot.py
+@@ -323,7 +323,7 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
+     if isolated_manifest != manifest:
+         raise ValueError("validator mutated manifest")
+     assert_validation_bytes_unchanged()
+-    if manifest.get("dataset_version") != dataset_version or manifest.get("generated_at") != generated_at or manifest.get("config_hash") != projection.config_hash or manifest.get("chunker_version") != projection.chunker_version or manifest.get("schemas_version") != projection.schemas_version or _canonical_json(manifest.get("source_scopes")) != _canonical_json(projection.source_scopes) or _canonical_json(manifest.get("counts")) != _canonical_json(expected_counts):
++    if manifest.get("dataset_version") != dataset_version or manifest.get("generated_at") != generated_at or manifest.get("export_mode") != request.export_mode or (request.export_mode == "delta" and manifest.get("base_dataset_version") != request.base_dataset_version) or manifest.get("config_hash") != projection.config_hash or manifest.get("chunker_version") != projection.chunker_version or manifest.get("schemas_version") != projection.schemas_version or _canonical_json(manifest.get("source_scopes")) != _canonical_json(projection.source_scopes) or _canonical_json(manifest.get("counts")) != _canonical_json(expected_counts):
+         raise ValueError
+     streams = {
+         name: _strict_jsonl_bytes(validation_bytes[f"{name}.jsonl"])
+@@ -336,7 +336,7 @@ def _accept(final_path: Path, request: M10SnapshotRequest, projection: M10Snapsh
+             if isolated_row != row:
+                 raise ValueError("validator mutated record")
+             assert_validation_bytes_unchanged()
+-    if streams["tombstones"]:
++    if request.export_mode == "full_snapshot" and streams["tombstones"]:
+         raise ValueError
+     expected_streams = {name: tuple(getattr(projection, name)) for name in _COUNT_KEYS}
+     if any(_canonical_json(list(streams[name])) != _canonical_json(list(expected_streams[name])) for name in _COUNT_KEYS):
+@@ -405,7 +405,7 @@ class ExportM10Snapshot:
+             raise M10SnapshotExportFailure("projection") from None
+ 
+         try:
+-            manifest = self._staging_writer.write(staging_path=staging_path, validator=self._validator, dataset_version=dataset_version, generated_at=generated_at, config_hash=projection.config_hash, chunker_version=projection.chunker_version, schemas_version=projection.schemas_version, documents=projection.documents, chunks=projection.chunks, relations=projection.relations, acl=projection.acl, media_assets=projection.media_assets, symbols=projection.symbols, sync_state=projection.sync_state, tombstones=projection.tombstones, source_scopes=projection.source_scopes)
++            manifest = self._staging_writer.write(staging_path=staging_path, validator=self._validator, dataset_version=dataset_version, generated_at=generated_at, config_hash=projection.config_hash, chunker_version=projection.chunker_version, schemas_version=projection.schemas_version, documents=projection.documents, chunks=projection.chunks, relations=projection.relations, acl=projection.acl, media_assets=projection.media_assets, symbols=projection.symbols, sync_state=projection.sync_state, tombstones=projection.tombstones, source_scopes=projection.source_scopes, export_mode=request.export_mode, base_dataset_version=request.base_dataset_version)
+         except Exception:
+             _cleanup_staging(staging_path)
+             raise M10SnapshotExportFailure("staging") from None
+diff --git a/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py b/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py
+index 41fbb66..7c6c559 100644
+--- a/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py
++++ b/tests/foundation/infrastructure/exporters/test_full_snapshot_staging_writer.py
+@@ -72,6 +72,17 @@ def test_successful_full_machine_readable_staging_snapshot(tmp_path: Path) -> No
+     FoundationSchemaValidator().validate_record("Manifest", manifest)
+ 
+ 
++def test_delta_staging_manifest_declares_base_and_allows_tombstones(tmp_path: Path) -> None:
++    manifest = _write_staging(
++        tmp_path / "delta",
++        export_mode="delta",
++        base_dataset_version="v20260712-093015-123456Z",
++    )
++    assert manifest["export_mode"] == "delta"
++    assert manifest["base_dataset_version"] == "v20260712-093015-123456Z"
++    assert manifest["counts"]["tombstones"] == 1
++
++
+ def test_successful_staging_contains_exact_filename_set(tmp_path: Path) -> None:
+     staging_path = tmp_path / "staging"
+ 
+-- 
+2.45.1.windows.1
+

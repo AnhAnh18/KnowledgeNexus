@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from knowledgenexus.foundation.infrastructure.exporters import (
+    DeltaSnapshotPublisher,
     FullSnapshotPublisher,
     FullSnapshotStagingCompleter,
     FullSnapshotStagingWriter,
@@ -22,6 +23,7 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
     FoundationSchemaValidator,
     FoundationValidationError,
 )
+from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
 from tests.fixtures.foundation.record_factories import (
     build_sample_acl_record,
     build_sample_chunk_record,
@@ -283,6 +285,120 @@ def test_delta_manifest_is_rejected_before_publication(tmp_path: Path) -> None:
         _publish(staging_path, dataset_root)
 
     assert staging_path.is_dir()
+
+
+def test_delta_publisher_requires_and_publishes_against_existing_base(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    base = dataset_root / OLD_DATASET_VERSION
+    base.mkdir()
+    staging_path = _create_completed_staging(dataset_root / "staging")
+    _mutate_manifest(
+        staging_path,
+        lambda manifest: (manifest.__setitem__("export_mode", "delta"), manifest.__setitem__("base_dataset_version", OLD_DATASET_VERSION)),
+    )
+
+    final_path = DeltaSnapshotPublisher.publish(
+        staging_path=staging_path,
+        dataset_root=dataset_root,
+        validator=FoundationSchemaValidator(),
+    )
+
+    assert final_path == dataset_root / VALID_DATASET_VERSION
+    assert not staging_path.exists()
+    assert base.is_dir()
+    assert (dataset_root / "LATEST.txt").read_bytes() == f"{VALID_DATASET_VERSION}\n".encode()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['{"entity_type":"document","entity_type":"chunk"}', '{"value":NaN}', '{"value":Infinity}'],
+)
+def test_delta_publisher_rejects_ambiguous_or_non_finite_jsonl(
+    tmp_path: Path,
+    raw: str,
+) -> None:
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    base = dataset_root / OLD_DATASET_VERSION
+    base.mkdir()
+    staging_path = _create_completed_staging(dataset_root / "staging")
+    _mutate_manifest(
+        staging_path,
+        lambda manifest: (
+            manifest.__setitem__("export_mode", "delta"),
+            manifest.__setitem__("base_dataset_version", OLD_DATASET_VERSION),
+        ),
+    )
+    (staging_path / "tombstones.jsonl").write_text(raw + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="(?:duplicate|non-finite)"):
+        DeltaSnapshotPublisher.publish(
+            staging_path=staging_path,
+            dataset_root=dataset_root,
+            validator=FoundationSchemaValidator(),
+        )
+
+    assert staging_path.is_dir()
+
+
+def test_delta_publisher_rejects_cross_source_tombstone_target(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    base = dataset_root / OLD_DATASET_VERSION
+    _create_completed_staging(base, dataset_version=OLD_DATASET_VERSION)
+    staging_path = _create_completed_staging(dataset_root / "staging")
+    _mutate_manifest(
+        staging_path,
+        lambda manifest: (
+            manifest.__setitem__("export_mode", "delta"),
+            manifest.__setitem__("base_dataset_version", OLD_DATASET_VERSION),
+        ),
+    )
+    # The target exists in the base stream but is not valid for the declared
+    # Confluence document source grammar.
+    (base / "documents.jsonl").write_text(
+        json.dumps({"document_id": "confluence:page:123", "source_system": "git"}) + "\n",
+        encoding="utf-8",
+    )
+    tombstone = {
+            "schema_version": "1.0",
+            "entity_type": "document",
+            "entity_id": "confluence:page:123",
+            "reason": "source_deleted",
+            "detected_at": "2026-08-05T00:00:00Z",
+            "dataset_version": VALID_DATASET_VERSION,
+    }
+    tombstone["tombstone_id"] = TombstoneIdGenerator.generate_tombstone_id(
+        entity_type="document",
+        entity_id="confluence:page:123",
+        reason="source_deleted",
+        dataset_version=VALID_DATASET_VERSION,
+    )
+    (staging_path / "tombstones.jsonl").write_text(
+        json.dumps(tombstone) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises((ValueError, FoundationValidationError)):
+        DeltaSnapshotPublisher.publish(
+            staging_path=staging_path,
+            dataset_root=dataset_root,
+            validator=FoundationSchemaValidator(),
+        )
+
+    assert staging_path.is_dir()
+
+
+@pytest.mark.parametrize("bad_path", [None, object(), "C:/dataset"])
+def test_publish_rejects_wrong_runtime_path_types_before_access(tmp_path: Path, bad_path: object) -> None:
+    staging_path = _create_completed_staging(tmp_path / "staging")
+    with pytest.raises(TypeError):
+        FullSnapshotPublisher.publish(
+            staging_path=bad_path,  # type: ignore[arg-type]
+            dataset_root=tmp_path,
+            validator=FoundationSchemaValidator(),
+        )
 
 
 def test_full_snapshot_with_base_version_is_rejected(tmp_path: Path) -> None:

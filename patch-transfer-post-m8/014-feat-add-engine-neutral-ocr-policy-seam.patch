@@ -1,0 +1,1076 @@
+From 4ccdf63ac69e0544a12d4d5067b3b4faeab8949a Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Thu, 6 Aug 2026 10:17:03 +0700
+Subject: [PATCH] feat: add engine-neutral OCR policy seam
+
+---
+ .local_ai/IMPLEMENTATION_STATE.md             |  18 ++
+ .local_ai/ROADMAP.md                          |   3 +-
+ .../foundation/domain/models/__init__.py      |  14 ++
+ .../foundation/domain/models/media_ocr.py     | 196 +++++++++++++++
+ .../domain/models/media_processing.py         |  18 +-
+ .../processors/media_attachment_processors.py | 233 +++++++++++++++++-
+ .../foundation/ports/__init__.py              |   4 +
+ .../foundation/ports/media_processing_port.py |  15 +-
+ .../domain/models/test_media_ocr.py           |  88 +++++++
+ .../test_media_attachment_processors.py       | 166 +++++++++++++
+ 10 files changed, 742 insertions(+), 13 deletions(-)
+ create mode 100644 src/knowledgenexus/foundation/domain/models/media_ocr.py
+ create mode 100644 tests/foundation/domain/models/test_media_ocr.py
+
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 1fd6bf6..9065367 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -1679,6 +1679,24 @@ are recorded without using repository-local commit SHAs as status.
+   fixes; `.codex-workflow/20260805-m9a3/08-review-2.md` records the fresh
+   independent `VERDICT: PASS`.
+ 
++## M9-A4 OCR Productionization Stage A
++
++- Status: bounded contract/policy seam complete and independently reviewed
++  `PASS`; production engine activation remains `pending_external_input`.
++- Added runtime-validated OCR limits/request/result envelopes, canonical
++  source/page/image binding, PDF rasterizer capability boundary, digital-first
++  mixed-PDF/image-only fallback, selected-image OCR policy, resource/quality/
++  cancellation/deadline limits, and fail-closed no-partial-result handling.
++  Existing fixture capability identities remain unchanged; no subprocess,
++  network, cloud, or engine runtime was introduced.
++- Validation: focused Fix3 `30 passed`; M9/media regression `37 passed`;
++  compileall and diff-check passed. Fresh independent review is
++  `.codex-workflow/20260806-scale-ocr/17-m9a4-fix3-independent-review.md`
++  with `VERDICT: PASS`.
++- Engine gate: an approval artifact is still required to identify the engine,
++  runtime/model/build identity, offline/network policy, limits, and sanitized
++  acceptance evidence before any production OCR claim.
++
+ ## M9-B Pinned Local Git Code-Document Seam
+ 
+ - Status: complete and independently reviewed `PASS`.
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 4295254..bd9e046 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -92,7 +92,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; Stage A reference slice and Stage B durable batch sidecar independently reviewed `PASS`; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory/raw replay plus the SQLite `batch_state.sqlite3` sidecar are independently reviewed `PASS`; the sidecar preserves M7 exact-v1 and shares the writer lock. Production transport, RSS, optimization, and 100k evidence remain deferred | Owner accepts bounded-stage progress; no 100k scale PASS or production transport claim is made. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+-| M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
++| M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; M9-A4 contract/policy seam independently reviewed `PASS`; OCR production activation `pending_external_input` | M9-A1/A2/A3, M9-A4 Stage A, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; no OCR engine approval/evidence exists yet; M8-AC real gate remains `pending_external_input` | Delta propagation and OCR contracts are bounded seams; engine activation, M10 real inputs, and full production evidence remain gated. |
+ | M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+@@ -1011,6 +1011,7 @@ M9A - Media:
+ | M9-A1 metadata-first media contract | complete | Added immutable attachment observation/policy/result models, schema-valid metadata-only MediaAsset builder, deterministic media relation-intent mapper, and strict adversarial boundaries; focused `11 passed`, bounded attachment/schema regression `87 passed`, architecture `16 passed`; independent review `PASS`; no download/raw/export/I/O. |
+ | M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
+ | M9-A3 offline draw.io/PDF/OCR processors | complete; independently reviewed `PASS` | Added bounded stdlib draw.io XML parsing, pinned digital-PDF text and image-OCR capability ports/processors, strict schema/status/detail binding, and MIME/filename dispatch over the M9-A2 envelope; focused `30 passed`, architecture `80 passed`, M9-A1/A2 regression `48 passed, 2 skipped`, compileall and diff-check passed. No engine/network/file side effects, attachment-text chunks, schema changes, or raw writes. |
++| M9-A4 OCR productionization Stage A | complete; independently reviewed `PASS`; engine activation pending external input | Added engine-neutral OCR request/result/limits contracts, PDF rasterizer capability boundary, digital-first mixed-PDF/image-only fallback, selected-image binding, quality/resource/cancellation policy, strict adversarial validation, and no-partial-result behavior. Focused Fix3 `30 passed`, M9/media regression `37 passed`; fresh review `PASS`. No engine was selected or activated. |
+ | M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
+ | M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
+ | M9-D1 tombstone contract and explicit cascade | complete; independently reviewed `PASS` | Added runtime-validated tombstone models, schema-valid deterministic builder, atomic document-root cascade use case, exact-field/JSON/cycle-safe boundaries, and injected schema-validator dependency. Focused `31 passed`; M9/M8 regression `42 passed`; architecture/schema `37 passed`; full architecture `86 passed`; compileall/diff-check passed; final review `VERDICT: PASS` in `.codex-workflow/20260805-m9d1/19-review-final.md`. |
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index eb8cc08..58423a6 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -174,6 +174,14 @@ from knowledgenexus.foundation.domain.models.media_processing import (
+     PdfTextExtractionResponse,
+     text_digest,
+ )
++from knowledgenexus.foundation.domain.models.media_ocr import (
++    OcrLimits,
++    OcrRequest,
++    OcrRequestStatus,
++    OcrResult,
++    PdfPageRasterizerPort,
++    RasterizedPdfImage,
++)
+ from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
+     MiniCorpusAcceptanceError,
+     MiniCorpusAcceptanceFailureCategory,
+@@ -375,6 +383,12 @@ __all__ = [
+     "OcrLabelResult",
+     "PdfPageTextResult",
+     "PdfTextExtractionResponse",
++    "OcrLimits",
++    "OcrRequest",
++    "OcrRequestStatus",
++    "OcrResult",
++    "PdfPageRasterizerPort",
++    "RasterizedPdfImage",
+     "text_digest",
+     "MiniCorpusAcceptanceError",
+     "MiniCorpusAcceptanceFailureCategory",
+diff --git a/src/knowledgenexus/foundation/domain/models/media_ocr.py b/src/knowledgenexus/foundation/domain/models/media_ocr.py
+new file mode 100644
+index 0000000..79fe9a1
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/media_ocr.py
+@@ -0,0 +1,196 @@
++from __future__ import annotations
++
++import hashlib
++import math
++import re
++from dataclasses import dataclass
++from enum import StrEnum
++from typing import Callable
++
++from knowledgenexus.foundation.domain.models.media_processing import (
++    MediaSourceLocator,
++    OcrLabelResult,
++)
++
++
++_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
++_ENGINE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,127}\Z")
++_RFC3339 = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})\Z")
++
++
++class OcrRequestStatus(StrEnum):
++    SUCCEEDED = "succeeded"
++    EMPTY = "empty"
++    LOW_CONFIDENCE = "low_confidence"
++    CANCELLED = "cancelled"
++    LIMIT_EXCEEDED = "limit_exceeded"
++    FAILED = "failed"
++
++
++@dataclass(frozen=True, repr=False)
++class OcrLimits:
++    max_input_bytes: int = 32 * 1024 * 1024
++    max_raster_bytes: int = 64 * 1024 * 1024
++    max_output_bytes: int = 8 * 1024 * 1024
++    max_images: int = 100
++    max_seconds: float = 120.0
++    min_confidence: float = 0.0
++    min_text_bytes: int = 1
++
++    def __post_init__(self) -> None:
++        for name in ("max_input_bytes", "max_raster_bytes", "max_output_bytes", "max_images", "min_text_bytes"):
++            value = getattr(self, name)
++            if type(value) is not int or value <= 0:
++                raise ValueError(f"{name} is invalid")
++        if type(self.max_seconds) not in (int, float) or not math.isfinite(float(self.max_seconds)) or self.max_seconds <= 0:
++            raise ValueError("max_seconds is invalid")
++        if type(self.min_confidence) not in (int, float) or not math.isfinite(float(self.min_confidence)) or not 0.0 <= float(self.min_confidence) <= 1.0:
++            raise ValueError("min_confidence is invalid")
++        object.__setattr__(self, "max_seconds", float(self.max_seconds))
++        object.__setattr__(self, "min_confidence", float(self.min_confidence))
++
++
++@dataclass(frozen=True, repr=False)
++class OcrRequest:
++    source_digest: str
++    locator: MediaSourceLocator
++    selected_image_indices: tuple[int, ...]
++    deadline: str | None
++    engine_id: str
++    engine_version: str
++    limits: OcrLimits = OcrLimits()
++    is_cancelled: Callable[[], bool] | None = None
++    input_bytes: int | None = None
++    raster_bytes: int | None = None
++    page_number: int | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.source_digest) is not str or _SHA256.fullmatch(self.source_digest) is None:
++            raise ValueError("source_digest is invalid")
++        if type(self.locator) is not MediaSourceLocator:
++            raise TypeError("locator is invalid")
++        if type(self.selected_image_indices) is not tuple or not self.selected_image_indices:
++            raise ValueError("selected_image_indices are invalid")
++        previous = 0
++        for value in self.selected_image_indices:
++            if type(value) is not int or value <= previous:
++                raise ValueError("selected_image_indices are invalid")
++            previous = value
++        if self.locator.image_index is not None and self.selected_image_indices != (self.locator.image_index,):
++            raise ValueError("selected_image_indices do not match locator")
++        if self.deadline is not None and (type(self.deadline) is not str or _RFC3339.fullmatch(self.deadline) is None):
++            raise ValueError("deadline is invalid")
++        for name in ("engine_id", "engine_version"):
++            value = getattr(self, name)
++            if type(value) is not str or not value or len(value) > 128 or (name == "engine_id" and _ENGINE.fullmatch(value) is None):
++                raise ValueError(f"{name} is invalid")
++        if type(self.limits) is not OcrLimits:
++            raise TypeError("limits are invalid")
++        if self.is_cancelled is not None and not callable(self.is_cancelled):
++            raise TypeError("is_cancelled is invalid")
++        for name in ("input_bytes", "raster_bytes"):
++            value = getattr(self, name)
++            if type(value) is not int or value <= 0:
++                raise ValueError(f"{name} is invalid")
++        if self.page_number is not None and (type(self.page_number) is not int or self.page_number <= 0):
++            raise ValueError("page_number is invalid")
++
++
++@dataclass(frozen=True, repr=False)
++class OcrResult:
++    request: OcrRequest
++    status: OcrRequestStatus
++    labels: tuple[OcrLabelResult, ...]
++    input_bytes: int
++    raster_bytes: int
++    output_bytes: int
++    images_requested: int
++    images_processed: int
++    output_digest: str | None = None
++    failure_category: str | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.request) is not OcrRequest:
++            raise TypeError("request is invalid")
++        if not isinstance(self.status, OcrRequestStatus):
++            raise TypeError("status is invalid")
++        if type(self.labels) is not tuple or any(type(label) is not OcrLabelResult for label in self.labels):
++            raise TypeError("labels are invalid")
++        for name in ("input_bytes", "raster_bytes", "output_bytes", "images_requested", "images_processed"):
++            value = getattr(self, name)
++            if type(value) is not int or value < 0:
++                raise ValueError(f"{name} is invalid")
++        if self.request.input_bytes is None or self.request.raster_bytes is None:
++            raise ValueError("request counters are required")
++        if self.input_bytes != self.request.input_bytes or self.raster_bytes != self.request.raster_bytes:
++            raise ValueError("request counters are not canonical")
++        if self.images_requested != len(self.request.selected_image_indices) or self.images_processed > self.images_requested:
++            raise ValueError("image counters are invalid")
++        indices = tuple(label.image_index for label in self.labels)
++        if any(label.image_index not in self.request.selected_image_indices for label in self.labels) or indices != tuple(sorted(set(indices))):
++            raise ValueError("label locator is invalid")
++        if self.status is OcrRequestStatus.SUCCEEDED and self.images_processed != len(indices):
++            raise ValueError("images_processed is not canonical")
++        if self.input_bytes > self.request.limits.max_input_bytes or self.raster_bytes > self.request.limits.max_raster_bytes or self.output_bytes > self.request.limits.max_output_bytes:
++            raise ValueError("resource counters exceed limits")
++        if self.status is OcrRequestStatus.SUCCEEDED:
++            if not self.labels or self.images_processed != self.images_requested or self.failure_category is not None:
++                raise ValueError("successful result is invalid")
++            if any(label.confidence < self.request.limits.min_confidence for label in self.labels):
++                raise ValueError("successful result confidence is invalid")
++            if any(len(label.text.encode("utf-8")) < self.request.limits.min_text_bytes for label in self.labels):
++                raise ValueError("successful result text quality is invalid")
++            expected = hashlib.sha256("\n".join(f"{x.image_index}:{x.text}:{x.confidence:.8f}" for x in self.labels).encode()).hexdigest()
++            if self.output_digest != expected:
++                raise ValueError("output_digest is invalid")
++            expected_output_bytes = len("\n".join(x.text for x in self.labels).encode("utf-8"))
++            if self.output_bytes != expected_output_bytes:
++                raise ValueError("output_bytes is not canonical")
++        else:
++            if self.labels or self.output_digest is not None or self.images_processed != 0 or self.output_bytes != 0:
++                raise ValueError("non-success result carries output")
++            if self.failure_category is None:
++                raise ValueError("failure_category is missing")
++        if self.failure_category is not None and (type(self.failure_category) is not str or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", self.failure_category)):
++            raise ValueError("failure_category is invalid")
++        allowed_categories = {
++            OcrRequestStatus.EMPTY: "empty",
++            OcrRequestStatus.LOW_CONFIDENCE: "low_confidence",
++            OcrRequestStatus.CANCELLED: "cancelled",
++            OcrRequestStatus.LIMIT_EXCEEDED: "limit_exceeded",
++            OcrRequestStatus.FAILED: "failed",
++        }
++        if self.status is OcrRequestStatus.SUCCEEDED:
++            if self.failure_category is not None:
++                raise ValueError("successful result failure category is invalid")
++        elif self.failure_category != allowed_categories[self.status]:
++            raise ValueError("failure category is incompatible with status")
++
++
++@dataclass(frozen=True, repr=False)
++class RasterizedPdfImage:
++    source_digest: str
++    page_number: int
++    image_index: int
++    body: bytes
++    image_digest: str
++
++    def __post_init__(self) -> None:
++        if type(self.source_digest) is not str or _SHA256.fullmatch(self.source_digest) is None:
++            raise ValueError("source_digest is invalid")
++        if type(self.page_number) is not int or self.page_number <= 0 or type(self.image_index) is not int or self.image_index <= 0:
++            raise ValueError("image locator is invalid")
++        if type(self.body) is not bytes or not self.body:
++            raise ValueError("body is invalid")
++        if type(self.image_digest) is not str or self.image_digest != hashlib.sha256(self.body).hexdigest():
++            raise ValueError("image_digest is invalid")
++
++
++class PdfPageRasterizerPort:
++    """Capability boundary; implementations must be approved separately."""
++
++    def rasterize_pdf_pages(self, *, source_digest: str, body: bytes, page_numbers: tuple[int, ...], limits: OcrLimits) -> tuple[RasterizedPdfImage, ...]:
++        raise NotImplementedError
++
++
++__all__ = ["OcrLimits", "OcrRequest", "OcrRequestStatus", "OcrResult", "PdfPageRasterizerPort", "RasterizedPdfImage"]
+diff --git a/src/knowledgenexus/foundation/domain/models/media_processing.py b/src/knowledgenexus/foundation/domain/models/media_processing.py
+index 29843bc..a48dc91 100644
+--- a/src/knowledgenexus/foundation/domain/models/media_processing.py
++++ b/src/knowledgenexus/foundation/domain/models/media_processing.py
+@@ -20,6 +20,7 @@ _PAGE_ID = re.compile(r"^confluence:page:[0-9]+$")
+ _MEDIA_ID = re.compile(r"^confluence:attachment:(?:att)?[0-9]+$")
+ _MIME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+ _SOURCE_VERSION = re.compile(r"^[^\x00-\x1f\x7f-\x9f]{1,256}$")
++_ENGINE_CAPABILITY = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+ _RFC3339 = re.compile(
+     r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})T"
+     r"(?:[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.[0-9]+)?"
+@@ -308,12 +309,15 @@ class MediaExtractionDetail:
+     status: str
+     text_sha256: str | None = None
+     warning: str | None = None
++    pdf_page_number: int | None = None
+ 
+     def __post_init__(self) -> None:
+         if type(self.ordinal) is not int or self.ordinal <= 0:
+             raise ValueError("ordinal is invalid")
+         if type(self.locator) is not MediaSourceLocator:
+             raise TypeError("locator is invalid")
++        if self.pdf_page_number is not None and (type(self.pdf_page_number) is not int or self.pdf_page_number <= 0):
++            raise ValueError("pdf_page_number is invalid")
+         try:
+             locator = MediaSourceLocator(
+                 parent_page_id=self.locator.parent_page_id,
+@@ -327,7 +331,10 @@ class MediaExtractionDetail:
+             raise ValueError("locator is invalid") from None
+         if not isinstance(self.processor_kind, MediaProcessorKind):
+             raise TypeError("processor_kind is invalid")
+-        if self.processor_kind in _CAPABILITIES:
++        if self.processor_kind is MediaProcessorKind.IMAGE_OCR:
++            if type(self.capability_id) is not str or not _ENGINE_CAPABILITY.fullmatch(self.capability_id) or type(self.capability_version) is not str or not self.capability_version:
++                raise ValueError("capability identity is invalid")
++        elif self.processor_kind in _CAPABILITIES:
+             _capability(self.processor_kind, self.capability_id, self.capability_version)
+         elif (self.capability_id, self.capability_version) != ("stdlib-drawio-v1", "1"):
+             raise ValueError("capability identity is invalid")
+@@ -345,6 +352,8 @@ class MediaExtractionDetail:
+         elif self.processor_kind is MediaProcessorKind.PDF_TEXT:
+             if self.locator.pdf_page_number is None or self.locator.image_index is not None:
+                 raise ValueError("PDF locator is invalid")
++            if self.status not in {"parsed", "ocr", "failed"}:
++                raise ValueError("PDF status is invalid")
+         elif self.processor_kind is MediaProcessorKind.IMAGE_OCR:
+             if self.locator.image_index is None or self.locator.pdf_page_number is not None:
+                 raise ValueError("OCR locator is invalid")
+@@ -493,10 +502,11 @@ class MediaProcessingResult:
+             seen_locators.add(locator_key)
+             rebuilt.append(copied)
+         status = asset["processing_status"]
+-        if any(detail.status != status for detail in rebuilt):
++        if status == "failed":
++            if any(detail.status != "failed" for detail in rebuilt):
++                raise ValueError("detail status mismatch")
++        elif any(detail.status not in {"parsed", "ocr"} for detail in rebuilt):
+             raise ValueError("detail status mismatch")
+-        if len({detail.processor_kind for detail in rebuilt}) != 1:
+-            raise ValueError("detail processor mismatch")
+         for detail in rebuilt:
+             locator = detail.locator
+             if (
+diff --git a/src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py b/src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py
+index 916b397..9caaacd 100644
+--- a/src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py
++++ b/src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py
+@@ -1,6 +1,10 @@
+ from __future__ import annotations
+ 
+ import hashlib
++import re
++import time
++from datetime import datetime, timezone
++from typing import Callable
+ 
+ from knowledgenexus.foundation.domain.models.media_body_materialization import (
+     MediaAttachmentBodyEnvelope,
+@@ -25,9 +29,12 @@ from knowledgenexus.foundation.domain.models.media_processing import (
+     PdfTextExtractionResponse,
+     text_digest,
+ )
++from knowledgenexus.foundation.domain.models.media_ocr import OcrLimits, OcrRequest, OcrRequestStatus, OcrResult, RasterizedPdfImage
+ from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
+ from knowledgenexus.foundation.ports.media_processing_port import (
+     ImageOcrPort,
++    OcrCapabilityPort,
++    PdfPageRasterizerPort,
+     PdfTextExtractionPort,
+ )
+ from knowledgenexus.foundation.infrastructure.processors.drawio_xml_processor import (
+@@ -42,6 +49,93 @@ _DRAWIO_CAPABILITY = ("stdlib-drawio-v1", "1")
+ _PDF_CAPABILITY = ("pdf-text-fixture-v1", "1")
+ _OCR_CAPABILITY = ("image-ocr-fixture-v1", "1")
+ _MAX_EXTRACTED_BYTES = 8 * 1024 * 1024
++_RFC3339 = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})\Z")
++
++
++def _ocr_cancelled(request: OcrRequest, started: float, clock: object) -> bool:
++    try:
++        if request.is_cancelled is not None and bool(request.is_cancelled()):
++            return True
++        if float(clock()) - started >= request.limits.max_seconds:
++            return True
++        if request.deadline is not None:
++            deadline = datetime.fromisoformat(request.deadline.replace("Z", "+00:00"))
++            if datetime.now(timezone.utc) >= deadline:
++                return True
++    except Exception:
++        return True
++    return False
++
++
++def _validate_raster_images(images: object, *, source_digest: str, page_numbers: tuple[int, ...], body_size: int, limits: OcrLimits) -> tuple[RasterizedPdfImage, ...]:
++    if type(images) is not tuple or len(images) != len(page_numbers) or len(images) > limits.max_images:
++        raise ValueError("rasterizer result count invalid")
++    seen: set[int] = set()
++    for item, page in zip(images, page_numbers):
++        if type(item) is not RasterizedPdfImage or item.source_digest != source_digest or item.page_number != page or item.image_index in seen:
++            raise ValueError("rasterizer binding invalid")
++        seen.add(item.image_index)
++    if sum(len(item.body) for item in images) > limits.max_raster_bytes:
++        raise OverflowError("raster byte limit")
++    if body_size > limits.max_input_bytes:
++        raise OverflowError("input byte limit")
++    return images
++
++
++def _validate_ocr_result(result: object, *, request: OcrRequest, image: RasterizedPdfImage) -> OcrResult:
++    if type(result) is not OcrResult:
++        raise ValueError("OCR result invalid")
++    try:
++        # Rebuild nested values so forged same-type dataclasses cannot bypass
++        # their own post-init invariants at this capability boundary.
++        raw_request = result.request
++        rebuilt_request = OcrRequest(
++            source_digest=raw_request.source_digest,
++            locator=MediaSourceLocator(
++                parent_page_id=raw_request.locator.parent_page_id,
++                attachment_id=raw_request.locator.attachment_id,
++                filename=raw_request.locator.filename,
++                raw_uri=raw_request.locator.raw_uri,
++                pdf_page_number=raw_request.locator.pdf_page_number,
++                image_index=raw_request.locator.image_index,
++            ),
++            selected_image_indices=raw_request.selected_image_indices,
++            deadline=raw_request.deadline,
++            engine_id=raw_request.engine_id,
++            engine_version=raw_request.engine_version,
++            limits=OcrLimits(**{name: getattr(raw_request.limits, name) for name in OcrLimits.__dataclass_fields__}),
++            is_cancelled=raw_request.is_cancelled,
++            input_bytes=raw_request.input_bytes,
++            raster_bytes=raw_request.raster_bytes,
++            page_number=raw_request.page_number,
++        )
++        labels = tuple(
++            OcrLabelResult(image_index=label.image_index, text=label.text, confidence=label.confidence)
++            for label in result.labels
++        )
++        rebuilt = OcrResult(
++            request=rebuilt_request,
++            status=result.status,
++            labels=labels,
++            input_bytes=result.input_bytes,
++            raster_bytes=result.raster_bytes,
++            output_bytes=result.output_bytes,
++            images_requested=result.images_requested,
++            images_processed=result.images_processed,
++            output_digest=result.output_digest,
++            failure_category=result.failure_category,
++        )
++    except Exception:
++        raise ValueError("OCR result invalid") from None
++    if rebuilt.request != request or rebuilt.status is not OcrRequestStatus.SUCCEEDED:
++        raise ValueError("OCR result invalid")
++    if rebuilt.request.page_number != image.page_number or rebuilt.request.locator.image_index != image.image_index:
++        raise ValueError("OCR request binding invalid")
++    if rebuilt.images_processed != 1 or tuple(label.image_index for label in rebuilt.labels) != (image.image_index,):
++        raise ValueError("OCR labels are not bound")
++    if rebuilt.input_bytes != request.input_bytes or rebuilt.raster_bytes != len(image.body):
++        raise ValueError("OCR counters invalid")
++    return rebuilt
+ 
+ 
+ def _revalidate_envelope(value: object) -> MediaAttachmentBodyEnvelope:
+@@ -170,7 +264,7 @@ def _locator(
+ 
+ 
+ class PdfTextProcessor:
+-    def __init__(self, *, capability: PdfTextExtractionPort, schema_validator: object | None = None) -> None:
++    def __init__(self, *, capability: PdfTextExtractionPort, rasterizer: PdfPageRasterizerPort | None = None, ocr_capability: OcrCapabilityPort | None = None, ocr_engine_id: str | None = None, ocr_engine_version: str | None = None, ocr_limits: OcrLimits | None = None, schema_validator: object | None = None, clock: object | None = None) -> None:
+         try:
+             extract = getattr(capability, "extract_pdf_text", None)
+         except Exception:
+@@ -185,12 +279,32 @@ class PdfTextProcessor:
+         if not callable(validate):
+             raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+         self._capability = capability
++        if rasterizer is not None and not callable(getattr(rasterizer, "rasterize_pdf_pages", None)):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        if ocr_capability is not None and not callable(getattr(ocr_capability, "recognize", None)):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        if (rasterizer is None) != (ocr_capability is None):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        if ocr_capability is not None and (type(ocr_engine_id) is not str or type(ocr_engine_version) is not str):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        if ocr_limits is not None and type(ocr_limits) is not OcrLimits:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        if clock is not None and not callable(clock):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        self._rasterizer = rasterizer
++        self._ocr_capability = ocr_capability
++        self._ocr_engine_id = ocr_engine_id
++        self._ocr_engine_version = ocr_engine_version
++        self._ocr_limits = ocr_limits or OcrLimits()
++        self._clock = time.monotonic if clock is None else clock
+         self._validator = validator
+ 
+     def process(self, *, envelope: object, observation: object) -> MediaProcessingResult:
+         body_envelope = _revalidate_envelope(envelope)
+         attachment = _revalidate_observation(observation)
+         _validate_binding(body_envelope, attachment)
++        if len(body_envelope.body_bytes) > self._ocr_limits.max_input_bytes:
++            return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.LIMIT_EXCEEDED, warning="OCR input limit exceeded")
+         try:
+             response = self._capability.extract_pdf_text(body=body_envelope.body_bytes)
+         except Exception:
+@@ -217,7 +331,17 @@ class PdfTextProcessor:
+             confidence=None,
+         )["raw_uri"]
+         assert type(raw_uri) is str
+-        if not response.pages or any(page.image_only for page in response.pages):
++        if not response.pages:
++            return self._failure(
++                body_envelope=body_envelope,
++                observation=attachment,
++                category=MediaProcessingFailureCategory.CAPABILITY_UNAVAILABLE,
++                warning="pdf image-only page deferred",
++                response=response,
++                raw_uri=raw_uri,
++            )
++        image_pages = tuple(page for page in response.pages if page.image_only)
++        if image_pages and self._rasterizer is None:
+             return self._failure(
+                 body_envelope=body_envelope,
+                 observation=attachment,
+@@ -230,6 +354,8 @@ class PdfTextProcessor:
+         details: list[MediaExtractionDetail] = []
+         output_bytes = 0
+         for index, page in enumerate(response.pages, start=1):
++            if page.image_only:
++                continue
+             page_text = page.text
+             if page.table_markdown:
+                 page_text = f"{page_text}\n{page.table_markdown}" if page_text else page.table_markdown
+@@ -246,7 +372,7 @@ class PdfTextProcessor:
+             output_bytes = projected_bytes
+             details.append(
+                 MediaExtractionDetail(
+-                    ordinal=index,
++                    ordinal=len(details) + 1,
+                     locator=_locator(
+                         observation=attachment,
+                         raw_uri=raw_uri,
+@@ -259,8 +385,55 @@ class PdfTextProcessor:
+                     text_sha256=text_digest(marked),
+                 )
+             )
++        if image_pages:
++            try:
++                source_digest = hashlib.sha256(body_envelope.body_bytes).hexdigest()
++                started = float(self._clock())
++                if len(image_pages) > self._ocr_limits.max_images:
++                    raise OverflowError
++                images = self._rasterizer.rasterize_pdf_pages(
++                    source_digest=source_digest,
++                    body=body_envelope.body_bytes,
++                    page_numbers=tuple(page.page_number for page in image_pages),
++                    limits=self._ocr_limits,
++                )
++                images = _validate_raster_images(images, source_digest=source_digest, page_numbers=tuple(page.page_number for page in image_pages), body_size=len(body_envelope.body_bytes), limits=self._ocr_limits)
++                for image in images:
++                    locator = _locator(observation=attachment, raw_uri=raw_uri, image_index=image.image_index)
++                    if _ocr_cancelled(OcrRequest(source_digest=source_digest, locator=locator, selected_image_indices=(image.image_index,), deadline=None, engine_id=self._ocr_engine_id, engine_version=self._ocr_engine_version, limits=self._ocr_limits, input_bytes=len(body_envelope.body_bytes), raster_bytes=len(image.body), page_number=image.page_number), started, self._clock):
++                        raise TimeoutError
++                    request = OcrRequest(
++                        source_digest=source_digest,
++                        locator=locator,
++                        selected_image_indices=(image.image_index,),
++                        deadline=None,
++                        engine_id=self._ocr_engine_id,
++                        engine_version=self._ocr_engine_version,
++                        limits=self._ocr_limits,
++                        input_bytes=len(body_envelope.body_bytes),
++                        raster_bytes=len(image.body),
++                        page_number=image.page_number,
++                    )
++                    result = self._ocr_capability.recognize(request=request, images=(image,))
++                    result = _validate_ocr_result(result, request=request, image=image)
++                    for label in result.labels:
++                        if label.confidence < self._ocr_limits.min_confidence or len(label.text.encode("utf-8")) < self._ocr_limits.min_text_bytes:
++                            raise LookupError
++                        marked = f"[pdf_page: {image.page_number}] [image: {label.image_index}] {label.text}"
++                        projected_bytes = output_bytes + (2 if parts else 0) + len(marked.encode("utf-8"))
++                        if projected_bytes > min(_MAX_EXTRACTED_BYTES, self._ocr_limits.max_output_bytes):
++                            raise OverflowError
++                        parts.append(marked)
++                        output_bytes = projected_bytes
++                        details.append(MediaExtractionDetail(ordinal=len(details) + 1, locator=locator, processor_kind=MediaProcessorKind.IMAGE_OCR, capability_id=self._ocr_engine_id, capability_version=self._ocr_engine_version, status="ocr", text_sha256=text_digest(marked), pdf_page_number=image.page_number))
++            except OverflowError:
++                return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.LIMIT_EXCEEDED, warning="OCR output limit exceeded", response=response, raw_uri=raw_uri)
++            except (TimeoutError, LookupError):
++                return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.LIMIT_EXCEEDED, warning="OCR quality or deadline policy rejected output", response=response, raw_uri=raw_uri)
++            except Exception:
++                return self._failure(body_envelope=body_envelope, observation=attachment, category=MediaProcessingFailureCategory.CAPABILITY_FAILURE, warning="PDF OCR fallback failed", response=response, raw_uri=raw_uri)
+         text = "\n\n".join(parts)
+-        if len(text.encode("utf-8")) > _MAX_EXTRACTED_BYTES:
++        if len(text.encode("utf-8")) > min(_MAX_EXTRACTED_BYTES, self._ocr_limits.max_output_bytes):
+             return self._failure(
+                 body_envelope=body_envelope,
+                 observation=attachment,
+@@ -328,7 +501,7 @@ class PdfTextProcessor:
+ 
+ 
+ class ImageOcrProcessor:
+-    def __init__(self, *, capability: ImageOcrPort, schema_validator: object | None = None) -> None:
++    def __init__(self, *, capability: ImageOcrPort, schema_validator: object | None = None, ocr_limits: OcrLimits | None = None, clock: Callable[[], float] | None = None, is_cancelled: Callable[[], bool] | None = None, deadline: str | None = None) -> None:
+         try:
+             extract = getattr(capability, "extract_labels", None)
+         except Exception:
+@@ -344,11 +517,37 @@ class ImageOcrProcessor:
+             raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
+         self._capability = capability
+         self._validator = validator
++        self._limits = ocr_limits or OcrLimits()
++        if clock is not None and not callable(clock):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        if is_cancelled is not None and not callable(is_cancelled):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        if deadline is not None:
++            if type(deadline) is not str:
++                raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++            if _RFC3339.fullmatch(deadline) is None:
++                raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++            try:
++                datetime.fromisoformat(deadline.replace("Z", "+00:00"))
++            except Exception:
++                raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++        if ocr_limits is not None and type(ocr_limits) is not OcrLimits:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        self._clock = clock or time.monotonic
++        self._is_cancelled = is_cancelled
++        self._deadline = deadline
+ 
+     def process(self, *, envelope: object, observation: object) -> MediaProcessingResult:
+         body_envelope = _revalidate_envelope(envelope)
+         attachment = _revalidate_observation(observation)
+         _validate_binding(body_envelope, attachment)
++        started = float(self._clock())
++        if len(body_envelope.body_bytes) > self._limits.max_input_bytes:
++            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR input limit exceeded")
++        if len(body_envelope.body_bytes) > self._limits.max_raster_bytes:
++            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR raster limit exceeded")
++        if self._cancelled(started):
++            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR request cancelled or expired")
+         try:
+             response = self._capability.extract_labels(body=body_envelope.body_bytes)
+             response = _revalidate_ocr_response(response)
+@@ -361,6 +560,8 @@ class ImageOcrProcessor:
+                 MediaProcessingFailureCategory.CAPABILITY_FAILURE,
+                 "OCR capability failed",
+             )
++        if self._cancelled(started):
++            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR request cancelled or expired")
+         if not response.labels:
+             return self._failure(
+                 body_envelope,
+@@ -368,6 +569,10 @@ class ImageOcrProcessor:
+                 MediaProcessingFailureCategory.PARSE_FAILED,
+                 "OCR produced no labels",
+             )
++        if any(label.image_index != 1 for label in response.labels):
++            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.MALFORMED_RESULT, "OCR labels are not bound to the selected image")
++        if len(response.labels) > self._limits.max_images or any(label.confidence < self._limits.min_confidence or len(label.text.encode("utf-8")) < self._limits.min_text_bytes for label in response.labels):
++            return self._failure(body_envelope, attachment, MediaProcessingFailureCategory.LIMIT_EXCEEDED, "OCR quality policy rejected output")
+         raw_uri = _asset(
+             envelope=body_envelope,
+             observation=attachment,
+@@ -382,7 +587,7 @@ class ImageOcrProcessor:
+         for index, label in enumerate(response.labels, start=1):
+             marked = f"[image: {label.image_index}] {label.text}"
+             projected_bytes = output_bytes + (1 if parts else 0) + len(marked.encode("utf-8"))
+-            if projected_bytes > _MAX_EXTRACTED_BYTES:
++            if projected_bytes > min(_MAX_EXTRACTED_BYTES, self._limits.max_output_bytes):
+                 return self._failure(
+                     body_envelope,
+                     attachment,
+@@ -403,7 +608,7 @@ class ImageOcrProcessor:
+                 )
+             )
+         confidence = sum(label.confidence for label in response.labels) / len(response.labels)
+-        if len("\n".join(parts).encode("utf-8")) > _MAX_EXTRACTED_BYTES:
++        if len("\n".join(parts).encode("utf-8")) > min(_MAX_EXTRACTED_BYTES, self._limits.max_output_bytes):
+             return self._failure(
+                 body_envelope,
+                 attachment,
+@@ -423,6 +628,20 @@ class ImageOcrProcessor:
+             raise MediaProcessingError(MediaProcessingFailureCategory.SCHEMA_INVALID) from None
+         return MediaProcessingResult(asset=asset, details=tuple(details))
+ 
++    def _cancelled(self, started: float) -> bool:
++        try:
++            if self._is_cancelled is not None and bool(self._is_cancelled()):
++                return True
++            if float(self._clock()) - started >= self._limits.max_seconds:
++                return True
++            if self._deadline is not None:
++                deadline = datetime.fromisoformat(self._deadline.replace("Z", "+00:00"))
++                if datetime.now(timezone.utc) >= deadline:
++                    return True
++        except Exception:
++            return True
++        return False
++
+     @staticmethod
+     def _failure(
+         body_envelope: MediaAttachmentBodyEnvelope,
+diff --git a/src/knowledgenexus/foundation/ports/__init__.py b/src/knowledgenexus/foundation/ports/__init__.py
+index 99b1d65..7726e09 100644
+--- a/src/knowledgenexus/foundation/ports/__init__.py
++++ b/src/knowledgenexus/foundation/ports/__init__.py
+@@ -114,6 +114,8 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+ )
+ from knowledgenexus.foundation.ports.media_processing_port import (
+     ImageOcrPort,
++    OcrCapabilityPort,
++    PdfPageRasterizerPort,
+     PdfTextExtractionPort,
+ )
+ from knowledgenexus.foundation.ports.m10_snapshot_export_port import (
+@@ -202,6 +204,8 @@ __all__ = [
+     "ResumeUniqueIncompleteRunRequest",
+     "StartNewRunRequest",
+     "ImageOcrPort",
++    "OcrCapabilityPort",
++    "PdfPageRasterizerPort",
+     "PdfTextExtractionPort",
+     "M10PublisherPort",
+     "M10StagingCompleterPort",
+diff --git a/src/knowledgenexus/foundation/ports/media_processing_port.py b/src/knowledgenexus/foundation/ports/media_processing_port.py
+index 331d117..b545894 100644
+--- a/src/knowledgenexus/foundation/ports/media_processing_port.py
++++ b/src/knowledgenexus/foundation/ports/media_processing_port.py
+@@ -6,6 +6,13 @@ from knowledgenexus.foundation.domain.models.media_processing import (
+     ImageOcrResponse,
+     PdfTextExtractionResponse,
+ )
++from knowledgenexus.foundation.domain.models.media_ocr import (
++    OcrLimits,
++    OcrRequest,
++    OcrResult,
++    PdfPageRasterizerPort,
++    RasterizedPdfImage,
++)
+ 
+ 
+ class PdfTextExtractionPort(Protocol):
+@@ -16,4 +23,10 @@ class ImageOcrPort(Protocol):
+     def extract_labels(self, *, body: bytes) -> ImageOcrResponse: ...
+ 
+ 
+-__all__ = ["ImageOcrPort", "PdfTextExtractionPort"]
++class OcrCapabilityPort(Protocol):
++    """Approved-adapter seam; fixture capabilities remain separate."""
++
++    def recognize(self, *, request: OcrRequest, images: tuple[RasterizedPdfImage, ...]) -> OcrResult: ...
++
++
++__all__ = ["ImageOcrPort", "PdfTextExtractionPort", "OcrCapabilityPort", "PdfPageRasterizerPort", "OcrLimits", "OcrRequest", "OcrResult"]
+diff --git a/tests/foundation/domain/models/test_media_ocr.py b/tests/foundation/domain/models/test_media_ocr.py
+new file mode 100644
+index 0000000..00f2610
+--- /dev/null
++++ b/tests/foundation/domain/models/test_media_ocr.py
+@@ -0,0 +1,88 @@
++from __future__ import annotations
++
++import hashlib
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.media_ocr import (
++    OcrLimits,
++    OcrRequest,
++    OcrRequestStatus,
++    OcrResult,
++    RasterizedPdfImage,
++)
++from knowledgenexus.foundation.domain.models.media_processing import MediaSourceLocator, OcrLabelResult
++
++
++def _locator() -> MediaSourceLocator:
++    return MediaSourceLocator(
++        parent_page_id="1000", attachment_id="2000", filename="scan.pdf",
++        raw_uri="raw://confluence/attachments/2000/" + "a" * 64, image_index=1,
++    )
++
++
++def _request() -> OcrRequest:
++    return OcrRequest(
++        source_digest="b" * 64, locator=_locator(), selected_image_indices=(1,),
++        deadline=None, engine_id="approved-engine", engine_version="v1", limits=OcrLimits(),
++        input_bytes=10, raster_bytes=20,
++    )
++
++
++def test_ocr_result_requires_canonical_digest_and_exact_counters() -> None:
++    request = _request()
++    label = OcrLabelResult(image_index=1, text="hello", confidence=0.9)
++    digest = hashlib.sha256(b"1:hello:0.90000000").hexdigest()
++    result = OcrResult(request=request, status=OcrRequestStatus.SUCCEEDED, labels=(label,), input_bytes=10,
++                       raster_bytes=20, output_bytes=5, images_requested=1, images_processed=1, output_digest=digest)
++    assert result.output_digest == digest
++    with pytest.raises(ValueError):
++        OcrResult(request=request, status=OcrRequestStatus.SUCCEEDED, labels=(label,), input_bytes=10,
++                  raster_bytes=20, output_bytes=5, images_requested=1, images_processed=0, output_digest=digest)
++    with pytest.raises(ValueError):
++        OcrResult(request=request, status=OcrRequestStatus.SUCCEEDED, labels=(label,), input_bytes=10,
++                  raster_bytes=20, output_bytes=5, images_requested=1, images_processed=1, output_digest="c" * 64)
++
++
++def test_ocr_contract_rejects_forged_inputs_and_non_success_output() -> None:
++    with pytest.raises((TypeError, ValueError)):
++        OcrRequest(source_digest="x", locator=object(), selected_image_indices=(1,), deadline=None,
++                   engine_id="engine", engine_version="1")
++    request = _request()
++    with pytest.raises(ValueError):
++        OcrResult(request=request, status=OcrRequestStatus.EMPTY, labels=(), input_bytes=1,
++                  raster_bytes=0, output_bytes=0, images_requested=1, images_processed=0)
++    with pytest.raises(ValueError):
++        RasterizedPdfImage(source_digest="b" * 64, page_number=1, image_index=1, body=b"x", image_digest="a" * 64)
++
++
++@pytest.mark.parametrize("status,category", [
++    (OcrRequestStatus.EMPTY, "empty"),
++    (OcrRequestStatus.LOW_CONFIDENCE, "low_confidence"),
++    (OcrRequestStatus.CANCELLED, "cancelled"),
++    (OcrRequestStatus.LIMIT_EXCEEDED, "limit_exceeded"),
++    (OcrRequestStatus.FAILED, "failed"),
++])
++def test_ocr_status_failure_matrix_is_exact(status: OcrRequestStatus, category: str) -> None:
++    request = _request()
++    result = OcrResult(request=request, status=status, labels=(), input_bytes=10, raster_bytes=20,
++                       output_bytes=0, images_requested=1, images_processed=0,
++                       failure_category=category)
++    assert result.status is status
++    with pytest.raises(ValueError):
++        OcrResult(request=request, status=status, labels=(), input_bytes=10, raster_bytes=20,
++                  output_bytes=0, images_requested=1, images_processed=0,
++                  failure_category="failed" if category != "failed" else "empty")
++
++
++def test_ocr_request_requires_bound_counters_and_result_rejects_forged_counters() -> None:
++    with pytest.raises(ValueError):
++        OcrRequest(source_digest="b" * 64, locator=_locator(), selected_image_indices=(1,),
++                   deadline=None, engine_id="approved-engine", engine_version="v1")
++    request = _request()
++    label = OcrLabelResult(image_index=1, text="hello", confidence=0.9)
++    digest = hashlib.sha256(b"1:hello:0.90000000").hexdigest()
++    with pytest.raises(ValueError):
++        OcrResult(request=request, status=OcrRequestStatus.SUCCEEDED, labels=(label,), input_bytes=11,
++                  raster_bytes=20, output_bytes=5, images_requested=1, images_processed=1,
++                  output_digest=digest)
+diff --git a/tests/foundation/infrastructure/processors/test_media_attachment_processors.py b/tests/foundation/infrastructure/processors/test_media_attachment_processors.py
+index 85ea68c..b0ec27c 100644
+--- a/tests/foundation/infrastructure/processors/test_media_attachment_processors.py
++++ b/tests/foundation/infrastructure/processors/test_media_attachment_processors.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ from pathlib import Path
+ 
+ import pytest
++import hashlib
+ 
+ from knowledgenexus.foundation.domain.models.confluence_page_observation import (
+     RawHttpObservation,
+@@ -20,6 +21,7 @@ from knowledgenexus.foundation.domain.models.media_processing import (
+     PdfPageTextResult,
+     PdfTextExtractionResponse,
+ )
++from knowledgenexus.foundation.domain.models.media_ocr import OcrLimits, OcrRequestStatus, OcrResult, RasterizedPdfImage
+ from knowledgenexus.foundation.infrastructure.processors.media_attachment_processors import (
+     ImageOcrProcessor,
+     PdfTextProcessor,
+@@ -119,6 +121,67 @@ def test_pdf_forged_response_and_unexpected_exception_fail_closed() -> None:
+     assert result.failure_category is MediaProcessingFailureCategory.CAPABILITY_FAILURE
+ 
+ 
++def test_pdf_image_only_fallback_is_bound_and_does_not_publish_partial_output() -> None:
++    class _Rasterizer:
++        def rasterize_pdf_pages(self, *, source_digest: str, body: bytes, page_numbers: tuple[int, ...], limits: object) -> tuple[RasterizedPdfImage, ...]:
++            return tuple(RasterizedPdfImage(source_digest=source_digest, page_number=page, image_index=index, body=b"pixels", image_digest=hashlib.sha256(b"pixels").hexdigest()) for index, page in enumerate(page_numbers, 1))
++
++    class _Ocr:
++        def recognize(self, *, request: object, images: tuple[RasterizedPdfImage, ...]) -> OcrResult:
++            from knowledgenexus.foundation.domain.models.media_processing import OcrLabelResult
++            label = OcrLabelResult(image_index=images[0].image_index, text="scan", confidence=0.9)
++            digest = hashlib.sha256(f"{label.image_index}:{label.text}:{label.confidence:.8f}".encode()).hexdigest()
++            return OcrResult(request=request, status=OcrRequestStatus.SUCCEEDED, labels=(label,), input_bytes=4, raster_bytes=6, output_bytes=4, images_requested=1, images_processed=1, output_digest=digest)
++
++    processor = PdfTextProcessor(
++        capability=_PdfCapability(PdfTextExtractionResponse(capability_id="pdf-text-fixture-v1", capability_version="1", pages=(PdfPageTextResult(page_number=1, text="digital"), PdfPageTextResult(page_number=2, text="", image_only=True)))),
++        rasterizer=_Rasterizer(), ocr_capability=_Ocr(), ocr_engine_id="approved-engine", ocr_engine_version="v1",
++    )
++    result = processor.process(envelope=_envelope(), observation=_observation())
++    assert result.failure_category is None
++    assert result.asset["extracted_text"] == "[pdf_page: 1]\ndigital\n\n[pdf_page: 2] [image: 1] scan"
++
++
++def test_pdf_fallback_rejects_reordered_raster_pages() -> None:
++    class _BadRasterizer:
++        def rasterize_pdf_pages(self, *, source_digest: str, body: bytes, page_numbers: tuple[int, ...], limits: object) -> tuple[object, ...]:
++            return tuple()
++
++    processor = PdfTextProcessor(
++        capability=_PdfCapability(PdfTextExtractionResponse(capability_id="pdf-text-fixture-v1", capability_version="1", pages=(PdfPageTextResult(page_number=1, text="", image_only=True),))),
++        rasterizer=_BadRasterizer(), ocr_capability=type("O", (), {"recognize": lambda *args, **kwargs: None})(), ocr_engine_id="approved-engine", ocr_engine_version="v1",
++    )
++    result = processor.process(envelope=_envelope(), observation=_observation())
++    assert result.failure_category is MediaProcessingFailureCategory.CAPABILITY_FAILURE
++
++
++def test_pdf_fallback_rejects_wrong_source_and_duplicate_image_binding() -> None:
++    class _BadRasterizer:
++        def rasterize_pdf_pages(self, *, source_digest: str, body: bytes, page_numbers: tuple[int, ...], limits: object) -> tuple[RasterizedPdfImage, ...]:
++            wrong = "a" * 64
++            return tuple(RasterizedPdfImage(source_digest=wrong, page_number=page, image_index=1, body=b"pixels", image_digest=hashlib.sha256(b"pixels").hexdigest()) for page in page_numbers)
++    processor = PdfTextProcessor(
++        capability=_PdfCapability(PdfTextExtractionResponse(capability_id="pdf-text-fixture-v1", capability_version="1", pages=(PdfPageTextResult(page_number=1, text="", image_only=True),))),
++        rasterizer=_BadRasterizer(), ocr_capability=type("O", (), {"recognize": lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not call OCR"))})(), ocr_engine_id="approved-engine", ocr_engine_version="v1",
++    )
++    result = processor.process(envelope=_envelope(), observation=_observation())
++    assert result.failure_category is MediaProcessingFailureCategory.CAPABILITY_FAILURE
++    assert result.asset["extracted_text"] is None
++
++
++def test_pdf_fallback_enforces_limits_without_partial_output() -> None:
++    class _NeverRaster:
++        def rasterize_pdf_pages(self, **kwargs: object) -> tuple[RasterizedPdfImage, ...]:
++            raise AssertionError("must reject before rasterization")
++    processor = PdfTextProcessor(
++        capability=_PdfCapability(PdfTextExtractionResponse(capability_id="pdf-text-fixture-v1", capability_version="1", pages=(PdfPageTextResult(page_number=1, text="", image_only=True),))),
++        rasterizer=_NeverRaster(), ocr_capability=type("O", (), {"recognize": lambda *args, **kwargs: None})(), ocr_engine_id="approved-engine", ocr_engine_version="v1", ocr_limits=OcrLimits(max_input_bytes=1),
++    )
++    result = processor.process(envelope=_envelope(), observation=_observation())
++    assert result.failure_category is MediaProcessingFailureCategory.LIMIT_EXCEEDED
++    assert result.asset["extracted_text"] is None
++
++
+ def test_ocr_processor_emits_labels_only_with_confidence() -> None:
+     processor = ImageOcrProcessor(
+         capability=_OcrCapability(
+@@ -144,3 +207,106 @@ def test_ocr_forged_response_is_sanitized() -> None:
+         observation=_observation(filename="chart.png", mime_type="image/png"),
+     )
+     assert result.failure_category is MediaProcessingFailureCategory.MALFORMED_RESULT
++
++
++def test_standalone_ocr_rejects_labels_for_unselected_image() -> None:
++    result = ImageOcrProcessor(
++        capability=_OcrCapability(
++            ImageOcrResponse(
++                capability_id="image-ocr-fixture-v1",
++                capability_version="1",
++                labels=(OcrLabelResult(image_index=2, text="wrong", confidence=0.9),),
++            )
++        )
++    ).process(
++        envelope=_envelope(filename="chart.png"),
++        observation=_observation(filename="chart.png", mime_type="image/png"),
++    )
++    assert result.failure_category is MediaProcessingFailureCategory.MALFORMED_RESULT
++    assert result.asset["extracted_text"] is None
++
++
++def test_pdf_fallback_revalidates_forged_ocr_result() -> None:
++    class _Rasterizer:
++        def rasterize_pdf_pages(self, *, source_digest: str, body: bytes, page_numbers: tuple[int, ...], limits: object) -> tuple[RasterizedPdfImage, ...]:
++            return tuple(RasterizedPdfImage(source_digest=source_digest, page_number=page, image_index=1, body=b"pixels", image_digest=hashlib.sha256(b"pixels").hexdigest()) for page in page_numbers)
++
++    class _ForgedOcr:
++        def recognize(self, *, request: object, images: tuple[RasterizedPdfImage, ...]) -> object:
++            label = OcrLabelResult(image_index=1, text="scan", confidence=0.9)
++            digest = hashlib.sha256(f"1:scan:0.90000000".encode()).hexdigest()
++            forged = object.__new__(OcrResult)
++            object.__setattr__(forged, "request", request)
++            object.__setattr__(forged, "status", OcrRequestStatus.SUCCEEDED)
++            object.__setattr__(forged, "labels", (label,))
++            object.__setattr__(forged, "input_bytes", 4)
++            object.__setattr__(forged, "raster_bytes", 6)
++            object.__setattr__(forged, "output_bytes", 999)
++            object.__setattr__(forged, "images_requested", 1)
++            object.__setattr__(forged, "images_processed", 1)
++            object.__setattr__(forged, "output_digest", digest)
++            object.__setattr__(forged, "failure_category", None)
++            return forged
++
++    processor = PdfTextProcessor(
++        capability=_PdfCapability(PdfTextExtractionResponse(capability_id="pdf-text-fixture-v1", capability_version="1", pages=(PdfPageTextResult(page_number=1, text="", image_only=True),))),
++        rasterizer=_Rasterizer(), ocr_capability=_ForgedOcr(), ocr_engine_id="approved-engine", ocr_engine_version="v1",
++    )
++    result = processor.process(envelope=_envelope(), observation=_observation())
++    assert result.failure_category is MediaProcessingFailureCategory.CAPABILITY_FAILURE
++    assert result.asset["extracted_text"] is None
++
++
++def test_ocr_constructor_rejects_invalid_runtime_inputs() -> None:
++    with pytest.raises(Exception):
++        ImageOcrProcessor(capability=_OcrCapability(object()), ocr_limits=object())
++    with pytest.raises(Exception):
++        ImageOcrProcessor(capability=_OcrCapability(object()), clock=object())
++    with pytest.raises(Exception):
++        ImageOcrProcessor(capability=_OcrCapability(object()), deadline="2026-08-05")
++
++
++def test_ocr_exact_elapsed_limit_is_inclusive() -> None:
++    class _Never:
++        def extract_labels(self, *, body: bytes) -> object:
++            raise AssertionError("capability must not be called")
++
++    ticks = iter((0.0, 120.0))
++    processor = ImageOcrProcessor(capability=_Never(), clock=lambda: next(ticks))
++    result = processor.process(envelope=_envelope(filename="chart.png"), observation=_observation(filename="chart.png", mime_type="image/png"))
++    assert result.failure_category is MediaProcessingFailureCategory.LIMIT_EXCEEDED
++
++
++def test_standalone_ocr_rejects_raster_limit_before_capability() -> None:
++    class _Never:
++        def extract_labels(self, *, body: bytes) -> object:
++            raise AssertionError("capability must not be called")
++    processor = ImageOcrProcessor(capability=_Never(), ocr_limits=OcrLimits(max_raster_bytes=1))
++    result = processor.process(envelope=_envelope(filename="chart.png"), observation=_observation(filename="chart.png", mime_type="image/png"))
++    assert result.failure_category is MediaProcessingFailureCategory.LIMIT_EXCEEDED
++    assert result.asset["extracted_text"] is None
++
++
++def test_standalone_ocr_rejects_cancelled_or_expired_request_before_capability() -> None:
++    class _Never:
++        def extract_labels(self, *, body: bytes) -> object:
++            raise AssertionError("capability must not be called")
++    processor = ImageOcrProcessor(capability=_Never(), is_cancelled=lambda: True)
++    result = processor.process(envelope=_envelope(filename="chart.png"), observation=_observation(filename="chart.png", mime_type="image/png"))
++    assert result.failure_category is MediaProcessingFailureCategory.LIMIT_EXCEEDED
++    ticks = iter((0.0, 121.0))
++    processor = ImageOcrProcessor(capability=_Never(), clock=lambda: next(ticks))
++    result = processor.process(envelope=_envelope(filename="chart.png"), observation=_observation(filename="chart.png", mime_type="image/png"))
++    assert result.failure_category is MediaProcessingFailureCategory.LIMIT_EXCEEDED
++
++
++def test_standalone_ocr_rechecks_cancellation_after_capability() -> None:
++    state = {"cancelled": False}
++    class _Capability:
++        def extract_labels(self, *, body: bytes) -> object:
++            state["cancelled"] = True
++            return ImageOcrResponse(capability_id="image-ocr-fixture-v1", capability_version="1", labels=(OcrLabelResult(image_index=1, text="ok", confidence=0.9),))
++    processor = ImageOcrProcessor(capability=_Capability(), is_cancelled=lambda: state["cancelled"])
++    result = processor.process(envelope=_envelope(filename="chart.png"), observation=_observation(filename="chart.png", mime_type="image/png"))
++    assert result.failure_category is MediaProcessingFailureCategory.LIMIT_EXCEEDED
++    assert result.asset["extracted_text"] is None
+-- 
+2.45.1.windows.1
+

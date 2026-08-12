@@ -1,0 +1,2537 @@
+From fcd9935996e4989a8cbf5fe14213f305370535d7 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 4 Aug 2026 22:37:24 +0700
+Subject: [PATCH] feat(foundation): add M9 attachment body fetch store boundary
+
+---
+ .codex-workflow/20260805-m9a2/05-review-1.md  |  26 +
+ .codex-workflow/20260805-m9a2/06-fix-plan.md  |  26 +
+ .../20260805-m9a2/07-fix-implementation.md    |  34 ++
+ .codex-workflow/20260805-m9a2/08-review-2.md  |  18 +
+ .local_ai/IMPLEMENTATION_STATE.md             |  39 +-
+ .local_ai/ROADMAP.md                          |   5 +-
+ .../application/use_cases/__init__.py         |   4 +
+ ...ch_and_store_confluence_attachment_body.py | 303 ++++++++++
+ .../foundation/domain/models/__init__.py      |  16 +
+ .../models/media_body_materialization.py      | 428 ++++++++++++++
+ .../infrastructure/raw_store/__init__.py      |   4 +
+ .../confluence_raw_attachment_store.py        | 523 ++++++++++++++++++
+ .../foundation/ports/__init__.py              |  16 +
+ .../confluence_attachment_body_fetch_port.py  |  60 ++
+ .../confluence_raw_attachment_store_port.py   |  55 ++
+ .../test_m9a2_attachment_body_boundary.py     |  52 ++
+ ...ch_and_store_confluence_attachment_body.py | 319 +++++++++++
+ .../models/test_media_body_materialization.py | 141 +++++
+ .../test_confluence_raw_attachment_store.py   | 240 ++++++++
+ 19 files changed, 2303 insertions(+), 6 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m9a2/05-review-1.md
+ create mode 100644 .codex-workflow/20260805-m9a2/06-fix-plan.md
+ create mode 100644 .codex-workflow/20260805-m9a2/07-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9a2/08-review-2.md
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/fetch_and_store_confluence_attachment_body.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/media_body_materialization.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/raw_store/confluence_raw_attachment_store.py
+ create mode 100644 src/knowledgenexus/foundation/ports/confluence_attachment_body_fetch_port.py
+ create mode 100644 src/knowledgenexus/foundation/ports/confluence_raw_attachment_store_port.py
+ create mode 100644 tests/architecture/test_m9a2_attachment_body_boundary.py
+ create mode 100644 tests/foundation/application/use_cases/test_fetch_and_store_confluence_attachment_body.py
+ create mode 100644 tests/foundation/domain/models/test_media_body_materialization.py
+ create mode 100644 tests/foundation/infrastructure/raw_store/test_confluence_raw_attachment_store.py
+
+diff --git a/.codex-workflow/20260805-m9a2/05-review-1.md b/.codex-workflow/20260805-m9a2/05-review-1.md
+new file mode 100644
+index 0000000..caa666b
+--- /dev/null
++++ b/.codex-workflow/20260805-m9a2/05-review-1.md
+@@ -0,0 +1,26 @@
++# M9-A2 Independent Review 1
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Findings
++
++- P1: Fetch/store port errors accept arbitrary constructor arguments and
++  preserve arbitrary strings in `str`/`repr`; this can leak IDs, paths, bytes,
++  hosts, or underlying exception text across the public boundary.
++- P1: `FetchAndStoreConfluenceAttachmentBody` trusts forged exact dataclass
++  instances. `object.__new__(RawHttpObservation)` and
++  `object.__new__(MediaBodyStoreBudget)` reach field access and leak
++  `AttributeError` instead of sanitized category failures.
++- P1: Unexpected `RuntimeError` (and other non-listed exceptions) from the
++  fetcher or raw store propagates unsanitized, violating the failure mapping
++  and atomic boundary contract.
++- P1: Concurrent publishes can both pass cumulative budget checks and exceed
++  `max_total_bytes`; budget accounting has no reservation/serialization guard.
++- P2: `_scan_tree` is recursively unbounded and scan exceptions can escape the
++  publication boundary instead of mapping to a stable store category.
++- P2: `MediaAttachmentRawArtifact.__repr__` exposes byte counts at a public
++  boundary despite the strict no-sensitive-metadata error/repr rule.
++
++## Verdict
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m9a2/06-fix-plan.md b/.codex-workflow/20260805-m9a2/06-fix-plan.md
+new file mode 100644
+index 0000000..179524a
+--- /dev/null
++++ b/.codex-workflow/20260805-m9a2/06-fix-plan.md
+@@ -0,0 +1,26 @@
++# M9-A2 Review Fix Plan
++
++## Scope
++
++Address every confirmed finding from `05-review-1.md` without adding network,
++parsing, media processing, export, checkpoint, ACL, or downstream storage
++behavior.
++
++## Bounded changes
++
++1. Make fetch/store port errors category-only and allowlist store categories;
++   sanitize all unexpected fetch/store failures in the use case.
++2. Rebuild and validate forged `RawHttpObservation` and
++   `MediaBodyStoreBudget` instances before field access or side effects.
++3. Serialize cumulative budget accounting across publishes and map scan errors
++   to stable categories; retain no-clobber replay semantics.
++4. Remove byte-count details from public artifact repr and add adversarial tests
++   for forged instances, exception leakage, concurrent budget races, and scan
++   failure mapping.
++
++## Validation and re-review
++
++Run the focused M9-A2 suite, M9-A1/schema and raw-store regressions,
++compileall, and scoped diff-check; record results in
++`07-fix-implementation.md`. Obtain a fresh independent review in
++`08-review-2.md`; only `VERDICT: PASS` permits ledger update, commit, and push.
+diff --git a/.codex-workflow/20260805-m9a2/07-fix-implementation.md b/.codex-workflow/20260805-m9a2/07-fix-implementation.md
+new file mode 100644
+index 0000000..ca6eb8c
+--- /dev/null
++++ b/.codex-workflow/20260805-m9a2/07-fix-implementation.md
+@@ -0,0 +1,34 @@
++# M9-A2 Review Fix Implementation
++
++Implemented the bounded fixes from `06-fix-plan.md` and the additional
++independent-review cases for forged envelope/artifact instances, replay scan
++ordering, directory TOCTOU checks, and hardlink rejection.
++
++## Production changes
++
++- Fetch/store port errors now carry only closed category values and expose
++  sanitized representations.
++- The use case rebuilds and validates budgets, HTTP observations, and returned
++  artifacts before field access; unexpected fetch/store exceptions map to
++  stable failure categories.
++- The raw store rebuilds envelopes and budgets, serializes cumulative budget
++  accounting per data root, scans before replay, bounds iterative tree scans,
++  validates root/parent directory identity across scan-to-publication, rejects
++  hardlinked regular files, canonicalizes equivalent root lock keys, and maps
++  scan failures to `raw_artifact_invalid`.
++- Public raw-artifact representations no longer expose byte counts.
++- Focused adversarial tests cover forged instances, exception sanitization,
++  replay pollution, scan failures, concurrent budget accounting, and category
++  allowlists.
++
++## Validation
++
++- `uv run python -m pytest -q tests/foundation/domain/models/test_media_body_materialization.py tests/foundation/application/use_cases/test_fetch_and_store_confluence_attachment_body.py tests/foundation/infrastructure/raw_store/test_confluence_raw_attachment_store.py tests/architecture/test_m9a2_attachment_body_boundary.py --basetemp=.pytest-m9a2-fix6`
++  -> `37 passed, 2 skipped`.
++- `uv run python -m pytest -q tests/foundation/domain/models/test_media_materialization.py tests/foundation/infrastructure/raw_store/test_confluence_raw_restriction_store.py tests/foundation/domain/models/test_media_body_materialization.py tests/foundation/infrastructure/raw_store/test_confluence_raw_attachment_store.py tests/architecture/test_m9a2_attachment_body_boundary.py --basetemp=.pytest-m9a2-reg2`
++  -> `48 passed, 3 skipped`.
++- `python -m compileall -q src tests` -> passed.
++- Scoped `git diff --check` -> passed.
++
++Independent re-review remains required before ledger updates, commit, and
++push.
+diff --git a/.codex-workflow/20260805-m9a2/08-review-2.md b/.codex-workflow/20260805-m9a2/08-review-2.md
+new file mode 100644
+index 0000000..97825b4
+--- /dev/null
++++ b/.codex-workflow/20260805-m9a2/08-review-2.md
+@@ -0,0 +1,18 @@
++# M9-A2 Independent Review 2
++
++This artifact records the result returned by a fresh independent review
++session. The reviewer did not edit the worktree.
++
++## Findings
++
++No concrete P0, P1, P2, or P3 findings identified.
++
++## Validation
++
++`uv run python -m pytest -q tests/foundation/domain/models/test_media_body_materialization.py tests/foundation/application/use_cases/test_fetch_and_store_confluence_attachment_body.py tests/foundation/infrastructure/raw_store/test_confluence_raw_attachment_store.py tests/architecture/test_m9a2_attachment_body_boundary.py --basetemp=.pytest-m9a2-review-final`
++
++Result: `37 passed, 2 skipped`.
++
++## Verdict
++
++VERDICT: PASS
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 5dd9b54..8512fc2 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -24,8 +24,9 @@ independently reviewed `PASS`. M8-AC controlled mini-corpus acceptance is
+ implemented and independently re-reviewed `PASS`, but the real gate remains
+ `pending_external_input` because no approved 10-20 page generation/selection/
+ tokenizer input was supplied. M9-A1 metadata-first media contract is also
+-complete and independently reviewed `PASS`; M9-A2 through M9-D remain staged
+-under the reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
++complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
++independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
++reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+ 
+ ## Durable State Convention
+ 
+@@ -1601,8 +1602,38 @@ are recorded without using repository-local commit SHAs as status.
+   status/schema combinations, deterministic ordering, atomicity, and no-I/O
+   behavior; verdict `PASS` in
+   `.codex-workflow/20260805-m9a/05-review-1.md`.
+-- Commit/push closeout is pending on this branch; M9-A2 body fetch/store is the
+-  next separately reviewed stage.
++- M9-A1 closeout is recorded above; its commit/push closeout remains grouped
++  with the current approved M9-A2 stage on this branch.
++
++## M9-A2 Attachment Body Fetch and Store Boundary
++
++- Status: complete and independently reviewed `PASS`.
++- Objective: fetch one policy-selected attachment body through a typed port,
++  validate the bounded response, publish canonical immutable raw evidence, and
++  return a downloaded-but-not-processed `MediaAsset` result without parsing,
++  OCR, export, checkpoint, ACL, or downstream storage behavior.
++- Contract: explicit absolute `data_root`, frozen body/total/free-disk budget,
++  category-only sanitized ports/errors, canonical envelope JSON, no-clobber
++  replay/conflict semantics, bounded regular-file scan, hardlink/symlink/
++  reparse rejection, root/parent identity checks across scan-to-publication,
++  canonicalized per-root budget serialization, and fail-closed forged-input and
++  unexpected-exception handling.
++- Changed production files:
++  `src/knowledgenexus/foundation/domain/models/media_body_materialization.py`,
++  `src/knowledgenexus/foundation/ports/confluence_attachment_body_fetch_port.py`,
++  `src/knowledgenexus/foundation/ports/confluence_raw_attachment_store_port.py`,
++  `src/knowledgenexus/foundation/application/use_cases/fetch_and_store_confluence_attachment_body.py`,
++  `src/knowledgenexus/foundation/infrastructure/raw_store/confluence_raw_attachment_store.py`,
++  and the corresponding package exports. Focused adversarial tests cover
++  models, use-case, raw store, and architecture boundaries.
++- Validation: focused `37 passed, 2 skipped`; M9-A1/raw-store regression
++  selection `50 passed, 3 skipped`; `python -m compileall -q src tests` passed;
++  scoped `git diff --check` passed.
++- Review artifacts:
++  `.codex-workflow/20260805-m9a2/05-review-1.md` (`CHANGES_REQUIRED`),
++  `.codex-workflow/20260805-m9a2/08-review-2.md` (`PASS`).
++- Commit/push closeout is pending on this branch; M9-A3 is the next separately
++  planned and reviewed stage.
+ 
+ ## Current Execution Boundary
+ 
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 66498cc..71a2715 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -115,7 +115,8 @@ M8-A through M8-E are complete and independently reviewed `PASS`. M8-AC
+ controlled mini-corpus acceptance is implemented and independently re-reviewed
+ `PASS`, but its real gate remains `pending_external_input` until an approved
+ 10-20 page generation/selection/tokenizer input is supplied. M9-A1 is complete
+-and independently reviewed `PASS`; M9-A2 through M9-D remain staged under the
++and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
++independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
+ reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+ 
+ - M2C1 `CanonicalDocumentRecordBuilder` - done.
+@@ -988,7 +989,7 @@ M9A - Media:
+ | Stage | Status | Review / gate outcome |
+ |---|---|---|
+ | M9-A1 metadata-first media contract | complete | Added immutable attachment observation/policy/result models, schema-valid metadata-only MediaAsset builder, deterministic media relation-intent mapper, and strict adversarial boundaries; focused `11 passed`, bounded attachment/schema regression `87 passed`, architecture `16 passed`; independent review `PASS`; no download/raw/export/I/O. |
+-| M9-A2 attachment body fetch/store boundary | pending | Requires explicit `data_root`, disk budget, body-fetch port, and path-safe raw-store policy. |
++| M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
+ | M9-A3 offline draw.io/PDF/OCR processors | pending | Capability-pinned processors remain deferred until A2 evidence/store seam is approved. |
+ | M9-B local Git repository and code-document seam | pending | M9-B starts after its own plan review; local-clone identity and fallback-window seam remain locked. |
+ | M9-C minimal symbol index | pending | Depends on M9-B code-document contract; no symbol chunk stream is active yet. |
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index 580321d..6792d2f 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -34,6 +34,9 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop
+     ControlledStopPolicy,
+     is_inventory_window_commit,
+ )
++from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
++    FetchAndStoreConfluenceAttachmentBody,
++)
+ from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
+     AcceptConfluenceMiniCorpus,
+ )
+@@ -57,5 +60,6 @@ __all__ = [
+     "ControlledStopDecision",
+     "ControlledStopPolicy",
+     "is_inventory_window_commit",
++    "FetchAndStoreConfluenceAttachmentBody",
+     "AcceptConfluenceMiniCorpus",
+ ]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/fetch_and_store_confluence_attachment_body.py b/src/knowledgenexus/foundation/application/use_cases/fetch_and_store_confluence_attachment_body.py
+new file mode 100644
+index 0000000..dd259f4
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/fetch_and_store_confluence_attachment_body.py
+@@ -0,0 +1,303 @@
++from __future__ import annotations
++
++import hashlib
++
++from knowledgenexus.foundation.domain.models.confluence_page_observation import (
++    RawHttpObservation,
++)
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++    MediaAttachmentPublicationOutcome,
++    MediaAttachmentRawArtifact,
++    MediaBodyMaterializationError,
++    MediaBodyMaterializationFailureCategory,
++    MediaBodyMaterializationResult,
++    MediaBodyStoreBudget,
++)
++from knowledgenexus.foundation.domain.models.media_materialization import (
++    ConfluenceAttachmentObservation,
++    MediaPolicyDecision,
++)
++from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
++from knowledgenexus.foundation.ports.confluence_attachment_body_fetch_port import (
++    ConfluenceAttachmentBodyFetchError,
++    ConfluenceAttachmentBodyFetchPort,
++    ConfluenceAttachmentBodyTooLargeError,
++)
++from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
++    ConfluenceRawAttachmentStoreError,
++    ConfluenceRawAttachmentStoreFailureCategory,
++    ConfluenceRawAttachmentStorePort,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++
++
++def _fail(category: MediaBodyMaterializationFailureCategory) -> None:
++    raise MediaBodyMaterializationError(category) from None
++
++
++class FetchAndStoreConfluenceAttachmentBody:
++    """Fetch one selected attachment and publish immutable raw evidence."""
++
++    def __init__(
++        self,
++        *,
++        body_fetcher: ConfluenceAttachmentBodyFetchPort,
++        raw_attachment_store: ConfluenceRawAttachmentStorePort,
++        budget: MediaBodyStoreBudget,
++        schema_validator: object | None = None,
++    ) -> None:
++        if type(budget) is not MediaBodyStoreBudget:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        try:
++            validated_budget = MediaBodyStoreBudget(
++                max_body_bytes=budget.max_body_bytes,
++                max_total_bytes=budget.max_total_bytes,
++                minimum_free_disk_reserve_bytes=budget.minimum_free_disk_reserve_bytes,
++            )
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        try:
++            fetch = getattr(body_fetcher, "fetch_attachment_body", None)
++            resolve = getattr(raw_attachment_store, "resolve_attachment_path", None)
++            publish = getattr(raw_attachment_store, "publish_attachment", None)
++            read = getattr(raw_attachment_store, "read_attachment", None)
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        if not callable(fetch) or not callable(resolve) or not callable(publish) or not callable(read):
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        try:
++            validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++            validate_record = getattr(validator, "validate_record", None)
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        if not callable(validate_record):
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        self._body_fetcher = body_fetcher
++        self._raw_attachment_store = raw_attachment_store
++        self._budget = validated_budget
++        self._schema_validator = validator
++
++    def execute(
++        self,
++        *,
++        observation: object,
++        decision: object,
++    ) -> MediaBodyMaterializationResult:
++        if type(observation) is not ConfluenceAttachmentObservation:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        if type(decision) is not MediaPolicyDecision:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_INPUT)
++        observation = self._revalidate_observation(observation)
++        decision = self._revalidate_decision(decision)
++        if observation.attachment_id != decision.attachment_id:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_POLICY)
++        if decision.policy != "download_and_process":
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_POLICY)
++        if observation.size_bytes is not None and observation.size_bytes > self._budget.max_body_bytes:
++            _fail(MediaBodyMaterializationFailureCategory.RESPONSE_SIZE_LIMIT)
++
++        try:
++            response = self._body_fetcher.fetch_attachment_body(
++                attachment_id=observation.attachment_id,
++                filename=observation.filename,
++                max_bytes=self._budget.max_body_bytes,
++            )
++        except ConfluenceAttachmentBodyTooLargeError:
++            _fail(MediaBodyMaterializationFailureCategory.RESPONSE_SIZE_LIMIT)
++        except ConfluenceAttachmentBodyFetchError:
++            _fail(MediaBodyMaterializationFailureCategory.FETCH)
++        except (TypeError, ValueError, OSError):
++            _fail(MediaBodyMaterializationFailureCategory.FETCH)
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.FETCH)
++        if type(response) is not RawHttpObservation:
++            _fail(MediaBodyMaterializationFailureCategory.FETCH)
++        try:
++            status_code = response.status_code
++            response_body = response.body
++            if type(status_code) is not int or type(response_body) is not bytes:
++                _fail(MediaBodyMaterializationFailureCategory.FETCH)
++            response = RawHttpObservation(status_code=status_code, body=response_body)
++        except MediaBodyMaterializationError:
++            raise
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.FETCH)
++        if response.status_code != 200:
++            _fail(MediaBodyMaterializationFailureCategory.HTTP)
++        body = response.body
++        if len(body) > self._budget.max_body_bytes:
++            _fail(MediaBodyMaterializationFailureCategory.RESPONSE_SIZE_LIMIT)
++        if observation.size_bytes is not None and observation.size_bytes != len(body):
++            _fail(MediaBodyMaterializationFailureCategory.METADATA_MISMATCH)
++
++        envelope = MediaAttachmentBodyEnvelope(
++            format_version="1",
++            evidence_kind="confluence_attachment_body",
++            attachment_id=observation.attachment_id,
++            parent_page_id=observation.parent_page_id,
++            filename=observation.filename,
++            source_version=observation.source_version,
++            http_status=200,
++            body_encoding="base64",
++            body_bytes=body,
++        )
++        content_hash = hashlib.sha256(body).hexdigest()
++        try:
++            predicted_path = self._raw_attachment_store.resolve_attachment_path(
++                attachment_id=observation.attachment_id,
++                content_hash=content_hash,
++            )
++        except ConfluenceRawAttachmentStoreError as exc:
++            _fail(
++                self._store_category(
++                    exc, fallback=MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID
++                )
++            )
++        except (TypeError, ValueError, OSError):
++            _fail(MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID)
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID)
++        try:
++            predicted_artifact = MediaAttachmentRawArtifact(
++                path=predicted_path,
++                attachment_id=observation.attachment_id,
++                body_sha256=content_hash,
++                byte_count=len(body),
++                raw_uri=(
++                    f"raw://confluence/attachments/{observation.attachment_id}/{content_hash}"
++                ),
++                outcome=MediaAttachmentPublicationOutcome.PUBLISHED,
++            )
++        except (TypeError, ValueError):
++            _fail(MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID)
++        asset = self._asset(observation=observation, artifact=predicted_artifact)
++        try:
++            self._schema_validator.validate_record("MediaAsset", asset)
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.SCHEMA_INVALID)
++        try:
++            artifact = self._raw_attachment_store.publish_attachment(envelope=envelope)
++        except ConfluenceRawAttachmentStoreError as exc:
++            _fail(
++                self._store_category(
++                    exc, fallback=MediaBodyMaterializationFailureCategory.RAW_PUBLICATION_FAILURE
++                )
++            )
++        except (TypeError, ValueError, OSError):
++            _fail(MediaBodyMaterializationFailureCategory.RAW_PUBLICATION_FAILURE)
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.RAW_PUBLICATION_FAILURE)
++        artifact = self._revalidate_artifact(artifact)
++        if (
++            artifact.attachment_id != predicted_artifact.attachment_id
++            or artifact.body_sha256 != predicted_artifact.body_sha256
++            or artifact.byte_count != predicted_artifact.byte_count
++            or artifact.raw_uri != predicted_artifact.raw_uri
++            or artifact.path != predicted_artifact.path
++        ):
++            _fail(MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID)
++        try:
++            return MediaBodyMaterializationResult(
++                asset=self._asset(observation=observation, artifact=artifact),
++                artifact=artifact,
++            )
++        except (TypeError, ValueError):
++            _fail(MediaBodyMaterializationFailureCategory.INTERNAL_FAILURE)
++
++    @staticmethod
++    def _revalidate_observation(value: ConfluenceAttachmentObservation) -> ConfluenceAttachmentObservation:
++        try:
++            return ConfluenceAttachmentObservation(
++                attachment_id=value.attachment_id,
++                parent_page_id=value.parent_page_id,
++                filename=value.filename,
++                mime_type=value.mime_type,
++                size_bytes=value.size_bytes,
++                source_version=value.source_version,
++                updated_at=value.updated_at,
++                crawled_at=value.crawled_at,
++            )
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_OBSERVATION)
++
++    @staticmethod
++    def _revalidate_decision(value: MediaPolicyDecision) -> MediaPolicyDecision:
++        try:
++            return MediaPolicyDecision(
++                attachment_id=value.attachment_id,
++                policy=value.policy,
++            )
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.INVALID_POLICY)
++
++    @staticmethod
++    def _revalidate_artifact(value: object) -> MediaAttachmentRawArtifact:
++        if type(value) is not MediaAttachmentRawArtifact:
++            _fail(MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID)
++        try:
++            return MediaAttachmentRawArtifact(
++                path=value.path,
++                attachment_id=value.attachment_id,
++                body_sha256=value.body_sha256,
++                byte_count=value.byte_count,
++                raw_uri=value.raw_uri,
++                outcome=value.outcome,
++            )
++        except Exception:
++            _fail(MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID)
++
++    @staticmethod
++    def _asset(
++        *,
++        observation: ConfluenceAttachmentObservation,
++        artifact: MediaAttachmentRawArtifact,
++    ) -> dict[str, object]:
++        return {
++            "schema_version": "1.0",
++            "media_id": DocumentIdGenerator.confluence_attachment_id(observation.attachment_id),
++            "parent_document_id": DocumentIdGenerator.confluence_page_id(observation.parent_page_id),
++            "source_system": "confluence",
++            "filename": observation.filename,
++            "mime_type": observation.mime_type,
++            "size_bytes": observation.size_bytes,
++            "download_status": "downloaded",
++            "processing_status": "not_processed",
++            "relevance": "high",
++            "extracted_text": None,
++            "summary": None,
++            "confidence": None,
++            "raw_uri": artifact.raw_uri,
++            "content_hash": artifact.body_sha256,
++            "source_version": observation.source_version,
++            "updated_at": observation.updated_at,
++            "crawled_at": observation.crawled_at,
++        }
++
++    @staticmethod
++    def _store_category(
++        error: object,
++        *,
++        fallback: MediaBodyMaterializationFailureCategory,
++    ) -> MediaBodyMaterializationFailureCategory:
++        try:
++            category = error.category
++        except Exception:
++            return fallback
++        if not isinstance(category, ConfluenceRawAttachmentStoreFailureCategory):
++            return fallback
++        if category is ConfluenceRawAttachmentStoreFailureCategory.RAW_REPLAY_CONFLICT:
++            return MediaBodyMaterializationFailureCategory.RAW_REPLAY_CONFLICT
++        if category is ConfluenceRawAttachmentStoreFailureCategory.RAW_ARTIFACT_INVALID:
++            return MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID
++        if category is ConfluenceRawAttachmentStoreFailureCategory.BUDGET_EXCEEDED:
++            return MediaBodyMaterializationFailureCategory.BUDGET_EXCEEDED
++        return MediaBodyMaterializationFailureCategory.RAW_PUBLICATION_FAILURE
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++__all__ = ["FetchAndStoreConfluenceAttachmentBody"]
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index a4b46c7..50a2f9d 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -99,6 +99,15 @@ from knowledgenexus.foundation.domain.models.media_materialization import (
+     MediaPolicyDecision,
+     MediaRelationIntent,
+ )
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++    MediaAttachmentPublicationOutcome,
++    MediaAttachmentRawArtifact,
++    MediaBodyMaterializationError,
++    MediaBodyMaterializationFailureCategory,
++    MediaBodyMaterializationResult,
++    MediaBodyStoreBudget,
++)
+ from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
+     MiniCorpusAcceptanceError,
+     MiniCorpusAcceptanceFailureCategory,
+@@ -233,6 +242,13 @@ __all__ = [
+     "MediaMaterializationResult",
+     "MediaPolicyDecision",
+     "MediaRelationIntent",
++    "MediaAttachmentBodyEnvelope",
++    "MediaAttachmentPublicationOutcome",
++    "MediaAttachmentRawArtifact",
++    "MediaBodyMaterializationError",
++    "MediaBodyMaterializationFailureCategory",
++    "MediaBodyMaterializationResult",
++    "MediaBodyStoreBudget",
+     "MiniCorpusAcceptanceError",
+     "MiniCorpusAcceptanceFailureCategory",
+     "MiniCorpusAcceptanceRequest",
+diff --git a/src/knowledgenexus/foundation/domain/models/media_body_materialization.py b/src/knowledgenexus/foundation/domain/models/media_body_materialization.py
+new file mode 100644
+index 0000000..3095c69
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/media_body_materialization.py
+@@ -0,0 +1,428 @@
++from __future__ import annotations
++
++import base64
++import binascii
++import hashlib
++import json
++import re
++import unicodedata
++from dataclasses import dataclass
++from datetime import datetime
++from enum import StrEnum
++from pathlib import Path, PosixPath, WindowsPath
++
++from knowledgenexus.foundation.domain.rules.confluence_attachment_id import (
++    require_confluence_attachment_id,
++)
++from knowledgenexus.foundation.domain.rules.confluence_page_id import (
++    require_confluence_page_id,
++)
++
++
++_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
++_RFC3339 = re.compile(
++    r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})T"
++    r"(?:[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.[0-9]+)?"
++    r"(?:Z|[+-][0-9]{2}:[0-9]{2})$"
++)
++_MIME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
++_SOURCE_VERSION = re.compile(r"^[^\x00-\x1f\x7f-\x9f]{1,256}$")
++_MEDIA_ID = re.compile(r"^confluence:attachment:(?:att)?[0-9]+$")
++_PAGE_DOCUMENT_ID = re.compile(r"^confluence:page:[0-9]+$")
++_ASSET_FIELDS = frozenset(
++    {
++        "schema_version",
++        "media_id",
++        "parent_document_id",
++        "source_system",
++        "filename",
++        "mime_type",
++        "size_bytes",
++        "download_status",
++        "processing_status",
++        "relevance",
++        "extracted_text",
++        "summary",
++        "confidence",
++        "raw_uri",
++        "content_hash",
++        "source_version",
++        "updated_at",
++        "crawled_at",
++    }
++)
++_ENVELOPE_FIELDS = frozenset(
++    {
++        "format_version",
++        "evidence_kind",
++        "attachment_id",
++        "parent_page_id",
++        "filename",
++        "source_version",
++        "http_status",
++        "body_encoding",
++        "body_base64",
++        "body_byte_count",
++        "body_sha256",
++    }
++)
++_MAX_BODY_BYTES = 256 * 1024 * 1024
++_PATH_TYPES = (PosixPath, WindowsPath)
++
++
++def _validate_timestamp(value: object, field_name: str) -> str:
++    if type(value) is not str or _RFC3339.fullmatch(value) is None:
++        raise ValueError(f"{field_name} is invalid")
++    try:
++        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    except ValueError:
++        raise ValueError(f"{field_name} is invalid") from None
++    if parsed.tzinfo is None:
++        raise ValueError(f"{field_name} is invalid")
++    return value
++
++
++def _validate_filename(value: object) -> str:
++    if type(value) is not str:
++        raise TypeError("filename is invalid")
++    normalized = unicodedata.normalize("NFC", value)
++    if (
++        not normalized
++        or len(normalized.encode("utf-8")) > 512
++        or "/" in normalized
++        or "\\" in normalized
++        or any(
++            ord(character) < 0x20
++            or 0x7F <= ord(character) <= 0x9F
++            or character in ("\u2028", "\u2029")
++            for character in normalized
++        )
++    ):
++        raise ValueError("filename is invalid")
++    return normalized
++
++
++def _validate_mime(value: object) -> str | None:
++    if value is None:
++        return None
++    if type(value) is not str:
++        raise TypeError("mime_type is invalid")
++    normalized = value.strip().lower()
++    if _MIME.fullmatch(normalized) is None or len(normalized.encode("utf-8")) > 256:
++        raise ValueError("mime_type is invalid")
++    return normalized
++
++
++def _validate_source_version(value: object) -> str | None:
++    if value is None:
++        return None
++    if (
++        type(value) is not str
++        or _SOURCE_VERSION.fullmatch(value) is None
++        or len(value.encode("utf-8")) > 256
++        or any(character in value for character in ("\r", "\n", "\u2028", "\u2029"))
++    ):
++        raise ValueError("source_version is invalid")
++    return value
++
++
++def _validate_attachment_id(value: object) -> str:
++    if type(value) is not str:
++        raise TypeError("attachment_id is invalid")
++    try:
++        return require_confluence_attachment_id(value)
++    except (TypeError, ValueError):
++        raise ValueError("attachment_id is invalid") from None
++
++
++def _validate_page_id(value: object) -> str:
++    if type(value) is not str:
++        raise TypeError("parent_page_id is invalid")
++    try:
++        return require_confluence_page_id(value)
++    except (TypeError, ValueError):
++        raise ValueError("parent_page_id is invalid") from None
++
++
++class MediaBodyMaterializationFailureCategory(StrEnum):
++    INVALID_INPUT = "invalid_input"
++    INVALID_OBSERVATION = "invalid_observation"
++    INVALID_POLICY = "invalid_policy"
++    FETCH = "fetch"
++    RESPONSE_SIZE_LIMIT = "response_size_limit"
++    HTTP = "http"
++    METADATA_MISMATCH = "metadata_mismatch"
++    BUDGET_EXCEEDED = "budget_exceeded"
++    RAW_ARTIFACT_INVALID = "raw_artifact_invalid"
++    RAW_REPLAY_CONFLICT = "raw_replay_conflict"
++    RAW_PUBLICATION_FAILURE = "raw_publication_failure"
++    SCHEMA_INVALID = "schema_invalid"
++    INTERNAL_FAILURE = "internal_failure"
++
++
++class MediaBodyMaterializationError(Exception):
++    """Sanitized failure from the attachment body boundary."""
++
++    def __init__(self, category: MediaBodyMaterializationFailureCategory) -> None:
++        if not isinstance(category, MediaBodyMaterializationFailureCategory):
++            raise TypeError("category is invalid")
++        self.category = category
++        super().__init__(category.value)
++
++    def __repr__(self) -> str:
++        try:
++            category = self.category.value
++        except Exception:
++            return f"{type(self).__name__}()"
++        return f"{type(self).__name__}(category={category!r})"
++
++
++@dataclass(frozen=True, repr=False)
++class MediaBodyStoreBudget:
++    max_body_bytes: int
++    max_total_bytes: int
++    minimum_free_disk_reserve_bytes: int
++
++    def __post_init__(self) -> None:
++        for value in (
++            self.max_body_bytes,
++            self.max_total_bytes,
++            self.minimum_free_disk_reserve_bytes,
++        ):
++            if type(value) is not int:
++                raise TypeError("budget values are invalid")
++        if not 0 < self.max_body_bytes <= _MAX_BODY_BYTES:
++            raise ValueError("max_body_bytes is invalid")
++        if self.max_total_bytes < self.max_body_bytes:
++            raise ValueError("max_total_bytes is invalid")
++        if self.minimum_free_disk_reserve_bytes < 0:
++            raise ValueError("minimum_free_disk_reserve_bytes is invalid")
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++@dataclass(frozen=True, repr=False)
++class MediaAttachmentBodyEnvelope:
++    format_version: str
++    evidence_kind: str
++    attachment_id: str
++    parent_page_id: str
++    filename: str
++    source_version: str | None
++    http_status: int
++    body_encoding: str
++    body_bytes: bytes
++
++    def __post_init__(self) -> None:
++        if (
++            type(self.format_version) is not str
++            or type(self.evidence_kind) is not str
++            or self.format_version != "1"
++            or self.evidence_kind != "confluence_attachment_body"
++        ):
++            raise ValueError("envelope identity is invalid")
++        if type(self.body_encoding) is not str or self.body_encoding != "base64":
++            raise ValueError("body encoding is invalid")
++        if type(self.http_status) is not int or self.http_status != 200:
++            raise ValueError("http status is invalid")
++        object.__setattr__(self, "attachment_id", _validate_attachment_id(self.attachment_id))
++        object.__setattr__(self, "parent_page_id", _validate_page_id(self.parent_page_id))
++        object.__setattr__(self, "filename", _validate_filename(self.filename))
++        object.__setattr__(self, "source_version", _validate_source_version(self.source_version))
++        if type(self.body_bytes) is not bytes:
++            raise TypeError("body bytes are invalid")
++
++    def to_bytes(self) -> bytes:
++        payload = {
++            "attachment_id": self.attachment_id,
++            "body_base64": base64.b64encode(self.body_bytes).decode("ascii"),
++            "body_byte_count": len(self.body_bytes),
++            "body_encoding": self.body_encoding,
++            "body_sha256": hashlib.sha256(self.body_bytes).hexdigest(),
++            "evidence_kind": self.evidence_kind,
++            "filename": self.filename,
++            "format_version": self.format_version,
++            "http_status": self.http_status,
++            "parent_page_id": self.parent_page_id,
++            "source_version": self.source_version,
++        }
++        return json.dumps(
++            payload,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        ).encode("utf-8")
++
++    @classmethod
++    def from_bytes(cls, serialized: bytes) -> "MediaAttachmentBodyEnvelope":
++        if type(serialized) is not bytes:
++            raise TypeError("serialized envelope is invalid")
++
++        def reject_constant(_value: str) -> None:
++            raise ValueError("serialized envelope is invalid")
++
++        def reject_duplicate(pairs: list[tuple[object, object]]) -> dict[object, object]:
++            output: dict[object, object] = {}
++            for key, value in pairs:
++                if key in output:
++                    raise ValueError("serialized envelope is invalid")
++                output[key] = value
++            return output
++
++        try:
++            payload = json.loads(
++                serialized.decode("utf-8"),
++                object_pairs_hook=reject_duplicate,
++                parse_constant=reject_constant,
++            )
++        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
++            raise ValueError("serialized envelope is invalid") from None
++        if not isinstance(payload, dict) or set(payload) != _ENVELOPE_FIELDS:
++            raise ValueError("serialized envelope is invalid")
++        encoded = payload["body_base64"]
++        if type(encoded) is not str:
++            raise ValueError("serialized envelope is invalid")
++        try:
++            encoded_bytes = encoded.encode("ascii")
++            body = base64.b64decode(encoded_bytes, validate=True)
++        except (UnicodeEncodeError, binascii.Error, ValueError):
++            raise ValueError("serialized envelope is invalid") from None
++        if base64.b64encode(body) != encoded_bytes:
++            raise ValueError("serialized envelope is invalid")
++        count = payload["body_byte_count"]
++        digest = payload["body_sha256"]
++        if (
++            type(count) is not int
++            or count < 0
++            or count != len(body)
++            or type(digest) is not str
++            or _SHA256.fullmatch(digest) is None
++            or digest != hashlib.sha256(body).hexdigest()
++        ):
++            raise ValueError("serialized envelope is invalid")
++        try:
++            envelope = cls(
++                format_version=payload["format_version"],
++                evidence_kind=payload["evidence_kind"],
++                attachment_id=payload["attachment_id"],
++                parent_page_id=payload["parent_page_id"],
++                filename=payload["filename"],
++                source_version=payload["source_version"],
++                http_status=payload["http_status"],
++                body_encoding=payload["body_encoding"],
++                body_bytes=body,
++            )
++        except (TypeError, ValueError):
++            raise ValueError("serialized envelope is invalid") from None
++        if envelope.to_bytes() != serialized:
++            raise ValueError("serialized envelope is invalid")
++        return envelope
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++class MediaAttachmentPublicationOutcome(StrEnum):
++    PUBLISHED = "published"
++    REUSED = "reused"
++
++
++@dataclass(frozen=True, repr=False)
++class MediaAttachmentRawArtifact:
++    path: Path
++    attachment_id: str
++    body_sha256: str
++    byte_count: int
++    raw_uri: str
++    outcome: MediaAttachmentPublicationOutcome
++
++    def __post_init__(self) -> None:
++        if type(self.path) not in _PATH_TYPES or not self.path.is_absolute():
++            raise TypeError("path is invalid")
++        object.__setattr__(self, "attachment_id", _validate_attachment_id(self.attachment_id))
++        if type(self.body_sha256) is not str or _SHA256.fullmatch(self.body_sha256) is None:
++            raise ValueError("body_sha256 is invalid")
++        if type(self.byte_count) is not int or self.byte_count < 0:
++            raise ValueError("byte_count is invalid")
++        expected_uri = (
++            f"raw://confluence/attachments/{self.attachment_id}/{self.body_sha256}"
++        )
++        if type(self.raw_uri) is not str or self.raw_uri != expected_uri:
++            raise ValueError("raw_uri is invalid")
++        if not isinstance(self.outcome, MediaAttachmentPublicationOutcome):
++            raise TypeError("outcome is invalid")
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++@dataclass(frozen=True, repr=False)
++class MediaBodyMaterializationResult:
++    asset: dict[str, object]
++    artifact: MediaAttachmentRawArtifact
++
++    def __post_init__(self) -> None:
++        if type(self.asset) is not dict or type(self.artifact) is not MediaAttachmentRawArtifact:
++            raise TypeError("media body result is invalid")
++        try:
++            artifact = MediaAttachmentRawArtifact(
++                path=self.artifact.path,
++                attachment_id=self.artifact.attachment_id,
++                body_sha256=self.artifact.body_sha256,
++                byte_count=self.artifact.byte_count,
++                raw_uri=self.artifact.raw_uri,
++                outcome=self.artifact.outcome,
++            )
++        except Exception:
++            raise ValueError("media body result is invalid") from None
++        object.__setattr__(self, "artifact", artifact)
++        if set(self.asset) != _ASSET_FIELDS:
++            raise ValueError("asset fields are invalid")
++        copied = dict(self.asset)
++        for key, value in copied.items():
++            if type(key) is not str or type(value) not in {str, int, float, bool, type(None)}:
++                raise TypeError("asset values are invalid")
++        if (
++            copied["schema_version"] != "1.0"
++            or copied["source_system"] != "confluence"
++            or copied["download_status"] != "downloaded"
++            or copied["processing_status"] != "not_processed"
++            or copied["relevance"] != "high"
++            or any(copied[field] is not None for field in ("extracted_text", "summary", "confidence"))
++        ):
++            raise ValueError("asset status is invalid")
++        attachment_id = _validate_attachment_id(artifact.attachment_id)
++        if copied["media_id"] != f"confluence:attachment:{attachment_id}":
++            raise ValueError("asset identity is invalid")
++        if copied["raw_uri"] != artifact.raw_uri or copied["content_hash"] != artifact.body_sha256:
++            raise ValueError("asset evidence is invalid")
++        if type(copied["parent_document_id"]) is not str or _PAGE_DOCUMENT_ID.fullmatch(copied["parent_document_id"]) is None:
++            raise ValueError("asset parent identity is invalid")
++        _validate_filename(copied["filename"])
++        _validate_mime(copied["mime_type"])
++        size = copied["size_bytes"]
++        if size is not None and (type(size) is not int or size < 0 or size != artifact.byte_count):
++            raise ValueError("asset size is invalid")
++        if type(copied["content_hash"]) is not str or _SHA256.fullmatch(copied["content_hash"]) is None:
++            raise ValueError("asset content hash is invalid")
++        _validate_source_version(copied["source_version"])
++        if copied["updated_at"] is not None:
++            _validate_timestamp(copied["updated_at"], "updated_at")
++        _validate_timestamp(copied["crawled_at"], "crawled_at")
++        object.__setattr__(self, "asset", copied)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++__all__ = [
++    "MediaAttachmentBodyEnvelope",
++    "MediaAttachmentPublicationOutcome",
++    "MediaAttachmentRawArtifact",
++    "MediaBodyMaterializationError",
++    "MediaBodyMaterializationFailureCategory",
++    "MediaBodyMaterializationResult",
++    "MediaBodyStoreBudget",
++]
+diff --git a/src/knowledgenexus/foundation/infrastructure/raw_store/__init__.py b/src/knowledgenexus/foundation/infrastructure/raw_store/__init__.py
+index ccd5985..062c76c 100644
+--- a/src/knowledgenexus/foundation/infrastructure/raw_store/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/raw_store/__init__.py
+@@ -13,6 +13,9 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_restricti
+ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_generation_store import (
+     ConfluenceRawPageGenerationStore,
+ )
++from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store import (
++    ConfluenceRawAttachmentStore,
++)
+ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector import (
+     ConfluenceRawPageOrphanInspector,
+ )
+@@ -28,6 +31,7 @@ __all__ = [
+     "ConfluenceRawPageReadError",
+     "ConfluenceRawRestrictionEvidenceStore",
+     "ConfluenceRawPageGenerationStore",
++    "ConfluenceRawAttachmentStore",
+     "ConfluenceRawPageOrphanInspector",
+     "ConfluenceRawRestrictionOrphanInspector",
+ ]
+diff --git a/src/knowledgenexus/foundation/infrastructure/raw_store/confluence_raw_attachment_store.py b/src/knowledgenexus/foundation/infrastructure/raw_store/confluence_raw_attachment_store.py
+new file mode 100644
+index 0000000..927af37
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/raw_store/confluence_raw_attachment_store.py
+@@ -0,0 +1,523 @@
++from __future__ import annotations
++
++import hashlib
++import os
++import re
++import shutil
++import stat
++import threading
++from pathlib import Path, PosixPath, WindowsPath
++
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++    MediaAttachmentPublicationOutcome,
++    MediaAttachmentRawArtifact,
++    MediaBodyStoreBudget,
++)
++from knowledgenexus.foundation.domain.rules.confluence_attachment_id import (
++    require_confluence_attachment_id,
++)
++from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_restriction_store import (
++    _bound_stat,
++    _is_link_or_reparse,
++    _metadata,
++    _open_bound_parent,
++    _posix_open_regular,
++    _windows_open_regular_fd,
++)
++from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
++    ConfluenceRawAttachmentStoreError,
++    ConfluenceRawAttachmentStoreFailureCategory,
++    ConfluenceRawAttachmentStorePort,
++)
++
++
++_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
++_ATTACHMENTS_SUBDIR = ("confluence", "attachments")
++_READ_CHUNK_BYTES = 64 * 1024
++_MAX_READ_OVERHEAD = 1 * 1024 * 1024
++_MAX_SCAN_DEPTH = 128
++_MAX_SCAN_ENTRIES = 1_000_000
++_PATH_TYPES = (PosixPath, WindowsPath)
++_PUBLISH_LOCKS: dict[Path, threading.Lock] = {}
++_PUBLISH_LOCKS_GUARD = threading.Lock()
++
++
++def _fail(category: str | ConfluenceRawAttachmentStoreFailureCategory) -> None:
++    try:
++        normalized = (
++            category
++            if isinstance(category, ConfluenceRawAttachmentStoreFailureCategory)
++            else ConfluenceRawAttachmentStoreFailureCategory(category)
++        )
++    except (TypeError, ValueError):
++        normalized = ConfluenceRawAttachmentStoreFailureCategory.RAW_ARTIFACT_INVALID
++    raise ConfluenceRawAttachmentStoreError(normalized) from None
++
++
++def _require_plain_directory_chain(path: Path) -> None:
++    try:
++        chain = [*path.parents, path]
++        chain.reverse()
++    except Exception:
++        _fail("raw_artifact_invalid")
++    for component in chain:
++        try:
++            details = os.lstat(component)
++        except Exception:
++            _fail("raw_artifact_invalid")
++        if _is_link_or_reparse(details) or not stat.S_ISDIR(details.st_mode):
++            _fail("raw_artifact_invalid")
++
++
++def _require_attachment_id(value: object) -> str:
++    if type(value) is not str:
++        _fail("raw_artifact_invalid")
++    try:
++        return require_confluence_attachment_id(value)
++    except (TypeError, ValueError):
++        _fail("raw_artifact_invalid")
++
++
++def _require_hash(value: object) -> str:
++    if type(value) is not str or _SHA256.fullmatch(value) is None:
++        _fail("raw_artifact_invalid")
++    return value
++
++
++def _entry_size(details: os.stat_result) -> int:
++    if (
++        _is_link_or_reparse(details)
++        or not stat.S_ISREG(details.st_mode)
++        or getattr(details, "st_nlink", 1) != 1
++    ):
++        _fail("raw_artifact_invalid")
++    if type(details.st_size) is not int or details.st_size < 0:
++        _fail("raw_artifact_invalid")
++    return details.st_size
++
++
++def _directory_identity(path: Path) -> tuple[int, int, int]:
++    try:
++        details = os.lstat(path)
++    except Exception:
++        _fail("raw_artifact_invalid")
++    if _is_link_or_reparse(details) or not stat.S_ISDIR(details.st_mode):
++        _fail("raw_artifact_invalid")
++    return (details.st_dev, details.st_ino, details.st_mode)
++
++
++def _handle_directory_identity(handle: int) -> tuple[int, int, int]:
++    try:
++        details = os.fstat(handle)
++    except Exception:
++        _fail("raw_artifact_invalid")
++    if _is_link_or_reparse(details) or not stat.S_ISDIR(details.st_mode):
++        _fail("raw_artifact_invalid")
++    return (details.st_dev, details.st_ino, details.st_mode)
++
++
++def _scan_tree(path: Path) -> int:
++    """Count regular bytes while rejecting unsafe or changing entries."""
++
++    total = 0
++    pending: list[tuple[Path, int]] = [(path, 0)]
++    entry_count = 0
++    while pending:
++        current, depth = pending.pop()
++        try:
++            root_details = os.lstat(current)
++        except FileNotFoundError:
++            if current == path:
++                return 0
++            _fail("raw_artifact_invalid")
++        except Exception:
++            _fail("raw_artifact_invalid")
++        if _is_link_or_reparse(root_details) or not stat.S_ISDIR(root_details.st_mode):
++            _fail("raw_artifact_invalid")
++        try:
++            with os.scandir(current) as entries:
++                for entry in entries:
++                    entry_count += 1
++                    if entry_count > _MAX_SCAN_ENTRIES:
++                        _fail("raw_artifact_invalid")
++                    entry_path = Path(entry.path)
++                    try:
++                        before = os.lstat(entry_path)
++                    except Exception:
++                        _fail("raw_artifact_invalid")
++                    if _is_link_or_reparse(before):
++                        _fail("raw_artifact_invalid")
++                    if stat.S_ISDIR(before.st_mode):
++                        if depth >= _MAX_SCAN_DEPTH:
++                            _fail("raw_artifact_invalid")
++                        pending.append((entry_path, depth + 1))
++                        continue
++                    total += _entry_size(before)
++                    try:
++                        after = os.lstat(entry_path)
++                    except Exception:
++                        _fail("raw_artifact_invalid")
++                    if _metadata(after) != _metadata(before):
++                        _fail("raw_artifact_invalid")
++        except ConfluenceRawAttachmentStoreError:
++            raise
++        except Exception:
++            _fail("raw_artifact_invalid")
++        try:
++            after_root = os.lstat(current)
++        except Exception:
++            _fail("raw_artifact_invalid")
++        if (
++            _is_link_or_reparse(after_root)
++            or not stat.S_ISDIR(after_root.st_mode)
++            or _metadata(after_root) != _metadata(root_details)
++        ):
++            _fail("raw_artifact_invalid")
++    return total
++
++
++def _publish_lock_for(data_root: Path) -> threading.Lock:
++    with _PUBLISH_LOCKS_GUARD:
++        lock = _PUBLISH_LOCKS.get(data_root)
++        if lock is None:
++            lock = threading.Lock()
++            _PUBLISH_LOCKS[data_root] = lock
++        return lock
++
++
++def _read_bound_limited(parent_handle: int, name: str, *, max_bytes: int) -> bytes:
++    descriptor = (
++        _windows_open_regular_fd(parent_handle, name)
++        if os.name == "nt"
++        else _posix_open_regular(parent_handle, name)
++    )
++    try:
++        before = os.fstat(descriptor)
++        if (
++            _is_link_or_reparse(before)
++            or not stat.S_ISREG(before.st_mode)
++            or getattr(before, "st_nlink", 1) != 1
++        ):
++            raise OSError("unsafe regular entry")
++        if before.st_size > max_bytes:
++            raise OverflowError("bounded read exceeded")
++        chunks: list[bytes] = []
++        remaining = max_bytes + 1
++        while remaining:
++            chunk = os.read(descriptor, min(_READ_CHUNK_BYTES, remaining))
++            if not chunk:
++                break
++            chunks.append(chunk)
++            remaining -= len(chunk)
++        after_descriptor = os.fstat(descriptor)
++        after_path = _bound_stat(parent_handle, name)
++        content = b"".join(chunks)
++        if (
++            len(content) > max_bytes
++            or _metadata(after_descriptor) != _metadata(before)
++            or _metadata(after_path) != _metadata(before)
++        ):
++            raise OSError("unstable regular entry")
++        return content
++    finally:
++        try:
++            os.close(descriptor)
++        except OSError:
++            pass
++
++
++class ConfluenceRawAttachmentStore(ConfluenceRawAttachmentStorePort):
++    """Immutable, deterministic raw attachment envelope store."""
++
++    def __init__(self, *, data_root: Path, budget: MediaBodyStoreBudget) -> None:
++        # WindowsPath/POSIXPath are the concrete pathlib.Path types returned
++        # by the platform, so the boundary accepts those concrete subclasses.
++        if type(data_root) not in _PATH_TYPES:
++            _fail("raw_artifact_invalid")
++        try:
++            is_absolute = data_root.is_absolute()
++            parts = data_root.parts
++        except Exception:
++            _fail("raw_artifact_invalid")
++        if not is_absolute:
++            _fail("raw_artifact_invalid")
++        if any(part in {".", ".."} for part in parts):
++            _fail("raw_artifact_invalid")
++        if type(budget) is not MediaBodyStoreBudget:
++            _fail("raw_artifact_invalid")
++        try:
++            validated_budget = MediaBodyStoreBudget(
++                max_body_bytes=budget.max_body_bytes,
++                max_total_bytes=budget.max_total_bytes,
++                minimum_free_disk_reserve_bytes=budget.minimum_free_disk_reserve_bytes,
++            )
++        except Exception:
++            _fail("raw_artifact_invalid")
++        _require_plain_directory_chain(data_root)
++        try:
++            canonical_root = data_root.resolve(strict=True)
++        except Exception:
++            _fail("raw_artifact_invalid")
++        self._data_root = data_root
++        self._data_root_identity = _directory_identity(data_root)
++        self._budget = validated_budget
++        self._publish_lock = _publish_lock_for(canonical_root)
++
++    def resolve_attachment_path(self, *, attachment_id: str, content_hash: str) -> Path:
++        attachment = _require_attachment_id(attachment_id)
++        digest = _require_hash(content_hash)
++        target = self._data_root.joinpath(
++            *_ATTACHMENTS_SUBDIR,
++            attachment,
++            f"{digest}.json",
++        )
++        try:
++            target.relative_to(self._data_root)
++        except ValueError:
++            _fail("raw_artifact_invalid")
++        return target
++
++    def publish_attachment(
++        self, *, envelope: MediaAttachmentBodyEnvelope
++    ) -> MediaAttachmentRawArtifact:
++        with self._publish_lock:
++            return self._publish_attachment(envelope=envelope)
++
++    def _publish_attachment(
++        self, *, envelope: MediaAttachmentBodyEnvelope
++    ) -> MediaAttachmentRawArtifact:
++        envelope = self._revalidate_envelope(envelope)
++        if type(envelope) is not MediaAttachmentBodyEnvelope:
++            _fail("raw_artifact_invalid")
++        body = envelope.body_bytes
++        if type(body) is not bytes or len(body) > self._budget.max_body_bytes:
++            _fail("budget_exceeded")
++        try:
++            content = envelope.to_bytes()
++        except (TypeError, ValueError, OverflowError):
++            _fail("raw_artifact_invalid")
++        if type(content) is not bytes:
++            _fail("raw_artifact_invalid")
++        try:
++            target = self.resolve_attachment_path(
++                attachment_id=envelope.attachment_id,
++                content_hash=hashlib.sha256(body).hexdigest(),
++            )
++        except ConfluenceRawAttachmentStoreError:
++            raise
++        except Exception:
++            _fail("raw_artifact_invalid")
++        serialized_size = len(content)
++        if serialized_size > self._budget.max_total_bytes:
++            _fail("budget_exceeded")
++
++        # Scan before replay so unsafe sibling or temporary entries are never
++        # hidden by an otherwise valid existing target.
++        self._assert_data_root_identity()
++        try:
++            existing_bytes = _scan_tree(self._data_root.joinpath(*_ATTACHMENTS_SUBDIR))
++        except ConfluenceRawAttachmentStoreError:
++            raise
++        except Exception:
++            _fail("raw_artifact_invalid")
++        self._assert_data_root_identity()
++        existing = self._read_existing(target)
++        if existing is not None:
++            return self._replay_or_conflict(
++                target=target,
++                existing=existing,
++                expected=content,
++                envelope=envelope,
++            )
++
++        if existing_bytes + serialized_size > self._budget.max_total_bytes:
++            _fail("budget_exceeded")
++        try:
++            disk_free = shutil.disk_usage(self._data_root).free
++        except Exception:
++            _fail("budget_exceeded")
++        if type(disk_free) is not int or disk_free < (
++            serialized_size + self._budget.minimum_free_disk_reserve_bytes
++        ):
++            _fail("budget_exceeded")
++
++        self._ensure_target_parent(target.parent)
++        expected_parent_identity = _directory_identity(target.parent)
++        self._assert_data_root_identity()
++        try:
++            with _open_bound_parent(target.parent, create=False) as parent_handle:
++                parent_identity = (
++                    _directory_identity(target.parent)
++                    if os.name == "nt"
++                    else _handle_directory_identity(parent_handle)
++                )
++                if parent_identity != expected_parent_identity:
++                    _fail("raw_artifact_invalid")
++                published = self._publish_bound(
++                    parent_handle=parent_handle,
++                    target_name=target.name,
++                    content=content,
++                )
++            if not published:
++                raced = self._read_existing(target)
++                if raced is None:
++                    _fail("raw_publication_failure")
++                return self._replay_or_conflict(
++                    target=target,
++                    existing=raced,
++                    expected=content,
++                    envelope=envelope,
++                )
++            persisted = self._read_existing(target)
++            if persisted != content:
++                _fail("raw_publication_failure")
++            return self._artifact(
++                target=target,
++                envelope=envelope,
++                outcome=MediaAttachmentPublicationOutcome.PUBLISHED,
++            )
++        except ConfluenceRawAttachmentStoreError:
++            raise
++        except OverflowError:
++            _fail("raw_artifact_invalid")
++        except (OSError, TypeError, ValueError):
++            _fail("raw_publication_failure")
++        except Exception:
++            _fail("raw_publication_failure")
++
++    def _assert_data_root_identity(self) -> None:
++        if _directory_identity(self._data_root) != self._data_root_identity:
++            _fail("raw_artifact_invalid")
++
++    def read_attachment(
++        self, *, attachment_id: str, content_hash: str
++    ) -> MediaAttachmentBodyEnvelope:
++        attachment = _require_attachment_id(attachment_id)
++        digest = _require_hash(content_hash)
++        target = self.resolve_attachment_path(
++            attachment_id=attachment,
++            content_hash=digest,
++        )
++        content = self._read_existing(target)
++        if content is None:
++            _fail("raw_artifact_invalid")
++        envelope = self._parse(content)
++        if (
++            envelope.attachment_id != attachment
++            or hashlib.sha256(envelope.body_bytes).hexdigest() != digest
++        ):
++            _fail("raw_artifact_invalid")
++        return envelope
++
++    @staticmethod
++    def _revalidate_envelope(value: object) -> MediaAttachmentBodyEnvelope:
++        if type(value) is not MediaAttachmentBodyEnvelope:
++            _fail("raw_artifact_invalid")
++        try:
++            return MediaAttachmentBodyEnvelope(
++                format_version=value.format_version,
++                evidence_kind=value.evidence_kind,
++                attachment_id=value.attachment_id,
++                parent_page_id=value.parent_page_id,
++                filename=value.filename,
++                source_version=value.source_version,
++                http_status=value.http_status,
++                body_encoding=value.body_encoding,
++                body_bytes=value.body_bytes,
++            )
++        except Exception:
++            _fail("raw_artifact_invalid")
++
++    def _ensure_target_parent(self, parent: Path) -> None:
++        try:
++            parent.relative_to(self._data_root)
++        except ValueError:
++            _fail("raw_artifact_invalid")
++        try:
++            with _open_bound_parent(parent, create=True):
++                pass
++        except Exception:
++            _fail("raw_artifact_invalid")
++
++    def _read_existing(self, target: Path) -> bytes | None:
++        try:
++            with _open_bound_parent(target.parent, create=False) as parent_handle:
++                try:
++                    details = _bound_stat(parent_handle, target.name)
++                except FileNotFoundError:
++                    return None
++                if _is_link_or_reparse(details) or not stat.S_ISREG(details.st_mode):
++                    _fail("raw_artifact_invalid")
++                return _read_bound_limited(
++                    parent_handle,
++                    target.name,
++                    max_bytes=max(16 * 1024 * 1024, self._budget.max_body_bytes * 2 + _MAX_READ_OVERHEAD),
++                )
++        except ConfluenceRawAttachmentStoreError:
++            raise
++        except FileNotFoundError:
++            return None
++        except OverflowError:
++            _fail("raw_artifact_invalid")
++        except Exception:
++            _fail("raw_artifact_invalid")
++
++    def _parse(self, content: bytes) -> MediaAttachmentBodyEnvelope:
++        try:
++            envelope = MediaAttachmentBodyEnvelope.from_bytes(content)
++            canonical = envelope.to_bytes()
++        except (TypeError, ValueError, OverflowError):
++            _fail("raw_artifact_invalid")
++        except Exception:
++            _fail("raw_artifact_invalid")
++        if canonical != content:
++            _fail("raw_artifact_invalid")
++        return envelope
++
++    def _replay_or_conflict(
++        self,
++        *,
++        target: Path,
++        existing: bytes,
++        expected: bytes,
++        envelope: MediaAttachmentBodyEnvelope,
++    ) -> MediaAttachmentRawArtifact:
++        self._parse(existing)
++        if existing != expected:
++            _fail("raw_replay_conflict")
++        return self._artifact(
++            target=target,
++            envelope=envelope,
++            outcome=MediaAttachmentPublicationOutcome.REUSED,
++        )
++
++    @staticmethod
++    def _artifact(
++        *,
++        target: Path,
++        envelope: MediaAttachmentBodyEnvelope,
++        outcome: MediaAttachmentPublicationOutcome,
++    ) -> MediaAttachmentRawArtifact:
++        digest = hashlib.sha256(envelope.body_bytes).hexdigest()
++        return MediaAttachmentRawArtifact(
++            path=target,
++            attachment_id=envelope.attachment_id,
++            body_sha256=digest,
++            byte_count=len(envelope.body_bytes),
++            raw_uri=f"raw://confluence/attachments/{envelope.attachment_id}/{digest}",
++            outcome=outcome,
++        )
++
++    @staticmethod
++    def _publish_bound(*, parent_handle: int, target_name: str, content: bytes) -> bool:
++        # Keep the no-clobber primitive local so publication never falls back
++        # to check-then-write semantics.
++        from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_restriction_store import (
++            _publish_bound,
++        )
++
++        return _publish_bound(parent_handle, target_name, content)
++
++
++__all__ = ["ConfluenceRawAttachmentStore"]
+diff --git a/src/knowledgenexus/foundation/ports/__init__.py b/src/knowledgenexus/foundation/ports/__init__.py
+index 77aa6a7..7e2a337 100644
+--- a/src/knowledgenexus/foundation/ports/__init__.py
++++ b/src/knowledgenexus/foundation/ports/__init__.py
+@@ -19,6 +19,16 @@ from knowledgenexus.foundation.ports.confluence_page_observation_port import (
+     ConfluenceObservationTooLargeError,
+     ConfluenceRestrictionFetchPort,
+ )
++from knowledgenexus.foundation.ports.confluence_attachment_body_fetch_port import (
++    ConfluenceAttachmentBodyFetchError,
++    ConfluenceAttachmentBodyFetchPort,
++    ConfluenceAttachmentBodyTooLargeError,
++)
++from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
++    ConfluenceRawAttachmentStoreError,
++    ConfluenceRawAttachmentStoreFailureCategory,
++    ConfluenceRawAttachmentStorePort,
++)
+ from knowledgenexus.foundation.ports.raw_page_observation_store_port import (
+     RawObservationStoreError,
+     RawObservationStorePort,
+@@ -110,6 +120,12 @@ __all__ = [
+     "ConfluenceObservationFetchError",
+     "ConfluenceObservationTooLargeError",
+     "ConfluenceRestrictionFetchPort",
++    "ConfluenceAttachmentBodyFetchError",
++    "ConfluenceAttachmentBodyFetchPort",
++    "ConfluenceAttachmentBodyTooLargeError",
++    "ConfluenceRawAttachmentStoreError",
++    "ConfluenceRawAttachmentStoreFailureCategory",
++    "ConfluenceRawAttachmentStorePort",
+     "RawObservationStoreError",
+     "RawObservationStorePort",
+     "RawPageReadError",
+diff --git a/src/knowledgenexus/foundation/ports/confluence_attachment_body_fetch_port.py b/src/knowledgenexus/foundation/ports/confluence_attachment_body_fetch_port.py
+new file mode 100644
+index 0000000..67eca53
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/confluence_attachment_body_fetch_port.py
+@@ -0,0 +1,60 @@
++from __future__ import annotations
++
++from enum import StrEnum
++from typing import Protocol
++
++from knowledgenexus.foundation.domain.models.confluence_page_observation import (
++    RawHttpObservation,
++)
++
++
++class _ConfluenceAttachmentBodyFetchFailureCategory(StrEnum):
++    FETCH = "fetch"
++    RESPONSE_SIZE_LIMIT = "response_size_limit"
++
++
++class ConfluenceAttachmentBodyFetchError(Exception):
++    """An attachment body could not be fetched safely."""
++
++    def __init__(
++        self,
++        category: _ConfluenceAttachmentBodyFetchFailureCategory =
++        _ConfluenceAttachmentBodyFetchFailureCategory.FETCH,
++    ) -> None:
++        if not isinstance(category, _ConfluenceAttachmentBodyFetchFailureCategory):
++            raise TypeError("category is invalid")
++        self.category = category
++        super().__init__(category.value)
++
++    def __repr__(self) -> str:
++        try:
++            category = self.category.value
++        except Exception:
++            return f"{type(self).__name__}()"
++        return f"{type(self).__name__}(category={category!r})"
++
++
++class ConfluenceAttachmentBodyTooLargeError(ConfluenceAttachmentBodyFetchError):
++    """An attachment body exceeded the configured byte bound."""
++
++    def __init__(self) -> None:
++        super().__init__(
++            _ConfluenceAttachmentBodyFetchFailureCategory.RESPONSE_SIZE_LIMIT
++        )
++
++
++class ConfluenceAttachmentBodyFetchPort(Protocol):
++    def fetch_attachment_body(
++        self,
++        *,
++        attachment_id: str,
++        filename: str,
++        max_bytes: int,
++    ) -> RawHttpObservation: ...
++
++
++__all__ = [
++    "ConfluenceAttachmentBodyFetchError",
++    "ConfluenceAttachmentBodyFetchPort",
++    "ConfluenceAttachmentBodyTooLargeError",
++]
+diff --git a/src/knowledgenexus/foundation/ports/confluence_raw_attachment_store_port.py b/src/knowledgenexus/foundation/ports/confluence_raw_attachment_store_port.py
+new file mode 100644
+index 0000000..6a501c0
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/confluence_raw_attachment_store_port.py
+@@ -0,0 +1,55 @@
++from __future__ import annotations
++
++from enum import StrEnum
++from pathlib import Path
++from typing import Protocol
++
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++    MediaAttachmentRawArtifact,
++)
++
++
++class ConfluenceRawAttachmentStoreFailureCategory(StrEnum):
++    RAW_ARTIFACT_INVALID = "raw_artifact_invalid"
++    RAW_REPLAY_CONFLICT = "raw_replay_conflict"
++    BUDGET_EXCEEDED = "budget_exceeded"
++    RAW_PUBLICATION_FAILURE = "raw_publication_failure"
++
++
++class ConfluenceRawAttachmentStoreError(Exception):
++    """Sanitized failure from the immutable attachment raw store."""
++
++    def __init__(self, category: ConfluenceRawAttachmentStoreFailureCategory) -> None:
++        if not isinstance(category, ConfluenceRawAttachmentStoreFailureCategory):
++            raise TypeError("category is invalid")
++        self.category = category
++        super().__init__(category.value)
++
++    def __repr__(self) -> str:
++        try:
++            category = self.category.value
++        except Exception:
++            return f"{type(self).__name__}()"
++        return f"{type(self).__name__}(category={category!r})"
++
++
++class ConfluenceRawAttachmentStorePort(Protocol):
++    def resolve_attachment_path(
++        self, *, attachment_id: str, content_hash: str
++    ) -> Path: ...
++
++    def publish_attachment(
++        self, *, envelope: MediaAttachmentBodyEnvelope
++    ) -> MediaAttachmentRawArtifact: ...
++
++    def read_attachment(
++        self, *, attachment_id: str, content_hash: str
++    ) -> MediaAttachmentBodyEnvelope: ...
++
++
++__all__ = [
++    "ConfluenceRawAttachmentStoreError",
++    "ConfluenceRawAttachmentStoreFailureCategory",
++    "ConfluenceRawAttachmentStorePort",
++]
+diff --git a/tests/architecture/test_m9a2_attachment_body_boundary.py b/tests/architecture/test_m9a2_attachment_body_boundary.py
+new file mode 100644
+index 0000000..26f30a8
+--- /dev/null
++++ b/tests/architecture/test_m9a2_attachment_body_boundary.py
+@@ -0,0 +1,52 @@
++from __future__ import annotations
++
++import ast
++from pathlib import Path
++
++
++_ROOT = (
++    Path(__file__).parents[2]
++    / "src"
++    / "knowledgenexus"
++    / "foundation"
++)
++_FILES = (
++    _ROOT / "domain" / "models" / "media_body_materialization.py",
++    _ROOT / "ports" / "confluence_attachment_body_fetch_port.py",
++    _ROOT / "ports" / "confluence_raw_attachment_store_port.py",
++    _ROOT / "application" / "use_cases" / "fetch_and_store_confluence_attachment_body.py",
++    _ROOT / "infrastructure" / "raw_store" / "confluence_raw_attachment_store.py",
++)
++
++
++def _imports(source: str) -> set[str]:
++    tree = ast.parse(source)
++    names: set[str] = set()
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Import):
++            names.update(alias.name for alias in node.names)
++        elif isinstance(node, ast.ImportFrom) and node.module:
++            names.add(node.module)
++    return names
++
++
++def test_m9a2_has_no_live_capture_or_downstream_storage_dependencies() -> None:
++    for path in _FILES:
++        source = path.read_text(encoding="utf-8")
++        imports = _imports(source)
++        assert not any(name.startswith(("urllib", "requests", "httpx", "socket")) for name in imports)
++        assert not any(token in source for token in ("qdrant", "checkpoint", "ocr", "drawio"))
++
++
++def test_m9a2_domain_and_ports_do_not_import_infrastructure() -> None:
++    for path in _FILES[:3]:
++        imports = _imports(path.read_text(encoding="utf-8"))
++        assert not any(name.startswith("knowledgenexus.foundation.infrastructure") for name in imports)
++
++
++def test_m9a2_store_does_not_use_replace_or_filename_path_components() -> None:
++    source = (_ROOT / "infrastructure" / "raw_store" / "confluence_raw_attachment_store.py").read_text(
++        encoding="utf-8"
++    )
++    assert "os.replace" not in source
++    assert "envelope.filename" not in source
+diff --git a/tests/foundation/application/use_cases/test_fetch_and_store_confluence_attachment_body.py b/tests/foundation/application/use_cases/test_fetch_and_store_confluence_attachment_body.py
+new file mode 100644
+index 0000000..9a67521
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_fetch_and_store_confluence_attachment_body.py
+@@ -0,0 +1,319 @@
++from __future__ import annotations
++
++import hashlib
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
++    FetchAndStoreConfluenceAttachmentBody,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_observation import (
++    RawHttpObservation,
++)
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++    MediaAttachmentPublicationOutcome,
++    MediaAttachmentRawArtifact,
++    MediaBodyMaterializationFailureCategory,
++    MediaBodyMaterializationError,
++    MediaBodyStoreBudget,
++)
++from knowledgenexus.foundation.domain.models.media_materialization import (
++    ConfluenceAttachmentObservation,
++    MediaPolicyDecision,
++)
++from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store import (
++    ConfluenceRawAttachmentStore,
++)
++from knowledgenexus.foundation.ports.confluence_attachment_body_fetch_port import (
++    ConfluenceAttachmentBodyFetchError,
++    ConfluenceAttachmentBodyTooLargeError,
++)
++from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
++    ConfluenceRawAttachmentStoreError,
++    ConfluenceRawAttachmentStoreFailureCategory,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++
++
++class _Fetcher:
++    def __init__(self, response: object) -> None:
++        self.response = response
++        self.calls: list[tuple[str, str, int]] = []
++
++    def fetch_attachment_body(self, *, attachment_id: str, filename: str, max_bytes: int):
++        self.calls.append((attachment_id, filename, max_bytes))
++        return self.response
++
++
++class _Store:
++    def __init__(self, root: Path) -> None:
++        self.root = root
++        self.published: list[MediaAttachmentBodyEnvelope] = []
++
++    def resolve_attachment_path(self, *, attachment_id: str, content_hash: str) -> Path:
++        return self.root / "confluence" / "attachments" / attachment_id / f"{content_hash}.json"
++
++    def publish_attachment(self, *, envelope: MediaAttachmentBodyEnvelope) -> MediaAttachmentRawArtifact:
++        self.published.append(envelope)
++        digest = hashlib.sha256(envelope.body_bytes).hexdigest()
++        return MediaAttachmentRawArtifact(
++            path=self.resolve_attachment_path(
++                attachment_id=envelope.attachment_id,
++                content_hash=digest,
++            ),
++            attachment_id=envelope.attachment_id,
++            body_sha256=digest,
++            byte_count=len(envelope.body_bytes),
++            raw_uri=f"raw://confluence/attachments/{envelope.attachment_id}/{digest}",
++            outcome=MediaAttachmentPublicationOutcome.PUBLISHED,
++        )
++
++    def read_attachment(self, *, attachment_id: str, content_hash: str) -> MediaAttachmentBodyEnvelope:
++        if not self.published:
++            raise FileNotFoundError
++        return self.published[-1]
++
++
++class _RaisingFetcher:
++    def __init__(self, error: Exception) -> None:
++        self.error = error
++
++    def fetch_attachment_body(self, **_: object) -> object:
++        raise self.error
++
++
++class _RaisingStore(_Store):
++    def __init__(
++        self,
++        root: Path,
++        *,
++        resolve_error: Exception | None = None,
++        publish_error: Exception | None = None,
++    ) -> None:
++        super().__init__(root)
++        self.resolve_error = resolve_error
++        self.publish_error = publish_error
++
++    def resolve_attachment_path(self, *, attachment_id: str, content_hash: str) -> Path:
++        if self.resolve_error is not None:
++            raise self.resolve_error
++        return super().resolve_attachment_path(attachment_id=attachment_id, content_hash=content_hash)
++
++    def publish_attachment(self, *, envelope: MediaAttachmentBodyEnvelope) -> MediaAttachmentRawArtifact:
++        if self.publish_error is not None:
++            raise self.publish_error
++        return super().publish_attachment(envelope=envelope)
++
++
++class _ForgedArtifactStore(_Store):
++    def publish_attachment(self, *, envelope: MediaAttachmentBodyEnvelope) -> MediaAttachmentRawArtifact:
++        return object.__new__(MediaAttachmentRawArtifact)
++
++
++def _observation(size_bytes: int | None = 4) -> ConfluenceAttachmentObservation:
++    return ConfluenceAttachmentObservation(
++        attachment_id="2000",
++        parent_page_id="1000",
++        filename="diagram.drawio",
++        mime_type="application/xml",
++        size_bytes=size_bytes,
++        source_version="4",
++        updated_at=None,
++        crawled_at="2026-08-05T00:00:00Z",
++    )
++
++
++def _use_case(fetcher: object, store: object) -> FetchAndStoreConfluenceAttachmentBody:
++    return FetchAndStoreConfluenceAttachmentBody(
++        body_fetcher=fetcher,
++        raw_attachment_store=store,
++        budget=MediaBodyStoreBudget(
++            max_body_bytes=100,
++            max_total_bytes=1000,
++            minimum_free_disk_reserve_bytes=0,
++        ),
++        schema_validator=FoundationSchemaValidator(),
++    )
++
++
++def test_happy_path_downloads_once_and_builds_schema_valid_asset(tmp_path: Path) -> None:
++    fetcher = _Fetcher(RawHttpObservation(status_code=200, body=b"body"))
++    store = _Store(tmp_path)
++    result = _use_case(fetcher, store).execute(
++        observation=_observation(),
++        decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++    )
++    assert result.asset["download_status"] == "downloaded"
++    assert result.asset["processing_status"] == "not_processed"
++    assert result.asset["content_hash"] == hashlib.sha256(b"body").hexdigest()
++    assert len(fetcher.calls) == 1
++    assert len(store.published) == 1
++
++
++def test_happy_path_with_concrete_store_publishes_canonical_envelope(tmp_path: Path) -> None:
++    fetcher = _Fetcher(RawHttpObservation(status_code=200, body=b"body"))
++    budget = MediaBodyStoreBudget(
++        max_body_bytes=100,
++        max_total_bytes=1000,
++        minimum_free_disk_reserve_bytes=0,
++    )
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=budget)
++    result = FetchAndStoreConfluenceAttachmentBody(
++        body_fetcher=fetcher,
++        raw_attachment_store=store,
++        budget=budget,
++        schema_validator=FoundationSchemaValidator(),
++    ).execute(
++        observation=_observation(),
++        decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++    )
++    assert result.artifact.path.exists()
++    assert store.read_attachment(
++        attachment_id="2000", content_hash=result.artifact.body_sha256
++    ).body_bytes == b"body"
++
++
++def test_non_download_policy_fails_before_fetch() -> None:
++    fetcher = _Fetcher(RawHttpObservation(status_code=200, body=b"body"))
++    store = _Store(Path("C:/synthetic-root"))
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        _use_case(fetcher, store).execute(
++            observation=_observation(),
++            decision=MediaPolicyDecision(attachment_id="2000", policy="metadata_only"),
++        )
++    assert error.value.category is MediaBodyMaterializationFailureCategory.INVALID_POLICY
++    assert fetcher.calls == []
++    assert store.published == []
++
++
++@pytest.mark.parametrize(
++    "response,category",
++    [
++        (RawHttpObservation(status_code=404, body=b"body"), MediaBodyMaterializationFailureCategory.HTTP),
++        (object(), MediaBodyMaterializationFailureCategory.FETCH),
++    ],
++)
++def test_malformed_fetch_results_fail_closed(response: object, category) -> None:
++    fetcher = _Fetcher(response)
++    store = _Store(Path("C:/synthetic-root"))
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        _use_case(fetcher, store).execute(
++            observation=_observation(),
++            decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++        )
++    assert error.value.category is category
++    assert store.published == []
++
++
++def test_declared_size_mismatch_is_rejected_without_publish(tmp_path: Path) -> None:
++    fetcher = _Fetcher(RawHttpObservation(status_code=200, body=b"other"))
++    store = _Store(tmp_path)
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        _use_case(fetcher, store).execute(
++            observation=_observation(size_bytes=4),
++            decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++        )
++    assert error.value.category is MediaBodyMaterializationFailureCategory.METADATA_MISMATCH
++    assert store.published == []
++
++
++def test_forged_budget_fails_before_boundary_access() -> None:
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        FetchAndStoreConfluenceAttachmentBody(
++            body_fetcher=_Fetcher(RawHttpObservation(status_code=200, body=b"body")),
++            raw_attachment_store=_Store(Path("C:/synthetic-root")),
++            budget=object.__new__(MediaBodyStoreBudget),
++            schema_validator=FoundationSchemaValidator(),
++        )
++    assert error.value.category is MediaBodyMaterializationFailureCategory.INVALID_INPUT
++
++
++def test_forged_fetch_observation_fails_closed() -> None:
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        _use_case(
++            _Fetcher(object.__new__(RawHttpObservation)),
++            _Store(Path("C:/synthetic-root")),
++        ).execute(
++            observation=_observation(),
++            decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++        )
++    assert error.value.category is MediaBodyMaterializationFailureCategory.FETCH
++
++
++def test_unexpected_fetch_exception_is_sanitized() -> None:
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        _use_case(
++            _RaisingFetcher(RuntimeError("secret/path/body")),
++            _Store(Path("C:/synthetic-root")),
++        ).execute(
++            observation=_observation(),
++            decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++        )
++    assert error.value.category is MediaBodyMaterializationFailureCategory.FETCH
++    assert "secret/path" not in str(error.value)
++
++
++@pytest.mark.parametrize(
++    "store_error,category",
++    [
++        (
++            RuntimeError("secret/path/resolve"),
++            MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID,
++        ),
++        (
++            RuntimeError("secret/path/publish"),
++            MediaBodyMaterializationFailureCategory.RAW_PUBLICATION_FAILURE,
++        ),
++    ],
++)
++def test_unexpected_store_exceptions_are_sanitized(
++    store_error: Exception,
++    category: MediaBodyMaterializationFailureCategory,
++) -> None:
++    kwargs = (
++        {"resolve_error": store_error}
++        if category is MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID
++        else {"publish_error": store_error}
++    )
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        _use_case(
++            _Fetcher(RawHttpObservation(status_code=200, body=b"body")),
++            _RaisingStore(Path("C:/synthetic-root"), **kwargs),
++        ).execute(
++            observation=_observation(),
++            decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++        )
++    assert error.value.category is category
++    assert "secret/path" not in str(error.value)
++
++
++def test_forged_store_artifact_fails_closed() -> None:
++    with pytest.raises(MediaBodyMaterializationError) as error:
++        _use_case(
++            _Fetcher(RawHttpObservation(status_code=200, body=b"body")),
++            _ForgedArtifactStore(Path("C:/synthetic-root")),
++        ).execute(
++            observation=_observation(),
++            decision=MediaPolicyDecision(attachment_id="2000", policy="download_and_process"),
++        )
++    assert error.value.category is MediaBodyMaterializationFailureCategory.RAW_ARTIFACT_INVALID
++
++
++def test_fetch_port_errors_are_category_only() -> None:
++    with pytest.raises(TypeError):
++        ConfluenceAttachmentBodyFetchError("secret/path")  # type: ignore[arg-type]
++    error = ConfluenceAttachmentBodyTooLargeError()
++    assert "secret/path" not in repr(error)
++
++
++def test_store_error_rejects_unknown_category() -> None:
++    with pytest.raises(TypeError):
++        ConfluenceRawAttachmentStoreError("secret/path")  # type: ignore[arg-type]
++    error = ConfluenceRawAttachmentStoreError(
++        ConfluenceRawAttachmentStoreFailureCategory.RAW_ARTIFACT_INVALID
++    )
++    assert repr(error) == "ConfluenceRawAttachmentStoreError(category='raw_artifact_invalid')"
+diff --git a/tests/foundation/domain/models/test_media_body_materialization.py b/tests/foundation/domain/models/test_media_body_materialization.py
+new file mode 100644
+index 0000000..37d7724
+--- /dev/null
++++ b/tests/foundation/domain/models/test_media_body_materialization.py
+@@ -0,0 +1,141 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++    MediaAttachmentPublicationOutcome,
++    MediaAttachmentRawArtifact,
++    MediaBodyMaterializationError,
++    MediaBodyMaterializationResult,
++    MediaBodyStoreBudget,
++)
++
++
++def _envelope(body: bytes = b"body") -> MediaAttachmentBodyEnvelope:
++    return MediaAttachmentBodyEnvelope(
++        format_version="1",
++        evidence_kind="confluence_attachment_body",
++        attachment_id="2000",
++        parent_page_id="1000",
++        filename="diagram.drawio",
++        source_version="4",
++        http_status=200,
++        body_encoding="base64",
++        body_bytes=body,
++    )
++
++
++def _artifact(tmp_path: Path, body: bytes = b"body") -> MediaAttachmentRawArtifact:
++    envelope = _envelope(body)
++    digest = __import__("hashlib").sha256(body).hexdigest()
++    return MediaAttachmentRawArtifact(
++        path=tmp_path / "confluence" / "attachments" / "2000" / f"{digest}.json",
++        attachment_id="2000",
++        body_sha256=digest,
++        byte_count=len(body),
++        raw_uri=f"raw://confluence/attachments/2000/{digest}",
++        outcome=MediaAttachmentPublicationOutcome.PUBLISHED,
++    )
++
++
++def test_budget_rejects_bool_and_impossible_relationships() -> None:
++    with pytest.raises(TypeError):
++        MediaBodyStoreBudget(max_body_bytes=True, max_total_bytes=10, minimum_free_disk_reserve_bytes=0)
++    with pytest.raises(ValueError):
++        MediaBodyStoreBudget(max_body_bytes=10, max_total_bytes=9, minimum_free_disk_reserve_bytes=0)
++
++
++def test_envelope_is_canonical_and_round_trips() -> None:
++    envelope = _envelope("cafe".encode())
++    encoded = envelope.to_bytes()
++    assert encoded == envelope.to_bytes()
++    assert MediaAttachmentBodyEnvelope.from_bytes(encoded) == envelope
++    assert b"\n" not in encoded
++
++
++@pytest.mark.parametrize(
++    "mutator",
++    [
++        lambda payload: payload.update(body_byte_count=99),
++        lambda payload: payload.update(body_sha256="0" * 64),
++        lambda payload: payload.update(body_base64="%%%"),
++        lambda payload: payload.update(extra=True),
++    ],
++)
++def test_envelope_rejects_tampering(mutator) -> None:
++    payload = json.loads(_envelope().to_bytes())
++    mutator(payload)
++    with pytest.raises(ValueError):
++        MediaAttachmentBodyEnvelope.from_bytes(
++            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
++        )
++
++
++def test_result_validates_downloaded_status_and_defensively_copies(tmp_path: Path) -> None:
++    artifact = _artifact(tmp_path)
++    asset = {
++        "schema_version": "1.0",
++        "media_id": "confluence:attachment:2000",
++        "parent_document_id": "confluence:page:1000",
++        "source_system": "confluence",
++        "filename": "diagram.drawio",
++        "mime_type": "application/xml",
++        "size_bytes": 4,
++        "download_status": "downloaded",
++        "processing_status": "not_processed",
++        "relevance": "high",
++        "extracted_text": None,
++        "summary": None,
++        "confidence": None,
++        "raw_uri": artifact.raw_uri,
++        "content_hash": artifact.body_sha256,
++        "source_version": "4",
++        "updated_at": None,
++        "crawled_at": "2026-08-05T00:00:00Z",
++    }
++    result = MediaBodyMaterializationResult(asset=asset, artifact=artifact)
++    asset["filename"] = "mutated"
++    assert result.asset["filename"] == "diagram.drawio"
++
++
++def test_result_rejects_impossible_status_or_hash(tmp_path: Path) -> None:
++    artifact = _artifact(tmp_path)
++    asset = {
++        "schema_version": "1.0",
++        "media_id": "confluence:attachment:2000",
++        "parent_document_id": "confluence:page:1000",
++        "source_system": "confluence",
++        "filename": "diagram.drawio",
++        "mime_type": None,
++        "size_bytes": 4,
++        "download_status": "skipped",
++        "processing_status": "not_processed",
++        "relevance": "high",
++        "extracted_text": None,
++        "summary": None,
++        "confidence": None,
++        "raw_uri": artifact.raw_uri,
++        "content_hash": artifact.body_sha256,
++        "source_version": None,
++        "updated_at": None,
++        "crawled_at": "2026-08-05T00:00:00Z",
++    }
++    with pytest.raises(ValueError):
++        MediaBodyMaterializationResult(asset=asset, artifact=artifact)
++
++
++def test_result_rejects_forged_artifact_without_leaking_attribute_errors(tmp_path: Path) -> None:
++    artifact = object.__new__(MediaAttachmentRawArtifact)
++    with pytest.raises(ValueError, match="media body result is invalid"):
++        MediaBodyMaterializationResult(asset={}, artifact=artifact)
++
++
++def test_raw_artifact_repr_excludes_byte_count(tmp_path: Path) -> None:
++    artifact = _artifact(tmp_path)
++    rendered = repr(artifact)
++    assert "byte_count" not in rendered
++    assert rendered == "MediaAttachmentRawArtifact()"
+diff --git a/tests/foundation/infrastructure/raw_store/test_confluence_raw_attachment_store.py b/tests/foundation/infrastructure/raw_store/test_confluence_raw_attachment_store.py
+new file mode 100644
+index 0000000..9425033
+--- /dev/null
++++ b/tests/foundation/infrastructure/raw_store/test_confluence_raw_attachment_store.py
+@@ -0,0 +1,240 @@
++from __future__ import annotations
++
++import hashlib
++from concurrent.futures import ThreadPoolExecutor
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++    MediaAttachmentPublicationOutcome,
++    MediaAttachmentRawArtifact,
++    MediaBodyStoreBudget,
++)
++from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store import (
++    ConfluenceRawAttachmentStore,
++)
++import knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store as raw_store_module
++from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
++    ConfluenceRawAttachmentStoreError,
++)
++
++
++def _budget(*, total: int = 1024 * 1024) -> MediaBodyStoreBudget:
++    return MediaBodyStoreBudget(
++        max_body_bytes=1024,
++        max_total_bytes=total,
++        minimum_free_disk_reserve_bytes=0,
++    )
++
++
++def _envelope(body: bytes = b"hello") -> MediaAttachmentBodyEnvelope:
++    return MediaAttachmentBodyEnvelope(
++        format_version="1",
++        evidence_kind="confluence_attachment_body",
++        attachment_id="123",
++        parent_page_id="456",
++        filename="hello.txt",
++        source_version="v1",
++        http_status=200,
++        body_encoding="base64",
++        body_bytes=body,
++    )
++
++
++def test_publish_read_and_replay_are_immutable(tmp_path: Path) -> None:
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    envelope = _envelope()
++
++    first = store.publish_attachment(envelope=envelope)
++    assert first.outcome is MediaAttachmentPublicationOutcome.PUBLISHED
++    assert first.path == store.resolve_attachment_path(
++        attachment_id="123", content_hash=hashlib.sha256(b"hello").hexdigest()
++    )
++    assert store.read_attachment(
++        attachment_id="123", content_hash=first.body_sha256
++    ) == envelope
++
++    replay = store.publish_attachment(envelope=envelope)
++    assert replay.outcome is MediaAttachmentPublicationOutcome.REUSED
++    assert replay.path == first.path
++
++
++def test_conflicting_replay_does_not_overwrite_existing_file(tmp_path: Path) -> None:
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    original = _envelope(b"first")
++    store.publish_attachment(envelope=original)
++
++    # The path is keyed by the body digest, so a mismatched envelope under an
++    # existing target is simulated by replacing the final bytes directly.
++    target = store.resolve_attachment_path(
++        attachment_id="123", content_hash=hashlib.sha256(b"first").hexdigest()
++    )
++    target.write_bytes(
++        MediaAttachmentBodyEnvelope(
++            format_version="1",
++            evidence_kind="confluence_attachment_body",
++            attachment_id="123",
++            parent_page_id="456",
++            filename="different.txt",
++            source_version="v1",
++            http_status=200,
++            body_encoding="base64",
++            body_bytes=b"first",
++        ).to_bytes()
++    )
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        store.publish_attachment(envelope=original)
++    assert exc_info.value.category == "raw_replay_conflict"
++
++
++def test_root_and_path_components_are_strict(tmp_path: Path) -> None:
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        ConfluenceRawAttachmentStore(data_root=tmp_path / "missing", budget=_budget())
++    assert exc_info.value.category == "raw_artifact_invalid"
++
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    with pytest.raises(ConfluenceRawAttachmentStoreError):
++        store.resolve_attachment_path(attachment_id="../1", content_hash="0" * 64)
++    with pytest.raises(ConfluenceRawAttachmentStoreError):
++        store.resolve_attachment_path(attachment_id="1", content_hash="A" * 64)
++
++
++def test_budget_accounts_for_serialized_envelope(tmp_path: Path) -> None:
++    envelope = _envelope()
++    budget = MediaBodyStoreBudget(
++        max_body_bytes=1,
++        max_total_bytes=len(envelope.to_bytes()) - 1,
++        minimum_free_disk_reserve_bytes=0,
++    )
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=budget)
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        store.publish_attachment(envelope=envelope)
++    assert exc_info.value.category == "budget_exceeded"
++
++
++def test_symlinked_attachment_directory_fails_closed(tmp_path: Path) -> None:
++    redirected = tmp_path / "redirected"
++    redirected.mkdir()
++    attachments = tmp_path / "confluence" / "attachments"
++    attachments.mkdir(parents=True)
++    try:
++        (attachments / "123").symlink_to(redirected, target_is_directory=True)
++    except (OSError, NotImplementedError):
++        pytest.skip("symlink creation is unavailable")
++
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        store.publish_attachment(envelope=_envelope())
++    assert exc_info.value.category == "raw_artifact_invalid"
++
++
++def test_forged_budget_and_envelope_fail_closed(tmp_path: Path) -> None:
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as budget_error:
++        ConfluenceRawAttachmentStore(
++            data_root=tmp_path,
++            budget=object.__new__(MediaBodyStoreBudget),
++        )
++    assert budget_error.value.category == "raw_artifact_invalid"
++
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as envelope_error:
++        store.publish_attachment(envelope=object.__new__(MediaAttachmentBodyEnvelope))
++    assert envelope_error.value.category == "raw_artifact_invalid"
++
++
++def test_scan_failure_is_mapped_to_sanitized_category(tmp_path: Path, monkeypatch) -> None:
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    monkeypatch.setattr(raw_store_module, "_scan_tree", lambda _: (_ for _ in ()).throw(RuntimeError("secret/path")))
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        store.publish_attachment(envelope=_envelope())
++    assert exc_info.value.category == "raw_artifact_invalid"
++    assert "secret/path" not in repr(exc_info.value)
++
++
++def test_replaced_data_root_after_scan_fails_closed(tmp_path: Path, monkeypatch) -> None:
++    data_root = tmp_path / "data-root"
++    data_root.mkdir()
++    store = ConfluenceRawAttachmentStore(data_root=data_root, budget=_budget())
++    original = data_root
++    moved = tmp_path / "moved-root"
++
++    def replace_root(_: Path) -> int:
++        original.rename(moved)
++        original.mkdir()
++        return 0
++
++    monkeypatch.setattr(raw_store_module, "_scan_tree", replace_root)
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        store.publish_attachment(envelope=_envelope())
++    assert exc_info.value.category == "raw_artifact_invalid"
++
++
++def test_replay_scans_sibling_entries_before_reusing(tmp_path: Path) -> None:
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    envelope = _envelope()
++    first = store.publish_attachment(envelope=envelope)
++    redirected = tmp_path / "redirected"
++    redirected.mkdir()
++    sibling = first.path.parent / "unsafe-link"
++    try:
++        sibling.symlink_to(redirected, target_is_directory=True)
++    except (OSError, NotImplementedError):
++        pytest.skip("symlink creation is unavailable")
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        store.publish_attachment(envelope=envelope)
++    assert exc_info.value.category == "raw_artifact_invalid"
++
++
++def test_hardlinked_target_fails_closed(tmp_path: Path) -> None:
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    first = store.publish_attachment(envelope=_envelope())
++    outside = tmp_path / "outside-link"
++    try:
++        outside.hardlink_to(first.path)
++    except (OSError, NotImplementedError):
++        pytest.skip("hardlink creation is unavailable")
++    with pytest.raises(ConfluenceRawAttachmentStoreError) as exc_info:
++        store.read_attachment(attachment_id="123", content_hash=first.body_sha256)
++    assert exc_info.value.category == "raw_artifact_invalid"
++
++
++def test_concurrent_publishes_reserve_cumulative_budget(tmp_path: Path) -> None:
++    first = _envelope(b"first")
++    second = MediaAttachmentBodyEnvelope(
++        format_version="1",
++        evidence_kind="confluence_attachment_body",
++        attachment_id="124",
++        parent_page_id="456",
++        filename="hello.txt",
++        source_version="v1",
++        http_status=200,
++        body_encoding="base64",
++        body_bytes=b"second",
++    )
++    budget = MediaBodyStoreBudget(
++        max_body_bytes=100,
++        max_total_bytes=len(first.to_bytes()),
++        minimum_free_disk_reserve_bytes=0,
++    )
++    store = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=budget)
++
++    def publish(envelope: MediaAttachmentBodyEnvelope):
++        try:
++            return store.publish_attachment(envelope=envelope)
++        except ConfluenceRawAttachmentStoreError as error:
++            return error
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        results = list(executor.map(publish, (first, second)))
++    assert sum(isinstance(result, MediaAttachmentRawArtifact) for result in results) == 1
++    failures = [result for result in results if isinstance(result, ConfluenceRawAttachmentStoreError)]
++    assert len(failures) == 1
++    assert failures[0].category == "budget_exceeded"
++
++
++def test_equivalent_resolved_roots_share_publish_lock(tmp_path: Path) -> None:
++    first = ConfluenceRawAttachmentStore(data_root=tmp_path, budget=_budget())
++    second = ConfluenceRawAttachmentStore(data_root=tmp_path.resolve(), budget=_budget())
++    assert first._publish_lock is second._publish_lock
+-- 
+2.45.1.windows.1
+

@@ -6,6 +6,9 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_
 from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_adapter import (  # noqa: E501
     ConfluenceDataCenterPageAdapter,
 )
+from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_attachment_body_adapter import (
+    ConfluenceDataCenterAttachmentBodyAdapter,
+)
 from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_observation_adapter import (  # noqa: E501
     ConfluenceDataCenterPageObservationAdapter,
 )
@@ -30,9 +33,14 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_htt
     ConfluenceStatusAwareExecutionResult,
     RetryingConfluenceHttpTransport,
 )
+from knowledgenexus.foundation.infrastructure.confluence.confluence_subtree_live_composition import (
+    LiveSubtreeComposition,
+    compose_live_subtree,
+)
 
 __all__ = [
     "ConfluenceDataCenterInventoryAdapter",
+    "ConfluenceDataCenterAttachmentBodyAdapter",
     "ConfluenceDataCenterPageAdapter",
     "ConfluenceDataCenterPageObservationAdapter",
     "ConfluenceDataCenterPageMetadataMapper",
@@ -52,4 +60,6 @@ __all__ = [
     "RetryingConfluenceHttpTransport",
     "prepare_confluence_get_input",
     "UrllibConfluenceHttpTransport",
+    "LiveSubtreeComposition",
+    "compose_live_subtree",
 ]

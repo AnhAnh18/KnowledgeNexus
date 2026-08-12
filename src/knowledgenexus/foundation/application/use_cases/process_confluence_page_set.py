@@ -21,6 +21,7 @@ from knowledgenexus.foundation.domain.models.confluence_chunking import (
 )
 from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluencePageNormalizationResult,
+    NormalizationReferenceIntent,
 )
 from knowledgenexus.foundation.domain.models.confluence_page_set import (
     ACTIVE_PAGE_SET_PROFILE_IDENTITY,
@@ -251,6 +252,9 @@ class ProcessConfluencePageSet:
         documents: list[dict[str, object]] = []
         chunks: list[dict[str, object]] = []
         page_metrics: list[ConfluencePageSetPageMetrics] = []
+        reference_intents_by_page: list[
+            tuple[str, tuple[NormalizationReferenceIntent, ...]]
+        ] = []
         kind_totals: Counter[str] = Counter()
         warning_total = 0
         intent_total = 0
@@ -321,6 +325,12 @@ class ProcessConfluencePageSet:
                 )
                 documents.append(dict(normalization.canonical_document))
                 chunks.extend(page_chunks)
+                reference_intents_by_page.append(
+                    (
+                        str(normalization.canonical_document["document_id"]),
+                        tuple(normalization.reference_intents),
+                    )
+                )
                 page_metrics.append(page_metric)
                 for kind, count in content_kinds.items():
                     kind_totals[kind] += count
@@ -362,6 +372,7 @@ class ProcessConfluencePageSet:
                 chunks=tuple(chunks),
                 page_metrics=tuple(page_metrics),
                 metrics=metrics,
+                reference_intents_by_page=tuple(reference_intents_by_page),
             )
         except (TypeError, ValueError):
             raise self._error(

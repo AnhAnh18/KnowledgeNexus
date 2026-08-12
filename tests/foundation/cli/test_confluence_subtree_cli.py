@@ -1,0 +1,723 @@
+import argparse
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+import knowledgenexus.foundation.infrastructure.confluence as confluence_pkg
+import knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport as retry_transport_module
+from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_inventory import (
+    ExecuteDurableConfluenceInventory,
+)
+from knowledgenexus.foundation.cli import confluence_subtree_corpus as cli
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+    CanonicalIncludeRoots,
+    CrawlRunId,
+    InventoryRootCommit,
+)
+from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
+from knowledgenexus.foundation.domain.models.confluence_inventory_window import ConfluenceInventoryWindow
+from knowledgenexus.foundation.domain.models.confluence_page_content import NormalizationReferenceIntent
+from knowledgenexus.foundation.domain.models.confluence_page_metadata import ConfluencePageMetadata
+from knowledgenexus.foundation.domain.models.confluence_page_set import (
+    ConfluencePageSetMetrics,
+    ConfluencePageSetPageMetrics,
+    ConfluencePageSetResult,
+)
+from knowledgenexus.foundation.domain.models.confluence_source_config import (
+    ConfluenceIncludeRoot,
+    ConfluenceSourceConfig,
+)
+from knowledgenexus.foundation.domain.models.media_body_materialization import (
+    MediaAttachmentBodyEnvelope,
+    MediaBodyStoreBudget,
+)
+from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_run_port import (
+    SqliteConfluenceCheckpointRunPort,
+)
+from knowledgenexus.foundation.infrastructure.raw_store import ConfluenceRawPageGenerationStore
+from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store import (
+    ConfluenceRawAttachmentStore,
+)
+from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+    ActivateRawGenerationRequest,
+    ResumeExplicitRunRequest,
+    ResumeUniqueIncompleteRunRequest,
+    StartNewRunRequest,
+)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+APPROVED_PROFILE_PATH = REPO_ROOT / "contracts" / "foundation" / "crawl_reliability_profile.yaml"
+
+
+main = cli.main
+
+
+RUN_ID = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
+
+
+def _selection():
+    rows = [{
+        "page_id": "1000",
+        "crawled_at": "2026-08-10T00:00:00Z",
+        "expected_source_version": "7",
+    }]
+    return {
+        "format_version": "confluence-subtree-selection-v1",
+        "run_id": str(RUN_ID),
+        "generation_id": str(RUN_ID),
+        "selection_identity": cli._selection_identity(rows),
+        "items": rows,
+    }
+
+
+def _result(*, drawio: bool):
+    intents = (
+        NormalizationReferenceIntent(
+            1, "drawio", "deferred_mvp", "diagram.drawio", "diagram.drawio"
+        ),
+    ) if drawio else ()
+    return ConfluencePageSetResult(
+        documents=({
+            "document_id": "confluence:page:1000",
+            "page_id": "1000",
+            "source_version": "7",
+        },),
+        chunks=({"chunk_id": "chunk-1"},),
+        page_metrics=(ConfluencePageSetPageMetrics(
+            1, 1, 0, len(intents), (("paragraph", 1),)
+        ),),
+        metrics=ConfluencePageSetMetrics(
+            1, 1, 0, 1, 1, 0, len(intents), (("paragraph", 1),)
+        ),
+        reference_intents_by_page=(("confluence:page:1000", intents),),
+    )
+
+
+def _args(**overrides):
+    values = {
+        "run_id": str(RUN_ID), "selection_path": None, "max_pages": 10,
+        "raw_root": "unused", "chunking_profile_path": "unused",
+        "tokenizer_assets_dir": "unused", "output_dir": None,
+        "reliability_profile_path": "unused", "batch_size": 100,
+        "space_key": "SPACE", "root_page_id": "1000",
+        "resume_run_id": None, "resume_unique": False,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_help_exits_zero_without_failure_payload(capsys):
+    assert main(["--help"]) == 0
+    assert '"status":"failed"' not in capsys.readouterr().out
+
+
+def test_capture_pages_parser_accepts_only_positive_controlled_batch_stop() -> None:
+    parsed = cli._parser().parse_args([
+        "capture-pages", "--state-dir", "C:/state", "--max-pages", "5000",
+        "--stop-after-batches", "2",
+    ])
+    assert parsed.stop_after_batches == 2
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args([
+            "capture-pages", "--state-dir", "C:/state", "--max-pages", "5000",
+            "--stop-after-batches", "0",
+        ])
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args([
+            "inventory", "--state-dir", "C:/state", "--max-pages", "5000",
+            "--stop-after-batches", "2",
+        ])
+
+
+def test_capture_pages_main_forwards_controlled_batch_stop(monkeypatch, tmp_path, capsys) -> None:
+    observed = {}
+
+    def capture(args, state):
+        observed["stop_after_batches"] = args.stop_after_batches
+        observed["state"] = state
+        return {"status": "stopped", "phase": "capture-pages"}
+
+    monkeypatch.setattr(cli, "_capture_pages_phase", capture)
+    state = tmp_path.resolve()
+    assert main([
+        "capture-pages", "--state-dir", str(state), "--max-pages", "5000",
+        "--stop-after-batches", "2",
+    ]) == 0
+    assert observed == {"stop_after_batches": 2, "state": state}
+    assert json.loads(capsys.readouterr().out)["status"] == "stopped"
+
+
+def test_drawio_phase_fails_closed_without_production_adapters(capsys, tmp_path):
+    result = main(["capture-drawio", "--state-dir", str(tmp_path), "--max-pages", "5000"])
+    assert result == 2
+    assert capsys.readouterr().out == '{"status":"failed","error":"configuration"}\n'
+
+
+def test_processing_state_uses_parent_page_version_and_real_result_tuple(monkeypatch, tmp_path):
+    state = tmp_path.resolve()
+    selection = _selection()
+    cli._atomic_json(cli._state_path(state, str(RUN_ID), "inventory-selection.json"), selection)
+    monkeypatch.setattr(cli, "_compose_page_processor", lambda *_args, **_kwargs: _result(drawio=True))
+
+    outcome = cli._process_pages_phase(_args(), state)
+    recorded = cli._read_json(cli._state_path(state, str(RUN_ID), "processing-state.json"))
+
+    assert outcome["status"] == "complete"
+    assert recorded["drawio_references"] == [{
+        "parent_page_id": "1000",
+        "filename": "diagram.drawio",
+        "parent_source_version": "7",
+    }]
+
+
+def test_export_consumes_tuple_result_and_publishes_no_drawio_packet(monkeypatch, tmp_path):
+    state = (tmp_path / "state").resolve()
+    output = (tmp_path / "packet").resolve()
+    selection = _selection()
+    cli._atomic_json(cli._state_path(state, str(RUN_ID), "inventory-selection.json"), selection)
+    result = _result(drawio=False)
+    cli._atomic_json(
+        cli._state_path(state, str(RUN_ID), "processing-state.json"),
+        cli._processing_payload(run_id=RUN_ID, selection=selection, result=result),
+    )
+    monkeypatch.setattr(cli, "_compose_page_processor", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(cli, "_raw_page_bytes", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _value: {
+        "inventory_page_size": 50, "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000, "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+
+    class Exporter:
+        def __init__(self, *, validator):
+            assert validator is not None
+
+        def publish(self, **kwargs):
+            assert kwargs["media_assets"] == []
+            return {
+                "format_version": "confluence-subtree-indexing-packet-v1",
+                "document_count": 1,
+                "chunk_count": 1,
+                "media_asset_count": 0,
+            }
+
+    monkeypatch.setattr(cli, "SubtreePacketExporter", Exporter)
+    outcome = cli._export_phase(_args(output_dir=str(output)), state)
+    assert outcome["packet_published"] is True
+
+
+def test_zero_drawio_phase_persists_generation_bound_state_without_network(monkeypatch, tmp_path):
+    state = tmp_path.resolve()
+    selection = _selection()
+    cli._atomic_json(cli._state_path(state, str(RUN_ID), "inventory-selection.json"), selection)
+    cli._atomic_json(
+        cli._state_path(state, str(RUN_ID), "processing-state.json"),
+        cli._processing_payload(
+            run_id=RUN_ID, selection=selection, result=_result(drawio=False)
+        ),
+    )
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _value: {
+        "inventory_page_size": 50, "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000, "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+    monkeypatch.setattr(cli, "_raw_page_bytes", lambda *_args, **_kwargs: 100)
+
+    outcome = cli._capture_drawio_phase(_args(), state)
+    drawio = cli._read_json(cli._state_path(state, str(RUN_ID), "drawio-state.json"))
+
+    assert outcome["status"] == "complete"
+    assert drawio["run_id"] == str(RUN_ID)
+    assert drawio["selection_identity"] == selection["selection_identity"]
+    assert drawio["observed"] == []
+    assert drawio["resolutions"] == []
+
+
+def test_parser_keeps_reliability_and_chunking_profiles_distinct():
+    parsed = cli._parser().parse_args([
+        "process-pages", "--state-dir", "X", "--max-pages", "10",
+        "--reliability-profile-path", "crawl.yaml",
+        "--chunking-profile-path", "embedding.yaml",
+    ])
+    assert parsed.reliability_profile_path == "crawl.yaml"
+    assert parsed.chunking_profile_path == "embedding.yaml"
+
+
+def test_operator_page_cap_is_validated_without_mutating_the_reliability_profile():
+    profile = {"max_pages_per_run": 10_000, "profile_id": "profile"}
+    validated = cli._validated_page_bound(_args(max_pages=5_000), profile)
+    assert validated["max_pages_per_run"] == 10_000
+    assert validated is profile
+
+
+def test_operator_page_cap_exceeding_the_profile_is_rejected():
+    profile = {"max_pages_per_run": 10_000, "profile_id": "profile"}
+    with pytest.raises(ValueError):
+        cli._validated_page_bound(_args(max_pages=10_001), profile)
+
+
+def test_validated_page_bound_output_still_satisfies_every_checkpoint_request():
+    """Regression test: a real approved profile, once passed through
+    ``_validated_page_bound``, must still be accepted by every checkpoint
+    request type and by live composition's profile validation. Rewriting
+    ``max_pages_per_run`` in place previously broke every live phase because
+    the fingerprint/profile contract only accepts two closed, approved
+    profiles (see ``_validate_profile``).
+    """
+    profile = cli._load_reliability_profile(str(APPROVED_PROFILE_PATH))
+    args = _args(max_pages=10, space_key="SPACE", root_page_id="1000")
+    validated = cli._validated_page_bound(args, profile)
+    source_config = ConfluenceSourceConfig(
+        source_id="confluence-root1",
+        space_key="SPACE",
+        include_roots=(ConfluenceIncludeRoot(page_id="1000"),),
+        page_size=validated["inventory_page_size"],
+    )
+    common = dict(
+        workspace=Path("C:/tmp/review-probe"),
+        endpoint_url="https://example.invalid/wiki",
+        source_config=source_config,
+        reliability_profile=validated,
+    )
+    run_id = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
+    StartNewRunRequest(**common)
+    ResumeUniqueIncompleteRunRequest(**common)
+    ResumeExplicitRunRequest(run_id=run_id, **common)
+    ActivateRawGenerationRequest(run_id=run_id, **common)
+
+
+def test_state_path_rejects_traversal_run_and_unknown_artifact(tmp_path):
+    import pytest
+    with pytest.raises((TypeError, ValueError)):
+        cli._state_path(tmp_path.resolve(), "..", "processing-state.json")
+    with pytest.raises(ValueError):
+        cli._state_path(tmp_path.resolve(), str(RUN_ID), "../escape.json")
+
+
+# --- P2-3: every published selection row must be source-version-bound ---
+
+
+def test_selection_from_inventory_rejects_missing_source_version():
+    roots = CanonicalIncludeRoots(("1000",))
+    root_metadata = ConfluencePageMetadata("1000", "Root", "SPACE")
+    assert root_metadata.source_version is None
+    root_fact = InventoryRootCommit(RUN_ID, 0, "1000", root_metadata, roots)
+
+    with pytest.raises(ValueError):
+        cli._selection_payload_from_inventory(
+            run_id=RUN_ID, facts=(root_fact,), max_pages=10,
+            crawled_at="2026-08-10T00:00:00Z",
+        )
+
+
+def test_selection_from_inventory_accepts_bound_source_version():
+    roots = CanonicalIncludeRoots(("1000",))
+    root_metadata = ConfluencePageMetadata("1000", "Root", "SPACE", source_version="1")
+    root_fact = InventoryRootCommit(RUN_ID, 0, "1000", root_metadata, roots)
+
+    selection = cli._selection_payload_from_inventory(
+        run_id=RUN_ID, facts=(root_fact,), max_pages=10,
+        crawled_at="2026-08-10T00:00:00Z",
+    )
+
+    assert selection["items"] == [{
+        "page_id": "1000", "crawled_at": "2026-08-10T00:00:00Z",
+        "expected_source_version": "1",
+    }]
+
+
+def test_load_subtree_selection_rejects_null_expected_source_version(tmp_path):
+    rows = [{
+        "page_id": "1000", "crawled_at": "2026-08-10T00:00:00Z",
+        "expected_source_version": None,
+    }]
+    path = (tmp_path / "selection.json").resolve()
+    path.write_text(json.dumps(rows), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        cli._load_subtree_selection(path, 10)
+
+
+# --- P3-1: the configured root page must survive into the published selection ---
+
+
+def test_assert_root_page_in_selection_rejects_missing_root():
+    selection = {"items": [{"page_id": "2000", "crawled_at": "x", "expected_source_version": "1"}]}
+    with pytest.raises(ValueError):
+        cli._assert_root_page_in_selection("1000", selection)
+
+
+def test_assert_root_page_in_selection_accepts_present_root():
+    selection = {"items": [{"page_id": "1000", "crawled_at": "x", "expected_source_version": "1"}]}
+    cli._assert_root_page_in_selection("1000", selection)
+
+
+# --- P2-1: export must re-verify Draw.io raw evidence against disk ---
+
+
+def _publish_drawio_attachment(raw_root: Path, *, attachment_id: str = "att12", body: bytes = b"<xml/>") -> tuple[str, int]:
+    attachments_root = raw_root / "attachments"
+    attachments_root.mkdir(parents=True, exist_ok=True)
+    budget = MediaBodyStoreBudget(max_body_bytes=4096, max_total_bytes=1024 * 1024, minimum_free_disk_reserve_bytes=0)
+    store = ConfluenceRawAttachmentStore(data_root=attachments_root, budget=budget)
+    envelope = MediaAttachmentBodyEnvelope(
+        format_version="1", evidence_kind="confluence_attachment_body",
+        attachment_id=attachment_id, parent_page_id="1000", filename="diagram.drawio",
+        source_version="3", http_status=200, body_encoding="base64", body_bytes=body,
+    )
+    store.publish_attachment(envelope=envelope)
+    return hashlib.sha256(body).hexdigest(), len(body)
+
+
+def _drawio_verify_profile():
+    return {"max_response_bytes_per_request": 8388608, "minimum_free_disk_reserve_bytes": 0}
+
+
+def test_verify_drawio_media_assets_accepts_matching_raw_artifact(tmp_path):
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    content_hash, size = _publish_drawio_attachment(raw_root)
+    asset = {
+        "media_id": "m1",
+        "raw_uri": f"raw://confluence/attachments/att12/{content_hash}",
+        "content_hash": content_hash,
+        "size_bytes": size,
+    }
+    config = cli.ConfluenceSubtreeCorpusConfig(max_pages=10, drawio_bytes=1024 * 1024)
+
+    cli._verify_drawio_media_assets_on_disk(
+        raw_root=raw_root, media_assets=[asset],
+        profile=_drawio_verify_profile(), drawio_config=config,
+    )
+
+
+def test_verify_drawio_media_assets_fails_closed_when_artifact_missing(tmp_path):
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    content_hash, size = _publish_drawio_attachment(raw_root)
+    target = raw_root / "attachments" / "confluence" / "attachments" / "att12" / f"{content_hash}.json"
+    assert target.exists()
+    target.unlink()
+    asset = {
+        "media_id": "m1",
+        "raw_uri": f"raw://confluence/attachments/att12/{content_hash}",
+        "content_hash": content_hash,
+        "size_bytes": size,
+    }
+    config = cli.ConfluenceSubtreeCorpusConfig(max_pages=10, drawio_bytes=1024 * 1024)
+
+    with pytest.raises(ValueError):
+        cli._verify_drawio_media_assets_on_disk(
+            raw_root=raw_root, media_assets=[asset],
+            profile=_drawio_verify_profile(), drawio_config=config,
+        )
+
+
+def test_verify_drawio_media_assets_fails_closed_when_declared_size_does_not_match(tmp_path):
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    content_hash, size = _publish_drawio_attachment(raw_root)
+    asset = {
+        "media_id": "m1",
+        "raw_uri": f"raw://confluence/attachments/att12/{content_hash}",
+        "content_hash": content_hash,
+        "size_bytes": size + 1,
+    }
+    config = cli.ConfluenceSubtreeCorpusConfig(max_pages=10, drawio_bytes=1024 * 1024)
+
+    with pytest.raises(ValueError):
+        cli._verify_drawio_media_assets_on_disk(
+            raw_root=raw_root, media_assets=[asset],
+            profile=_drawio_verify_profile(), drawio_config=config,
+        )
+
+
+def test_verify_drawio_media_assets_rejects_forged_raw_uri(tmp_path):
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    content_hash, size = _publish_drawio_attachment(raw_root)
+    asset = {
+        "media_id": "m1",
+        "raw_uri": f"raw://confluence/attachments/att12/{'0' * 64}",
+        "content_hash": content_hash,
+        "size_bytes": size,
+    }
+    config = cli.ConfluenceSubtreeCorpusConfig(max_pages=10, drawio_bytes=1024 * 1024)
+
+    with pytest.raises(ValueError):
+        cli._verify_drawio_media_assets_on_disk(
+            raw_root=raw_root, media_assets=[asset],
+            profile=_drawio_verify_profile(), drawio_config=config,
+        )
+
+
+def test_verify_drawio_media_assets_skips_when_no_assets(tmp_path):
+    raw_root = (tmp_path / "raw").resolve()
+    cli._verify_drawio_media_assets_on_disk(
+        raw_root=raw_root, media_assets=[],
+        profile=_drawio_verify_profile(), drawio_config=cli.ConfluenceSubtreeCorpusConfig(max_pages=10),
+    )
+
+
+# --- P1-2: forcing end-to-end test across all five phases, one state dir, one run id ---
+#
+# Real checkpoint state (SQLite), real raw-page-store layout, and real
+# selection/processing/drawio-state binding all run through the production
+# phase functions unmodified. Only two narrow seams are faked to keep this
+# offline: the Confluence HTTP transport (page bodies come from an in-memory
+# fixture instead of the network) and the chunking/tokenizer pipeline (this
+# machine has no pinned BGE-M3 bundle -- see docs/FOUNDATION_EXTERNAL_GATE_
+# RUNBOOK.md). Everything else -- run/generation identity, fingerprint
+# binding, selection identity, processing-state binding, and drawio-state
+# binding -- is the real production code.
+
+
+class _FakeInventoryWindowPort:
+    """Offline ConfluenceInventoryWindowPort: one root, one descendant."""
+
+    def __init__(self, *, descendant_page_id: str, descendant_version: str) -> None:
+        self._descendant_page_id = descendant_page_id
+        self._descendant_version = descendant_version
+
+    def fetch_root_metadata(self, *, space_key, root_page_id):
+        return ConfluencePageMetadata(root_page_id, "Root", space_key, source_version="1")
+
+    def fetch_descendants_window(self, *, space_key, root_page_id, start, page_size):
+        metadata = ConfluencePageMetadata(
+            self._descendant_page_id, "Child", space_key,
+            parent_page_id=root_page_id, ancestor_page_ids=(root_page_id,),
+            ancestor_titles=("Root",), source_version=self._descendant_version,
+        )
+        return ConfluenceInventoryWindow(items=(metadata,), start=0, limit=page_size, size=1, total_size=1)
+
+
+class _FakeHttpInner:
+    """Offline top-level transport double: page bodies keyed by page id."""
+
+    def __init__(self, pages: dict[str, bytes]) -> None:
+        self._pages = pages
+
+    def get_bytes(self, *, path, query):
+        page_id = path.rsplit("/", 1)[-1]
+        if page_id not in self._pages:
+            raise AssertionError(f"unexpected page fetch for {page_id!r}")
+        return self._pages[page_id]
+
+    def get_json(self, *, path, query):
+        raise AssertionError("get_json is not exercised by this offline e2e test")
+
+    def get_response_bytes(self, *, path, query):
+        raise AssertionError("get_response_bytes is not exercised by this offline e2e test")
+
+
+class _FakeRetryingTransport:
+    """Passthrough replacing RetryingConfluenceHttpTransport: no retries, no pacing."""
+
+    def __init__(self, *, inner, profile, monotonic_clock, sleeper, attempt_reserver) -> None:
+        self._inner = inner
+
+    def get_bytes(self, *, path, query):
+        return self._inner.get_bytes(path=path, query=query)
+
+    def get_json(self, *, path, query):
+        return self._inner.get_json(path=path, query=query)
+
+    def get_response_bytes(self, *, path, query):
+        return self._inner.get_response_bytes(path=path, query=query)
+
+
+class _FakeLiveSubtreeComposition:
+    def __init__(self, *, checkpoint_run_port, raw_page_store, window_port, http_inner) -> None:
+        self.checkpoint_run_port = checkpoint_run_port
+        self.raw_page_store = raw_page_store
+        self.http_inner = http_inner
+        self.retry_profile = None
+        self._window_port = window_port
+
+    def inventory_use_case(self, *, max_search_pages):
+        return ExecuteDurableConfluenceInventory(
+            checkpoint_run_port=self.checkpoint_run_port,
+            inventory_window_port_factory=lambda transport: self._window_port,
+            inventory_transport_factory=lambda activation: object(),
+        )
+
+    def guarded_raw_page_store(self, *, activation):
+        assert callable(getattr(activation, "guard_raw_publication", None))
+        return self.raw_page_store
+
+    def attachment_components(self, **_kwargs):
+        raise AssertionError("this offline e2e test does not exercise Draw.io attachment fetch")
+
+
+def _make_fake_compose_live_subtree(window_port, http_inner):
+    def _fake_compose_live_subtree(*, raw_root, checkpoint_workspace, reliability_profile, max_search_pages, **_kwargs):
+        return _FakeLiveSubtreeComposition(
+            checkpoint_run_port=SqliteConfluenceCheckpointRunPort(),
+            raw_page_store=ConfluenceRawPageGenerationStore(raw_root=raw_root),
+            window_port=window_port,
+            http_inner=http_inner,
+        )
+
+    return _fake_compose_live_subtree
+
+
+def _confluence_page_json(*, page_id: str, title: str, space_key: str, version: int, html: str) -> bytes:
+    payload = {
+        "id": page_id, "type": "page", "title": title,
+        "space": {"key": space_key},
+        "version": {"number": version, "when": "2026-08-10T00:00:00Z"},
+        "body": {"storage": {"value": html, "representation": "storage"}},
+    }
+    return json.dumps(payload).encode("utf-8")
+
+
+def _fake_process_result(items):
+    """Build a schema-valid CanonicalDocument/ChunkRecord pair per item.
+
+    Field shapes (schema_version, acl_id, chunk_id, acl_tags, ...) mirror
+    contracts/foundation/schemas/canonical_document.schema.json and
+    chunk_record.schema.json exactly, so SubtreePacketExporter.publish's
+    real (unmocked) schema validation accepts them.
+    """
+    count = len(items)
+    documents = []
+    chunks = []
+    for item in items:
+        document_id = f"confluence:page:{item.page_id}"
+        documents.append({
+            "schema_version": "1.0",
+            "document_id": document_id,
+            "source_system": "confluence",
+            "source_type": "wiki_page",
+            "page_id": item.page_id,
+            "source_version": item.expected_source_version,
+            "content_hash": hashlib.sha256(f"document-{item.page_id}".encode()).hexdigest(),
+            "acl_id": "acl:restricted:unresolved",
+            "crawled_at": item.crawled_at,
+        })
+        chunk_hex = hashlib.sha256(f"chunk-{item.page_id}".encode()).hexdigest()[:16]
+        chunks.append({
+            "schema_version": "1.0",
+            "chunk_id": f"chunk:confluence:{chunk_hex}",
+            "document_id": document_id,
+            "source_system": "confluence",
+            "source_type": "wiki_page",
+            "text": f"Fixture body for {item.page_id}",
+            "content_kind": "prose",
+            "language": "unknown",
+            "token_count": 4,
+            "acl_tags": ["restricted:unresolved"],
+            "content_hash": hashlib.sha256(f"chunk-body-{item.page_id}".encode()).hexdigest(),
+            "chunker_version": "1.2.0",
+        })
+    documents = tuple(documents)
+    chunks = tuple(chunks)
+    page_metrics = tuple(
+        ConfluencePageSetPageMetrics(ordinal, 1, 0, 0, (("paragraph", 1),))
+        for ordinal in range(1, count + 1)
+    )
+    metrics = ConfluencePageSetMetrics(count, count, 0, count, count, 0, 0, (("paragraph", count),))
+    return ConfluencePageSetResult(
+        documents=documents, chunks=chunks, page_metrics=page_metrics, metrics=metrics,
+        reference_intents_by_page=tuple((doc["document_id"], ()) for doc in documents),
+    )
+
+
+def test_five_phases_run_sequentially_against_one_state_dir_and_run_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    state = (tmp_path / "state").resolve()
+    state.mkdir()
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    output_dir = (tmp_path / "packet").resolve()
+
+    window_port = _FakeInventoryWindowPort(descendant_page_id="2000", descendant_version="3")
+    http_inner = _FakeHttpInner({
+        "1000": _confluence_page_json(page_id="1000", title="Root", space_key="SPACE", version=1, html="<p>Root body</p>"),
+        "2000": _confluence_page_json(page_id="2000", title="Child", space_key="SPACE", version=3, html="<p>Child body</p>"),
+    })
+    monkeypatch.setattr(confluence_pkg, "compose_live_subtree", _make_fake_compose_live_subtree(window_port, http_inner))
+    monkeypatch.setattr(retry_transport_module, "RetryingConfluenceHttpTransport", _FakeRetryingTransport)
+
+    base = dict(
+        max_pages=10, raw_root=str(raw_root), space_key="SPACE", root_page_id="1000",
+        reliability_profile_path=str(APPROVED_PROFILE_PATH),
+    )
+
+    # Phase 1: inventory -- real checkpoint DB, real fingerprint/run-id, root included.
+    # The first call starts the run and drives the underlying crawl loop to
+    # completion inside one session, but (matching production: activation
+    # snapshots are captured once and are not refreshed by later commits) it
+    # reports the pre-crawl snapshot and cannot yet publish a selection. A
+    # second, resumed call observes the now-complete state and publishes it --
+    # this two-call polling shape is the real, intended operator flow.
+    first_inventory_call = cli._inventory_phase(_args(**base), state)
+    assert first_inventory_call["selected_pages"] == 0
+
+    inventory_result = cli._inventory_phase(_args(**base, resume_unique=True), state)
+    assert inventory_result["status"] == "complete"
+    assert inventory_result["selected_pages"] == 2
+    run_id = inventory_result["run_id"]
+
+    selection_path = cli._state_path(state, run_id, "inventory-selection.json")
+    selection = cli._read_json(selection_path)
+    assert {row["page_id"] for row in selection["items"]} == {"1000", "2000"}
+    assert selection["run_id"] == run_id and selection["generation_id"] == run_id
+
+    # Phase 2: capture-pages -- real activation of the same run, real raw-store writes.
+    capture_result = cli._capture_pages_phase(_args(**base, run_id=run_id), state)
+    assert capture_result["status"] == "complete"
+    assert capture_result["captured"] == 2
+
+    raw_store = ConfluenceRawPageGenerationStore(raw_root=raw_root)
+    for page_id in ("1000", "2000"):
+        assert raw_store.resolve_page_path(run_id=CrawlRunId(run_id), page_id=page_id).exists()
+
+    # Phase 3: process-pages -- chunking/tokenizer injected (no pinned bundle here);
+    # everything else (selection binding, processing-state binding) is real.
+    monkeypatch.setattr(cli, "_compose_page_processor", lambda _args, *, run_id, items: _fake_process_result(items))
+
+    process_result = cli._process_pages_phase(_args(**base, run_id=run_id), state)
+    assert process_result["status"] == "complete"
+    assert process_result["page_count"] == 2
+
+    processing_state = cli._read_json(cli._state_path(state, run_id, "processing-state.json"))
+    assert processing_state["run_id"] == run_id
+    assert processing_state["selection_identity"] == selection["selection_identity"]
+    assert processing_state["failed_pages"] == 0
+
+    # Re-running process-pages must replay identically, not re-mutate durable state.
+    replay_result = cli._process_pages_phase(_args(**base, run_id=run_id), state)
+    assert replay_result == process_result
+
+    # Phase 4: capture-drawio -- zero references in this fixture corpus; still
+    # binds and persists generation-scoped state for real.
+    drawio_result = cli._capture_drawio_phase(_args(**base, run_id=run_id), state)
+    assert drawio_result["status"] == "complete"
+    assert drawio_result["drawio_references_observed"] == 0
+
+    drawio_state = cli._read_json(cli._state_path(state, run_id, "drawio-state.json"))
+    assert drawio_state["run_id"] == run_id
+    assert drawio_state["selection_identity"] == selection["selection_identity"]
+
+    # Phase 5: export -- reprocesses, compares against recorded state, publishes.
+    export_result = cli._export_phase(_args(**base, run_id=run_id, output_dir=str(output_dir)), state)
+    assert export_result["status"] == "complete"
+    assert export_result["packet_published"] is True
+    assert export_result["document_count"] == 2
+
+    documents = (output_dir / "documents.jsonl").read_text(encoding="utf-8").splitlines()
+    assert {json.loads(line)["page_id"] for line in documents} == {"1000", "2000"}
+
+    # A second export at the same output directory must refuse to clobber.
+    with pytest.raises(ValueError):
+        cli._export_phase(_args(**base, run_id=run_id, output_dir=str(output_dir)), state)

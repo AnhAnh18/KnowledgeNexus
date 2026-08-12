@@ -1,0 +1,3321 @@
+From eac58f5d68c9942a9042ebe04fce0d625ab64668 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 4 Aug 2026 23:21:13 +0700
+Subject: [PATCH] feat(foundation): add offline media processors
+
+---
+ .codex-workflow/20260805-m9a3/05-review-1.md  |  19 +
+ .codex-workflow/20260805-m9a3/08-review-2.md  |  10 +
+ .local_ai/IMPLEMENTATION_STATE.md             |  36 +-
+ .local_ai/ROADMAP.md                          |   2 +-
+ .../application/use_cases/__init__.py         |   4 +
+ .../process_confluence_media_attachment.py    | 259 ++++++++
+ .../foundation/domain/models/__init__.py      |  44 ++
+ .../foundation/domain/models/drawio_xml.py    | 330 +++++++++++
+ .../domain/models/media_processing.py         | 535 +++++++++++++++++
+ .../infrastructure/processors/__init__.py     |  12 +
+ .../processors/drawio_xml_processor.py        | 498 ++++++++++++++++
+ .../processors/media_attachment_processors.py | 559 ++++++++++++++++++
+ .../foundation/ports/__init__.py              |   6 +
+ .../foundation/ports/media_processing_port.py |  19 +
+ .../test_m9a3_media_processing_boundary.py    |  57 ++
+ ...est_process_confluence_media_attachment.py | 169 ++++++
+ .../domain/models/test_drawio_xml.py          |  76 +++
+ .../domain/models/test_media_processing.py    | 137 +++++
+ .../processors/test_drawio_xml_processor.py   | 189 ++++++
+ .../test_media_attachment_processors.py       | 146 +++++
+ 20 files changed, 3104 insertions(+), 3 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m9a3/05-review-1.md
+ create mode 100644 .codex-workflow/20260805-m9a3/08-review-2.md
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/process_confluence_media_attachment.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/drawio_xml.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/media_processing.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/processors/drawio_xml_processor.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py
+ create mode 100644 src/knowledgenexus/foundation/ports/media_processing_port.py
+ create mode 100644 tests/architecture/test_m9a3_media_processing_boundary.py
+ create mode 100644 tests/foundation/application/use_cases/test_process_confluence_media_attachment.py
+ create mode 100644 tests/foundation/domain/models/test_drawio_xml.py
+ create mode 100644 tests/foundation/domain/models/test_media_processing.py
+ create mode 100644 tests/foundation/infrastructure/processors/test_drawio_xml_processor.py
+ create mode 100644 tests/foundation/infrastructure/processors/test_media_attachment_processors.py
+
+diff --git a/.codex-workflow/20260805-m9a3/05-review-1.md b/.codex-workflow/20260805-m9a3/05-review-1.md
+new file mode 100644
+index 0000000..99408ee
+--- /dev/null
++++ b/.codex-workflow/20260805-m9a3/05-review-1.md
+@@ -0,0 +1,19 @@
++# M9-A3 Independent Review
++
++## Initial findings
++
++- `P1`: application dispatch accepted a result whose extraction-detail
++  processor kind did not match the routed MIME kind.
++- `P1`: application dispatch did not bind `content_hash`/`raw_uri` to the
++  materialized envelope body.
++- `P2`: draw.io `byte_count` reported canonical output bytes instead of raw
++  input bytes.
++- `P2`: PDF/OCR capability cardinality and page/image counters lacked explicit
++  upper bounds; output limits were checked after intermediate accumulation.
++- `P2`: the reviewed plan required an architecture guard for no engine,
++  network, or file side effects.
++
++## Resolution
++
++All findings were fixed in the bounded M9-A3 implementation. A focused
++re-review was run in an independent session after the fixes.
+diff --git a/.codex-workflow/20260805-m9a3/08-review-2.md b/.codex-workflow/20260805-m9a3/08-review-2.md
+new file mode 100644
+index 0000000..f0ecb3d
+--- /dev/null
++++ b/.codex-workflow/20260805-m9a3/08-review-2.md
+@@ -0,0 +1,10 @@
++# M9-A3 Independent Re-review
++
++VERDICT: PASS
++
++- Focused M9-A3 suite: `30 passed`.
++- Architecture suite: `80 passed`.
++- Rechecked route/detail-kind binding, envelope evidence hash/URI binding,
++  raw draw.io byte count, capability bounds, and no engine/network/file-side
++  effects.
++- No P0, P1, P2, or P3 findings remain.
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 8512fc2..1e5d0b8 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -1632,8 +1632,40 @@ are recorded without using repository-local commit SHAs as status.
+ - Review artifacts:
+   `.codex-workflow/20260805-m9a2/05-review-1.md` (`CHANGES_REQUIRED`),
+   `.codex-workflow/20260805-m9a2/08-review-2.md` (`PASS`).
+-- Commit/push closeout is pending on this branch; M9-A3 is the next separately
+-  planned and reviewed stage.
++- Commit/push closeout is complete on `codex/m8-m9` (`fcd9935`); M9-A3 was
++  implemented as the next separately planned and reviewed stage.
++
++## M9-A3 Offline Draw.io/PDF/OCR Processors
++
++- Status: complete and independently reviewed `PASS`.
++- Objective: process one already-materialized M9-A2 attachment body offline,
++  preserving the schema-shaped MediaAsset evidence while returning an
++  in-memory extraction-detail projection for draw.io, digital PDF text, or
++  selected-image OCR.
++- Contract: stdlib source-first draw.io XML parsing with DTD/entity rejection,
++  bounded deterministic labels/edges/containers, closed PDF/OCR capability
++  identities, strict page/image counters and output budgets, exact `parsed` /
++  `ocr` / `failed` status matrix, MIME/filename dispatch, envelope-bound
++  content hash/raw URI, sanitized failures, and no attachment-text chunks or
++  side-effecting engine/network/file behavior.
++- Changed production files:
++  `src/knowledgenexus/foundation/domain/models/drawio_xml.py`,
++  `src/knowledgenexus/foundation/domain/models/media_processing.py`,
++  `src/knowledgenexus/foundation/ports/media_processing_port.py`,
++  `src/knowledgenexus/foundation/infrastructure/processors/drawio_xml_processor.py`,
++  `src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py`,
++  `src/knowledgenexus/foundation/application/use_cases/process_confluence_media_attachment.py`,
++  and package exports.
++- Validation: focused M9-A3 suite `30 passed`; architecture suite `80 passed`;
++  M9-A1/A2 regression `48 passed, 2 skipped`; M8-D/E bounded regression
++  `43 passed`; `python -m compileall -q src tests` and scoped `git diff --check`
++  passed. The broad Foundation suite remains environment-blocked by known
++  tokenizer-asset/runtime and unrelated CLI/temp-root failures; no M9-A3
++  failure was observed in the bounded suites.
++- Review artifacts:
++  `.codex-workflow/20260805-m9a3/05-review-1.md` records initial findings and
++  fixes; `.codex-workflow/20260805-m9a3/08-review-2.md` records the fresh
++  independent `VERDICT: PASS`.
+ 
+ ## Current Execution Boundary
+ 
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 71a2715..cfe4e87 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -990,7 +990,7 @@ M9A - Media:
+ |---|---|---|
+ | M9-A1 metadata-first media contract | complete | Added immutable attachment observation/policy/result models, schema-valid metadata-only MediaAsset builder, deterministic media relation-intent mapper, and strict adversarial boundaries; focused `11 passed`, bounded attachment/schema regression `87 passed`, architecture `16 passed`; independent review `PASS`; no download/raw/export/I/O. |
+ | M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
+-| M9-A3 offline draw.io/PDF/OCR processors | pending | Capability-pinned processors remain deferred until A2 evidence/store seam is approved. |
++| M9-A3 offline draw.io/PDF/OCR processors | complete; independently reviewed `PASS` | Added bounded stdlib draw.io XML parsing, pinned digital-PDF text and image-OCR capability ports/processors, strict schema/status/detail binding, and MIME/filename dispatch over the M9-A2 envelope; focused `30 passed`, architecture `80 passed`, M9-A1/A2 regression `48 passed, 2 skipped`, compileall and diff-check passed. No engine/network/file side effects, attachment-text chunks, schema changes, or raw writes. |
+ | M9-B local Git repository and code-document seam | pending | M9-B starts after its own plan review; local-clone identity and fallback-window seam remain locked. |
+ | M9-C minimal symbol index | pending | Depends on M9-B code-document contract; no symbol chunk stream is active yet. |
+ | M9-D1/D2 tombstone/delta propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries. |
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index 6792d2f..f13ba8c 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -40,6 +40,9 @@ from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_
+ from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
+     AcceptConfluenceMiniCorpus,
+ )
++from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
++    ProcessConfluenceMediaAttachment,
++)
+ 
+ __all__ = [
+     "BuildConfluenceInventory",
+@@ -62,4 +65,5 @@ __all__ = [
+     "is_inventory_window_commit",
+     "FetchAndStoreConfluenceAttachmentBody",
+     "AcceptConfluenceMiniCorpus",
++    "ProcessConfluenceMediaAttachment",
+ ]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/process_confluence_media_attachment.py b/src/knowledgenexus/foundation/application/use_cases/process_confluence_media_attachment.py
+new file mode 100644
+index 0000000..fad716b
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/process_confluence_media_attachment.py
+@@ -0,0 +1,259 @@
++from __future__ import annotations
++
++import hashlib
++from pathlib import PurePath
++
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++)
++from knowledgenexus.foundation.domain.models.media_materialization import (
++    ConfluenceAttachmentObservation,
++)
++from knowledgenexus.foundation.domain.models.media_processing import (
++    MediaExtractionDetail,
++    MediaProcessingError,
++    MediaProcessingFailureCategory,
++    MediaProcessingResult,
++    MediaProcessorKind,
++    MediaSourceLocator,
++)
++from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++
++
++_DRAWIO_MIMES = frozenset({
++    "application/vnd.jgraph.mxfile",
++    "application/x-drawio",
++    "application/drawio",
++})
++_PDF_MIMES = frozenset({"application/pdf"})
++_IMAGE_MIMES = frozenset({
++    "image/png",
++    "image/jpeg",
++    "image/jpg",
++    "image/gif",
++    "image/webp",
++    "image/bmp",
++    "image/tiff",
++})
++_DRAWIO_SUFFIXES = (".drawio", ".drawio.xml")
++_PDF_SUFFIXES = (".pdf",)
++_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff")
++
++
++def _fail(category: MediaProcessingFailureCategory) -> None:
++    raise MediaProcessingError(category) from None
++
++
++def _revalidate_envelope(value: object) -> MediaAttachmentBodyEnvelope:
++    if type(value) is not MediaAttachmentBodyEnvelope:
++        _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++    try:
++        return MediaAttachmentBodyEnvelope(
++            format_version=value.format_version,
++            evidence_kind=value.evidence_kind,
++            attachment_id=value.attachment_id,
++            parent_page_id=value.parent_page_id,
++            filename=value.filename,
++            source_version=value.source_version,
++            http_status=value.http_status,
++            body_encoding=value.body_encoding,
++            body_bytes=value.body_bytes,
++        )
++    except Exception:
++        _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++
++
++def _revalidate_observation(value: object) -> ConfluenceAttachmentObservation:
++    if type(value) is not ConfluenceAttachmentObservation:
++        _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++    try:
++        return ConfluenceAttachmentObservation(
++            attachment_id=value.attachment_id,
++            parent_page_id=value.parent_page_id,
++            filename=value.filename,
++            mime_type=value.mime_type,
++            size_bytes=value.size_bytes,
++            source_version=value.source_version,
++            updated_at=value.updated_at,
++            crawled_at=value.crawled_at,
++        )
++    except Exception:
++        _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++
++
++class ProcessConfluenceMediaAttachment:
++    """Route one materialized attachment through an offline processor."""
++
++    def __init__(
++        self,
++        *,
++        drawio_processor: object | None = None,
++        pdf_processor: object | None = None,
++        ocr_processor: object | None = None,
++        schema_validator: object | None = None,
++    ) -> None:
++        try:
++            validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++            validate = getattr(validator, "validate_record", None)
++        except Exception:
++            _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++        if not callable(validate):
++            _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++        self._drawio = drawio_processor
++        self._pdf = pdf_processor
++        self._ocr = ocr_processor
++        for processor in (self._drawio, self._pdf, self._ocr):
++            if processor is not None:
++                try:
++                    process = getattr(processor, "process", None)
++                except Exception:
++                    _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++                if not callable(process):
++                    _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++        self._validator = validator
++
++    def execute(self, *, envelope: object, observation: object) -> MediaProcessingResult:
++        body = _revalidate_envelope(envelope)
++        attachment = _revalidate_observation(observation)
++        if (
++            body.attachment_id != attachment.attachment_id
++            or body.parent_page_id != attachment.parent_page_id
++            or body.filename != attachment.filename
++            or body.source_version != attachment.source_version
++            or (attachment.size_bytes is not None and attachment.size_bytes != len(body.body_bytes))
++        ):
++            _fail(MediaProcessingFailureCategory.INVALID_INPUT)
++        kind = self._route(attachment.filename, attachment.mime_type)
++        if kind is None:
++            _fail(MediaProcessingFailureCategory.UNSUPPORTED_MEDIA)
++        processor = {
++            MediaProcessorKind.DRAWIO: self._drawio,
++            MediaProcessorKind.PDF_TEXT: self._pdf,
++            MediaProcessorKind.IMAGE_OCR: self._ocr,
++        }[kind]
++        if processor is None:
++            return self._failed_result(
++                body,
++                attachment,
++                kind,
++                MediaProcessingFailureCategory.CAPABILITY_UNAVAILABLE,
++            )
++        try:
++            result = processor.process(envelope=body, observation=attachment)
++        except MediaProcessingError:
++            raise
++        except Exception:
++            _fail(MediaProcessingFailureCategory.INTERNAL_FAILURE)
++        if type(result) is not MediaProcessingResult:
++            _fail(MediaProcessingFailureCategory.MALFORMED_RESULT)
++        try:
++            result = MediaProcessingResult(
++                asset=result.asset,
++                details=result.details,
++                failure_category=result.failure_category,
++            )
++        except Exception:
++            _fail(MediaProcessingFailureCategory.MALFORMED_RESULT)
++        asset = result.asset
++        expected_media_id = DocumentIdGenerator.confluence_attachment_id(attachment.attachment_id)
++        expected_parent_id = DocumentIdGenerator.confluence_page_id(attachment.parent_page_id)
++        expected_content_hash = hashlib.sha256(body.body_bytes).hexdigest()
++        expected_raw_uri = (
++            f"raw://confluence/attachments/{attachment.attachment_id}/{expected_content_hash}"
++        )
++        if (
++            asset["media_id"] != expected_media_id
++            or asset["parent_document_id"] != expected_parent_id
++            or asset["filename"] != attachment.filename
++            or asset["mime_type"] != attachment.mime_type
++            or asset["size_bytes"] != attachment.size_bytes
++            or asset["content_hash"] != expected_content_hash
++            or asset["raw_uri"] != expected_raw_uri
++        ):
++            _fail(MediaProcessingFailureCategory.MALFORMED_RESULT)
++        if any(detail.processor_kind is not kind for detail in result.details):
++            _fail(MediaProcessingFailureCategory.MALFORMED_RESULT)
++        try:
++            self._validator.validate_record("MediaAsset", asset)
++        except Exception:
++            _fail(MediaProcessingFailureCategory.SCHEMA_INVALID)
++        return result
++
++    @staticmethod
++    def _route(filename: str, mime_type: str | None) -> MediaProcessorKind | None:
++        suffix = PurePath(filename.lower()).suffix
++        lowered = filename.lower()
++        if mime_type in _DRAWIO_MIMES or lowered.endswith(_DRAWIO_SUFFIXES):
++            return MediaProcessorKind.DRAWIO
++        if mime_type in _PDF_MIMES or suffix in _PDF_SUFFIXES:
++            return MediaProcessorKind.PDF_TEXT
++        if mime_type in _IMAGE_MIMES or suffix in _IMAGE_SUFFIXES:
++            return MediaProcessorKind.IMAGE_OCR
++        return None
++
++    def _failed_result(
++        self,
++        envelope: MediaAttachmentBodyEnvelope,
++        observation: ConfluenceAttachmentObservation,
++        kind: MediaProcessorKind,
++        category: MediaProcessingFailureCategory,
++    ) -> MediaProcessingResult:
++        digest = hashlib.sha256(envelope.body_bytes).hexdigest()
++        raw_uri = f"raw://confluence/attachments/{observation.attachment_id}/{digest}"
++        asset = {
++            "schema_version": "1.0",
++            "media_id": DocumentIdGenerator.confluence_attachment_id(observation.attachment_id),
++            "parent_document_id": DocumentIdGenerator.confluence_page_id(observation.parent_page_id),
++            "source_system": "confluence",
++            "filename": observation.filename,
++            "mime_type": observation.mime_type,
++            "size_bytes": observation.size_bytes,
++            "download_status": "downloaded",
++            "processing_status": "failed",
++            "relevance": "high",
++            "extracted_text": None,
++            "summary": None,
++            "confidence": None,
++            "raw_uri": raw_uri,
++            "content_hash": digest,
++            "source_version": observation.source_version,
++            "updated_at": observation.updated_at,
++            "crawled_at": observation.crawled_at,
++        }
++        locator = MediaSourceLocator(
++            parent_page_id=observation.parent_page_id,
++            attachment_id=observation.attachment_id,
++            filename=observation.filename,
++            raw_uri=raw_uri,
++            pdf_page_number=1 if kind is MediaProcessorKind.PDF_TEXT else None,
++            image_index=1 if kind is MediaProcessorKind.IMAGE_OCR else None,
++        )
++        detail = MediaExtractionDetail(
++            ordinal=1,
++            locator=locator,
++            processor_kind=kind,
++            capability_id={
++                MediaProcessorKind.DRAWIO: "stdlib-drawio-v1",
++                MediaProcessorKind.PDF_TEXT: "pdf-text-fixture-v1",
++                MediaProcessorKind.IMAGE_OCR: "image-ocr-fixture-v1",
++            }[kind],
++            capability_version="1",
++            status="failed",
++            warning="processor capability unavailable",
++        )
++        try:
++            self._validator.validate_record("MediaAsset", asset)
++            return MediaProcessingResult(
++                asset=asset,
++                details=(detail,),
++                failure_category=category,
++            )
++        except Exception:
++            _fail(MediaProcessingFailureCategory.SCHEMA_INVALID)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++__all__ = ["ProcessConfluenceMediaAttachment"]
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index 50a2f9d..bf0d2ba 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -108,6 +108,30 @@ from knowledgenexus.foundation.domain.models.media_body_materialization import (
+     MediaBodyMaterializationResult,
+     MediaBodyStoreBudget,
+ )
++from knowledgenexus.foundation.domain.models.drawio_xml import (
++    DrawioEdge,
++    DrawioParseResult,
++    DrawioVertex,
++    DrawioXmlEdge,
++    DrawioXmlFailureCategory,
++    DrawioXmlLimits,
++    DrawioXmlParseResult,
++    DrawioXmlProcessingError,
++    DrawioXmlVertex,
++)
++from knowledgenexus.foundation.domain.models.media_processing import (
++    ImageOcrResponse,
++    MediaExtractionDetail,
++    MediaProcessingError,
++    MediaProcessingFailureCategory,
++    MediaProcessingResult,
++    MediaProcessorKind,
++    MediaSourceLocator,
++    OcrLabelResult,
++    PdfPageTextResult,
++    PdfTextExtractionResponse,
++    text_digest,
++)
+ from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
+     MiniCorpusAcceptanceError,
+     MiniCorpusAcceptanceFailureCategory,
+@@ -249,6 +273,26 @@ __all__ = [
+     "MediaBodyMaterializationFailureCategory",
+     "MediaBodyMaterializationResult",
+     "MediaBodyStoreBudget",
++    "DrawioEdge",
++    "DrawioParseResult",
++    "DrawioVertex",
++    "DrawioXmlEdge",
++    "DrawioXmlFailureCategory",
++    "DrawioXmlLimits",
++    "DrawioXmlParseResult",
++    "DrawioXmlProcessingError",
++    "DrawioXmlVertex",
++    "ImageOcrResponse",
++    "MediaExtractionDetail",
++    "MediaProcessingError",
++    "MediaProcessingFailureCategory",
++    "MediaProcessingResult",
++    "MediaProcessorKind",
++    "MediaSourceLocator",
++    "OcrLabelResult",
++    "PdfPageTextResult",
++    "PdfTextExtractionResponse",
++    "text_digest",
+     "MiniCorpusAcceptanceError",
+     "MiniCorpusAcceptanceFailureCategory",
+     "MiniCorpusAcceptanceRequest",
+diff --git a/src/knowledgenexus/foundation/domain/models/drawio_xml.py b/src/knowledgenexus/foundation/domain/models/drawio_xml.py
+new file mode 100644
+index 0000000..dacf4d9
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/drawio_xml.py
+@@ -0,0 +1,330 @@
++"""Immutable, metadata-safe values returned by the offline draw.io parser.
++
++The draw.io processor deliberately keeps its result independent from the
++``MediaAsset`` contract.  The application boundary can project this result
++into a media asset and an extraction-detail projection without making XML
++structure part of the public schema.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import unicodedata
++from dataclasses import dataclass
++from enum import StrEnum
++
++
++_SHA256_LENGTH = 64
++_MAX_TEXT_BYTES = 256 * 1024 * 1024
++_MAX_ID_BYTES = 512
++
++
++class DrawioXmlFailureCategory(StrEnum):
++    """Stable categories exposed by the draw.io processing boundary."""
++
++    INVALID_INPUT = "invalid_input"
++    XML_INVALID = "xml_invalid"
++    XML_UNSAFE = "xml_unsafe"
++    STRUCTURE_INVALID = "structure_invalid"
++    BOUNDS_EXCEEDED = "bounds_exceeded"
++    OUTPUT_INVALID = "output_invalid"
++    INTERNAL_FAILURE = "internal_failure"
++
++
++class DrawioXmlProcessingError(Exception):
++    """Sanitized draw.io processing failure.
++
++    Only an allowlisted category is accepted.  In particular, callers cannot
++    smuggle arbitrary parser/engine text through this exception boundary.
++    """
++
++    def __init__(self, category: DrawioXmlFailureCategory) -> None:
++        if type(category) is not DrawioXmlFailureCategory:
++            raise TypeError("category is invalid")
++        self.category = category
++        super().__init__(category.value)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}(category={self.category.value!r})"
++
++
++def _text(value: object, field: str, *, allow_empty: bool = True) -> str:
++    if type(value) is not str:
++        raise TypeError(f"{field} is invalid")
++    normalized = unicodedata.normalize("NFC", value)
++    if not allow_empty and not normalized:
++        raise ValueError(f"{field} is invalid")
++    if len(normalized.encode("utf-8")) > _MAX_TEXT_BYTES:
++        raise ValueError(f"{field} is invalid")
++    # XML labels may contain line breaks, but NUL and surrogate code points
++    # cannot be represented safely in the extracted UTF-8 output.
++    if any(
++        ord(character) == 0
++        or 0xD800 <= ord(character) <= 0xDFFF
++        for character in normalized
++    ):
++        raise ValueError(f"{field} is invalid")
++    return normalized
++
++
++def _identifier(value: object, field: str) -> str:
++    normalized = _text(value, field, allow_empty=False)
++    if len(normalized.encode("utf-8")) > _MAX_ID_BYTES:
++        raise ValueError(f"{field} is invalid")
++    if any(
++        ord(character) < 0x20
++        or 0x7F <= ord(character) <= 0x9F
++        or character in ("\u2028", "\u2029")
++        for character in normalized
++    ):
++        raise ValueError(f"{field} is invalid")
++    return normalized
++
++
++@dataclass(frozen=True, repr=False)
++class DrawioXmlLimits:
++    """Resource limits used by :class:`DrawioXmlProcessor`.
++
++    Limits are immutable and validated at construction.  The processor also
++    rebuilds this value before use so forged instances fail closed.
++    """
++
++    max_bytes: int = 4 * 1024 * 1024
++    max_nodes: int = 10_000
++    max_edges: int = 20_000
++    max_depth: int = 64
++    max_output_bytes: int = 1 * 1024 * 1024
++    max_label_bytes: int = 256 * 1024
++
++    def __post_init__(self) -> None:
++        values = (
++            self.max_bytes,
++            self.max_nodes,
++            self.max_edges,
++            self.max_depth,
++            self.max_output_bytes,
++            self.max_label_bytes,
++        )
++        if any(type(value) is not int for value in values):
++            raise TypeError("draw.io limits are invalid")
++        if not 1 <= self.max_bytes <= 256 * 1024 * 1024:
++            raise ValueError("max_bytes is invalid")
++        if not 1 <= self.max_nodes <= 1_000_000:
++            raise ValueError("max_nodes is invalid")
++        if not 0 <= self.max_edges <= 2_000_000:
++            raise ValueError("max_edges is invalid")
++        if not 1 <= self.max_depth <= 1024:
++            raise ValueError("max_depth is invalid")
++        if not 1 <= self.max_output_bytes <= 256 * 1024 * 1024:
++            raise ValueError("max_output_bytes is invalid")
++        if not 1 <= self.max_label_bytes <= 256 * 1024 * 1024:
++            raise ValueError("max_label_bytes is invalid")
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++@dataclass(frozen=True, repr=False)
++class DrawioXmlVertex:
++    """A labelled draw.io vertex and its parent/container ancestry."""
++
++    diagram_id: str
++    cell_id: str
++    label: str
++    container_ids: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        object.__setattr__(self, "diagram_id", _identifier(self.diagram_id, "diagram_id"))
++        object.__setattr__(self, "cell_id", _identifier(self.cell_id, "cell_id"))
++        object.__setattr__(self, "label", _text(self.label, "label"))
++        if type(self.container_ids) is not tuple or any(
++            type(item) is not str for item in self.container_ids
++        ):
++            raise TypeError("container_ids are invalid")
++        normalized = tuple(_identifier(item, "container_id") for item in self.container_ids)
++        if len(set(normalized)) != len(normalized):
++            raise ValueError("container_ids are invalid")
++        object.__setattr__(self, "container_ids", normalized)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++    @property
++    def id(self) -> str:
++        return self.cell_id
++
++    @property
++    def containers(self) -> tuple[str, ...]:
++        return self.container_ids
++
++
++@dataclass(frozen=True, repr=False)
++class DrawioXmlEdge:
++    """A draw.io edge link and its parent/container ancestry."""
++
++    diagram_id: str
++    cell_id: str
++    source_id: str | None
++    target_id: str | None
++    container_ids: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        object.__setattr__(self, "diagram_id", _identifier(self.diagram_id, "diagram_id"))
++        object.__setattr__(self, "cell_id", _identifier(self.cell_id, "cell_id"))
++        for field in ("source_id", "target_id"):
++            value = getattr(self, field)
++            if value is not None:
++                object.__setattr__(self, field, _identifier(value, field))
++        if type(self.container_ids) is not tuple or any(
++            type(item) is not str for item in self.container_ids
++        ):
++            raise TypeError("container_ids are invalid")
++        normalized = tuple(_identifier(item, "container_id") for item in self.container_ids)
++        if len(set(normalized)) != len(normalized):
++            raise ValueError("container_ids are invalid")
++        object.__setattr__(self, "container_ids", normalized)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++    @property
++    def id(self) -> str:
++        return self.cell_id
++
++    @property
++    def source(self) -> str | None:
++        return self.source_id
++
++    @property
++    def target(self) -> str | None:
++        return self.target_id
++
++    @property
++    def containers(self) -> tuple[str, ...]:
++        return self.container_ids
++
++
++@dataclass(frozen=True, repr=False)
++class DrawioParseResult:
++    """Deterministic, bounded draw.io extraction output."""
++
++    extracted_text: str
++    vertices: tuple[DrawioXmlVertex, ...]
++    edges: tuple[DrawioXmlEdge, ...]
++    digest: str
++    byte_count: int
++    node_count: int
++    edge_count: int
++
++    def __post_init__(self) -> None:
++        try:
++            if set(vars(self)) != {
++                "extracted_text",
++                "vertices",
++                "edges",
++                "digest",
++                "byte_count",
++                "node_count",
++                "edge_count",
++            }:
++                raise ValueError("draw.io result is invalid")
++        except TypeError:
++            raise ValueError("draw.io result is invalid") from None
++        text = _text(self.extracted_text, "extracted_text")
++        if len(text.encode("utf-8")) > _MAX_TEXT_BYTES:
++            raise ValueError("extracted_text is invalid")
++        if type(self.vertices) is not tuple or any(
++            type(item) is not DrawioXmlVertex for item in self.vertices
++        ):
++            raise TypeError("vertices are invalid")
++        if type(self.edges) is not tuple or any(
++            type(item) is not DrawioXmlEdge for item in self.edges
++        ):
++            raise TypeError("edges are invalid")
++        # Rebuild nested values before accessing fields so a forged dataclass
++        # cannot produce an unsanitized AttributeError at this boundary.
++        try:
++            vertices = tuple(
++                DrawioXmlVertex(
++                    diagram_id=item.diagram_id,
++                    cell_id=item.cell_id,
++                    label=item.label,
++                    container_ids=item.container_ids,
++                )
++                for item in self.vertices
++            )
++            edges = tuple(
++                DrawioXmlEdge(
++                    diagram_id=item.diagram_id,
++                    cell_id=item.cell_id,
++                    source_id=item.source_id,
++                    target_id=item.target_id,
++                    container_ids=item.container_ids,
++                )
++                for item in self.edges
++            )
++        except Exception:
++            raise ValueError("draw.io result is invalid") from None
++        if type(self.digest) is not str or len(self.digest) != _SHA256_LENGTH:
++            raise ValueError("digest is invalid")
++        try:
++            int(self.digest, 16)
++        except (TypeError, ValueError):
++            raise ValueError("digest is invalid") from None
++        for field in ("byte_count", "node_count", "edge_count"):
++            value = getattr(self, field)
++            if type(value) is not int or value < 0:
++                raise ValueError(f"{field} is invalid")
++        if self.byte_count > 256 * 1024 * 1024:
++            raise ValueError("byte_count is invalid")
++        if self.node_count != len(vertices) or self.edge_count != len(edges):
++            raise ValueError("draw.io counters are invalid")
++        if vertices != tuple(sorted(vertices, key=lambda item: (item.diagram_id, item.cell_id))):
++            raise ValueError("vertices are not deterministic")
++        if edges != tuple(sorted(edges, key=lambda item: (item.diagram_id, item.cell_id))):
++            raise ValueError("edges are not deterministic")
++        expected_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
++        if self.digest != expected_digest:
++            raise ValueError("digest does not match extracted_text")
++        object.__setattr__(self, "extracted_text", text)
++        object.__setattr__(self, "vertices", vertices)
++        object.__setattr__(self, "edges", edges)
++
++    @property
++    def labels(self) -> tuple[str, ...]:
++        """Convenience projection used by media application code."""
++
++        return tuple(vertex.label for vertex in self.vertices if vertex.label)
++
++    @property
++    def text(self) -> str:
++        """Alias for callers that use the generic processor result protocol."""
++
++        return self.extracted_text
++
++    @property
++    def content_hash(self) -> str:
++        return self.digest
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++# Short aliases make the draw.io result convenient without introducing names
++# that collide with the shared PDF/OCR processing models.
++DrawioVertex = DrawioXmlVertex
++DrawioEdge = DrawioXmlEdge
++DrawioXmlParseResult = DrawioParseResult
++
++
++__all__ = [
++    "DrawioEdge",
++    "DrawioParseResult",
++    "DrawioVertex",
++    "DrawioXmlEdge",
++    "DrawioXmlFailureCategory",
++    "DrawioXmlLimits",
++    "DrawioXmlParseResult",
++    "DrawioXmlProcessingError",
++    "DrawioXmlVertex",
++]
+diff --git a/src/knowledgenexus/foundation/domain/models/media_processing.py b/src/knowledgenexus/foundation/domain/models/media_processing.py
+new file mode 100644
+index 0000000..29843bc
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/media_processing.py
+@@ -0,0 +1,535 @@
++from __future__ import annotations
++
++import hashlib
++import math
++import re
++import unicodedata
++from dataclasses import dataclass
++from enum import StrEnum
++
++from knowledgenexus.foundation.domain.rules.confluence_attachment_id import (
++    require_confluence_attachment_id,
++)
++from knowledgenexus.foundation.domain.rules.confluence_page_id import (
++    require_confluence_page_id,
++)
++
++
++_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
++_PAGE_ID = re.compile(r"^confluence:page:[0-9]+$")
++_MEDIA_ID = re.compile(r"^confluence:attachment:(?:att)?[0-9]+$")
++_MIME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
++_SOURCE_VERSION = re.compile(r"^[^\x00-\x1f\x7f-\x9f]{1,256}$")
++_RFC3339 = re.compile(
++    r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})T"
++    r"(?:[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.[0-9]+)?"
++    r"(?:Z|[+-][0-9]{2}:[0-9]{2})$"
++)
++_MAX_TEXT_BYTES = 4 * 1024 * 1024
++_MAX_WARNING_BYTES = 512
++_MAX_PAGE_NUMBER = 1_000_000
++_MAX_IMAGE_INDEX = 1_000_000
++_MAX_CAPABILITY_RECORDS = 10_000
++_ASSET_FIELDS = frozenset(
++    {
++        "schema_version",
++        "media_id",
++        "parent_document_id",
++        "source_system",
++        "filename",
++        "mime_type",
++        "size_bytes",
++        "download_status",
++        "processing_status",
++        "relevance",
++        "extracted_text",
++        "summary",
++        "confidence",
++        "raw_uri",
++        "content_hash",
++        "source_version",
++        "updated_at",
++        "crawled_at",
++    }
++)
++
++
++def _filename(value: object) -> str:
++    if type(value) is not str:
++        raise TypeError("filename is invalid")
++    normalized = unicodedata.normalize("NFC", value)
++    if (
++        not normalized
++        or len(normalized.encode("utf-8")) > 512
++        or "/" in normalized
++        or "\\" in normalized
++        or any(ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F for character in normalized)
++    ):
++        raise ValueError("filename is invalid")
++    return normalized
++
++
++def _text(value: object, field: str, *, allow_empty: bool = True) -> str:
++    if type(value) is not str:
++        raise TypeError(f"{field} is invalid")
++    normalized = unicodedata.normalize("NFC", value)
++    if (not allow_empty and not normalized) or len(normalized.encode("utf-8")) > _MAX_TEXT_BYTES:
++        raise ValueError(f"{field} is invalid")
++    if any(ord(character) < 0x20 and character not in "\n\t" for character in normalized):
++        raise ValueError(f"{field} is invalid")
++    return normalized
++
++
++def _id(value: object, *, page: bool) -> str:
++    if type(value) is not str:
++        raise TypeError("identity is invalid")
++    try:
++        return require_confluence_page_id(value) if page else require_confluence_attachment_id(value)
++    except (TypeError, ValueError):
++        raise ValueError("identity is invalid") from None
++
++
++class MediaProcessorKind(StrEnum):
++    DRAWIO = "drawio"
++    PDF_TEXT = "pdf_text"
++    IMAGE_OCR = "image_ocr"
++
++
++class MediaProcessingFailureCategory(StrEnum):
++    INVALID_INPUT = "invalid_input"
++    UNSUPPORTED_MEDIA = "unsupported_media"
++    CAPABILITY_UNAVAILABLE = "capability_unavailable"
++    CAPABILITY_FAILURE = "capability_failure"
++    MALFORMED_RESULT = "malformed_result"
++    LIMIT_EXCEEDED = "limit_exceeded"
++    PARSE_FAILED = "parse_failed"
++    SCHEMA_INVALID = "schema_invalid"
++    INTERNAL_FAILURE = "internal_failure"
++
++
++class MediaProcessingError(Exception):
++    """Sanitized failure from the offline media-processing boundary."""
++
++    def __init__(self, category: MediaProcessingFailureCategory) -> None:
++        if not isinstance(category, MediaProcessingFailureCategory):
++            raise TypeError("category is invalid")
++        self.category = category
++        super().__init__(category.value)
++
++    def __repr__(self) -> str:
++        try:
++            category = self.category.value
++        except Exception:
++            return f"{type(self).__name__}()"
++        return f"{type(self).__name__}(category={category!r})"
++
++
++@dataclass(frozen=True, repr=False)
++class MediaSourceLocator:
++    parent_page_id: str
++    attachment_id: str
++    filename: str
++    raw_uri: str
++    pdf_page_number: int | None = None
++    image_index: int | None = None
++
++    def __post_init__(self) -> None:
++        parent_page_id = _id(self.parent_page_id, page=True)
++        attachment_id = _id(self.attachment_id, page=False)
++        filename = _filename(self.filename)
++        expected_prefix = f"raw://confluence/attachments/{attachment_id}/"
++        if (
++            type(self.raw_uri) is not str
++            or not self.raw_uri.startswith(expected_prefix)
++            or _SHA256.fullmatch(self.raw_uri[len(expected_prefix) :]) is None
++        ):
++            raise ValueError("raw_uri is invalid")
++        if self.pdf_page_number is not None:
++            if type(self.pdf_page_number) is not int or self.pdf_page_number <= 0:
++                raise ValueError("pdf_page_number is invalid")
++        if self.image_index is not None:
++            if type(self.image_index) is not int or self.image_index <= 0:
++                raise ValueError("image_index is invalid")
++        if self.pdf_page_number is not None and self.image_index is not None:
++            raise ValueError("locator kind is invalid")
++        object.__setattr__(self, "parent_page_id", parent_page_id)
++        object.__setattr__(self, "attachment_id", attachment_id)
++        object.__setattr__(self, "filename", filename)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++_CAPABILITIES = {
++    MediaProcessorKind.PDF_TEXT: ("pdf-text-fixture-v1", "1"),
++    MediaProcessorKind.IMAGE_OCR: ("image-ocr-fixture-v1", "1"),
++}
++
++
++def _capability(kind: MediaProcessorKind, name: object, version: object) -> tuple[str, str]:
++    if not isinstance(kind, MediaProcessorKind) or type(name) is not str or type(version) is not str:
++        raise TypeError("capability identity is invalid")
++    expected = _CAPABILITIES.get(kind)
++    if expected != (name, version):
++        raise ValueError("capability identity is invalid")
++    return expected
++
++
++@dataclass(frozen=True, repr=False)
++class PdfPageTextResult:
++    page_number: int
++    text: str
++    table_markdown: str | None = None
++    image_only: bool = False
++
++    def __post_init__(self) -> None:
++        if (
++            type(self.page_number) is not int
++            or not 0 < self.page_number <= _MAX_PAGE_NUMBER
++        ):
++            raise ValueError("page_number is invalid")
++        text = _text(self.text, "text")
++        if self.table_markdown is not None:
++            table = _text(self.table_markdown, "table_markdown")
++        else:
++            table = None
++        if type(self.image_only) is not bool:
++            raise TypeError("image_only is invalid")
++        if self.image_only and (text or table):
++            raise ValueError("image-only page contains text")
++        object.__setattr__(self, "text", text)
++        object.__setattr__(self, "table_markdown", table)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++@dataclass(frozen=True, repr=False)
++class PdfTextExtractionResponse:
++    capability_id: str
++    capability_version: str
++    pages: tuple[PdfPageTextResult, ...]
++
++    def __post_init__(self) -> None:
++        _capability(MediaProcessorKind.PDF_TEXT, self.capability_id, self.capability_version)
++        if type(self.pages) is not tuple:
++            raise TypeError("pages are invalid")
++        if len(self.pages) > _MAX_CAPABILITY_RECORDS:
++            raise ValueError("pages are invalid")
++        rebuilt: list[PdfPageTextResult] = []
++        previous = 0
++        for page in self.pages:
++            if type(page) is not PdfPageTextResult:
++                raise TypeError("pages are invalid")
++            try:
++                rebuilt_page = PdfPageTextResult(
++                    page_number=page.page_number,
++                    text=page.text,
++                    table_markdown=page.table_markdown,
++                    image_only=page.image_only,
++                )
++            except Exception:
++                raise ValueError("pages are invalid") from None
++            if rebuilt_page.page_number <= previous:
++                raise ValueError("page order is invalid")
++            previous = rebuilt_page.page_number
++            rebuilt.append(rebuilt_page)
++        object.__setattr__(self, "pages", tuple(rebuilt))
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++@dataclass(frozen=True, repr=False)
++class OcrLabelResult:
++    image_index: int
++    text: str
++    confidence: float
++
++    def __post_init__(self) -> None:
++        if (
++            type(self.image_index) is not int
++            or not 0 < self.image_index <= _MAX_IMAGE_INDEX
++        ):
++            raise ValueError("image_index is invalid")
++        text = _text(self.text, "text", allow_empty=False)
++        if type(self.confidence) is not float or not math.isfinite(self.confidence):
++            raise TypeError("confidence is invalid")
++        if not 0.0 <= self.confidence <= 1.0:
++            raise ValueError("confidence is invalid")
++        object.__setattr__(self, "text", text)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++@dataclass(frozen=True, repr=False)
++class ImageOcrResponse:
++    capability_id: str
++    capability_version: str
++    labels: tuple[OcrLabelResult, ...]
++
++    def __post_init__(self) -> None:
++        _capability(MediaProcessorKind.IMAGE_OCR, self.capability_id, self.capability_version)
++        if type(self.labels) is not tuple:
++            raise TypeError("labels are invalid")
++        if len(self.labels) > _MAX_CAPABILITY_RECORDS:
++            raise ValueError("labels are invalid")
++        rebuilt: list[OcrLabelResult] = []
++        previous = 0
++        for label in self.labels:
++            if type(label) is not OcrLabelResult:
++                raise TypeError("labels are invalid")
++            try:
++                rebuilt_label = OcrLabelResult(
++                    image_index=label.image_index,
++                    text=label.text,
++                    confidence=label.confidence,
++                )
++            except Exception:
++                raise ValueError("labels are invalid") from None
++            if rebuilt_label.image_index <= previous:
++                raise ValueError("image order is invalid")
++            previous = rebuilt_label.image_index
++            rebuilt.append(rebuilt_label)
++        object.__setattr__(self, "labels", tuple(rebuilt))
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++@dataclass(frozen=True, repr=False)
++class MediaExtractionDetail:
++    ordinal: int
++    locator: MediaSourceLocator
++    processor_kind: MediaProcessorKind
++    capability_id: str
++    capability_version: str
++    status: str
++    text_sha256: str | None = None
++    warning: str | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.ordinal) is not int or self.ordinal <= 0:
++            raise ValueError("ordinal is invalid")
++        if type(self.locator) is not MediaSourceLocator:
++            raise TypeError("locator is invalid")
++        try:
++            locator = MediaSourceLocator(
++                parent_page_id=self.locator.parent_page_id,
++                attachment_id=self.locator.attachment_id,
++                filename=self.locator.filename,
++                raw_uri=self.locator.raw_uri,
++                pdf_page_number=self.locator.pdf_page_number,
++                image_index=self.locator.image_index,
++            )
++        except Exception:
++            raise ValueError("locator is invalid") from None
++        if not isinstance(self.processor_kind, MediaProcessorKind):
++            raise TypeError("processor_kind is invalid")
++        if self.processor_kind in _CAPABILITIES:
++            _capability(self.processor_kind, self.capability_id, self.capability_version)
++        elif (self.capability_id, self.capability_version) != ("stdlib-drawio-v1", "1"):
++            raise ValueError("capability identity is invalid")
++        if type(self.status) is not str or self.status not in {"parsed", "ocr", "failed"}:
++            raise ValueError("status is invalid")
++        if self.text_sha256 is not None and (
++            type(self.text_sha256) is not str or _SHA256.fullmatch(self.text_sha256) is None
++        ):
++            raise ValueError("text_sha256 is invalid")
++        if self.processor_kind is MediaProcessorKind.DRAWIO:
++            if self.locator.pdf_page_number is not None or self.locator.image_index is not None:
++                raise ValueError("draw.io locator is invalid")
++            if self.status not in {"parsed", "failed"}:
++                raise ValueError("draw.io status is invalid")
++        elif self.processor_kind is MediaProcessorKind.PDF_TEXT:
++            if self.locator.pdf_page_number is None or self.locator.image_index is not None:
++                raise ValueError("PDF locator is invalid")
++        elif self.processor_kind is MediaProcessorKind.IMAGE_OCR:
++            if self.locator.image_index is None or self.locator.pdf_page_number is not None:
++                raise ValueError("OCR locator is invalid")
++            if self.status not in {"ocr", "failed"}:
++                raise ValueError("OCR status is invalid")
++        if self.status in {"parsed", "ocr"} and self.text_sha256 is None:
++            raise ValueError("successful detail digest is missing")
++        if self.status == "failed" and self.text_sha256 is not None:
++            raise ValueError("failed detail carries digest")
++        if self.status == "failed" and self.warning is None:
++            raise ValueError("failed detail warning is missing")
++        if self.status in {"parsed", "ocr"} and self.warning is not None:
++            raise ValueError("successful detail carries warning")
++        if self.warning is not None:
++            warning = _text(self.warning, "warning", allow_empty=False)
++            if len(warning.encode("utf-8")) > _MAX_WARNING_BYTES:
++                raise ValueError("warning is invalid")
++            object.__setattr__(self, "warning", warning)
++        object.__setattr__(self, "locator", locator)
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++class _MediaAssetValidator:
++    @staticmethod
++    def validate(asset: object, *, failure_category: MediaProcessingFailureCategory | None) -> dict[str, object]:
++        if type(asset) is not dict:
++            raise ValueError("asset fields are invalid")
++        if any(type(key) is not str for key in asset):
++            raise TypeError("asset keys are invalid")
++        if set(asset) != _ASSET_FIELDS:
++            raise ValueError("asset fields are invalid")
++        copied = dict(asset)
++        if type(copied["schema_version"]) is not str or copied["schema_version"] != "1.0":
++            raise ValueError("asset identity is invalid")
++        if type(copied["source_system"]) is not str or copied["source_system"] != "confluence":
++            raise ValueError("asset identity is invalid")
++        if type(copied["media_id"]) is not str or _MEDIA_ID.fullmatch(copied["media_id"]) is None:
++            raise ValueError("asset media_id is invalid")
++        if type(copied["parent_document_id"]) is not str or _PAGE_ID.fullmatch(copied["parent_document_id"]) is None:
++            raise ValueError("asset parent_document_id is invalid")
++        _filename(copied["filename"])
++        mime_type = copied["mime_type"]
++        if mime_type is not None and (
++            type(mime_type) is not str or _MIME.fullmatch(mime_type.strip().lower()) is None
++        ):
++            raise ValueError("asset mime_type is invalid")
++        size_bytes = copied["size_bytes"]
++        if size_bytes is not None and (type(size_bytes) is not int or size_bytes < 0):
++            raise ValueError("asset size_bytes is invalid")
++        if copied["download_status"] != "downloaded":
++            raise ValueError("asset download_status is invalid")
++        status = copied["processing_status"]
++        if type(status) is not str or status not in {"parsed", "ocr", "failed"}:
++            raise ValueError("asset processing_status is invalid")
++        raw_uri = copied["raw_uri"]
++        if type(raw_uri) is not str or copied["content_hash"] is None:
++            raise ValueError("asset evidence is invalid")
++        if type(copied["content_hash"]) is not str or _SHA256.fullmatch(copied["content_hash"]) is None:
++            raise ValueError("asset content_hash is invalid")
++        attachment_id = copied["media_id"].rsplit(":", 1)[-1]
++        expected_uri = f"raw://confluence/attachments/{attachment_id}/{copied['content_hash']}"
++        if raw_uri != expected_uri:
++            raise ValueError("asset raw_uri is invalid")
++        if copied["source_version"] is not None and (
++            type(copied["source_version"]) is not str
++            or _SOURCE_VERSION.fullmatch(copied["source_version"]) is None
++        ):
++            raise ValueError("asset source_version is invalid")
++        for field in ("updated_at", "crawled_at"):
++            timestamp = copied[field]
++            if timestamp is not None and (type(timestamp) is not str or _RFC3339.fullmatch(timestamp) is None):
++                raise ValueError(f"asset {field} is invalid")
++        if copied["crawled_at"] is None:
++            raise ValueError("asset crawled_at is invalid")
++        for field in ("extracted_text", "summary"):
++            value = copied[field]
++            if value is not None:
++                _text(value, f"asset {field}")
++        if copied["relevance"] not in {"high", "medium", "low", "unknown"}:
++            raise ValueError("asset relevance is invalid")
++        if status == "failed":
++            if any(copied[field] is not None for field in ("extracted_text", "summary", "confidence")):
++                raise ValueError("failed asset carries derived text")
++            if failure_category is None:
++                raise ValueError("failed asset category is missing")
++        else:
++            if type(copied["extracted_text"]) is not str or not copied["extracted_text"]:
++                raise ValueError("processed asset text is invalid")
++            if failure_category is not None:
++                raise ValueError("successful asset carries failure category")
++            if status == "ocr":
++                if type(copied["confidence"]) is not float or not math.isfinite(copied["confidence"]):
++                    raise ValueError("OCR confidence is invalid")
++                if not 0.0 <= copied["confidence"] <= 1.0:
++                    raise ValueError("OCR confidence is invalid")
++            elif copied["confidence"] is not None:
++                raise ValueError("parsed asset confidence is invalid")
++        return copied
++
++
++@dataclass(frozen=True, repr=False)
++class MediaProcessingResult:
++    asset: dict[str, object]
++    details: tuple[MediaExtractionDetail, ...]
++    failure_category: MediaProcessingFailureCategory | None = None
++
++    def __post_init__(self) -> None:
++        if self.failure_category is not None and not isinstance(
++            self.failure_category, MediaProcessingFailureCategory
++        ):
++            raise TypeError("failure_category is invalid")
++        asset = _MediaAssetValidator.validate(self.asset, failure_category=self.failure_category)
++        if type(self.details) is not tuple or not self.details:
++            raise ValueError("details are invalid")
++        rebuilt: list[MediaExtractionDetail] = []
++        seen_locators: set[tuple[object, ...]] = set()
++        for expected, detail in enumerate(self.details, start=1):
++            if type(detail) is not MediaExtractionDetail:
++                raise TypeError("details are invalid")
++            try:
++                copied = MediaExtractionDetail(
++                    ordinal=detail.ordinal,
++                    locator=detail.locator,
++                    processor_kind=detail.processor_kind,
++                    capability_id=detail.capability_id,
++                    capability_version=detail.capability_version,
++                    status=detail.status,
++                    text_sha256=detail.text_sha256,
++                    warning=detail.warning,
++                )
++            except Exception:
++                raise ValueError("details are invalid") from None
++            if copied.ordinal != expected:
++                raise ValueError("detail order is invalid")
++            locator_key = (
++                copied.locator.parent_page_id,
++                copied.locator.attachment_id,
++                copied.locator.raw_uri,
++                copied.locator.pdf_page_number,
++                copied.locator.image_index,
++            )
++            if locator_key in seen_locators:
++                raise ValueError("duplicate detail locator")
++            seen_locators.add(locator_key)
++            rebuilt.append(copied)
++        status = asset["processing_status"]
++        if any(detail.status != status for detail in rebuilt):
++            raise ValueError("detail status mismatch")
++        if len({detail.processor_kind for detail in rebuilt}) != 1:
++            raise ValueError("detail processor mismatch")
++        for detail in rebuilt:
++            locator = detail.locator
++            if (
++                f"confluence:page:{locator.parent_page_id.removeprefix('confluence:page:')}"
++                != asset["parent_document_id"]
++                or f"confluence:attachment:{locator.attachment_id}"
++                != asset["media_id"]
++                or locator.raw_uri != asset["raw_uri"]
++            ):
++                raise ValueError("detail asset binding mismatch")
++        object.__setattr__(self, "asset", asset)
++        object.__setattr__(self, "details", tuple(rebuilt))
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}()"
++
++
++def text_digest(value: str) -> str:
++    if type(value) is not str:
++        raise TypeError("text is invalid")
++    return hashlib.sha256(value.encode("utf-8")).hexdigest()
++
++
++__all__ = [
++    "ImageOcrResponse",
++    "MediaExtractionDetail",
++    "MediaProcessingError",
++    "MediaProcessingFailureCategory",
++    "MediaProcessingResult",
++    "MediaProcessorKind",
++    "MediaSourceLocator",
++    "OcrLabelResult",
++    "PdfPageTextResult",
++    "PdfTextExtractionResponse",
++    "text_digest",
++]
+diff --git a/src/knowledgenexus/foundation/infrastructure/processors/__init__.py b/src/knowledgenexus/foundation/infrastructure/processors/__init__.py
+index 54abea7..1d82ecb 100644
+--- a/src/knowledgenexus/foundation/infrastructure/processors/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/processors/__init__.py
+@@ -4,8 +4,20 @@ from knowledgenexus.foundation.infrastructure.processors.confluence_raw_page_map
+ from knowledgenexus.foundation.infrastructure.processors.confluence_storage_xhtml_normalizer import (  # noqa: E501
+     ConfluenceStorageXhtmlNormalizer,
+ )
++from knowledgenexus.foundation.infrastructure.processors.drawio_xml_processor import (
++    DrawioXmlProcessor,
++)
++from knowledgenexus.foundation.infrastructure.processors.media_attachment_processors import (
++    DrawioProcessor,
++    ImageOcrProcessor,
++    PdfTextProcessor,
++)
+ 
+ __all__ = [
+     "ConfluenceDataCenterRawPageMapper",
+     "ConfluenceStorageXhtmlNormalizer",
++    "DrawioXmlProcessor",
++    "DrawioProcessor",
++    "ImageOcrProcessor",
++    "PdfTextProcessor",
+ ]
+diff --git a/src/knowledgenexus/foundation/infrastructure/processors/drawio_xml_processor.py b/src/knowledgenexus/foundation/infrastructure/processors/drawio_xml_processor.py
+new file mode 100644
+index 0000000..e7d8508
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/processors/drawio_xml_processor.py
+@@ -0,0 +1,498 @@
++"""Bounded, offline draw.io XML extraction.
++
++This module intentionally uses only :mod:`xml.etree.ElementTree`.  It never
++loads a diagram engine, follows links, reads files, or performs network I/O.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import re
++import unicodedata
++import xml.etree.ElementTree as ET
++from collections.abc import Iterable
++
++from knowledgenexus.foundation.domain.models.drawio_xml import (
++    DrawioParseResult,
++    DrawioXmlEdge,
++    DrawioXmlFailureCategory,
++    DrawioXmlLimits,
++    DrawioXmlProcessingError,
++    DrawioXmlVertex,
++)
++
++
++_UNSAFE_DECLARATION = re.compile(rb"<!\s*(?:doctype|entity|\[)", re.IGNORECASE)
++_MAX_CELL_ID_BYTES = 512
++
++# These cover mxCell attributes emitted by current diagrams.net releases.
++# Unknown attributes are rejected so an unexpected XML shape does not silently
++# become a different extraction contract.
++_CELL_ATTRIBUTES = frozenset(
++    {
++        "id",
++        "value",
++        "label",
++        "style",
++        "vertex",
++        "edge",
++        "parent",
++        "source",
++        "target",
++        "connectable",
++        "visible",
++        "collapsed",
++        "html",
++        "link",
++        "tooltip",
++        "placeholder",
++        "movable",
++        "resizable",
++        "rotatable",
++        "deletable",
++        "cloneable",
++        "swimlane",
++        "startSize",
++        "alternateBounds",
++        "foldable",
++        "container",
++        "treeFoldingCode",
++        "sourcePort",
++        "targetPort",
++        "entryX",
++        "entryY",
++        "entryDx",
++        "entryDy",
++        "exitX",
++        "exitY",
++        "exitDx",
++        "exitDy",
++    }
++)
++_DESCENDANT_ELEMENTS = frozenset({"mxGeometry", "mxPoint", "mxRectangle", "Array"})
++
++
++def _fail(category: DrawioXmlFailureCategory) -> None:
++    raise DrawioXmlProcessingError(category) from None
++
++
++def _local_name(tag: object) -> str:
++    if type(tag) is not str:
++        _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++    # Namespaced draw.io content would make the accepted shape ambiguous.  The
++    # canonical export uses unqualified mx* elements, so reject namespaces.
++    if "}" in tag or ":" in tag:
++        _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++    return tag
++
++
++def _normalize_text(value: object, field: str, *, max_bytes: int, allow_empty: bool = True) -> str:
++    if type(value) is not str:
++        _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++    normalized = unicodedata.normalize("NFC", value)
++    if not allow_empty and not normalized:
++        _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++    if len(normalized.encode("utf-8")) > max_bytes:
++        _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++    # XML 1.0 does not permit NUL/surrogates; reject them even when a forged
++    # ElementTree node is supplied by a test or adapter.
++    if any(
++        ord(character) == 0
++        or 0xD800 <= ord(character) <= 0xDFFF
++        for character in normalized
++    ):
++        _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++    return normalized
++
++
++def _copy_limits(value: object) -> DrawioXmlLimits:
++    if type(value) is not DrawioXmlLimits:
++        _fail(DrawioXmlFailureCategory.INVALID_INPUT)
++    try:
++        if set(vars(value)) != {
++            "max_bytes",
++            "max_nodes",
++            "max_edges",
++            "max_depth",
++            "max_output_bytes",
++            "max_label_bytes",
++        }:
++            _fail(DrawioXmlFailureCategory.INVALID_INPUT)
++        return DrawioXmlLimits(
++            max_bytes=value.max_bytes,
++            max_nodes=value.max_nodes,
++            max_edges=value.max_edges,
++            max_depth=value.max_depth,
++            max_output_bytes=value.max_output_bytes,
++            max_label_bytes=value.max_label_bytes,
++        )
++    except Exception:
++        _fail(DrawioXmlFailureCategory.INVALID_INPUT)
++
++
++class DrawioXmlProcessor:
++    """Parse one already-materialized draw.io body deterministically."""
++
++    def __init__(
++        self,
++        limits: object | None = None,
++        *,
++        max_bytes: int = DrawioXmlLimits.max_bytes,
++        max_nodes: int = DrawioXmlLimits.max_nodes,
++        max_edges: int = DrawioXmlLimits.max_edges,
++        max_depth: int = DrawioXmlLimits.max_depth,
++        max_output_bytes: int = DrawioXmlLimits.max_output_bytes,
++        max_label_bytes: int = DrawioXmlLimits.max_label_bytes,
++    ) -> None:
++        if limits is not None:
++            if any(
++                value != default
++                for value, default in (
++                    (max_bytes, DrawioXmlLimits.max_bytes),
++                    (max_nodes, DrawioXmlLimits.max_nodes),
++                    (max_edges, DrawioXmlLimits.max_edges),
++                    (max_depth, DrawioXmlLimits.max_depth),
++                    (max_output_bytes, DrawioXmlLimits.max_output_bytes),
++                    (max_label_bytes, DrawioXmlLimits.max_label_bytes),
++                )
++            ):
++                _fail(DrawioXmlFailureCategory.INVALID_INPUT)
++            self._limits = _copy_limits(limits)
++            return
++        try:
++            self._limits = DrawioXmlLimits(
++                max_bytes=max_bytes,
++                max_nodes=max_nodes,
++                max_edges=max_edges,
++                max_depth=max_depth,
++                max_output_bytes=max_output_bytes,
++                max_label_bytes=max_label_bytes,
++            )
++        except Exception:
++            _fail(DrawioXmlFailureCategory.INVALID_INPUT)
++
++    def process(self, body: object) -> DrawioParseResult:
++        """Return a bounded parse result or a category-only failure.
++
++        The exact ``bytes`` check happens before any indexing or decoding, and
++        the processor rebuilds its limits on every call to defend against
++        forged/frozen dataclass instances.
++        """
++
++        try:
++            limits = _copy_limits(self._limits)
++            if type(body) is not bytes:
++                _fail(DrawioXmlFailureCategory.INVALID_INPUT)
++            if len(body) > limits.max_bytes:
++                _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++            if _UNSAFE_DECLARATION.search(body) is not None:
++                _fail(DrawioXmlFailureCategory.XML_UNSAFE)
++            root = ET.fromstring(body)
++            return self._extract(root, byte_count=len(body), limits=limits)
++        except DrawioXmlProcessingError:
++            raise
++        except (ET.ParseError, UnicodeError):
++            _fail(DrawioXmlFailureCategory.XML_INVALID)
++        except Exception:
++            # Do not expose parser internals, forged-object AttributeErrors, or
++            # implementation details through this public boundary.
++            _fail(DrawioXmlFailureCategory.INTERNAL_FAILURE)
++
++    parse = process
++    extract = process
++
++    def _extract(
++        self,
++        root: object,
++        *,
++        byte_count: int,
++        limits: DrawioXmlLimits,
++    ) -> DrawioParseResult:
++        if type(root) is not ET.Element:
++            _fail(DrawioXmlFailureCategory.XML_INVALID)
++        self._check_tree_bounds(root, limits)
++        root_name = _local_name(root.tag)
++        if root_name == "mxGraphModel":
++            diagrams = (("diagram-1", root),)
++        elif root_name == "mxfile":
++            diagrams = self._read_mxfile(root)
++        else:
++            _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++
++        vertices: list[DrawioXmlVertex] = []
++        edges: list[DrawioXmlEdge] = []
++        for diagram_id, graph_model in diagrams:
++            graph_vertices, graph_edges = self._read_graph(
++                graph_model, diagram_id=diagram_id, limits=limits
++            )
++            vertices.extend(graph_vertices)
++            edges.extend(graph_edges)
++        vertices.sort(key=lambda item: (item.diagram_id, item.cell_id))
++        edges.sort(key=lambda item: (item.diagram_id, item.cell_id))
++        if len(vertices) > limits.max_nodes or len(edges) > limits.max_edges:
++            _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++        extracted_text = self._canonical_text(vertices, edges, limits)
++        digest = hashlib.sha256(extracted_text.encode("utf-8")).hexdigest()
++        try:
++            return DrawioParseResult(
++                extracted_text=extracted_text,
++                vertices=tuple(vertices),
++                edges=tuple(edges),
++                digest=digest,
++                byte_count=byte_count,
++                node_count=len(vertices),
++                edge_count=len(edges),
++            )
++        except DrawioXmlProcessingError:
++            raise
++        except Exception:
++            _fail(DrawioXmlFailureCategory.OUTPUT_INVALID)
++
++    @staticmethod
++    def _read_mxfile(root: ET.Element) -> tuple[tuple[str, ET.Element], ...]:
++        diagrams: list[tuple[str, ET.Element]] = []
++        seen_ids: set[str] = set()
++        children = list(root)
++        if not children:
++            _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++        for index, diagram in enumerate(children, start=1):
++            if _local_name(diagram.tag) != "diagram":
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            if diagram.text and diagram.text.strip():
++                # Base64/deflate-compressed pages are intentionally outside
++                # this source-first processor.
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            graph_models = [child for child in list(diagram) if _local_name(child.tag) == "mxGraphModel"]
++            if len(graph_models) != 1 or len(list(diagram)) != 1:
++                # Compressed/base64 pages and arbitrary children are outside
++                # this source-first bounded processor.
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            raw_id = diagram.attrib.get("id") or diagram.attrib.get("name")
++            diagram_id = raw_id if raw_id else f"diagram-{index}"
++            diagram_id = _normalize_text(
++                diagram_id,
++                "diagram_id",
++                max_bytes=_MAX_CELL_ID_BYTES,
++                allow_empty=False,
++            )
++            if diagram_id in seen_ids:
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            seen_ids.add(diagram_id)
++            diagrams.append((diagram_id, graph_models[0]))
++        # XML child order is not a deterministic identity; sorting by the
++        # stable diagram ID makes repeated exports independent of page order.
++        return tuple(sorted(diagrams, key=lambda item: item[0]))
++
++    def _read_graph(
++        self,
++        graph_model: ET.Element,
++        *,
++        diagram_id: str,
++        limits: DrawioXmlLimits,
++    ) -> tuple[tuple[DrawioXmlVertex, ...], tuple[DrawioXmlEdge, ...]]:
++        if _local_name(graph_model.tag) != "mxGraphModel":
++            _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++        children = list(graph_model)
++        roots = [child for child in children if _local_name(child.tag) == "root"]
++        if len(roots) != 1 or len(children) != 1:
++            _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++        cells = list(roots[0])
++        if any(_local_name(cell.tag) != "mxCell" for cell in cells):
++            _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++        if len(cells) > limits.max_nodes + limits.max_edges + 2:
++            _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++
++        by_id: dict[str, ET.Element] = {}
++        for cell in cells:
++            if set(cell.attrib) - _CELL_ATTRIBUTES:
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            raw_id = cell.attrib.get("id")
++            cell_id = _normalize_text(
++                raw_id,
++                "cell_id",
++                max_bytes=_MAX_CELL_ID_BYTES,
++                allow_empty=False,
++            )
++            if cell_id in by_id:
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            by_id[cell_id] = cell
++            self._validate_cell_descendants(cell)
++
++        parent_by_id: dict[str, str | None] = {}
++        for cell_id, cell in by_id.items():
++            parent = cell.attrib.get("parent")
++            if parent is not None:
++                parent = _normalize_text(
++                    parent,
++                    "parent_id",
++                    max_bytes=_MAX_CELL_ID_BYTES,
++                    allow_empty=False,
++                )
++                if parent not in by_id:
++                    _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            parent_by_id[cell_id] = parent
++
++        # Validate every parent chain, including structural cells that do not
++        # produce output records.  Memoization keeps this linear for deeply
++        # nested container chains instead of repeatedly walking each prefix.
++        ancestry_by_id = self._ancestry_map(parent_by_id, max_depth=limits.max_depth)
++
++        vertices: list[DrawioXmlVertex] = []
++        edges: list[DrawioXmlEdge] = []
++        for cell_id, cell in by_id.items():
++            vertex_flag = cell.attrib.get("vertex") == "1"
++            edge_flag = cell.attrib.get("edge") == "1"
++            if vertex_flag and edge_flag:
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            if vertex_flag:
++                raw_label = cell.attrib.get("value", cell.attrib.get("label", ""))
++                label = _normalize_text(
++                    raw_label,
++                    "label",
++                    max_bytes=limits.max_label_bytes,
++                )
++                vertices.append(
++                    DrawioXmlVertex(
++                        diagram_id=diagram_id,
++                        cell_id=cell_id,
++                        label=label,
++                        container_ids=ancestry_by_id[cell_id],
++                    )
++                )
++            elif edge_flag:
++                source = cell.attrib.get("source")
++                target = cell.attrib.get("target")
++                for field, value in (("source_id", source), ("target_id", target)):
++                    if value is not None:
++                        value = _normalize_text(
++                            value,
++                            field,
++                            max_bytes=_MAX_CELL_ID_BYTES,
++                            allow_empty=False,
++                        )
++                        if value not in by_id:
++                            _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++                        if field == "source_id":
++                            source = value
++                        else:
++                            target = value
++                edges.append(
++                    DrawioXmlEdge(
++                        diagram_id=diagram_id,
++                        cell_id=cell_id,
++                        source_id=source,
++                        target_id=target,
++                        container_ids=ancestry_by_id[cell_id],
++                    )
++                )
++        if len(vertices) > limits.max_nodes or len(edges) > limits.max_edges:
++            _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++        return tuple(vertices), tuple(edges)
++
++    @staticmethod
++    def _validate_cell_descendants(cell: ET.Element) -> None:
++        if cell.text and cell.text.strip():
++            _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++        for child in cell.iter():
++            if child is cell:
++                continue
++            if _local_name(child.tag) not in _DESCENDANT_ELEMENTS:
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            if child.text and child.text.strip():
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            if child.tail and child.tail.strip():
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++
++    @staticmethod
++    def _ancestry_map(
++        parent_by_id: dict[str, str | None],
++        *,
++        max_depth: int,
++    ) -> dict[str, tuple[str, ...]]:
++        cache: dict[str, tuple[str, ...]] = {}
++        for start in parent_by_id:
++            if start in cache:
++                continue
++            path: list[str] = []
++            path_index: dict[str, int] = {}
++            current: str | None = start
++            while current is not None and current not in cache:
++                if current in path_index:
++                    _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++                path_index[current] = len(path)
++                path.append(current)
++                current = parent_by_id.get(current)
++                if len(path) > max_depth + 1:
++                    _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++            if current is not None and current in path_index:
++                _fail(DrawioXmlFailureCategory.STRUCTURE_INVALID)
++            for node in reversed(path):
++                parent = parent_by_id.get(node)
++                inherited = cache.get(parent, ()) if parent is not None else ()
++                cache[node] = inherited + ((parent,) if parent is not None else ())
++        return cache
++
++    @staticmethod
++    def _check_tree_bounds(root: ET.Element, limits: DrawioXmlLimits) -> None:
++        stack: list[tuple[ET.Element, int]] = [(root, 1)]
++        count = 0
++        while stack:
++            element, depth = stack.pop()
++            count += 1
++            if depth > limits.max_depth:
++                _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++            if count > limits.max_nodes + limits.max_edges + limits.max_depth + 16:
++                _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++            for child in list(element):
++                stack.append((child, depth + 1))
++
++    @staticmethod
++    def _canonical_text(
++        vertices: Iterable[DrawioXmlVertex],
++        edges: Iterable[DrawioXmlEdge],
++        limits: DrawioXmlLimits,
++    ) -> str:
++        records: list[str] = []
++        for vertex in vertices:
++            records.append(
++                json.dumps(
++                    {
++                        "cell_id": vertex.cell_id,
++                        "container_ids": list(vertex.container_ids),
++                        "diagram_id": vertex.diagram_id,
++                        "kind": "vertex",
++                        "label": vertex.label,
++                    },
++                    ensure_ascii=False,
++                    sort_keys=True,
++                    separators=(",", ":"),
++                    allow_nan=False,
++                )
++            )
++        for edge in edges:
++            records.append(
++                json.dumps(
++                    {
++                        "cell_id": edge.cell_id,
++                        "container_ids": list(edge.container_ids),
++                        "diagram_id": edge.diagram_id,
++                        "kind": "edge",
++                        "source_id": edge.source_id,
++                        "target_id": edge.target_id,
++                    },
++                    ensure_ascii=False,
++                    sort_keys=True,
++                    separators=(",", ":"),
++                    allow_nan=False,
++                )
++            )
++        if not records:
++            records.append('{"kind":"empty"}')
++        output = unicodedata.normalize("NFC", "\n".join(records))
++        if len(output.encode("utf-8")) > limits.max_output_bytes:
++            _fail(DrawioXmlFailureCategory.BOUNDS_EXCEEDED)
++        return output
++
++
++__all__ = ["DrawioXmlProcessor"]
+diff --git a/src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py b/src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py
+new file mode 100644
+index 0000000..916b397
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/processors/media_attachment_processors.py
+@@ -0,0 +1,559 @@
++from __future__ import annotations
++
++import hashlib
++
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++)
++from knowledgenexus.foundation.domain.models.drawio_xml import (
++    DrawioXmlFailureCategory,
++    DrawioXmlProcessingError,
++)
++from knowledgenexus.foundation.domain.models.media_materialization import (
++    ConfluenceAttachmentObservation,
++)
++from knowledgenexus.foundation.domain.models.media_processing import (
++    ImageOcrResponse,
++    MediaExtractionDetail,
++    MediaProcessingError,
++    MediaProcessingFailureCategory,
++    MediaProcessingResult,
++    MediaProcessorKind,
++    MediaSourceLocator,
++    OcrLabelResult,
++    PdfPageTextResult,
++    PdfTextExtractionResponse,
++    text_digest,
++)
++from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
++from knowledgenexus.foundation.ports.media_processing_port import (
++    ImageOcrPort,
++    PdfTextExtractionPort,
++)
++from knowledgenexus.foundation.infrastructure.processors.drawio_xml_processor import (
++    DrawioXmlProcessor,
++)
++from knowledgenexus.shared.contracts.foundation.schema_validator import (
++    FoundationSchemaValidator,
++)
++
++
++_DRAWIO_CAPABILITY = ("stdlib-drawio-v1", "1")
++_PDF_CAPABILITY = ("pdf-text-fixture-v1", "1")
++_OCR_CAPABILITY = ("image-ocr-fixture-v1", "1")
++_MAX_EXTRACTED_BYTES = 8 * 1024 * 1024
++
++
++def _revalidate_envelope(value: object) -> MediaAttachmentBodyEnvelope:
++    if type(value) is not MediaAttachmentBodyEnvelope:
++        raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++    try:
++        return MediaAttachmentBodyEnvelope(
++            format_version=value.format_version,
++            evidence_kind=value.evidence_kind,
++            attachment_id=value.attachment_id,
++            parent_page_id=value.parent_page_id,
++            filename=value.filename,
++            source_version=value.source_version,
++            http_status=value.http_status,
++            body_encoding=value.body_encoding,
++            body_bytes=value.body_bytes,
++        )
++    except Exception:
++        raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++
++
++def _revalidate_observation(value: object) -> ConfluenceAttachmentObservation:
++    if type(value) is not ConfluenceAttachmentObservation:
++        raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++    try:
++        return ConfluenceAttachmentObservation(
++            attachment_id=value.attachment_id,
++            parent_page_id=value.parent_page_id,
++            filename=value.filename,
++            mime_type=value.mime_type,
++            size_bytes=value.size_bytes,
++            source_version=value.source_version,
++            updated_at=value.updated_at,
++            crawled_at=value.crawled_at,
++        )
++    except Exception:
++        raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++
++
++def _validate_binding(
++    envelope: MediaAttachmentBodyEnvelope,
++    observation: ConfluenceAttachmentObservation,
++) -> None:
++    if (
++        envelope.attachment_id != observation.attachment_id
++        or envelope.parent_page_id != observation.parent_page_id
++        or envelope.filename != observation.filename
++        or envelope.source_version != observation.source_version
++        or (observation.size_bytes is not None and observation.size_bytes != len(envelope.body_bytes))
++    ):
++        raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++
++
++def _revalidate_pdf_response(value: object) -> PdfTextExtractionResponse:
++    if type(value) is not PdfTextExtractionResponse:
++        raise MediaProcessingError(MediaProcessingFailureCategory.MALFORMED_RESULT)
++    try:
++        return PdfTextExtractionResponse(
++            capability_id=value.capability_id,
++            capability_version=value.capability_version,
++            pages=value.pages,
++        )
++    except Exception:
++        raise MediaProcessingError(MediaProcessingFailureCategory.MALFORMED_RESULT) from None
++
++
++def _revalidate_ocr_response(value: object) -> ImageOcrResponse:
++    if type(value) is not ImageOcrResponse:
++        raise MediaProcessingError(MediaProcessingFailureCategory.MALFORMED_RESULT)
++    try:
++        return ImageOcrResponse(
++            capability_id=value.capability_id,
++            capability_version=value.capability_version,
++            labels=value.labels,
++        )
++    except Exception:
++        raise MediaProcessingError(MediaProcessingFailureCategory.MALFORMED_RESULT) from None
++
++
++def _asset(
++    *,
++    envelope: MediaAttachmentBodyEnvelope,
++    observation: ConfluenceAttachmentObservation,
++    status: str,
++    extracted_text: str | None,
++    confidence: float | None,
++) -> dict[str, object]:
++    digest = hashlib.sha256(envelope.body_bytes).hexdigest()
++    return {
++        "schema_version": "1.0",
++        "media_id": DocumentIdGenerator.confluence_attachment_id(observation.attachment_id),
++        "parent_document_id": DocumentIdGenerator.confluence_page_id(observation.parent_page_id),
++        "source_system": "confluence",
++        "filename": observation.filename,
++        "mime_type": observation.mime_type,
++        "size_bytes": observation.size_bytes,
++        "download_status": "downloaded",
++        "processing_status": status,
++        "relevance": "high",
++        "extracted_text": extracted_text,
++        "summary": None,
++        "confidence": confidence,
++        "raw_uri": f"raw://confluence/attachments/{observation.attachment_id}/{digest}",
++        "content_hash": digest,
++        "source_version": observation.source_version,
++        "updated_at": observation.updated_at,
++        "crawled_at": observation.crawled_at,
++    }
++
++
++def _locator(
++    *,
++    observation: ConfluenceAttachmentObservation,
++    raw_uri: str,
++    pdf_page_number: int | None = None,
++    image_index: int | None = None,
++) -> MediaSourceLocator:
++    return MediaSourceLocator(
++        parent_page_id=observation.parent_page_id,
++        attachment_id=observation.attachment_id,
++        filename=observation.filename,
++        raw_uri=raw_uri,
++        pdf_page_number=pdf_page_number,
++        image_index=image_index,
++    )
++
++
++class PdfTextProcessor:
++    def __init__(self, *, capability: PdfTextExtractionPort, schema_validator: object | None = None) -> None:
++        try:
++            extract = getattr(capability, "extract_pdf_text", None)
++        except Exception:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++        if not callable(extract):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        try:
++            validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++            validate = getattr(validator, "validate_record", None)
++        except Exception:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++        if not callable(validate):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        self._capability = capability
++        self._validator = validator
++
++    def process(self, *, envelope: object, observation: object) -> MediaProcessingResult:
++        body_envelope = _revalidate_envelope(envelope)
++        attachment = _revalidate_observation(observation)
++        _validate_binding(body_envelope, attachment)
++        try:
++            response = self._capability.extract_pdf_text(body=body_envelope.body_bytes)
++        except Exception:
++            return self._failure(
++                body_envelope=body_envelope,
++                observation=attachment,
++                category=MediaProcessingFailureCategory.CAPABILITY_FAILURE,
++                warning="pdf capability failed",
++            )
++        try:
++            response = _revalidate_pdf_response(response)
++        except MediaProcessingError as error:
++            return self._failure(
++                body_envelope=body_envelope,
++                observation=attachment,
++                category=error.category,
++                warning="pdf capability result invalid",
++            )
++        raw_uri = _asset(
++            envelope=body_envelope,
++            observation=attachment,
++            status="failed",
++            extracted_text=None,
++            confidence=None,
++        )["raw_uri"]
++        assert type(raw_uri) is str
++        if not response.pages or any(page.image_only for page in response.pages):
++            return self._failure(
++                body_envelope=body_envelope,
++                observation=attachment,
++                category=MediaProcessingFailureCategory.CAPABILITY_UNAVAILABLE,
++                warning="pdf image-only page deferred",
++                response=response,
++                raw_uri=raw_uri,
++            )
++        parts: list[str] = []
++        details: list[MediaExtractionDetail] = []
++        output_bytes = 0
++        for index, page in enumerate(response.pages, start=1):
++            page_text = page.text
++            if page.table_markdown:
++                page_text = f"{page_text}\n{page.table_markdown}" if page_text else page.table_markdown
++            marked = f"[pdf_page: {page.page_number}]\n{page_text}".strip()
++            projected_bytes = output_bytes + (2 if parts else 0) + len(marked.encode("utf-8"))
++            if projected_bytes > _MAX_EXTRACTED_BYTES:
++                return self._failure(
++                    body_envelope=body_envelope,
++                    observation=attachment,
++                    category=MediaProcessingFailureCategory.LIMIT_EXCEEDED,
++                    warning="pdf output limit exceeded",
++                )
++            parts.append(marked)
++            output_bytes = projected_bytes
++            details.append(
++                MediaExtractionDetail(
++                    ordinal=index,
++                    locator=_locator(
++                        observation=attachment,
++                        raw_uri=raw_uri,
++                        pdf_page_number=page.page_number,
++                    ),
++                    processor_kind=MediaProcessorKind.PDF_TEXT,
++                    capability_id=response.capability_id,
++                    capability_version=response.capability_version,
++                    status="parsed",
++                    text_sha256=text_digest(marked),
++                )
++            )
++        text = "\n\n".join(parts)
++        if len(text.encode("utf-8")) > _MAX_EXTRACTED_BYTES:
++            return self._failure(
++                body_envelope=body_envelope,
++                observation=attachment,
++                category=MediaProcessingFailureCategory.LIMIT_EXCEEDED,
++                warning="pdf output limit exceeded",
++                response=response,
++                raw_uri=raw_uri,
++            )
++        asset = _asset(
++            envelope=body_envelope,
++            observation=attachment,
++            status="parsed",
++            extracted_text=text,
++            confidence=None,
++        )
++        self._validate_asset(asset)
++        return MediaProcessingResult(asset=asset, details=tuple(details))
++
++    def _failure(
++        self,
++        *,
++        body_envelope: MediaAttachmentBodyEnvelope,
++        observation: ConfluenceAttachmentObservation,
++        category: MediaProcessingFailureCategory,
++        warning: str,
++        response: PdfTextExtractionResponse | None = None,
++        raw_uri: str | None = None,
++    ) -> MediaProcessingResult:
++        if raw_uri is None:
++            raw_uri = _asset(
++                envelope=body_envelope,
++                observation=observation,
++                status="failed",
++                extracted_text=None,
++                confidence=None,
++            )["raw_uri"]
++        assert type(raw_uri) is str
++        pages = response.pages if response is not None and response.pages else (PdfPageTextResult(page_number=1, text=""),)
++        details = tuple(
++            MediaExtractionDetail(
++                ordinal=index,
++                locator=_locator(observation=observation, raw_uri=raw_uri, pdf_page_number=page.page_number),
++                processor_kind=MediaProcessorKind.PDF_TEXT,
++                capability_id=_PDF_CAPABILITY[0],
++                capability_version=_PDF_CAPABILITY[1],
++                status="failed",
++                warning=warning,
++            )
++            for index, page in enumerate(pages, start=1)
++        )
++        asset = _asset(
++            envelope=body_envelope,
++            observation=observation,
++            status="failed",
++            extracted_text=None,
++            confidence=None,
++        )
++        return MediaProcessingResult(asset=asset, details=details, failure_category=category)
++
++    def _validate_asset(self, asset: dict[str, object]) -> None:
++        try:
++            self._validator.validate_record("MediaAsset", asset)
++        except Exception:
++            raise MediaProcessingError(MediaProcessingFailureCategory.SCHEMA_INVALID) from None
++
++
++class ImageOcrProcessor:
++    def __init__(self, *, capability: ImageOcrPort, schema_validator: object | None = None) -> None:
++        try:
++            extract = getattr(capability, "extract_labels", None)
++        except Exception:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++        if not callable(extract):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        try:
++            validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++            validate = getattr(validator, "validate_record", None)
++        except Exception:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++        if not callable(validate):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        self._capability = capability
++        self._validator = validator
++
++    def process(self, *, envelope: object, observation: object) -> MediaProcessingResult:
++        body_envelope = _revalidate_envelope(envelope)
++        attachment = _revalidate_observation(observation)
++        _validate_binding(body_envelope, attachment)
++        try:
++            response = self._capability.extract_labels(body=body_envelope.body_bytes)
++            response = _revalidate_ocr_response(response)
++        except MediaProcessingError as error:
++            return self._failure(body_envelope, attachment, error.category, "OCR capability result invalid")
++        except Exception:
++            return self._failure(
++                body_envelope,
++                attachment,
++                MediaProcessingFailureCategory.CAPABILITY_FAILURE,
++                "OCR capability failed",
++            )
++        if not response.labels:
++            return self._failure(
++                body_envelope,
++                attachment,
++                MediaProcessingFailureCategory.PARSE_FAILED,
++                "OCR produced no labels",
++            )
++        raw_uri = _asset(
++            envelope=body_envelope,
++            observation=attachment,
++            status="failed",
++            extracted_text=None,
++            confidence=None,
++        )["raw_uri"]
++        assert type(raw_uri) is str
++        parts: list[str] = []
++        details: list[MediaExtractionDetail] = []
++        output_bytes = 0
++        for index, label in enumerate(response.labels, start=1):
++            marked = f"[image: {label.image_index}] {label.text}"
++            projected_bytes = output_bytes + (1 if parts else 0) + len(marked.encode("utf-8"))
++            if projected_bytes > _MAX_EXTRACTED_BYTES:
++                return self._failure(
++                    body_envelope,
++                    attachment,
++                    MediaProcessingFailureCategory.LIMIT_EXCEEDED,
++                    "OCR output limit exceeded",
++                )
++            parts.append(marked)
++            output_bytes = projected_bytes
++            details.append(
++                MediaExtractionDetail(
++                    ordinal=index,
++                    locator=_locator(observation=attachment, raw_uri=raw_uri, image_index=label.image_index),
++                    processor_kind=MediaProcessorKind.IMAGE_OCR,
++                    capability_id=response.capability_id,
++                    capability_version=response.capability_version,
++                    status="ocr",
++                    text_sha256=text_digest(marked),
++                )
++            )
++        confidence = sum(label.confidence for label in response.labels) / len(response.labels)
++        if len("\n".join(parts).encode("utf-8")) > _MAX_EXTRACTED_BYTES:
++            return self._failure(
++                body_envelope,
++                attachment,
++                MediaProcessingFailureCategory.LIMIT_EXCEEDED,
++                "OCR output limit exceeded",
++            )
++        asset = _asset(
++            envelope=body_envelope,
++            observation=attachment,
++            status="ocr",
++            extracted_text="\n".join(parts),
++            confidence=confidence,
++        )
++        try:
++            self._validator.validate_record("MediaAsset", asset)
++        except Exception:
++            raise MediaProcessingError(MediaProcessingFailureCategory.SCHEMA_INVALID) from None
++        return MediaProcessingResult(asset=asset, details=tuple(details))
++
++    @staticmethod
++    def _failure(
++        body_envelope: MediaAttachmentBodyEnvelope,
++        observation: ConfluenceAttachmentObservation,
++        category: MediaProcessingFailureCategory,
++        warning: str,
++    ) -> MediaProcessingResult:
++        asset = _asset(
++            envelope=body_envelope,
++            observation=observation,
++            status="failed",
++            extracted_text=None,
++            confidence=None,
++        )
++        raw_uri = asset["raw_uri"]
++        assert type(raw_uri) is str
++        detail = MediaExtractionDetail(
++            ordinal=1,
++            locator=_locator(observation=observation, raw_uri=raw_uri, image_index=1),
++            processor_kind=MediaProcessorKind.IMAGE_OCR,
++            capability_id=_OCR_CAPABILITY[0],
++            capability_version=_OCR_CAPABILITY[1],
++            status="failed",
++            warning=warning,
++        )
++        return MediaProcessingResult(asset=asset, details=(detail,), failure_category=category)
++
++
++class DrawioProcessor:
++    """Project deterministic draw.io XML extraction into the MediaAsset seam."""
++
++    def __init__(self, *, parser: DrawioXmlProcessor | None = None, schema_validator: object | None = None) -> None:
++        if parser is not None and type(parser) is not DrawioXmlProcessor:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        try:
++            validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++            validate = getattr(validator, "validate_record", None)
++        except Exception:
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT) from None
++        if not callable(validate):
++            raise MediaProcessingError(MediaProcessingFailureCategory.INVALID_INPUT)
++        self._parser = parser or DrawioXmlProcessor()
++        self._validator = validator
++
++    def process(self, *, envelope: object, observation: object) -> MediaProcessingResult:
++        body_envelope = _revalidate_envelope(envelope)
++        attachment = _revalidate_observation(observation)
++        _validate_binding(body_envelope, attachment)
++        raw_uri = _asset(
++            envelope=body_envelope,
++            observation=attachment,
++            status="failed",
++            extracted_text=None,
++            confidence=None,
++        )["raw_uri"]
++        assert type(raw_uri) is str
++        try:
++            parsed = self._parser.process(body_envelope.body_bytes)
++        except DrawioXmlProcessingError as error:
++            category = (
++                MediaProcessingFailureCategory.LIMIT_EXCEEDED
++                if error.category is DrawioXmlFailureCategory.BOUNDS_EXCEEDED
++                else MediaProcessingFailureCategory.PARSE_FAILED
++            )
++            return self._failure(attachment, body_envelope, raw_uri, category, "draw.io parse failed")
++        except Exception:
++            return self._failure(
++                attachment,
++                body_envelope,
++                raw_uri,
++                MediaProcessingFailureCategory.INTERNAL_FAILURE,
++                "draw.io processor failed",
++            )
++        try:
++            text = parsed.extracted_text
++            if type(text) is not str or not text:
++                raise ValueError("empty draw.io output")
++            asset = _asset(
++                envelope=body_envelope,
++                observation=attachment,
++                status="parsed",
++                extracted_text=text,
++                confidence=None,
++            )
++            self._validator.validate_record("MediaAsset", asset)
++            detail = MediaExtractionDetail(
++                ordinal=1,
++                locator=_locator(observation=attachment, raw_uri=raw_uri),
++                processor_kind=MediaProcessorKind.DRAWIO,
++                capability_id=_DRAWIO_CAPABILITY[0],
++                capability_version=_DRAWIO_CAPABILITY[1],
++                status="parsed",
++                text_sha256=text_digest(text),
++            )
++            return MediaProcessingResult(asset=asset, details=(detail,))
++        except MediaProcessingError:
++            raise
++        except Exception:
++            return self._failure(
++                attachment,
++                body_envelope,
++                raw_uri,
++                MediaProcessingFailureCategory.SCHEMA_INVALID,
++                "draw.io output invalid",
++            )
++
++    @staticmethod
++    def _failure(
++        observation: ConfluenceAttachmentObservation,
++        envelope: MediaAttachmentBodyEnvelope,
++        raw_uri: str,
++        category: MediaProcessingFailureCategory,
++        warning: str,
++    ) -> MediaProcessingResult:
++        asset = _asset(
++            envelope=envelope,
++            observation=observation,
++            status="failed",
++            extracted_text=None,
++            confidence=None,
++        )
++        detail = MediaExtractionDetail(
++            ordinal=1,
++            locator=_locator(observation=observation, raw_uri=raw_uri),
++            processor_kind=MediaProcessorKind.DRAWIO,
++            capability_id=_DRAWIO_CAPABILITY[0],
++            capability_version=_DRAWIO_CAPABILITY[1],
++            status="failed",
++            warning=warning,
++        )
++        return MediaProcessingResult(asset=asset, details=(detail,), failure_category=category)
++
++
++__all__ = ["DrawioProcessor", "ImageOcrProcessor", "PdfTextProcessor"]
+diff --git a/src/knowledgenexus/foundation/ports/__init__.py b/src/knowledgenexus/foundation/ports/__init__.py
+index 7e2a337..12b0945 100644
+--- a/src/knowledgenexus/foundation/ports/__init__.py
++++ b/src/knowledgenexus/foundation/ports/__init__.py
+@@ -107,6 +107,10 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+     ResumeUniqueIncompleteRunRequest,
+     StartNewRunRequest,
+ )
++from knowledgenexus.foundation.ports.media_processing_port import (
++    ImageOcrPort,
++    PdfTextExtractionPort,
++)
+ 
+ __all__ = [
+     "ConfluenceInventoryPort",
+@@ -184,4 +188,6 @@ __all__ = [
+     "ResumeExplicitRunRequest",
+     "ResumeUniqueIncompleteRunRequest",
+     "StartNewRunRequest",
++    "ImageOcrPort",
++    "PdfTextExtractionPort",
+ ]
+diff --git a/src/knowledgenexus/foundation/ports/media_processing_port.py b/src/knowledgenexus/foundation/ports/media_processing_port.py
+new file mode 100644
+index 0000000..331d117
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/media_processing_port.py
+@@ -0,0 +1,19 @@
++from __future__ import annotations
++
++from typing import Protocol
++
++from knowledgenexus.foundation.domain.models.media_processing import (
++    ImageOcrResponse,
++    PdfTextExtractionResponse,
++)
++
++
++class PdfTextExtractionPort(Protocol):
++    def extract_pdf_text(self, *, body: bytes) -> PdfTextExtractionResponse: ...
++
++
++class ImageOcrPort(Protocol):
++    def extract_labels(self, *, body: bytes) -> ImageOcrResponse: ...
++
++
++__all__ = ["ImageOcrPort", "PdfTextExtractionPort"]
+diff --git a/tests/architecture/test_m9a3_media_processing_boundary.py b/tests/architecture/test_m9a3_media_processing_boundary.py
+new file mode 100644
+index 0000000..e4c1cc0
+--- /dev/null
++++ b/tests/architecture/test_m9a3_media_processing_boundary.py
+@@ -0,0 +1,57 @@
++from __future__ import annotations
++
++import ast
++from pathlib import Path
++
++
++_ROOT = Path(__file__).parents[2] / "src" / "knowledgenexus" / "foundation"
++_TARGETS = (
++    _ROOT / "domain" / "models" / "media_processing.py",
++    _ROOT / "domain" / "models" / "drawio_xml.py",
++    _ROOT / "ports" / "media_processing_port.py",
++    _ROOT / "infrastructure" / "processors" / "drawio_xml_processor.py",
++    _ROOT / "infrastructure" / "processors" / "media_attachment_processors.py",
++)
++_FORBIDDEN_IMPORTS = {
++    "fitz",
++    "pdfplumber",
++    "pytesseract",
++    "PIL",
++    "subprocess",
++    "requests",
++    "httpx",
++    "socket",
++    "urllib.request",
++}
++
++
++def _imports(path: Path) -> set[str]:
++    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++    names: set[str] = set()
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Import):
++            names.update(alias.name.split(".", 1)[0] for alias in node.names)
++        elif isinstance(node, ast.ImportFrom) and node.module:
++            names.add(node.module.split(".", 1)[0])
++    return names
++
++
++def test_m9a3_processors_have_no_engine_network_or_process_imports() -> None:
++    for path in _TARGETS:
++        assert _imports(path).isdisjoint(_FORBIDDEN_IMPORTS), path.name
++
++
++def test_m9a3_processing_seam_has_no_file_or_network_side_effect_calls() -> None:
++    forbidden_tokens = (
++        "open(",
++        "write_text(",
++        "write_bytes(",
++        "unlink(",
++        "requests.",
++        "httpx.",
++        "subprocess.",
++        "socket.",
++    )
++    for path in _TARGETS:
++        source = path.read_text(encoding="utf-8").lower()
++        assert not any(token in source for token in forbidden_tokens), path.name
+diff --git a/tests/foundation/application/use_cases/test_process_confluence_media_attachment.py b/tests/foundation/application/use_cases/test_process_confluence_media_attachment.py
+new file mode 100644
+index 0000000..a59b6cf
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_process_confluence_media_attachment.py
+@@ -0,0 +1,169 @@
++from __future__ import annotations
++
++import pytest
++
++from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
++    ProcessConfluenceMediaAttachment,
++)
++from knowledgenexus.foundation.domain.models.confluence_page_observation import RawHttpObservation
++from knowledgenexus.foundation.domain.models.media_body_materialization import MediaAttachmentBodyEnvelope
++from knowledgenexus.foundation.domain.models.media_materialization import ConfluenceAttachmentObservation
++from knowledgenexus.foundation.domain.models.media_processing import (
++    ImageOcrResponse,
++    MediaProcessingError,
++    MediaProcessingFailureCategory,
++    OcrLabelResult,
++    PdfPageTextResult,
++    PdfTextExtractionResponse,
++)
++from knowledgenexus.foundation.infrastructure.processors.media_attachment_processors import (
++    DrawioProcessor,
++    ImageOcrProcessor,
++    PdfTextProcessor,
++)
++
++
++def _envelope(body: bytes = b"body", *, filename: str = "file.pdf") -> MediaAttachmentBodyEnvelope:
++    return MediaAttachmentBodyEnvelope(
++        format_version="1",
++        evidence_kind="confluence_attachment_body",
++        attachment_id="2000",
++        parent_page_id="1000",
++        filename=filename,
++        source_version="1",
++        http_status=200,
++        body_encoding="base64",
++        body_bytes=body,
++    )
++
++
++def _observation(*, filename: str = "file.pdf", mime_type: str | None = "application/pdf", size: int = 4) -> ConfluenceAttachmentObservation:
++    return ConfluenceAttachmentObservation(
++        attachment_id="2000",
++        parent_page_id="1000",
++        filename=filename,
++        mime_type=mime_type,
++        size_bytes=size,
++        source_version="1",
++        updated_at=None,
++        crawled_at="2026-08-05T00:00:00Z",
++    )
++
++
++class _PdfCapability:
++    def extract_pdf_text(self, *, body: bytes) -> PdfTextExtractionResponse:
++        return PdfTextExtractionResponse(
++            capability_id="pdf-text-fixture-v1",
++            capability_version="1",
++            pages=(PdfPageTextResult(page_number=1, text="hello"),),
++        )
++
++
++class _OcrCapability:
++    def extract_labels(self, *, body: bytes) -> ImageOcrResponse:
++        return ImageOcrResponse(
++            capability_id="image-ocr-fixture-v1",
++            capability_version="1",
++            labels=(OcrLabelResult(image_index=1, text="label", confidence=0.75),),
++        )
++
++
++def test_dispatches_pdf_and_image_by_exact_policy() -> None:
++    use_case = ProcessConfluenceMediaAttachment(
++        pdf_processor=PdfTextProcessor(capability=_PdfCapability()),
++        ocr_processor=ImageOcrProcessor(capability=_OcrCapability()),
++    )
++    pdf = use_case.execute(envelope=_envelope(), observation=_observation())
++    assert pdf.asset["processing_status"] == "parsed"
++    image = use_case.execute(
++        envelope=_envelope(filename="chart.png"),
++        observation=_observation(filename="chart.png", mime_type="image/png"),
++    )
++    assert image.asset["processing_status"] == "ocr"
++
++
++def test_drawio_route_is_offline_and_deterministic() -> None:
++    body = (
++        b'<mxfile><diagram id="page"><mxGraphModel><root>'
++        b'<mxCell id="0"/><mxCell id="1" parent="0"/>'
++        b'<mxCell id="2" parent="1" vertex="1" value="A"><mxGeometry/></mxCell>'
++        b'</root></mxGraphModel></diagram></mxfile>'
++    )
++    use_case = ProcessConfluenceMediaAttachment(drawio_processor=DrawioProcessor())
++    first = use_case.execute(
++        envelope=_envelope(body, filename="diagram.drawio"),
++        observation=_observation(
++            filename="diagram.drawio",
++            mime_type="application/vnd.jgraph.mxfile",
++            size=len(body),
++        ),
++    )
++    second = use_case.execute(
++        envelope=_envelope(body, filename="diagram.drawio"),
++        observation=_observation(
++            filename="diagram.drawio",
++            mime_type="application/vnd.jgraph.mxfile",
++            size=len(body),
++        ),
++    )
++    assert first == second
++    assert first.asset["processing_status"] == "parsed"
++
++
++def test_missing_capability_returns_failed_asset_without_derived_fields() -> None:
++    result = ProcessConfluenceMediaAttachment().execute(
++        envelope=_envelope(), observation=_observation()
++    )
++    assert result.asset["processing_status"] == "failed"
++    assert result.failure_category is MediaProcessingFailureCategory.CAPABILITY_UNAVAILABLE
++    assert result.asset["extracted_text"] is None
++
++
++def test_unsupported_and_mismatched_inputs_fail_before_processing() -> None:
++    use_case = ProcessConfluenceMediaAttachment(drawio_processor=DrawioProcessor())
++    with pytest.raises(MediaProcessingError) as unsupported:
++        use_case.execute(
++            envelope=_envelope(filename="data.zip"),
++            observation=_observation(filename="data.zip", mime_type="application/zip"),
++        )
++    assert unsupported.value.category is MediaProcessingFailureCategory.UNSUPPORTED_MEDIA
++    with pytest.raises(MediaProcessingError) as mismatch:
++        use_case.execute(
++            envelope=_envelope(),
++            observation=_observation(size=3),
++        )
++    assert mismatch.value.category is MediaProcessingFailureCategory.INVALID_INPUT
++    with pytest.raises(MediaProcessingError) as wrong_type:
++        use_case.execute(envelope=object(), observation=object())
++    assert wrong_type.value.category is MediaProcessingFailureCategory.INVALID_INPUT
++
++
++def test_forged_processor_result_is_sanitized() -> None:
++    class _Forged:
++        def process(self, *, envelope: object, observation: object) -> object:
++            return object()
++
++    use_case = ProcessConfluenceMediaAttachment(pdf_processor=_Forged())
++    with pytest.raises(MediaProcessingError) as error:
++        use_case.execute(envelope=_envelope(), observation=_observation())
++    assert error.value.category is MediaProcessingFailureCategory.MALFORMED_RESULT
++
++
++def test_dispatch_rejects_a_result_with_the_wrong_processor_detail() -> None:
++    xml_body = (
++        b'<mxfile><diagram id="page"><mxGraphModel><root>'
++        b'<mxCell id="0"/><mxCell id="1" parent="0" vertex="1" value="A"><mxGeometry/></mxCell>'
++        b'</root></mxGraphModel></diagram></mxfile>'
++    )
++
++    class _WrongProcessor:
++        def process(self, *, envelope: object, observation: object) -> object:
++            return DrawioProcessor().process(envelope=envelope, observation=observation)
++
++    use_case = ProcessConfluenceMediaAttachment(pdf_processor=_WrongProcessor())
++    with pytest.raises(MediaProcessingError) as error:
++        use_case.execute(
++            envelope=_envelope(xml_body),
++            observation=_observation(size=len(xml_body)),
++        )
++    assert error.value.category is MediaProcessingFailureCategory.MALFORMED_RESULT
+diff --git a/tests/foundation/domain/models/test_drawio_xml.py b/tests/foundation/domain/models/test_drawio_xml.py
+new file mode 100644
+index 0000000..538dfb8
+--- /dev/null
++++ b/tests/foundation/domain/models/test_drawio_xml.py
+@@ -0,0 +1,76 @@
++from __future__ import annotations
++
++import hashlib
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.drawio_xml import (
++    DrawioParseResult,
++    DrawioXmlEdge,
++    DrawioXmlFailureCategory,
++    DrawioXmlProcessingError,
++    DrawioXmlVertex,
++)
++
++
++def _result() -> DrawioParseResult:
++    vertex = DrawioXmlVertex("page", "2", "Label", ("0", "1"))
++    edge = DrawioXmlEdge("page", "3", "2", "2", ("0", "1"))
++    text = '{"cell_id":"2","container_ids":["0","1"],"diagram_id":"page","kind":"vertex","label":"Label"}\n{"cell_id":"3","container_ids":["0","1"],"diagram_id":"page","kind":"edge","source_id":"2","target_id":"2"}'
++    return DrawioParseResult(
++        extracted_text=text,
++        vertices=(vertex,),
++        edges=(edge,),
++        digest=hashlib.sha256(text.encode()).hexdigest(),
++        byte_count=10,
++        node_count=1,
++        edge_count=1,
++    )
++
++
++def test_drawio_result_rejects_impossible_counters_and_digest() -> None:
++    result = _result()
++    with pytest.raises(ValueError):
++        DrawioParseResult(
++            extracted_text=result.extracted_text,
++            vertices=result.vertices,
++            edges=result.edges,
++            digest=result.digest,
++            byte_count=result.byte_count,
++            node_count=2,
++            edge_count=result.edge_count,
++        )
++    with pytest.raises(ValueError):
++        DrawioParseResult(
++            extracted_text=result.extracted_text,
++            vertices=result.vertices,
++            edges=result.edges,
++            digest="0" * 64,
++            byte_count=result.byte_count,
++            node_count=result.node_count,
++            edge_count=result.edge_count,
++        )
++
++
++def test_drawio_result_rebuilds_forged_nested_values_before_field_access() -> None:
++    forged_vertex = object.__new__(DrawioXmlVertex)
++    forged_edge = object.__new__(DrawioXmlEdge)
++    text = ""
++    with pytest.raises(ValueError):
++        DrawioParseResult(
++            extracted_text=text,
++            vertices=(forged_vertex,),
++            edges=(forged_edge,),
++            digest=hashlib.sha256(text.encode()).hexdigest(),
++            byte_count=0,
++            node_count=1,
++            edge_count=1,
++        )
++
++
++def test_drawio_failure_category_is_closed_and_sanitized() -> None:
++    with pytest.raises(TypeError):
++        DrawioXmlProcessingError("secret/path")
++    error = DrawioXmlProcessingError(DrawioXmlFailureCategory.XML_UNSAFE)
++    assert str(error) == "xml_unsafe"
++    assert "secret" not in repr(error)
+diff --git a/tests/foundation/domain/models/test_media_processing.py b/tests/foundation/domain/models/test_media_processing.py
+new file mode 100644
+index 0000000..55b1b6f
+--- /dev/null
++++ b/tests/foundation/domain/models/test_media_processing.py
+@@ -0,0 +1,137 @@
++from __future__ import annotations
++
++import hashlib
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.media_processing import (
++    ImageOcrResponse,
++    MediaExtractionDetail,
++    MediaProcessingError,
++    MediaProcessingFailureCategory,
++    MediaProcessingResult,
++    MediaProcessorKind,
++    MediaSourceLocator,
++    OcrLabelResult,
++    PdfPageTextResult,
++    PdfTextExtractionResponse,
++)
++
++
++def _locator(*, page: int | None = None, image: int | None = None) -> MediaSourceLocator:
++    return MediaSourceLocator(
++        parent_page_id="1000",
++        attachment_id="2000",
++        filename="diagram.drawio",
++        raw_uri=(
++            "raw://confluence/attachments/2000/"
++            + "a" * 64
++        ),
++        pdf_page_number=page,
++        image_index=image,
++    )
++
++
++def _asset(*, status: str = "parsed", text: str | None = "A -> B", confidence: float | None = None) -> dict[str, object]:
++    return {
++        "schema_version": "1.0",
++        "media_id": "confluence:attachment:2000",
++        "parent_document_id": "confluence:page:1000",
++        "source_system": "confluence",
++        "filename": "diagram.drawio",
++        "mime_type": "application/xml",
++        "size_bytes": 4,
++        "download_status": "downloaded",
++        "processing_status": status,
++        "relevance": "high",
++        "extracted_text": text,
++        "summary": None,
++        "confidence": confidence,
++        "raw_uri": "raw://confluence/attachments/2000/" + "a" * 64,
++        "content_hash": "a" * 64,
++        "source_version": "1",
++        "updated_at": None,
++        "crawled_at": "2026-08-05T00:00:00Z",
++    }
++
++
++def test_pdf_response_rebuilds_and_requires_ordered_pages() -> None:
++    response = PdfTextExtractionResponse(
++        capability_id="pdf-text-fixture-v1",
++        capability_version="1",
++        pages=(PdfPageTextResult(page_number=1, text="first"),),
++    )
++    assert response.pages[0].text == "first"
++    with pytest.raises(ValueError):
++        PdfTextExtractionResponse(
++            capability_id="pdf-text-fixture-v1",
++            capability_version="1",
++            pages=(
++                PdfPageTextResult(page_number=2, text="two"),
++                PdfPageTextResult(page_number=1, text="one"),
++            ),
++        )
++
++
++def test_pdf_image_only_page_cannot_carry_text() -> None:
++    with pytest.raises(ValueError):
++        PdfPageTextResult(page_number=1, text="hidden", image_only=True)
++    with pytest.raises(ValueError):
++        PdfPageTextResult(page_number=1_000_001, text="page")
++
++
++def test_ocr_response_rejects_nonfinite_or_forged_labels() -> None:
++    with pytest.raises(ValueError):
++        OcrLabelResult(image_index=1, text="label", confidence=1.1)
++    with pytest.raises(ValueError):
++        OcrLabelResult(image_index=1_000_001, text="label", confidence=0.5)
++    forged = object.__new__(OcrLabelResult)
++    with pytest.raises(ValueError):
++        ImageOcrResponse(
++            capability_id="image-ocr-fixture-v1",
++            capability_version="1",
++            labels=(forged,),
++        )
++
++
++def test_locator_rejects_cross_kind_and_bad_identity() -> None:
++    with pytest.raises(ValueError):
++        _locator(page=1, image=1)
++    with pytest.raises(ValueError):
++        MediaSourceLocator(
++            parent_page_id="1000",
++            attachment_id="2000",
++            filename="x",
++            raw_uri="file:///secret",
++        )
++
++
++def test_processing_result_enforces_status_and_detail_consistency() -> None:
++    text = "A -> B"
++    detail = MediaExtractionDetail(
++        ordinal=1,
++        locator=_locator(),
++        processor_kind=MediaProcessorKind.DRAWIO,
++        capability_id="stdlib-drawio-v1",
++        capability_version="1",
++        status="parsed",
++        text_sha256=hashlib.sha256(text.encode()).hexdigest(),
++    )
++    result = MediaProcessingResult(asset=_asset(text=text), details=(detail,))
++    assert result.asset["processing_status"] == "parsed"
++    failed_detail = MediaExtractionDetail(
++        ordinal=1,
++        locator=_locator(),
++        processor_kind=MediaProcessorKind.DRAWIO,
++        capability_id="stdlib-drawio-v1",
++        capability_version="1",
++        status="failed",
++        warning="parse failed",
++    )
++    with pytest.raises(ValueError):
++        MediaProcessingResult(
++            asset=_asset(status="failed", text=None),
++            details=(failed_detail,),
++        )
++    with pytest.raises(TypeError):
++        MediaProcessingError("secret")  # type: ignore[arg-type]
+diff --git a/tests/foundation/infrastructure/processors/test_drawio_xml_processor.py b/tests/foundation/infrastructure/processors/test_drawio_xml_processor.py
+new file mode 100644
+index 0000000..5524b2a
+--- /dev/null
++++ b/tests/foundation/infrastructure/processors/test_drawio_xml_processor.py
+@@ -0,0 +1,189 @@
++from __future__ import annotations
++
++import hashlib
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.drawio_xml import (
++    DrawioXmlFailureCategory,
++    DrawioXmlLimits,
++    DrawioXmlProcessingError,
++)
++from knowledgenexus.foundation.infrastructure.processors.drawio_xml_processor import (
++    DrawioXmlProcessor,
++)
++
++
++def _diagram(*, cells: str, diagram_id: str = "page") -> bytes:
++    return (
++        f'<mxfile><diagram id="{diagram_id}"><mxGraphModel><root>{cells}'
++        "</root></mxGraphModel></diagram></mxfile>"
++    ).encode("utf-8")
++
++
++def _cell(
++    cell_id: str,
++    *,
++    value: str = "",
++    parent: str | None = "1",
++    vertex: bool = False,
++    edge: bool = False,
++    source: str | None = None,
++    target: str | None = None,
++) -> str:
++    attrs = [f'id="{cell_id}"']
++    if value:
++        attrs.append(f'value="{value}"')
++    if parent is not None:
++        attrs.append(f'parent="{parent}"')
++    if vertex:
++        attrs.append('vertex="1"')
++    if edge:
++        attrs.append('edge="1"')
++    if source is not None:
++        attrs.append(f'source="{source}"')
++    if target is not None:
++        attrs.append(f'target="{target}"')
++    return f"<mxCell {' '.join(attrs)}><mxGeometry/></mxCell>"
++
++
++def test_drawio_extracts_nfc_labels_edges_and_container_context() -> None:
++    body = _diagram(
++        cells=(
++            _cell("0", parent=None)
++            + _cell("1", parent="0")
++            + _cell("10", value="Cafe\u0301", parent="1", vertex=True)
++            + _cell("20", parent="1", vertex=True, value="Target")
++            + _cell("30", parent="1", edge=True, source="10", target="20")
++        )
++    )
++
++    result = DrawioXmlProcessor().process(body)
++
++    assert result.node_count == 2
++    assert result.edge_count == 1
++    assert result.vertices[0].label == "Café"
++    assert result.vertices[0].container_ids == ("0", "1")
++    assert result.edges[0].source_id == "10"
++    assert result.edges[0].target_id == "20"
++    assert result.digest == hashlib.sha256(result.extracted_text.encode()).hexdigest()
++
++
++def test_drawio_output_is_stable_across_xml_attribute_and_cell_order() -> None:
++    first = _diagram(
++        cells=(
++            _cell("0", parent=None)
++            + _cell("1", parent="0")
++            + _cell("2", value="B", vertex=True)
++            + _cell("3", value="A", vertex=True)
++        )
++    )
++    second = _diagram(
++        cells=(
++            '<mxCell vertex="1" parent="1" value="A" id="3" />'
++            '<mxCell id="1" parent="0" />'
++            '<mxCell value="B" id="2" vertex="1" parent="1" />'
++            '<mxCell id="0" />'
++        )
++    )
++
++    left = DrawioXmlProcessor().process(first)
++    right = DrawioXmlProcessor().process(second)
++
++    assert left.extracted_text == right.extracted_text
++    assert left.vertices == right.vertices
++    assert left.edges == right.edges
++    assert left.digest == right.digest
++    assert left.byte_count != right.byte_count
++
++
++@pytest.mark.parametrize(
++    ("body", "category"),
++    [
++        (None, DrawioXmlFailureCategory.INVALID_INPUT),
++        (object(), DrawioXmlFailureCategory.INVALID_INPUT),
++        (b"<!DOCTYPE mxfile [<!ENTITY x 'boom'>]><mxfile />", DrawioXmlFailureCategory.XML_UNSAFE),
++        (b"<not-mxfile />", DrawioXmlFailureCategory.STRUCTURE_INVALID),
++        (b"<mxfile><diagram /></mxfile>", DrawioXmlFailureCategory.STRUCTURE_INVALID),
++    ],
++)
++def test_drawio_rejects_malformed_or_unsafe_input(body: object, category: DrawioXmlFailureCategory) -> None:
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor().process(body)
++    assert exc_info.value.category is category
++    assert "boom" not in str(exc_info.value)
++
++
++def test_drawio_enforces_byte_node_edge_depth_and_output_bounds() -> None:
++    body = _diagram(cells=_cell("0", parent=None) + _cell("1", parent="0"))
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor(max_bytes=len(body) - 1).process(body)
++    assert exc_info.value.category is DrawioXmlFailureCategory.BOUNDS_EXCEEDED
++
++    many_nodes = _diagram(
++        cells=_cell("0", parent=None)
++        + _cell("1", parent="0")
++        + _cell("2", parent="1", vertex=True, value="A")
++        + _cell("3", parent="1", vertex=True, value="B")
++    )
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor(max_nodes=1).process(many_nodes)
++    assert exc_info.value.category is DrawioXmlFailureCategory.BOUNDS_EXCEEDED
++
++    deep = _diagram(
++        cells=_cell("0", parent=None)
++        + _cell("1", parent="0")
++        + '<mxCell id="2" parent="1" vertex="1" value="x"><mxGeometry><mxPoint><mxRectangle /></mxPoint></mxGeometry></mxCell>'
++    )
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor(max_depth=4).process(deep)
++    assert exc_info.value.category is DrawioXmlFailureCategory.BOUNDS_EXCEEDED
++
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor(max_output_bytes=1).process(many_nodes)
++    assert exc_info.value.category is DrawioXmlFailureCategory.BOUNDS_EXCEEDED
++
++
++def test_drawio_rejects_unknown_attributes_and_impossible_links() -> None:
++    unknown = _diagram(cells='<mxCell id="0" unknown="x" />')
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor().process(unknown)
++    assert exc_info.value.category is DrawioXmlFailureCategory.STRUCTURE_INVALID
++
++    dangling = _diagram(
++        cells=_cell("0", parent=None)
++        + _cell("1", parent="0")
++        + _cell("2", parent="1", edge=True, source="missing", target="1")
++    )
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor().process(dangling)
++    assert exc_info.value.category is DrawioXmlFailureCategory.STRUCTURE_INVALID
++
++    cycle = _diagram(cells='<mxCell id="0" parent="0" />')
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor().process(cycle)
++    assert exc_info.value.category is DrawioXmlFailureCategory.STRUCTURE_INVALID
++
++
++def test_drawio_forged_limits_and_forged_processor_fail_closed() -> None:
++    forged_limits = object.__new__(DrawioXmlLimits)
++    processor = DrawioXmlProcessor.__new__(DrawioXmlProcessor)
++    processor._limits = forged_limits
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        processor.process(b"<mxfile />")
++    assert exc_info.value.category is DrawioXmlFailureCategory.INVALID_INPUT
++
++
++def test_drawio_unexpected_parser_exception_has_no_context(monkeypatch: pytest.MonkeyPatch) -> None:
++    def _raise(_body: bytes) -> object:
++        raise RuntimeError("secret/path")
++
++    monkeypatch.setattr(
++        "knowledgenexus.foundation.infrastructure.processors.drawio_xml_processor.ET.fromstring",
++        _raise,
++    )
++    with pytest.raises(DrawioXmlProcessingError) as exc_info:
++        DrawioXmlProcessor().process(b"<mxfile />")
++    assert exc_info.value.category is DrawioXmlFailureCategory.INTERNAL_FAILURE
++    assert exc_info.value.__suppress_context__ is True
++    assert "secret" not in str(exc_info.value)
+diff --git a/tests/foundation/infrastructure/processors/test_media_attachment_processors.py b/tests/foundation/infrastructure/processors/test_media_attachment_processors.py
+new file mode 100644
+index 0000000..85ea68c
+--- /dev/null
++++ b/tests/foundation/infrastructure/processors/test_media_attachment_processors.py
+@@ -0,0 +1,146 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.confluence_page_observation import (
++    RawHttpObservation,
++)
++from knowledgenexus.foundation.domain.models.media_body_materialization import (
++    MediaAttachmentBodyEnvelope,
++)
++from knowledgenexus.foundation.domain.models.media_materialization import (
++    ConfluenceAttachmentObservation,
++)
++from knowledgenexus.foundation.domain.models.media_processing import (
++    ImageOcrResponse,
++    MediaProcessingFailureCategory,
++    OcrLabelResult,
++    PdfPageTextResult,
++    PdfTextExtractionResponse,
++)
++from knowledgenexus.foundation.infrastructure.processors.media_attachment_processors import (
++    ImageOcrProcessor,
++    PdfTextProcessor,
++)
++
++
++def _envelope(body: bytes = b"body", *, filename: str = "file.pdf") -> MediaAttachmentBodyEnvelope:
++    return MediaAttachmentBodyEnvelope(
++        format_version="1",
++        evidence_kind="confluence_attachment_body",
++        attachment_id="2000",
++        parent_page_id="1000",
++        filename=filename,
++        source_version="1",
++        http_status=200,
++        body_encoding="base64",
++        body_bytes=body,
++    )
++
++
++def _observation(*, filename: str = "file.pdf", mime_type: str | None = "application/pdf") -> ConfluenceAttachmentObservation:
++    return ConfluenceAttachmentObservation(
++        attachment_id="2000",
++        parent_page_id="1000",
++        filename=filename,
++        mime_type=mime_type,
++        size_bytes=4,
++        source_version="1",
++        updated_at=None,
++        crawled_at="2026-08-05T00:00:00Z",
++    )
++
++
++class _PdfCapability:
++    def __init__(self, response: object) -> None:
++        self.response = response
++
++    def extract_pdf_text(self, *, body: bytes) -> object:
++        return self.response
++
++
++class _OcrCapability:
++    def __init__(self, response: object) -> None:
++        self.response = response
++
++    def extract_labels(self, *, body: bytes) -> object:
++        return self.response
++
++
++def test_pdf_processor_is_deterministic_and_preserves_page_markers() -> None:
++    processor = PdfTextProcessor(
++        capability=_PdfCapability(
++            PdfTextExtractionResponse(
++                capability_id="pdf-text-fixture-v1",
++                capability_version="1",
++                pages=(PdfPageTextResult(page_number=1, text="hello"),),
++            )
++        )
++    )
++    first = processor.process(envelope=_envelope(), observation=_observation())
++    second = processor.process(envelope=_envelope(), observation=_observation())
++    assert first == second
++    assert first.asset["processing_status"] == "parsed"
++    assert first.asset["extracted_text"] == "[pdf_page: 1]\nhello"
++
++
++def test_pdf_image_only_page_is_explicitly_deferred() -> None:
++    processor = PdfTextProcessor(
++        capability=_PdfCapability(
++            PdfTextExtractionResponse(
++                capability_id="pdf-text-fixture-v1",
++                capability_version="1",
++                pages=(PdfPageTextResult(page_number=1, text="", image_only=True),),
++            )
++        )
++    )
++    result = processor.process(envelope=_envelope(), observation=_observation())
++    assert result.asset["processing_status"] == "failed"
++    assert result.failure_category is MediaProcessingFailureCategory.CAPABILITY_UNAVAILABLE
++    assert result.asset["extracted_text"] is None
++
++
++def test_pdf_forged_response_and_unexpected_exception_fail_closed() -> None:
++    forged = object.__new__(PdfTextExtractionResponse)
++    result = PdfTextProcessor(capability=_PdfCapability(forged)).process(
++        envelope=_envelope(), observation=_observation()
++    )
++    assert result.failure_category is MediaProcessingFailureCategory.MALFORMED_RESULT
++
++    class _Raising:
++        def extract_pdf_text(self, *, body: bytes) -> object:
++            raise RuntimeError("secret/path")
++
++    result = PdfTextProcessor(capability=_Raising()).process(
++        envelope=_envelope(), observation=_observation()
++    )
++    assert result.failure_category is MediaProcessingFailureCategory.CAPABILITY_FAILURE
++
++
++def test_ocr_processor_emits_labels_only_with_confidence() -> None:
++    processor = ImageOcrProcessor(
++        capability=_OcrCapability(
++            ImageOcrResponse(
++                capability_id="image-ocr-fixture-v1",
++                capability_version="1",
++                labels=(OcrLabelResult(image_index=1, text="Title", confidence=0.8),),
++            )
++        )
++    )
++    result = processor.process(
++        envelope=_envelope(filename="chart.png", body=b"body"),
++        observation=_observation(filename="chart.png", mime_type="image/png"),
++    )
++    assert result.asset["processing_status"] == "ocr"
++    assert result.asset["confidence"] == 0.8
++    assert result.asset["extracted_text"] == "[image: 1] Title"
++
++
++def test_ocr_forged_response_is_sanitized() -> None:
++    result = ImageOcrProcessor(capability=_OcrCapability(object())).process(
++        envelope=_envelope(filename="chart.png"),
++        observation=_observation(filename="chart.png", mime_type="image/png"),
++    )
++    assert result.failure_category is MediaProcessingFailureCategory.MALFORMED_RESULT
+-- 
+2.45.1.windows.1
+

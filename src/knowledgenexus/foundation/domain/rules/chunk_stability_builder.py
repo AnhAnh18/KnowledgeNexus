@@ -181,6 +181,7 @@ class ChunkStabilitySummaryBuilder:
                 chunks=result.chunks,
                 page_metrics=result.page_metrics,
                 metrics=result.metrics,
+                reference_intents_by_page=result.reference_intents_by_page,
             )
         except Exception:
             _fail(ChunkStabilityFailureCategory.INVALID_INPUT)

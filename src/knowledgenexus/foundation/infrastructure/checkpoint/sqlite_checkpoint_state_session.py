@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 import re
+from contextlib import contextmanager
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CanonicalIncludeRoots,
@@ -60,6 +61,7 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
     CheckpointSchemaState,
     InventoryWorkItem,
     RawPageReplayCommand,
+    RawPageAcknowledgement,
     RawPageReplayDecision,
     RawPageReplayFailure,
     RawPageReplayFailureCategory,
@@ -608,6 +610,16 @@ class _CheckpointStateSession:
         self._active = False
         self._observed_page_ids = None
         self._last_data_version = None
+
+    @contextmanager
+    def guard_raw_publication(self) -> Iterator[None]:
+        """Verify the activation-owned OS writer lease around raw publish."""
+        self._require_active()
+        self._workspace._verify_writer_lock()
+        try:
+            yield
+        finally:
+            self._workspace._verify_writer_lock()
 
     @staticmethod
     def _data_version(transaction: object) -> int:
@@ -1587,6 +1599,56 @@ class _CheckpointStateSession:
                 raise ValueError("raw page progress acknowledgement mismatch")
             return RawPageReplayResult(RawPageReplayDecision.COMMITTED)
 
+        try:
+            return self._mutate(operation)
+        except CheckpointStateError:
+            raise
+        except Exception:
+            return RawPageReplayFailure(RawPageReplayFailureCategory.SCHEMA_INCOMPATIBLE)
+
+    def acknowledge_raw_page(self, acknowledgement: RawPageAcknowledgement):
+        """Record progress only after immutable raw evidence is published."""
+        if type(acknowledgement) is not RawPageAcknowledgement:
+            return RawPageReplayFailure(RawPageReplayFailureCategory.INVALID_REQUEST)
+        envelope = acknowledgement.envelope
+        if envelope.run_id != self._run_id or envelope.generation_id != self._run_id:
+            return RawPageReplayResult(RawPageReplayDecision.IDENTITY_CONFLICT)
+        try:
+            content = envelope.to_bytes()
+            expected = (
+                envelope.generation_id.value, envelope.page_id,
+                envelope.request_profile_version, envelope.source_version,
+                envelope.http_status, hashlib.sha256(content).hexdigest(),
+                len(content), "committed",
+            )
+            if expected[5] != acknowledgement.artifact.raw_sha256 or expected[6] != acknowledgement.artifact.byte_count:
+                return RawPageReplayResult(RawPageReplayDecision.IDENTITY_CONFLICT)
+        except Exception:
+            return RawPageReplayFailure(RawPageReplayFailureCategory.INVALID_REQUEST)
+
+        def operation(transaction: object):
+            self._validate_active_session(transaction)
+            self._prepare_inventory_validation(transaction)
+            known = transaction._fetchall(
+                "SELECT source_version FROM root_occurrences WHERE run_id=? AND page_id=? "
+                "UNION SELECT source_version FROM inventory_occurrences WHERE run_id=? AND page_id=?",
+                (self._run_id.value, envelope.page_id, self._run_id.value, envelope.page_id),
+            )
+            if not known:
+                return RawPageReplayResult(RawPageReplayDecision.UNKNOWN_INVENTORY)
+            if any(row[0] != envelope.source_version for row in known):
+                return RawPageReplayResult(RawPageReplayDecision.IDENTITY_CONFLICT)
+            existing = transaction._fetchone(
+                "SELECT generation_id,page_id,request_profile_version,source_version,http_status,raw_sha256,byte_count,status FROM raw_page_progress WHERE run_id=? AND page_id=?",
+                (self._run_id.value, envelope.page_id),
+            )
+            if existing is not None:
+                return RawPageReplayResult(RawPageReplayDecision.REPLAYED, True) if existing == expected else RawPageReplayResult(RawPageReplayDecision.CONFLICT)
+            transaction._execute(
+                "INSERT INTO raw_page_progress (run_id,generation_id,page_id,request_profile_version,source_version,http_status,raw_sha256,byte_count,status,committed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (self._run_id.value, *expected, _reservation_timestamp(self._utc_now())),
+            )
+            return RawPageReplayResult(RawPageReplayDecision.COMMITTED)
         try:
             return self._mutate(operation)
         except CheckpointStateError:

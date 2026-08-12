@@ -1,11 +1,28 @@
 from knowledgenexus.foundation.application.use_cases.build_confluence_inventory import (
     BuildConfluenceInventory,
 )
+from knowledgenexus.foundation.application.use_cases.build_sync_state_snapshot import (
+    BuildSyncStateSnapshot,
+    SyncStateSnapshotError,
+    SyncStateSnapshotResult,
+)
+from knowledgenexus.foundation.application.use_cases.assemble_m10_handoffs import (
+    AssembleConfluenceM10Handoff,
+    AssembleGitM10Handoff,
+    M10HandoffAssemblyError,
+)
 from knowledgenexus.foundation.application.use_cases.build_confluence_chunks import (
     BuildConfluenceChunks,
 )
 from knowledgenexus.foundation.application.use_cases.build_confluence_jira_relations import (
     BuildConfluenceJiraRelations,
+)
+from knowledgenexus.foundation.application.use_cases.materialize_confluence_media_relations import (
+    MaterializeConfluenceMediaRelations,
+    MediaRelationMaterializationError,
+    MediaRelationMaterializationFailureCategory,
+    MediaRelationMaterializationMetrics,
+    MediaRelationMaterializationResult,
 )
 from knowledgenexus.foundation.application.use_cases.collect_confluence_page_observations import (  # noqa: E501
     CollectConfluencePageObservations,
@@ -34,14 +51,85 @@ from knowledgenexus.foundation.application.use_cases.controlled_checkpoint_stop 
     ControlledStopPolicy,
     is_inventory_window_commit,
 )
+from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_attachment_body import (
+    FetchAndStoreConfluenceAttachmentBody,
+)
+from knowledgenexus.foundation.application.use_cases.execute_bounded_confluence_inventory import (
+    BoundedInventoryResult,
+    ExecuteBoundedConfluenceInventory,
+    MAX_SUBTREE_PAGES,
+)
+from knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages import (
+    CaptureConfluenceSubtreePages,
+    PageCaptureResult,
+)
+from knowledgenexus.foundation.application.use_cases.fetch_and_store_confluence_raw_page_generation import (
+    FetchAndStoreConfluenceRawPageGeneration,
+    GenerationRawPageFetchError,
+    GenerationRawPageFetchResult,
+)
 from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corpus import (
     AcceptConfluenceMiniCorpus,
+)
+from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
+    ProcessConfluenceMediaAttachment,
+)
+from knowledgenexus.foundation.application.use_cases.process_confluence_media_batch import (
+    MediaBatchProcessingError,
+    MediaBatchProcessingResult,
+    ProcessConfluenceMediaBatch,
+)
+from knowledgenexus.foundation.application.use_cases.build_git_code_documents import (
+    BuildGitCodeDocuments,
+    BuildGitCodeDocumentsRequest,
+)
+from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
+from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
+from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
+from knowledgenexus.foundation.application.use_cases.classify_delta_inventory import ClassifyDeltaInventory
+from knowledgenexus.foundation.application.use_cases.capture_delta_inventory import (
+    CaptureDeltaInventory,
+    DeltaInventoryCaptureError,
+    DeltaInventoryCaptureFailureCategory,
+    DeltaInventoryCaptureRequest,
+    scope_identity,
+    selection_identity,
+)
+from knowledgenexus.foundation.application.use_cases.project_m10_delta import (
+    M10DeltaOrchestrationError,
+    M10DeltaOrchestrationResult,
+    M10DeltaOrchestrator,
+)
+from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
+    ComposeM10Snapshot,
+    M10CompositionFailure,
+    M10CompositionFailureCategory,
+    M10CompositionResult,
+)
+from knowledgenexus.foundation.application.use_cases.evaluate_foundation_gates import (
+    FoundationGateEvaluationError,
+    EvaluateBoundedMediaCorpusAcceptance,
+    EvaluateBoundedMediaGate,
+    EvaluateOcrEngineApproval,
+    EvaluateScaleGateEvidence,
+    EvaluateScaleGate,
 )
 
 __all__ = [
     "BuildConfluenceInventory",
+    "BuildSyncStateSnapshot",
+    "SyncStateSnapshotError",
+    "SyncStateSnapshotResult",
+    "AssembleConfluenceM10Handoff",
+    "AssembleGitM10Handoff",
+    "M10HandoffAssemblyError",
     "BuildConfluenceChunks",
     "BuildConfluenceJiraRelations",
+    "MaterializeConfluenceMediaRelations",
+    "MediaRelationMaterializationError",
+    "MediaRelationMaterializationFailureCategory",
+    "MediaRelationMaterializationMetrics",
+    "MediaRelationMaterializationResult",
     "CollectConfluencePageObservations",
     "PageObservationCollectionError",
     "PageObservationCollectionResult",
@@ -53,9 +141,47 @@ __all__ = [
     "DurableInventoryTransport",
     "DurableInventoryTransportFactory",
     "ExecuteDurableConfluenceInventory",
+    "BoundedInventoryResult",
+    "ExecuteBoundedConfluenceInventory",
+    "MAX_SUBTREE_PAGES",
+    "CaptureConfluenceSubtreePages",
+    "PageCaptureResult",
     "ControlledStopController",
     "ControlledStopDecision",
     "ControlledStopPolicy",
     "is_inventory_window_commit",
+    "FetchAndStoreConfluenceAttachmentBody",
+    "FetchAndStoreConfluenceRawPageGeneration",
+    "GenerationRawPageFetchError",
+    "GenerationRawPageFetchResult",
     "AcceptConfluenceMiniCorpus",
+    "ProcessConfluenceMediaAttachment",
+    "MediaBatchProcessingError",
+    "MediaBatchProcessingResult",
+    "ProcessConfluenceMediaBatch",
+    "BuildGitCodeDocuments",
+    "BuildGitCodeDocumentsRequest",
+    "BuildGitSymbols",
+    "ProjectTombstones",
+    "PropagateDelta",
+    "ClassifyDeltaInventory",
+    "CaptureDeltaInventory",
+    "DeltaInventoryCaptureError",
+    "DeltaInventoryCaptureFailureCategory",
+    "DeltaInventoryCaptureRequest",
+    "scope_identity",
+    "selection_identity",
+    "M10DeltaOrchestrationError",
+    "M10DeltaOrchestrationResult",
+    "M10DeltaOrchestrator",
+    "ComposeM10Snapshot",
+    "M10CompositionFailure",
+    "M10CompositionFailureCategory",
+    "M10CompositionResult",
+    "FoundationGateEvaluationError",
+    "EvaluateBoundedMediaCorpusAcceptance",
+    "EvaluateBoundedMediaGate",
+    "EvaluateOcrEngineApproval",
+    "EvaluateScaleGateEvidence",
+    "EvaluateScaleGate",
 ]

@@ -1,0 +1,30 @@
+{
+  "schema": "w5-b-sanitized-v1",
+  "authorization_consumed": false,
+  "transfer_equivalent": false,
+  "invocation_count": 0,
+  "controlled_stop_resume": false,
+  "committed_work_not_refetched": false,
+  "drawio_only": true,
+  "tokenizer_verified": false,
+  "profile_verified": false,
+  "publish_repeat_deterministic": false,
+  "version_tree_identical": false,
+  "raw_state_unchanged": false,
+  "strict_readback": false,
+  "cross_stream_closed": false,
+  "atomic_publication": false,
+  "staging_residue_absent": false,
+  "stream_counts": {
+    "documents": 0,
+    "chunks": 0,
+    "relations": 0,
+    "acl": 0,
+    "media_assets": 0,
+    "sync_state": 0,
+    "tombstones": 0,
+    "symbols": 0
+  },
+  "status": "pending_external_input",
+  "failure_category": null
+}

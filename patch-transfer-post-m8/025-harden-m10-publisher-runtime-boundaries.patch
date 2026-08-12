@@ -1,0 +1,80 @@
+From 1309d7aca4ea373413416cfbf10a7acbc1c19e98 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:17:08 +0700
+Subject: [PATCH] Harden M10 publisher runtime boundaries
+
+---
+ .../exporters/full_snapshot_publisher.py            | 13 +++++++++++++
+ .../exporters/test_full_snapshot_publisher.py       | 11 +++++++++++
+ 2 files changed, 24 insertions(+)
+
+diff --git a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
+index 5737bcd..346bf98 100644
+--- a/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
++++ b/src/knowledgenexus/foundation/infrastructure/exporters/full_snapshot_publisher.py
+@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
+ 
+ DATASET_VERSION_PATTERN = re.compile(r"^v[0-9]{8}-[0-9]{6}-[0-9]{6}Z$")
+ LATEST_FILE_NAME = "LATEST.txt"
++_CONCRETE_PATH_TYPE = type(Path())
++
++
++def _validate_publish_inputs(*, staging_path: object, dataset_root: object, validator: object) -> None:
++    """Reject forged runtime types before any path or validator access."""
++    if type(staging_path) is not _CONCRETE_PATH_TYPE or type(dataset_root) is not _CONCRETE_PATH_TYPE:
++        raise TypeError("publish paths must be concrete Path values")
++    if type(validator) is not FoundationSchemaValidator:
++        raise TypeError("publish validator is invalid")
+ 
+ 
+ class FullSnapshotPublisher:
+@@ -34,6 +43,7 @@ class FullSnapshotPublisher:
+         dataset_root: Path,
+         validator: FoundationSchemaValidator,
+     ) -> Path:
++        _validate_publish_inputs(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
+         _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
+         _verify_completed_file_set(staging_path)
+ 
+@@ -163,6 +173,7 @@ class DeltaSnapshotPublisher:
+ 
+     @staticmethod
+     def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
++        _validate_publish_inputs(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
+         _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
+         _verify_completed_file_set(staging_path)
+         manifest = _load_manifest(staging_path / "manifest.json")
+@@ -193,6 +204,8 @@ class M10SnapshotPublisher:
+ 
+     @staticmethod
+     def publish(*, staging_path: Path, dataset_root: Path, validator: FoundationSchemaValidator) -> Path:
++        _validate_publish_inputs(staging_path=staging_path, dataset_root=dataset_root, validator=validator)
++        _verify_paths(staging_path=staging_path, dataset_root=dataset_root)
+         manifest = _load_manifest(staging_path / "manifest.json")
+         mode = manifest.get("export_mode")
+         if mode == "full_snapshot":
+diff --git a/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py b/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py
+index bae19af..dcb9d93 100644
+--- a/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py
++++ b/tests/foundation/infrastructure/exporters/test_full_snapshot_publisher.py
+@@ -309,6 +309,17 @@ def test_delta_publisher_requires_and_publishes_against_existing_base(tmp_path:
+     assert (dataset_root / "LATEST.txt").read_bytes() == f"{VALID_DATASET_VERSION}\n".encode()
+ 
+ 
++@pytest.mark.parametrize("bad_path", [None, object(), "C:/dataset"])
++def test_publish_rejects_wrong_runtime_path_types_before_access(tmp_path: Path, bad_path: object) -> None:
++    staging_path = _create_completed_staging(tmp_path / "staging")
++    with pytest.raises(TypeError):
++        FullSnapshotPublisher.publish(
++            staging_path=bad_path,  # type: ignore[arg-type]
++            dataset_root=tmp_path,
++            validator=FoundationSchemaValidator(),
++        )
++
++
+ def test_full_snapshot_with_base_version_is_rejected(tmp_path: Path) -> None:
+     dataset_root = tmp_path / "dataset"
+     dataset_root.mkdir()
+-- 
+2.45.1.windows.1
+

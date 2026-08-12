@@ -1,0 +1,236 @@
+﻿[
+    {
+        "order":  1,
+        "sha":  "fcd9935996e4989a8cbf5fe14213f305370535d7",
+        "subject":  "feat(foundation): add M9 attachment body fetch store boundary",
+        "file":  "001-feat-foundation-add-m9-attachment-body-fetch-store-boundary.patch"
+    },
+    {
+        "order":  2,
+        "sha":  "eac58f5d68c9942a9042ebe04fce0d625ab64668",
+        "subject":  "feat(foundation): add offline media processors",
+        "file":  "002-feat-foundation-add-offline-media-processors.patch"
+    },
+    {
+        "order":  3,
+        "sha":  "6808a1425237c5828e73067b9603acc8e79d3c3b",
+        "subject":  "feat(foundation): complete M9-B git code document seam",
+        "file":  "003-feat-foundation-complete-m9-b-git-code-document-seam.patch"
+    },
+    {
+        "order":  4,
+        "sha":  "b729356e8ce6758cadac710849fbcabf40ad00be",
+        "subject":  "feat(foundation): complete M9-C symbol index",
+        "file":  "004-feat-foundation-complete-m9-c-symbol-index.patch"
+    },
+    {
+        "order":  5,
+        "sha":  "49ee1ade8e36a723463a1bd89ee62c0748263fd9",
+        "subject":  "feat(foundation): complete M9-D1 tombstone cascade",
+        "file":  "005-feat-foundation-complete-m9-d1-tombstone-cascade.patch"
+    },
+    {
+        "order":  6,
+        "sha":  "e9cdd93f7a3f5ccc187357ae91191a52e4202179",
+        "subject":  "feat(foundation): complete M9-D2 delta propagation",
+        "file":  "006-feat-foundation-complete-m9-d2-delta-propagation.patch"
+    },
+    {
+        "order":  7,
+        "sha":  "2816e1f0414de9af6e83bfd908ca54969bcbac3f",
+        "subject":  "feat(foundation): add M10 snapshot wire models",
+        "file":  "007-feat-foundation-add-m10-snapshot-wire-models.patch"
+    },
+    {
+        "order":  8,
+        "sha":  "8851a51edbb9e8817222ab420bf407a6739211e0",
+        "subject":  "feat(foundation): complete M10-B trusted composition",
+        "file":  "008-feat-foundation-complete-m10-b-trusted-composition.patch"
+    },
+    {
+        "order":  9,
+        "sha":  "939dcde93656156d74a5f452ee968642e0e5cf92",
+        "subject":  "Complete M10-C generic snapshot completion",
+        "file":  "009-complete-m10-c-generic-snapshot-completion.patch"
+    },
+    {
+        "order":  10,
+        "sha":  "c5d8c51d911821372786a4ffe9ad747976892bfe",
+        "subject":  "Complete M10-D/E synthetic snapshot acceptance",
+        "file":  "010-complete-m10-d-e-synthetic-snapshot-acceptance.patch"
+    },
+    {
+        "order":  11,
+        "sha":  "502748ac31aae438014c874b98d87b5750e0f596",
+        "subject":  "Merge M10-D/E synthetic snapshot acceptance",
+        "file":  "011-merge-m10-d-e-synthetic-snapshot-acceptance.patch"
+    },
+    {
+        "order":  12,
+        "sha":  "a67d0200d483f808f67a124eb3737c40908c2c97",
+        "subject":  "feat: add bounded crawl batch orchestration",
+        "file":  "012-feat-add-bounded-crawl-batch-orchestration.patch"
+    },
+    {
+        "order":  13,
+        "sha":  "4129e7a60ef160e5ad57a5978ea8764527211279",
+        "subject":  "feat: add durable crawl batch sidecar",
+        "file":  "013-feat-add-durable-crawl-batch-sidecar.patch"
+    },
+    {
+        "order":  14,
+        "sha":  "4ccdf63ac69e0544a12d4d5067b3b4faeab8949a",
+        "subject":  "feat: add engine-neutral OCR policy seam",
+        "file":  "014-feat-add-engine-neutral-ocr-policy-seam.patch"
+    },
+    {
+        "order":  15,
+        "sha":  "f67ba0dfbecc942fa69145be5de0a78f19aed027",
+        "subject":  "docs: record bounded synthetic scale validation",
+        "file":  "015-docs-record-bounded-synthetic-scale-validation.patch"
+    },
+    {
+        "order":  16,
+        "sha":  "ecaa0e323017d234fb3b0e23e5c782875ee611d4",
+        "subject":  "Wire Foundation source stages into M10 adapters",
+        "file":  "016-wire-foundation-source-stages-into-m10-adapters.patch"
+    },
+    {
+        "order":  17,
+        "sha":  "c5bf2d53fa2a23a2af33fae4defa6b5aee724078",
+        "subject":  "Add Foundation external gate evidence models",
+        "file":  "017-add-foundation-external-gate-evidence-models.patch"
+    },
+    {
+        "order":  18,
+        "sha":  "828ce2e4fe64255ce2b145c71a9ca939bff869cc",
+        "subject":  "Merge ACL relation output in M10 provider",
+        "file":  "018-merge-acl-relation-output-in-m10-provider.patch"
+    },
+    {
+        "order":  19,
+        "sha":  "1b6f20708b3eb831e55039c093ed5d5c566e90df",
+        "subject":  "Avoid duplicate provider stage invocation",
+        "file":  "019-avoid-duplicate-provider-stage-invocation.patch"
+    },
+    {
+        "order":  20,
+        "sha":  "96f68983b82ee63847b523b0347d8c94d5a1f82a",
+        "subject":  "foundation: close delta tombstone lifecycle",
+        "file":  "020-foundation-close-delta-tombstone-lifecycle.patch"
+    },
+    {
+        "order":  21,
+        "sha":  "90b7a5169e0f80bb475c6d8d8299df1bf2729dea",
+        "subject":  "Keep gate artifact semantics stable",
+        "file":  "021-keep-gate-artifact-semantics-stable.patch"
+    },
+    {
+        "order":  22,
+        "sha":  "6b0ea2c282684ef1018e6ebc901595d8ccac26b6",
+        "subject":  "foundation: publish delta snapshots through M10 exporter",
+        "file":  "022-foundation-publish-delta-snapshots-through-m10-exporter.patch"
+    },
+    {
+        "order":  23,
+        "sha":  "785f57a2ce6addfd89cf463384a3eb0062f07503",
+        "subject":  "Wire M10 delta publisher and sanitize CLI results",
+        "file":  "023-wire-m10-delta-publisher-and-sanitize-cli-results.patch"
+    },
+    {
+        "order":  24,
+        "sha":  "cc244ff8795e657f10f2305514023216ba14c75f",
+        "subject":  "foundation: add F4 and F7 gate evaluators",
+        "file":  "024-foundation-add-f4-and-f7-gate-evaluators.patch"
+    },
+    {
+        "order":  25,
+        "sha":  "1309d7aca4ea373413416cfbf10a7acbc1c19e98",
+        "subject":  "Harden M10 publisher runtime boundaries",
+        "file":  "025-harden-m10-publisher-runtime-boundaries.patch"
+    },
+    {
+        "order":  26,
+        "sha":  "54af5d16ee435443a7632b4119e600695e264797",
+        "subject":  "Reject unsafe M10 publisher roots",
+        "file":  "026-reject-unsafe-m10-publisher-roots.patch"
+    },
+    {
+        "order":  27,
+        "sha":  "2ce45185ae016bd0ec6350a25341b139089a716b",
+        "subject":  "foundation: bind real scale evidence to production transport",
+        "file":  "027-foundation-bind-real-scale-evidence-to-production-transport.patch"
+    },
+    {
+        "order":  28,
+        "sha":  "c65e6a360c492feb8b88e4c221cefd4e5796cb01",
+        "subject":  "foundation: harden delta ACL and readback gates",
+        "file":  "028-foundation-harden-delta-acl-and-readback-gates.patch"
+    },
+    {
+        "order":  29,
+        "sha":  "5322658dd677e3193898e9858b463a572371c3aa",
+        "subject":  "foundation: expose ACL re-emission intents",
+        "file":  "029-foundation-expose-acl-re-emission-intents.patch"
+    },
+    {
+        "order":  30,
+        "sha":  "9692fd150a1f979af3fe8740ecb085f48d0464d2",
+        "subject":  "foundation: complete F1-F7 implementation gates",
+        "file":  "030-foundation-complete-f1-f7-implementation-gates.patch"
+    },
+    {
+        "order":  31,
+        "sha":  "fd22159453efe1c39bdcbd48fed7a147db8a821e",
+        "subject":  "foundation: preserve relation closure after ACL",
+        "file":  "031-foundation-preserve-relation-closure-after-acl.patch"
+    },
+    {
+        "order":  32,
+        "sha":  "4f6829e6602d12c8960217fa3dff4fb67cf9a551",
+        "subject":  "foundation: merge generic and Jira relations",
+        "file":  "032-foundation-merge-generic-and-jira-relations.patch"
+    },
+    {
+        "order":  33,
+        "sha":  "7ffa0e460053c6c3e13e68d6f1b9e991c7357eef",
+        "subject":  "foundation: close F1-F7 projection and readback seams",
+        "file":  "033-foundation-close-f1-f7-projection-and-readback-seams.patch"
+    },
+    {
+        "order":  34,
+        "sha":  "e1a32321d3fa572b30220da5eeb387632570f51e",
+        "subject":  "foundation: add bounded M10 delta orchestration",
+        "file":  "034-foundation-add-bounded-m10-delta-orchestration.patch"
+    },
+    {
+        "order":  35,
+        "sha":  "57aebc15627f9baa484ef3c5424ae8f82eafa8bc",
+        "subject":  "foundation: harden snapshot quality readback",
+        "file":  "035-foundation-harden-snapshot-quality-readback.patch"
+    },
+    {
+        "order":  36,
+        "sha":  "fd84482e2fc986e7b4ad060247f6ae37b560fd9c",
+        "subject":  "foundation: close snapshot sync and tombstone closure",
+        "file":  "036-foundation-close-snapshot-sync-and-tombstone-closure.patch"
+    },
+    {
+        "order":  37,
+        "sha":  "dbd92a45db02a6d584c8f97f726cec72add302ff",
+        "subject":  "foundation: preserve references and isolate M10 stages",
+        "file":  "037-foundation-preserve-references-and-isolate-m10-stages.patch"
+    },
+    {
+        "order":  38,
+        "sha":  "b082229d0efb4e56948363d8747a3407b230a34e",
+        "subject":  "foundation: bind Confluence attachment body transport",
+        "file":  "038-foundation-bind-confluence-attachment-body-transport.patch"
+    },
+    {
+        "order":  39,
+        "sha":  "166faa2b2d3c79cbb1a6f5092dbf6727b1bf4a23",
+        "subject":  "foundation: publish generation-bound Confluence pages",
+        "file":  "039-foundation-publish-generation-bound-confluence-pages.patch"
+    }
+]

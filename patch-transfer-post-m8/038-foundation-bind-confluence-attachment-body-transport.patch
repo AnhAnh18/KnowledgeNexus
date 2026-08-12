@@ -1,0 +1,267 @@
+From b082229d0efb4e56948363d8747a3407b230a34e Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 18:44:50 +0700
+Subject: [PATCH] foundation: bind Confluence attachment body transport
+
+---
+ .../infrastructure/confluence/__init__.py     |   4 +
+ ...nce_data_center_attachment_body_adapter.py |  96 ++++++++++++++
+ ...nce_data_center_attachment_body_adapter.py | 121 ++++++++++++++++++
+ 3 files changed, 221 insertions(+)
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/confluence/confluence_data_center_attachment_body_adapter.py
+ create mode 100644 tests/foundation/infrastructure/confluence/test_confluence_data_center_attachment_body_adapter.py
+
+diff --git a/src/knowledgenexus/foundation/infrastructure/confluence/__init__.py b/src/knowledgenexus/foundation/infrastructure/confluence/__init__.py
+index bad879b..b94cba3 100644
+--- a/src/knowledgenexus/foundation/infrastructure/confluence/__init__.py
++++ b/src/knowledgenexus/foundation/infrastructure/confluence/__init__.py
+@@ -6,6 +6,9 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_
+ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_adapter import (  # noqa: E501
+     ConfluenceDataCenterPageAdapter,
+ )
++from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_attachment_body_adapter import (
++    ConfluenceDataCenterAttachmentBodyAdapter,
++)
+ from knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_observation_adapter import (  # noqa: E501
+     ConfluenceDataCenterPageObservationAdapter,
+ )
+@@ -33,6 +36,7 @@ from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_htt
+ 
+ __all__ = [
+     "ConfluenceDataCenterInventoryAdapter",
++    "ConfluenceDataCenterAttachmentBodyAdapter",
+     "ConfluenceDataCenterPageAdapter",
+     "ConfluenceDataCenterPageObservationAdapter",
+     "ConfluenceDataCenterPageMetadataMapper",
+diff --git a/src/knowledgenexus/foundation/infrastructure/confluence/confluence_data_center_attachment_body_adapter.py b/src/knowledgenexus/foundation/infrastructure/confluence/confluence_data_center_attachment_body_adapter.py
+new file mode 100644
+index 0000000..eb1b382
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/confluence/confluence_data_center_attachment_body_adapter.py
+@@ -0,0 +1,96 @@
++from __future__ import annotations
++
++import unicodedata
++import urllib.parse
++
++from knowledgenexus.foundation.domain.models.confluence_page_observation import (
++    RawHttpObservation,
++)
++from knowledgenexus.foundation.domain.rules.confluence_attachment_id import (
++    require_confluence_attachment_id,
++)
++from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transport import (
++    ConfluenceHttpError,
++    ConfluenceHttpResponseTooLargeError,
++    ConfluenceHttpTransport,
++)
++from knowledgenexus.foundation.ports.confluence_attachment_body_fetch_port import (
++    ConfluenceAttachmentBodyFetchError,
++    ConfluenceAttachmentBodyTooLargeError,
++)
++
++
++_DOWNLOAD_PATH = "/download/attachments/{attachment_id}/{filename}"
++_MAX_FILENAME_BYTES = 512
++
++
++def _require_filename(value: object) -> str:
++    """Validate a filename before it becomes a URL path segment."""
++    if type(value) is not str:
++        raise TypeError("filename is invalid")
++    normalized = unicodedata.normalize("NFC", value)
++    if (
++        not normalized
++        or len(normalized.encode("utf-8")) > _MAX_FILENAME_BYTES
++        or "/" in normalized
++        or "\\" in normalized
++        or any(ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F for char in normalized)
++    ):
++        raise ValueError("filename is invalid")
++    return normalized
++
++
++class ConfluenceDataCenterAttachmentBodyAdapter:
++    """Fetch attachment bytes through the bounded Confluence HTTP transport."""
++
++    def __init__(self, *, transport: ConfluenceHttpTransport) -> None:
++        if not callable(getattr(transport, "get_response_bytes", None)):
++            raise TypeError("transport is invalid")
++        self._transport = transport
++
++    def fetch_attachment_body(
++        self,
++        *,
++        attachment_id: str,
++        filename: str,
++        max_bytes: int,
++    ) -> RawHttpObservation:
++        try:
++            attachment_id = require_confluence_attachment_id(attachment_id)
++            filename = _require_filename(filename)
++        except (TypeError, ValueError) as exc:
++            raise ConfluenceAttachmentBodyFetchError() from exc
++        if type(max_bytes) is not int or max_bytes <= 0:
++            raise ConfluenceAttachmentBodyFetchError()
++
++        path = _DOWNLOAD_PATH.format(
++            attachment_id=urllib.parse.quote(attachment_id, safe=""),
++            filename=urllib.parse.quote(filename, safe=""),
++        )
++        try:
++            response = self._transport.get_response_bytes(path=path, query={})
++        except ConfluenceHttpResponseTooLargeError as exc:
++            raise ConfluenceAttachmentBodyTooLargeError() from exc
++        except ConfluenceHttpError as exc:
++            raise ConfluenceAttachmentBodyFetchError() from exc
++        except (OSError, TypeError, ValueError) as exc:
++            raise ConfluenceAttachmentBodyFetchError() from exc
++        except Exception as exc:
++            raise ConfluenceAttachmentBodyFetchError() from exc
++
++        try:
++            status_code = response.status_code
++            body = response.body
++        except Exception as exc:
++            raise ConfluenceAttachmentBodyFetchError() from exc
++        if type(status_code) is not int or type(body) is not bytes:
++            raise ConfluenceAttachmentBodyFetchError()
++        if len(body) > max_bytes:
++            raise ConfluenceAttachmentBodyTooLargeError()
++        try:
++            return RawHttpObservation(status_code=status_code, body=body)
++        except (TypeError, ValueError) as exc:
++            raise ConfluenceAttachmentBodyFetchError() from exc
++
++
++__all__ = ["ConfluenceDataCenterAttachmentBodyAdapter"]
+diff --git a/tests/foundation/infrastructure/confluence/test_confluence_data_center_attachment_body_adapter.py b/tests/foundation/infrastructure/confluence/test_confluence_data_center_attachment_body_adapter.py
+new file mode 100644
+index 0000000..6c36288
+--- /dev/null
++++ b/tests/foundation/infrastructure/confluence/test_confluence_data_center_attachment_body_adapter.py
+@@ -0,0 +1,121 @@
++from __future__ import annotations
++
++from collections.abc import Mapping
++
++import pytest
++
++from knowledgenexus.foundation.infrastructure.confluence import (
++    ConfluenceDataCenterAttachmentBodyAdapter,
++    ConfluenceHttpError,
++    ConfluenceHttpResponse,
++    ConfluenceHttpResponseTooLargeError,
++)
++from knowledgenexus.foundation.ports.confluence_attachment_body_fetch_port import (
++    ConfluenceAttachmentBodyFetchError,
++    ConfluenceAttachmentBodyTooLargeError,
++)
++
++
++class FakeTransport:
++    def __init__(self, response: ConfluenceHttpResponse) -> None:
++        self.response = response
++        self.calls: list[tuple[str, dict[str, str]]] = []
++
++    def get_response_bytes(
++        self, *, path: str, query: Mapping[str, str]
++    ) -> ConfluenceHttpResponse:
++        self.calls.append((path, dict(query)))
++        return self.response
++
++
++def test_fetches_download_endpoint_and_preserves_response() -> None:
++    transport = FakeTransport(ConfluenceHttpResponse(status_code=200, body=b"pdf"))
++
++    result = ConfluenceDataCenterAttachmentBodyAdapter(
++        transport=transport
++    ).fetch_attachment_body(
++        attachment_id="att123",
++        filename="architecture diagram.pdf",
++        max_bytes=1024,
++    )
++
++    assert result.status_code == 200
++    assert result.body == b"pdf"
++    assert transport.calls == [
++        ("/download/attachments/att123/architecture%20diagram.pdf", {})
++    ]
++
++
++def test_rejects_body_over_requested_limit() -> None:
++    transport = FakeTransport(ConfluenceHttpResponse(status_code=200, body=b"1234"))
++
++    with pytest.raises(ConfluenceAttachmentBodyTooLargeError):
++        ConfluenceDataCenterAttachmentBodyAdapter(
++            transport=transport
++        ).fetch_attachment_body(
++            attachment_id="123",
++            filename="a.bin",
++            max_bytes=3,
++        )
++
++
++def test_maps_transport_size_failure_to_port_error() -> None:
++    class TooLarge(FakeTransport):
++        def get_response_bytes(self, **kwargs: object) -> ConfluenceHttpResponse:
++            raise ConfluenceHttpResponseTooLargeError("secret")
++
++    with pytest.raises(ConfluenceAttachmentBodyTooLargeError):
++        ConfluenceDataCenterAttachmentBodyAdapter(
++            transport=TooLarge(ConfluenceHttpResponse(status_code=200, body=b""))
++        ).fetch_attachment_body(
++            attachment_id="123",
++            filename="a.bin",
++            max_bytes=3,
++        )
++
++
++def test_maps_transport_failure_and_rejects_unsafe_path_inputs() -> None:
++    class Failing(FakeTransport):
++        def get_response_bytes(self, **kwargs: object) -> ConfluenceHttpResponse:
++            raise ConfluenceHttpError("credential/secret")
++
++    adapter = ConfluenceDataCenterAttachmentBodyAdapter(
++        transport=Failing(ConfluenceHttpResponse(status_code=200, body=b""))
++    )
++    with pytest.raises(ConfluenceAttachmentBodyFetchError) as exc_info:
++        adapter.fetch_attachment_body(
++            attachment_id="123",
++            filename="../secret.bin",
++            max_bytes=3,
++        )
++    assert "secret" not in str(exc_info.value)
++
++    with pytest.raises(ConfluenceAttachmentBodyFetchError):
++        adapter.fetch_attachment_body(
++            attachment_id="bad/id",
++            filename="a.bin",
++            max_bytes=3,
++        )
++
++    with pytest.raises(ConfluenceAttachmentBodyFetchError):
++        adapter.fetch_attachment_body(
++            attachment_id="123",
++            filename="a.bin",
++            max_bytes=0,
++        )
++
++
++def test_maps_transport_error_without_leaking_details() -> None:
++    class Failing(FakeTransport):
++        def get_response_bytes(self, **kwargs: object) -> ConfluenceHttpResponse:
++            raise ConfluenceHttpError("host-token-123")
++
++    with pytest.raises(ConfluenceAttachmentBodyFetchError) as exc_info:
++        ConfluenceDataCenterAttachmentBodyAdapter(
++            transport=Failing(ConfluenceHttpResponse(status_code=200, body=b""))
++        ).fetch_attachment_body(
++            attachment_id="123",
++            filename="a.bin",
++            max_bytes=3,
++        )
++    assert "host-token-123" not in str(exc_info.value)
+-- 
+2.45.1.windows.1
+

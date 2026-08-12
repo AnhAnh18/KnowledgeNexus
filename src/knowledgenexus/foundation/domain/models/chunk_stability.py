@@ -13,9 +13,9 @@ from knowledgenexus.foundation.domain.rules.content_hasher import ContentHasher
 
 SUMMARY_FORMAT_VERSION = "1"
 ACTIVE_CHUNKER_VERSION = "1.2.0"
-_CHUNK_ID = re.compile(r"^chunk:confluence:[0-9a-f]{16}(?:-[1-9][0-9]*)?$")
+_CHUNK_ID = re.compile(r"^chunk:(?:confluence|git):[0-9a-f]{16}(?:-[1-9][0-9]*)?$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_DOCUMENT_ID = re.compile(r"^confluence:page:\S+$")
+_DOCUMENT_ID = re.compile(r"^(?:confluence:page|git):\S+$")
 _CONTENT_KINDS = frozenset({"prose", "table", "code_block", "code_symbol", "code_window"})
 
 

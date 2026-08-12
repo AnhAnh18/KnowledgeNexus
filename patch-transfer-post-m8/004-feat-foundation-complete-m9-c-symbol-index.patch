@@ -1,0 +1,2313 @@
+From b729356e8ce6758cadac710849fbcabf40ad00be Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 5 Aug 2026 10:25:14 +0700
+Subject: [PATCH] feat(foundation): complete M9-C symbol index
+
+---
+ .../20260805-m9c/01-plan-review.md            |  69 +++
+ .../20260805-m9c/02-plan-revised.md           | 213 +++++++++
+ .../20260805-m9c/04-implementation.md         |  40 ++
+ .codex-workflow/20260805-m9c/05-review-1.md   |  49 +++
+ .../20260805-m9c/06-fix-plan.input.md         |  38 ++
+ .../20260805-m9c/07-fix-plan-review.md        |  73 +++
+ .../20260805-m9c/08-fix-implementation.md     |  22 +
+ .codex-workflow/20260805-m9c/09-review-2.md   |  25 ++
+ .codex-workflow/20260805-m9c/PLAN.input.md    |  93 ++++
+ .local_ai/IMPLEMENTATION_STATE.md             |  26 +-
+ .local_ai/ROADMAP.md                          |   9 +-
+ requirements.txt                              |   3 +
+ .../application/use_cases/__init__.py         |   2 +
+ .../use_cases/build_git_symbols.py            | 416 ++++++++++++++++++
+ .../foundation/domain/models/__init__.py      |  18 +
+ .../foundation/domain/models/symbol_index.py  | 277 ++++++++++++
+ .../foundation/domain/rules/__init__.py       |   4 +
+ .../domain/rules/symbol_id_generator.py       |  35 ++
+ .../domain/rules/symbol_record_builder.py     |  61 +++
+ .../infrastructure/parsers/__init__.py        |   5 +
+ .../parsers/tree_sitter_symbol_parser.py      | 290 ++++++++++++
+ .../foundation/ports/__init__.py              |   2 +
+ .../foundation/ports/symbol_parser_port.py    |  12 +
+ .../use_cases/test_build_git_symbols.py       | 125 ++++++
+ .../domain/models/test_symbol_index.py        |  62 +++
+ .../parsers/test_tree_sitter_symbol_parser.py |  53 +++
+ 26 files changed, 2016 insertions(+), 6 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m9c/01-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9c/02-plan-revised.md
+ create mode 100644 .codex-workflow/20260805-m9c/04-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9c/05-review-1.md
+ create mode 100644 .codex-workflow/20260805-m9c/06-fix-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m9c/07-fix-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m9c/08-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m9c/09-review-2.md
+ create mode 100644 .codex-workflow/20260805-m9c/PLAN.input.md
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/build_git_symbols.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/symbol_index.py
+ create mode 100644 src/knowledgenexus/foundation/domain/rules/symbol_id_generator.py
+ create mode 100644 src/knowledgenexus/foundation/domain/rules/symbol_record_builder.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/parsers/__init__.py
+ create mode 100644 src/knowledgenexus/foundation/infrastructure/parsers/tree_sitter_symbol_parser.py
+ create mode 100644 src/knowledgenexus/foundation/ports/symbol_parser_port.py
+ create mode 100644 tests/foundation/application/use_cases/test_build_git_symbols.py
+ create mode 100644 tests/foundation/domain/models/test_symbol_index.py
+ create mode 100644 tests/foundation/infrastructure/parsers/test_tree_sitter_symbol_parser.py
+
+diff --git a/.codex-workflow/20260805-m9c/01-plan-review.md b/.codex-workflow/20260805-m9c/01-plan-review.md
+new file mode 100644
+index 0000000..1bf5f6c
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/01-plan-review.md
+@@ -0,0 +1,69 @@
++# M9-C Plan Critique
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++The plan has the right high-level direction (tree-sitter C++/Java, no regex fallback, schema validation, and adversarial tests), but it is not yet actionable against the existing M9-B seam. The parser, symbol chunking, and authority-result semantics need an explicit contract matrix before implementation.
++
++## Findings
++
++### P1 - The plan does not define the M9-B authority-plan migration
++
++The current `CodeDocumentPlan`/`GitRepositorySnapshot` invariants require `included_chunk_count == 0` in a snapshot, reject any authority document that has chunks, and require every emitted chunk to be `content_kind=code_window` whose text is the entire assembled source window. M9-C's stated requirement to emit authority `code_symbol` chunks therefore cannot work by adding a parser module alone. The revised plan must name the model/use-case changes (including metrics, chunk validation, authority observation linkage, and result failure categories), preserve atomic failure semantics, and specify which existing invariants are replaced versus retained. Add a migration test proving a mixed snapshot (authority symbols plus non-authority fallback windows) is valid and that a failed authority parse returns no partial plan.
++
++### P1 - Chunk-ID generation is underspecified and risks violating CHUNKING_SPEC §3
++
++The plan specifies `SymbolIdGenerator`, but does not specify the `ChunkRecord.chunk_id` preimage. For Git symbol chunks the contract is `chunk:git:` plus SHA-256 of `git:{repo}:{file_path}` + unit key + normalized text; branch and commit must not enter that ID. Symbol IDs do include branch and use the overload suffix only for same-qualified-name overloads. The implementation plan must distinguish these two IDs, define duplicate byte-identical chunk handling (`-1`, `-2`) versus hash-collision failure, and add a test showing unchanged symbol text keeps its chunk ID across branch/commit changes while symbol IDs follow §12.2.
++
++### P1 - Parse-status and fallback behavior is ambiguous
++
++Master §12.1 requires C++ files with ERROR nodes to be recorded as `parse_status: partial` and extraction must not abort. CHUNKING §5.4 allows fallback windows only for symbol-less files (including a C++ file producing only ERROR nodes). The plan says “partial plus the bounded symbol/fallback policy” without defining the policy for: clean symbols; partial trees with some symbols; partial trees with zero symbols; parser hard failure; and unsupported Kotlin/XML. This is a correctness and security boundary because an unauthorized fallback stream could duplicate or expose source unexpectedly. Add a table of input state -> status -> SymbolRecords -> chunks -> failure category. The minimum contract should explicitly say whether partial-symbol files emit only successfully extracted symbols, and whether only the zero-symbol/ERROR-only case emits `code_window` chunks.
++
++### P1 - Chunk-record requirements are not carried through the plan
++
++The plan mentions linkage and profile limits but omits the complete `ChunkRecord` field/semantic contract: `acl_tags`, `content_hash`, `chunker_version`, `source_version`, `document_id`, empty arrays, language, line/part metadata, and exact schema field set. It also does not state that the assembled prefix/comment is normalized before hashing and token counting, or that the exact pinned BGE-M3 tokenizer asset must be used. Existing M9-B plan validation currently requires all optional fields to be materialized and checks source reconstruction. The revised plan must define the symbol-chunk builder inputs/outputs and cross-checks, including `chunk_id` -> SymbolRecord linkage, source commit/path identity, line bounds, contiguous parts, and `chunks_over_hard_max == 0`.
++
++### P1 - Symbol extraction and naming rules are not sufficiently deterministic
++
++The plan lists qualified names and parents but does not define node-to-symbol mappings or ordering for C++ namespaces, nested classes, templates, Java packages/classes/methods, constructors, operators, anonymous/nested declarations, or declarations split across lines. It also does not say how a class chunk obtains declaration/member signatures while excluding method bodies, or how attached leading comments are selected when comments are separated by annotations/preprocessor lines. These choices directly affect IDs and retrieval text. Add a deterministic mapping table, parent-stack algorithm, source-order tie-breakers, signature canonicalization, and fixture assertions for every MVP symbol type in §12.1 (including namespace/package).
++
++### P2 - Oversize/class rendering and line-range semantics need an explicit algorithm
++
++CHUNKING §5.1/§5.3 requires class/struct/interface/enum chunks to contain declaration and member signatures but not method bodies, while method/function chunks contain the full declaration/body and split only on complete lines. A class chunk is therefore not necessarily a contiguous source slice, yet the plan only says “build from complete source lines” and “include signatures.” Specify the rendered text algorithm, whether comments are included once or per part, how `line_start`/`line_end` refer back to source, and how gaps/overlaps are validated. Include tests for a class with two methods, a multiline signature, and an unsplittable over-budget line.
++
++### P2 - Dependency/API pinning is not acceptance-testable
++
++“Pin compatible versions” is not a concrete dependency requirement. `tree-sitter` and the official grammar packages have incompatible API combinations across releases. Name exact package/version pins, parser construction API, grammar ABI compatibility, and a smoke test that parses C++ and Java without network/cache fallback. Add an architecture test that the application imports only the parser port and the tree-sitter adapter is the sole infrastructure dependency; retain the M9-B boundary checks.
++
++### P2 - Atomic result validation needs a concrete public contract
++
++The plan proposes immutable observation/result models but does not define their fields, status enum, or impossible combinations. In particular, a success must have records/chunks and no error, a failed result must have exactly one sanitized category and no records, and `partial` is a parse status—not an application failure status. Specify runtime checks before field access for `object()`, `None`, forged dataclass instances, wrong enum values, extra/missing fields, malformed parser node spans, duplicate symbols, and mismatched counts. Add tests that prove the repository reader/parser/chunker are not called after invalid request/dependency input and no partial plan escapes on any exception.
++
++### P2 - Determinism/scanned-at source is not pinned
++
++The plan requires byte-identical output “with the same snapshot and timestamp” but never states where `scanned_at` comes from. It must be an explicit request/config timestamp (not wall clock), normalized to RFC3339 UTC, and reused for every SymbolRecord in a run. Define stable record/chunk ordering and JSON serialization, and test repeated runs plus changed timestamps (records may change only in the timestamp field; chunk IDs/text must not).
++
++### P3 - Extension/authority policy should be named, not inferred
++
++M9-B currently derives authority from the fixed C++/Java extension set and maps many other extensions to language tags. The plan should explicitly preserve that policy: Kotlin/XML remain non-symbol fallback; unsupported or parser-ineligible files do not become authority by parser guesswork. Add tests for `.cc/.cpp/.h/.hpp/.java`, Kotlin/XML, case variants, and a path whose extension is unknown.
++
++## Required acceptance tests
++
++1. Schema tests validate every emitted SymbolRecord and ChunkRecord with `additionalProperties: false`, including nullable `signature`, `parent_symbol`, and `chunk_id` cases and all required chunk fields.
++2. Parser fixtures cover C++/Java class, struct, interface, enum, function, method, namespace/package, nested parents, leading comments, multiline signatures, templates, and overloads; assert exact symbol IDs, suffixes, line ranges, parent links, source order, and parse status.
++3. Parse-state matrix tests cover `ok`, `partial` with symbols, `partial` with zero symbols/ERROR-only, hard parser failure, and Kotlin/XML fallback; assert no unauthorized fallback and no partial application result.
++4. Chunk tests assert exact provenance prefix, NFC/newline/trailing-space normalization, BGE-M3 token counts, class-body exclusion, method-body inclusion, complete-line split/overlap limits, `#p{n}` IDs, unsplittable-line failure, source line bounds, and symbol/chunk linkage.
++5. ID/determinism tests assert the CHUNKING_SPEC Git preimage (branch/commit excluded), duplicate identical chunks receive stable `-1/-2`, true hash collisions fail closed, and repeated runs produce byte-identical sorted output.
++6. M9-B seam tests assert mixed authority/non-authority documents, updated counters and plan invariants, exact commit/branch/path provenance, and unchanged behavior for non-authority fallback windows.
++7. Adversarial boundary tests use `object()`, `None`, wrong enum values, missing/extra fields, forged frozen objects, malformed parser results/spans, duplicate IDs, impossible status/count combinations, wrong tokenizer/profile, and invalid commit/path. Verify fail-closed sanitized categories and zero side effects.
++8. Run the focused M9-C suite, existing M9-B/M9-A/M8-D/E suites, architecture checks, `compileall`, and `git diff --check`; record exact commands/results in the implementation report.
++
++## Bounded alternatives
++
++- **Seam shape (recommended):** extend `CodeDocumentPlan` with a validated `symbols` collection and symbol-chunk allowance, while retaining one atomic `GitCodeBuildResult`; add a dedicated symbol-index domain service behind the existing use case. This keeps one repository snapshot and one commit-bound transaction.
++- **Seam shape (bounded alternative):** keep M9-B's plan immutable and add a second `BuildGitSymbols` application use case consuming only authority observations, then compose plans in a thin coordinator. This reduces changes to M9-B but requires a second cross-plan consistency/atomicity check before publication.
++- **Partial parsing policy (recommended):** `partial` emits only successfully extracted symbols; emit `code_window` only when the parser yields no symbols and the file qualifies for §5.4. Do not invent fallback windows for unparsed regions unless the contract is amended.
++- **Rendering policy (bounded alternative):** implement a source-preserving declaration assembler for aggregate symbols (declaration plus member signature spans) and source slices for methods/functions; document how non-contiguous aggregate spans map to one line range. A simpler contiguous class slice is contract-incompatible because it duplicates method bodies.
++
++## Review conclusion
++
++Revise the plan with the state matrix, ID algorithms, exact symbol mappings, complete ChunkRecord semantics, and explicit M9-B model migration before implementation. Until those are fixed, the plan is complex rather than a build-ready checklist.
+diff --git a/.codex-workflow/20260805-m9c/02-plan-revised.md b/.codex-workflow/20260805-m9c/02-plan-revised.md
+new file mode 100644
+index 0000000..ca2ca36
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/02-plan-revised.md
+@@ -0,0 +1,213 @@
++# M9-C Minimal Symbol Index - Revised Bounded Plan
++
++## Review disposition
++
++The independent critic classified this stage as `complex` and identified five
++P1 gaps: the M9-B authority seam migration, distinct symbol/chunk IDs, parse
++status/fallback policy, complete ChunkRecord semantics, and deterministic
++symbol naming/rendering. This revision resolves those gaps before implementation.
++
++## Objective and seam choice
++
++M9-C adds a second, atomic application boundary `BuildGitSymbols` that consumes
++an already validated M9-B `CodeDocumentPlan` and emits a `GitSymbolIndexResult`.
++M9-B's approved plan remains unchanged: it continues to emit documents and
++non-authority `code_window` chunks while retaining authority observations with
++zero fallback chunks. M9-C validates that the authority observations are exact
++byte/text/path/commit matches to the plan, then returns symbol records and
++authority chunks for later M9-D composition. No M9-B result is mutated or
++partially rewritten in this stage.
++
++This shape keeps the M9-B gate stable while making the cross-plan identity
++contract explicit. M9-D will be responsible for composing the M9-B fallback
++stream and this M9-C authority stream into one code snapshot.
++
++## Normative authority
++
++- `contracts/foundation/decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` §§12.1-12.2.
++- `contracts/foundation/CHUNKING_SPEC.md` §§3, 5.1-5.4, 6-7.
++- `contracts/foundation/schemas/symbol_record.schema.json` and `defs.schema.json`.
++- `contracts/foundation/schemas/chunk_record.schema.json`.
++- Existing `GitRepositorySnapshot`, `CodeDocumentPlan`, active BGE-M3 profile,
++  `ChunkRecordBuilder`, and M9-B commit/path policy.
++
++## Public models and runtime invariants
++
++Add immutable, exact-type validated models under the Foundation domain:
++
++- `ParsedSymbol`: `path`, `language`, `symbol_type`, `name`,
++  `qualified_name`, nullable `signature`, one-based `line_start`/`line_end`,
++  nullable `parent_qualified_name`, attached leading comment text, and
++  `parse_status`. Spans must be within the source line count and source order
++  must be deterministic.
++- `SymbolParseResult`: `status` (`ok`/`partial`), ordered symbols, parser
++  diagnostics reduced to bounded category/counters, and source path/language.
++- `GitSymbolIndexResult`: `status` (`success`/`failed`), ordered
++  `symbol_records`, ordered `chunks`, metrics (`authority_file_count`,
++  `symbol_count`, `chunk_count`, `partial_file_count`, `fallback_file_count`,
++  `oversized_part_count`), and one sanitized failure category on failure.
++  Success has no error and internally consistent counts; failure has no records,
++  chunks, or metrics other than zeroes.
++- `BuildGitSymbolsRequest`: exact `CodeDocumentPlan`, active
++  `ChunkingProfile`, and explicit RFC3339 `scanned_at` supplied by the caller.
++  The timestamp is normalized once and reused for every record; no wall clock
++  is read by the use case.
++
++Every public constructor/use-case validates runtime types before field access;
++rejects `object()`, `None`, wrong enum values, missing/extra fields, forged
++dataclass instances, impossible counters, duplicate paths/IDs, and invalid
++commit/path provenance. Unexpected dependency exceptions become sanitized
++failure categories and never leak partial output.
++
++## Parser capability and exact dependency pin
++
++Add `SymbolParserPort` under `foundation/ports`. The application imports only
++this port. Add one infrastructure adapter using official tree-sitter grammars:
++
++- `tree-sitter==0.25.2` (the grammar wheels expose the current `PyCapsule`
++  language API; the older 0.22 constructor is incompatible with these official
++  Windows wheels)
++- `tree-sitter-cpp==0.23.4`
++- `tree-sitter-java==0.23.5`
++
++The adapter uses the 0.25 `Parser(Language(grammar.language()))` API and grammar
++module language factories; it never downloads grammars or falls back to
++regex/ad-hoc parsing.
++An offline smoke test parses one C++ and one Java fixture with those installed
++packages. Kotlin/XML and all non-authority extensions remain outside this
++adapter and keep M9-B fallback-window behavior.
++
++## Deterministic extraction contract
++
++The adapter traverses tree-sitter nodes in `(start_byte, end_byte, node_type)`
++order with a parent stack. The following mappings are the only extracted types:
++
++| Language | Tree-sitter declarations | `symbol_type` | Qualified-name rule |
++|---|---|---|---|
++| C++ | `namespace_definition` | `namespace` | `A::B` by enclosing namespace stack |
++| C++ | `class_specifier` | `class` | enclosing namespace/class + name |
++| C++ | `struct_specifier` | `struct` | same |
++| C++ | `enum_specifier` | `enum` | same |
++| C++ | `function_definition`, declaration nodes with a declarator | `function` or `method` | enclosing class => method; otherwise function |
++| Java | `package_declaration` | `package` | dotted package name |
++| Java | `class_declaration`, `interface_declaration`, `enum_declaration` | `class`, `interface`, `enum` | enclosing package/class + name |
++| Java | `method_declaration`, `constructor_declaration` | `method` | enclosing class + name |
++
++Anonymous declarations, fields/variables, references, calls, templates as
++instantiations, and unsupported node forms are not emitted. Constructors use
++the class name as `name`; operators retain their canonical source spelling.
++Multiline declarations use the exact normalized source signature slice with
++internal whitespace collapsed only where the grammar slice contains line
++breaks; no semantic reformatting is performed. Parent links use the parent's
++qualified name. Leading comments are the contiguous preceding comment block,
++allowing annotations/preprocessor lines only when they are part of the same
++attached source span; a comment is included once in the symbol's rendered text.
++
++Stable ordering is source order, then parent depth, then symbol type/name. For
++same-file same-qualified-name overloads, `SymbolIdGenerator` emits:
++`{repo}:{branch}:{file_path}:{qualified_name}` for the first/unique symbol and
++`~{sha256(signature)[:8]}` for each overload. Duplicate signatures are a
++deterministic duplicate error rather than silent record replacement.
++
++## Parse-state matrix
++
++| Parser state | Symbol records | Chunks | Application result |
++|---|---|---|---|
++| clean tree, symbols found | records `parse_status=ok` | one `code_symbol` per symbol (or parts) | success |
++| partial tree, symbols found | extracted records `parse_status=partial` | only extracted `code_symbol` chunks; no duplicate windows | success |
++| clean/partial tree, zero symbols | none | M9-C emits bounded `code_window` fallback for that authority file | success |
++| parser hard failure / malformed parser result | none | none | failed `parser_failed`/`parser_result_invalid` |
++| Kotlin/XML/non-authority | none from M9-C | unchanged M9-B `code_window` stream | success at M9-B; M9-C ignores |
++
++Only the zero-symbol authority case uses §5.4 fallback windows. No fallback is
++invented for a partial parse that already yielded symbols. A parser error does
++not abort extraction of valid nodes, but a transport/API failure fails the
++atomic M9-C result.
++
++## Symbol records and code-symbol chunks
++
++`SymbolRecordBuilder` returns a plain dict with exactly the schema fields,
++validates it through `FoundationSchemaValidator`, and binds `repo`, `branch`,
++`commit_hash`, `file_path`, language, line range, `parse_status`, and shared
++`scanned_at` to the validated authority observation. `chunk_id` is non-null for
++every emitted symbol and points to exactly one emitted symbol chunk.
++
++Chunks are built through `ChunkRecordBuilder` with the complete required field
++set: `acl_tags=["repo:spen-sdk"]`, empty `jira_keys`/`relation_ids` and
++`heading_path`, `source_version=commit_sha`, `repo`, `branch`, `file_path`,
++`symbol`, line metadata, active `chunker_version=1.2.0`, BGE-M3 token count,
++and content hash of the exact normalized text. Schema validation occurs before
++return. The provenance prefix is normalized and included in both token count
++and hash:
++
++`// spen-sdk · {file_path} · {qualified_name}` followed by one blank line.
++
++Aggregate class/struct/interface/enum chunks contain the declaration and
++member-signature spans only; method/function chunks contain the declaration/body
++source span. Aggregate text may be non-contiguous; its `line_start`/`line_end`
++are the minimum/maximum source lines covering the selected spans and are checked
++against the commit-bound source. Attached comments are included once.
++
++For an oversized function/method, split complete source lines only using the
++active BGE-M3 tokenizer/profile (`code_window_target_tokens`, hard maximum,
++40-line cap, 4-line overlap). Repeat the prefix/comment in every part, set
++contiguous `part_index`/`part_total`, use unit keys
++`qualified_name#p{n}`, and fail closed as `unsplittable_code_line` when one line
++cannot fit. Aggregate symbols are bounded by the same hard maximum; an
++unsplittable aggregate fails closed.
++
++`ChunkIdGenerator` receives the stable Git document key
++`git:{repo}:{file_path}`, the unit key above, and exact normalized chunk text.
++Branch and commit are excluded from chunk IDs. Symbol IDs remain branch-bound.
++Byte-identical duplicate chunks receive deterministic `-1`, `-2` suffixes only
++when the duplicate unit is intentionally repeated; a true hash collision for
++different preimages fails closed as `chunk_id_collision`.
++
++## Atomic use-case algorithm
++
++1. Validate request, active profile, parser/tokenizer/schema dependencies, and
++   the exact M9-B plan before any parser/tokenizer call.
++2. Derive authority observations from the plan and revalidate path, source bytes,
++   normalized text, repo/branch/commit, and authority flag against the plan's
++   canonical observations.
++3. Parse each authority file using the port; validate every returned node/span,
++   language, parent, status, and deterministic ordering.
++4. Build all records/chunks in memory, validate schemas and cross-links, enforce
++   budgets/metrics/global uniqueness, then return one frozen success result.
++5. On any failure, return one sanitized failed result with no records/chunks and
++   no filesystem/network/export/checkpoint/raw-store side effect.
++
++## Files and bounded tests
++
++Expected production changes:
++
++- `requirements.txt` exact tree-sitter pins.
++- New domain models/rules/port/infrastructure adapter and
++  `foundation/application/use_cases/build_git_symbols.py` with package exports.
++- No modification to M9-B behavior except additive shared helpers if required.
++- Stage artifacts under `.codex-workflow/20260805-m9c/`.
++
++Focused tests must cover:
++
++- Exact schema fields and all symbol types, nullable fields, and additional
++  property rejection.
++- C++/Java fixtures for namespaces/packages, nested classes, class/struct/
++  interface/enum, functions/methods/constructors, comments, templates,
++  multiline signatures, overload IDs, and source-order determinism.
++- Parse matrix above, Kotlin/XML policy, parser hard failures, malformed spans,
++  and no partial output.
++- Exact prefix, class-body exclusion, method-body inclusion, token counts,
++  normalization, complete-line splitting, overlap/part metadata, unsplittable
++  lines, chunk preimages, duplicate IDs, true collision rejection, and symbol
++  linkage.
++- Public adversarial boundaries (`object()`, `None`, wrong enums, missing/extra
++  fields, forged frozen objects, impossible counters, wrong profile/tokenizer,
++  wrong commit/path) plus zero-call/zero-side-effect assertions.
++- Existing M9-B focused suite, M9-A regression, M8-D/E regression, architecture
++  checks, `python -m compileall -q src tests`, and scoped `git diff --check`.
++
++## Acceptance gate
++
++Independent review must be run in a fresh session and must report `VERDICT: PASS`
++with no unresolved P0-P3 findings. Only then update `.local_ai/ROADMAP.md` and
++`.local_ai/IMPLEMENTATION_STATE.md`, commit, and push `codex/m8-m9`.
+diff --git a/.codex-workflow/20260805-m9c/04-implementation.md b/.codex-workflow/20260805-m9c/04-implementation.md
+new file mode 100644
+index 0000000..e1d7752
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/04-implementation.md
+@@ -0,0 +1,40 @@
++# M9-C Implementation Report
++
++## Scope
++
++Implemented the bounded `BuildGitSymbols` authority stream over the approved
++M9-B `CodeDocumentPlan` without changing M9-B fallback-plan invariants. Added a
++tree-sitter C++/Java parser adapter, runtime-validated symbol/index models,
++deterministic symbol IDs, schema-valid SymbolRecord and code-symbol/fallback
++ChunkRecord construction, exact dependency pins, and adversarial-focused tests.
++
++## Files
++
++- `requirements.txt`
++- `src/knowledgenexus/foundation/domain/models/symbol_index.py`
++- `src/knowledgenexus/foundation/domain/rules/symbol_id_generator.py`
++- `src/knowledgenexus/foundation/domain/rules/symbol_record_builder.py`
++- `src/knowledgenexus/foundation/ports/symbol_parser_port.py`
++- `src/knowledgenexus/foundation/infrastructure/parsers/tree_sitter_symbol_parser.py`
++- `src/knowledgenexus/foundation/application/use_cases/build_git_symbols.py`
++- package exports under `src/knowledgenexus/foundation/{domain,ports,application}`
++- focused tests under `tests/foundation/{domain,infrastructure,application}`
++
++Pinned parser dependencies:
++
++- `tree-sitter==0.25.2`
++- `tree-sitter-cpp==0.23.4`
++- `tree-sitter-java==0.23.5`
++
++## Validation
++
++- `python -m pytest -q tests/foundation/infrastructure/parsers/test_tree_sitter_symbol_parser.py tests/foundation/domain/models/test_symbol_index.py tests/foundation/application/use_cases/test_build_git_symbols.py --basetemp=.pytest-m9c-focused-final` -> `10 passed` after review fixes.
++- `python -m pytest -q tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/domain/models/test_git_code_source.py --basetemp=.pytest-m9c-m9b` -> `27 passed`.
++- `python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_page_set.py tests/foundation/domain/models/test_confluence_page_set.py tests/foundation/domain/models/test_chunk_stability.py --basetemp=.pytest-m9c-m8de` -> `40 passed`.
++- M9-A media regression selection -> `65 passed`.
++- `python -m pytest -q tests/architecture --basetemp=.pytest-m9c-arch` -> `85 passed`.
++- `python -m compileall -q src tests` -> passed.
++- `git diff --check` -> passed (only normal LF/CRLF warnings from Git).
++
++Fresh independent re-review completed at `.codex-workflow/20260805-m9c/09-review-2.md`
++with `VERDICT: PASS` and no P0-P3 findings.
+diff --git a/.codex-workflow/20260805-m9c/05-review-1.md b/.codex-workflow/20260805-m9c/05-review-1.md
+new file mode 100644
+index 0000000..48c8858
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/05-review-1.md
+@@ -0,0 +1,49 @@
++# M9-C Independent Review
++
++VERDICT: FAIL
++
++## Findings
++
++### P1 - Parser spans are not validated against the authority source
++
++`ParsedSymbol.__post_init__` only checks that line/byte values are non-negative
++and ordered; it has no source line/byte bounds. `BuildGitSymbols.execute`
++revalidates the parser result but never compares `line_start`/`line_end`,
++`start_byte`, or `end_byte` to `observation.normalized_text`. As a result, a
++malicious or malformed parser result with `line_start=line_end=999` for a
++one-line file is accepted and returned as `success`, with both SymbolRecord and
++ChunkRecord claiming line 999. This violates the required malformed-span,
++commit-bound provenance, and fail-closed boundary behavior.
++
++Reproduction (custom parser returning a `ParsedSymbol` with line/byte values
++outside the source) produced `GitSymbolIndexStatus.SUCCESS`, a symbol record
++with `line_start: 999`, and a chunk with `line_start: 999`.
++
++Affected code: `src/knowledgenexus/foundation/domain/models/symbol_index.py:106-134`
++and `src/knowledgenexus/foundation/application/use_cases/build_git_symbols.py:80-84`.
++
++### P1 - C++ extraction misses declaration-only symbols and out-of-class methods
++
++The adapter maps only C++ `function_definition` nodes (plus aggregate nodes).
++It does not implement the plan's required "declaration nodes with a
++declarator" mapping, so declaration-only methods, constructors, and free
++function declarations disappear. For `class A { A(); void f(int); };` the
++adapter returns only the class. It also treats an out-of-class definition such
++as `void A::f() {}` as a top-level `function` named `f` with qualified name
++`f`, rather than a `method` under `A` (and similarly loses namespace/class
++qualification for `void n::A::f()`). This makes symbol records/chunks incomplete
++and gives incorrect parent/type/identity data for common C++ code.
++
++Affected code: `src/knowledgenexus/foundation/infrastructure/parsers/tree_sitter_symbol_parser.py:143-152`.
++
++## Verification
++
++- `python -m pytest -q --basetemp .tmp-pytest tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/infrastructure/parsers/test_tree_sitter_symbol_parser.py tests/foundation/domain/models/test_symbol_index.py tests/foundation/domain/records/test_chunk_record_builder.py` -> **41 passed**.
++- `python -m pytest -q --basetemp .tmp-pytest tests/foundation/application/use_cases/test_build_git_code_documents.py tests/architecture/test_m9b_git_boundary.py tests/architecture/test_m9a3_media_processing_boundary.py tests/architecture/test_m9a2_attachment_body_boundary.py tests/architecture/test_m8ac_acceptance_boundary.py` -> **26 passed**.
++- `python -m compileall -q src tests` -> passed.
++- `git diff --check -- src tests requirements.txt` -> passed (only CRLF normalization warnings).
++- Direct tree-sitter probes confirmed missing C++ declaration symbols and
++  incorrect out-of-class method classification; forged-span probe confirmed a
++  successful result with impossible line metadata.
++
++No implementation files were changed by this review.
+diff --git a/.codex-workflow/20260805-m9c/06-fix-plan.input.md b/.codex-workflow/20260805-m9c/06-fix-plan.input.md
+new file mode 100644
+index 0000000..33182eb
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/06-fix-plan.input.md
+@@ -0,0 +1,38 @@
++# M9-C Review-Fix Plan
++
++## Confirmed findings
++
++- P1: parser-provided byte/line spans are not checked against the authority
++  observation before records/chunks are emitted.
++- P1: the C++ adapter omits declaration-only function/method/constructor nodes
++  and misclassifies out-of-class qualified definitions as top-level functions.
++
++## Bounded fixes
++
++1. Add an application-boundary span validator immediately after parser-result
++   validation and before any record/fallback construction. Treat
++   `line_start`/`line_end` as inclusive one-based source lines and
++   `start_byte`/`end_byte` as exclusive UTF-8 offsets in the exact normalized
++   observation text. Derive byte-to-line boundaries from that text; reject path
++   or language mismatch, zero/reversed/out-of-range lines, byte overflow, and
++   byte/line mismatch (including multibyte UTF-8). A malformed symbol in any
++   later file rolls back all earlier in-memory output and returns sanitized
++   `parser_result_invalid`. Add forged-span tests for every case.
++2. Extend only the tree-sitter C++ mapping for direct declaration nodes whose
++   declarator contains a function declarator, without emitting helper nodes.
++   Walk qualified identifiers, constructors/destructors, and operators. Resolve
++   out-of-class qualifier chains against the prior class/struct declarations:
++   a class-qualified chain is a method with the nearest class parent; a
++   namespace-only chain remains a function. `A();` and `A::A()` are methods
++   named `A`; free declarations remain functions. Add fixtures for in-class
++   declarations, free declarations, `void A::f() {}`, `void n::A::f();`, and
++   `void n::g();`, with exact IDs/ranges/parents and no duplicates. Do not add
++   regex or broaden to call graph/fields.
++
++## Validation
++
++- Focused M9-C tests including all existing adversarial cases and the new P1
++  regressions.
++- M9-B, M9-A, M8-D/E, architecture, compileall, and diff-check regressions.
++- Fresh independent re-review in a new session; no ledger update or commit until
++  `VERDICT: PASS`.
+diff --git a/.codex-workflow/20260805-m9c/07-fix-plan-review.md b/.codex-workflow/20260805-m9c/07-fix-plan-review.md
+new file mode 100644
+index 0000000..4750ab0
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/07-fix-plan-review.md
+@@ -0,0 +1,73 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: build
++
++# M9-C Fix Plan Review
++
++The two bounded fixes target both confirmed P1 findings and do not require a
++broader seam change. The plan is buildable, but the following details must be
++made explicit so the implementation and re-review can verify the M9-C
++contract rather than only exercise the happy path.
++
++## Required span-validator detail
++
++1. Run validation for every parser symbol immediately after validating the
++   parser result type, path, language, and status, and before either symbol
++   records or zero-symbol fallback chunks are built. A malformed symbol in a
++   later authority file must roll back records/chunks already built for earlier
++   files.
++2. Define the coordinate contract in the fix: `line_start`/`line_end` are
++   inclusive one-based source lines; `start_byte`/`end_byte` are exclusive
++   UTF-8 byte offsets into the exact normalized authority text. Derive line
++   count and byte-to-line boundaries from that text, not from parser claims or
++   decoded character counts. Reject zero/negative lines, reversed ranges,
++   `end_byte > len(source_text.encode("utf-8"))`, and spans whose byte-derived
++   lines cannot be contained by the declared line range. A leading attached
++   comment may extend `line_start` before the node byte start, but must still be
++   within the source and declared range.
++3. The validator must also reject symbol path/language mismatches and malformed
++   runtime symbol objects as `parser_result_invalid`; it must not permit a
++   parser result with no symbols to bypass validation of its own result
++   invariants. The failed result must contain no records, chunks, or metrics,
++   including when a tokenizer/schema call has already occurred for an earlier
++   symbol.
++
++Add focused regressions for line overflow, byte overflow, zero and reversed
++   ranges, a UTF-8 multibyte offset, byte/line-range mismatch, and path or
++language mismatch. Assert `parser_result_invalid`, empty output, and atomic
++rollback. Retain the existing `object()`, `None`, forged-result, and wrong
++status adversarial cases.
++
++## Required C++ mapping detail
++
++1. Specify that the adapter recognizes only declaration nodes with a direct
++   function declarator (plus `function_definition`), and does not emit nested
++   declarator helper nodes as duplicate symbols. Name and qualifier extraction
++   must walk the declarator structure, including `qualified_identifier`,
++   constructor/destructor, and operator forms.
++2. Qualified out-of-class symbols are top-level in the syntax tree, so the
++   adapter needs a deterministic class/struct-qualified-name lookup (or an
++   equivalent prior declaration pass). A namespace qualifier alone remains a
++   `function`; a qualifier resolving to a class/struct is a `method`. Preserve
++   the full qualifier in `qualified_name` and use the nearest class-qualified
++   name as `parent_qualified_name`.
++3. State the expected constructor rule explicitly: `A();` and
++   `A::A()` have `name == "A"`, `symbol_type == "method"`, and the enclosing
++   class qualified name as parent. Declaration-only free functions remain
++   `function`. Their line/byte spans and signatures must be the declaration
++   node span, not a child declarator span.
++
++Add one fixture/assertion set covering: an in-class constructor and method
++declaration, a free function declaration, `void A::f() {}`, `void n::A::f();`,
++and a namespace-qualified free function such as `void n::g();`. Assert exact
++symbol type, name, qualified name, parent, source order, line spans, symbol
++IDs, and emitted chunk linkage; assert no duplicate symbol for each declaration.
++Include a nested namespace/class case to prove that `n::A::f` keeps both
++qualifiers and is not flattened to `f`.
++
++## Acceptance
++
++After these clarifications, the existing focused M9-C suite plus the new
++regressions, M9-B/M9-A/M8-D/E regressions, architecture checks, `compileall`,
++and `git diff --check` are sufficient. The required fresh independent
++re-review and `VERDICT: PASS` gate remain unchanged. No M9-B behavior,
++fallback policy, regex parsing, or unrelated symbol vocabulary should be
++expanded by this fix.
+diff --git a/.codex-workflow/20260805-m9c/08-fix-implementation.md b/.codex-workflow/20260805-m9c/08-fix-implementation.md
+new file mode 100644
+index 0000000..53b58e2
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/08-fix-implementation.md
+@@ -0,0 +1,22 @@
++# M9-C Review-Fix Implementation
++
++Addressed both confirmed P1 findings from `05-review-1.md`:
++
++- Added an atomic application-boundary validator for parser UTF-8 byte spans,
++  inclusive one-based line ranges, path/language provenance, and source bounds.
++  Invalid later-file output cannot escape earlier in-memory work.
++- Extended the tree-sitter C++ adapter for direct function declarations,
++  constructors, and qualified out-of-class definitions. Class-qualified chains
++  resolve to methods with full namespace/class names; namespace-only chains
++  remain functions. Declaration/definition duplicates are deterministically
++  coalesced by canonical signature, preferring a body-bearing definition.
++- Added regressions for forged line spans and declaration/qualified-method
++  extraction.
++
++Focused fix validation:
++
++- `python -m pytest -q tests/foundation/infrastructure/parsers/test_tree_sitter_symbol_parser.py tests/foundation/application/use_cases/test_build_git_symbols.py --basetemp=.pytest-m9c-fix` -> `7 passed`.
++- Final focused M9-C set -> `10 passed`; M9-B `27 passed`; M8-D/E `40 passed`;
++  M9-A `65 passed`; architecture `85 passed`; compileall and diff-check passed.
++- Fresh independent re-review: `.codex-workflow/20260805-m9c/09-review-2.md`,
++  `VERDICT: PASS`, no P0-P3 findings.
+diff --git a/.codex-workflow/20260805-m9c/09-review-2.md b/.codex-workflow/20260805-m9c/09-review-2.md
+new file mode 100644
+index 0000000..b43f5c4
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/09-review-2.md
+@@ -0,0 +1,25 @@
++# M9-C Independent Re-Review
++
++VERDICT: PASS
++
++## Scope
++
++Re-reviewed the two P1 findings from `05-review-1.md` against the current
++M9-C fixes and focused validation evidence. No source files were changed.
++
++## Verification
++
++- `BuildGitSymbols._validate_parsed_symbols` validates every parser symbol
++  against the exact normalized UTF-8 authority text, including provenance,
++  inclusive one-based line bounds, exclusive byte bounds, byte-derived line
++  containment, and body-span bounds. Invalid later output is caught before
++  the atomic result is returned, so forged spans fail closed with no output.
++- `TreeSitterSymbolParser` now maps C++ declaration nodes with function
++  declarators, constructors, and qualified out-of-class definitions. Class
++  qualifiers resolve to `method` symbols with full qualified and parent names;
++  namespace-only qualifiers remain `function` symbols. Declaration/definition
++  duplicates are deterministically deduplicated by the use case.
++- Focused fix validation reported `7 passed` for the parser and symbol-use-case
++  tests; the focused M9-C validation set is passing.
++
++No P0-P3 findings remain for the two reviewed fixes.
+diff --git a/.codex-workflow/20260805-m9c/PLAN.input.md b/.codex-workflow/20260805-m9c/PLAN.input.md
+new file mode 100644
+index 0000000..1e1690f
+--- /dev/null
++++ b/.codex-workflow/20260805-m9c/PLAN.input.md
+@@ -0,0 +1,93 @@
++# M9-C Minimal Symbol Index - Initial Plan
++
++## Objective
++
++Activate the bounded C++/Java symbol-index seam over the authority observations
++produced by M9-B. Emit schema-valid `SymbolRecord` dictionaries and deterministic
++`code_symbol` chunks linked by `chunk_id`, while preserving M9-B's atomic,
++commit-bound, no-fallback behavior for authority files.
++
++## Normative inputs
++
++- `contracts/foundation/decision_logs/AI_Knowledge_Platform_Master_Spec_v7_1.md` §12.1-12.2.
++- `contracts/foundation/CHUNKING_SPEC.md` §§5.1-5.4 and §7.
++- `contracts/foundation/schemas/symbol_record.schema.json` and referenced defs.
++- Active chunking profile and `ChunkRecord` schema.
++- M9-B `GitRepositorySnapshot`/`CodeDocumentPlan` authority observations and
++  commit/branch/path provenance.
++
++## Bounded scope
++
++1. Add immutable, runtime-validated symbol observation/result models. A symbol
++   observation carries parser language/type/name/qualified name/signature,
++   commit-valid one-based line range, parent, attached leading comment, and
++   parse status. Results are atomic: success has records/chunks and no error;
++   failure has one sanitized category and no partial records.
++2. Add a parser capability port and a tree-sitter adapter for the agreed MVP
++   languages C++ and Java. Use official grammar packages and pin compatible
++   versions in the dependency manifest. No regex/ad-hoc parser fallback is
++   permitted. Kotlin/XML remain symbol-less and continue using M9-B fallback
++   behavior.
++3. Add `SymbolIdGenerator` using
++   `{repo}:{branch}:{file_path}:{qualified_name}`, adding
++   `~sha256(signature)[:8]` only for deterministic same-qualified-name
++   overloads. Preserve stable source ordering and parent links.
++4. Add `SymbolRecordBuilder` producing plain JSON-compatible dictionaries,
++   schema-validating them before return, including exact commit hash, language,
++   parse status, and `scanned_at`. `chunk_id` is required for emitted symbols
++   and must link to an emitted `code_symbol` chunk.
++5. Build symbol chunks from complete source lines with the contract provenance
++   prefix and attached doc-comment. Class/struct/interface/enum chunks include
++   declaration/member signatures but exclude method bodies. Methods/functions
++   use their full declaration/body unless oversized; oversized symbols split by
++   complete lines under the active tokenizer/profile limits with `#p{n}` IDs and
++   contiguous part metadata. A single unsplittable line fails closed.
++6. Integrate M9-C into the M9-B code-document use case only for authority
++   observations. Non-authority files keep `code_window` chunks; authority files
++   with parser errors may produce `parse_status=partial` plus the bounded
++   symbol/fallback policy defined by the normative contract, but never silently
++   fall back or emit partial success outside the approved policy.
++7. Enforce deterministic ordering, global chunk-ID uniqueness, source line-range
++   bounds, symbol/chunk linkage, profile identity, and cross-field counters.
++   Validate forged objects and malformed runtime inputs at every public boundary.
++
++## Explicit non-goals
++
++- No call graph, references, fields/variables, template instantiations, symbol
++  retrieval, embedding, Qdrant/indexing writes, export publication, network,
++  checkpoint, raw-store, ACL, or delta/tombstone behavior.
++- No Kotlin/XML symbol extraction and no regex fallback in place of tree-sitter.
++- No broad repository scan or full M10 snapshot.
++
++## Files expected to change
++
++- `requirements.txt` (pinned tree-sitter runtime and official C++/Java grammars).
++- New foundation domain model/rule/port/adapter/use-case modules under the
++  existing package layout, with package exports.
++- Focused M9-C tests plus architecture boundary coverage.
++- Stage artifacts under `.codex-workflow/20260805-m9c/` only.
++
++## Validation and acceptance
++
++- Focused model, generator, builder, parser, chunker, and use-case tests.
++- Adversarial negative pass: `object()`, `None`, wrong enum values, missing or
++  extra fields, forged/frozen-object bypasses, invalid line ranges, impossible
++  counters, duplicate overloads/IDs, malformed parser results, and wrong
++  commit/path provenance all fail closed without side effects.
++- Schema validation for every SymbolRecord and ChunkRecord.
++- Determinism: same snapshot and timestamp produce byte-identical records,
++  chunks, ordering, and digest; overload suffixes are stable.
++- Regression: M9-B focused suite, M9-A regression, M8-D/E regression, compileall,
++  and scoped `git diff --check`.
++- Independent review in a fresh session; fix every P0-P3 finding before ledger
++  update and commit/push.
++
++## Risks/decisions for review
++
++- Tree-sitter package/API compatibility and grammar version pinning.
++- Exact node mappings and qualified-name construction for C++ templates,
++  namespaces, nested classes, Java packages/classes/methods, and overloaded
++  methods.
++- How partial/error trees map to the normative `parse_status` without creating
++  an unauthorized fallback stream.
++- Tokenizer/profile access for symbol chunks while keeping M9-B atomicity.
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index f2ffc7a..199918a 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -25,8 +25,9 @@ implemented and independently re-reviewed `PASS`, but the real gate remains
+ `pending_external_input` because no approved 10-20 page generation/selection/
+ tokenizer input was supplied. M9-A1 metadata-first media contract is also
+ complete and independently reviewed `PASS`; M9-A1 and M9-A2 are complete and
+-independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
+-reviewed M8-M9 goal plan. M9-B is independently approved; no M10 full-snapshot work has started.
++independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
++M9-B and M9-C are now independently approved; M9-D remains staged under the
++reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+ 
+ ## Durable State Convention
+ 
+@@ -1684,6 +1685,27 @@ are recorded without using repository-local commit SHAs as status.
+ - Review artifact: `.codex-workflow/20260804-m9b/40-review-18.md` records the
+   final fresh independent `VERDICT: PASS` after bounded fixes.
+ 
++## M9-C Minimal Symbol Index
++
++- Status: complete and independently re-reviewed `PASS`.
++- Objective: activate the bounded C++/Java tree-sitter symbol stream over
++  M9-B authority observations while preserving M9-B's fallback-plan invariants.
++- Contract: atomic `BuildGitSymbols` result, exact commit/path provenance,
++  runtime-validated parser spans, deterministic class/namespace/package/method/
++  function/enum/struct/interface extraction, overload IDs, schema-valid
++  `SymbolRecord` and `code_symbol`/error-only `code_window` chunks, pinned
++  BGE-M3 token/profile identity, and no export/network/raw/checkpoint side
++  effects. Kotlin/XML remain M9-B fallback-only.
++- Parser dependencies: `tree-sitter==0.25.2`, `tree-sitter-cpp==0.23.4`,
++  `tree-sitter-java==0.23.5`.
++- Validation: focused M9-C `10 passed`; M9-B regression `27 passed`; M8-D/E
++  regression `40 passed`; M9-A regression `65 passed`; architecture `85 passed`;
++  compileall and diff-check passed.
++- Review artifacts: `.codex-workflow/20260805-m9c/05-review-1.md` records the
++  initial `FAIL` and two P1 findings; bounded fix plan/review are in
++  `06-fix-plan.input.md` and `07-fix-plan-review.md`; fresh
++  `.codex-workflow/20260805-m9c/09-review-2.md` records final `VERDICT: PASS`.
++
+ ## Current Execution Boundary
+ 
+ The bounded M7-C5 durability-first inventory and M7-D5 raw-generation
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index bd22753..0d2ab4b 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -92,7 +92,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M6G-D - Real offline export acceptance and closeout | complete; approved | One authorized main-machine exporter invocation exited zero; post-run recovery invoked the exporter zero additional times and all sanitized gates passed | External snapshot/evidence retained outside Git; operator-script recovery did not alter production output. |
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+-| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3 and M9-B independently approved; M9-C/D remain pending | Split into independent tracks. |
++| M9 - Media, Git, symbols, and deletion propagation | in progress | M9-A1/A2/A3, M9-B, and M9-C independently approved; M9-D remains pending | Split into independent tracks. |
+ | M10 - First full POC Foundation snapshot | planned | Requires export, the real Confluence path, and the required POC media/Git/symbol tracks | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+@@ -116,8 +116,9 @@ controlled mini-corpus acceptance is implemented and independently re-reviewed
+ `PASS`, but its real gate remains `pending_external_input` until an approved
+ 10-20 page generation/selection/tokenizer input is supplied. M9-A1 is complete
+ and independently reviewed `PASS`. M9-A1 and M9-A2 are complete and
+-independently reviewed `PASS`; M9-A3 through M9-D remain staged under the
+-reviewed M8-M9 goal plan. M9-B is independently approved; no M10 full-snapshot work has started.
++independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
++M9-B and M9-C are independently approved; M9-D remains staged under the
++reviewed M8-M9 goal plan. No M10 full-snapshot work has started.
+ 
+ - M2C1 `CanonicalDocumentRecordBuilder` - done.
+ - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
+@@ -992,7 +993,7 @@ M9A - Media:
+ | M9-A2 attachment body fetch/store boundary | complete; independently approved | Added explicit `data_root`/budget validation, category-only fetch/store ports, canonical attachment envelopes, immutable path-safe raw publication/readback, bounded scan and replay handling, fail-closed forged-input/exception boundaries, root identity checks, and per-root budget serialization; focused `37 passed, 2 skipped`, regression `50 passed, 3 skipped`, compileall/diff-check passed; independent re-review `PASS`. |
+ | M9-A3 offline draw.io/PDF/OCR processors | complete; independently reviewed `PASS` | Added bounded stdlib draw.io XML parsing, pinned digital-PDF text and image-OCR capability ports/processors, strict schema/status/detail binding, and MIME/filename dispatch over the M9-A2 envelope; focused `30 passed`, architecture `80 passed`, M9-A1/A2 regression `48 passed, 2 skipped`, compileall and diff-check passed. No engine/network/file side effects, attachment-text chunks, schema changes, or raw writes. |
+ | M9-B local Git repository and code-document seam | complete | Pinned local `spen-sdk` commit-bound reader and fallback `code_window` document seam; focused `35 passed`, M9-A regression `47 passed`, M8-D/E regression `70 passed`; independent re-review `VERDICT: PASS` in `.codex-workflow/20260804-m9b/40-review-18.md`. |
+-| M9-C minimal symbol index | pending | Depends on M9-B code-document contract; no symbol chunk stream is active yet. |
++| M9-C minimal symbol index | complete; independently reviewed `PASS` | Added atomic C++/Java tree-sitter symbol indexing over M9-B authority observations, deterministic overload IDs, schema-valid SymbolRecords/code_symbol chunks, error-only fallback windows, commit-bound span validation, and no M9-B seam mutation. Focused `10 passed`, M9-B `27 passed`, M8-D/E `40 passed`, M9-A `65 passed`, architecture `85 passed`, compileall/diff-check passed; fresh re-review `VERDICT: PASS` in `.codex-workflow/20260805-m9c/09-review-2.md`. |
+ | M9-D1/D2 tombstone/delta propagation | pending | Depends on approved M9-A/B/C identities and M8-E summaries. |
+ 
+ M9B - Git repository scan:
+diff --git a/requirements.txt b/requirements.txt
+index e524964..c72361f 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -3,3 +3,6 @@ rfc3339-validator
+ PyYAML==6.0.3
+ tokenizers==0.22.2
+ portalocker==3.2.0
++tree-sitter==0.25.2
++tree-sitter-cpp==0.23.4
++tree-sitter-java==0.23.5
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index a13e343..c2a7793 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -47,6 +47,7 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
+     BuildGitCodeDocuments,
+     BuildGitCodeDocumentsRequest,
+ )
++from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
+ 
+ __all__ = [
+     "BuildConfluenceInventory",
+@@ -72,4 +73,5 @@ __all__ = [
+     "ProcessConfluenceMediaAttachment",
+     "BuildGitCodeDocuments",
+     "BuildGitCodeDocumentsRequest",
++    "BuildGitSymbols",
+ ]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/build_git_symbols.py b/src/knowledgenexus/foundation/application/use_cases/build_git_symbols.py
+new file mode 100644
+index 0000000..3bce642
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/build_git_symbols.py
+@@ -0,0 +1,416 @@
++from __future__ import annotations
++
++import hashlib
++import re
++from collections import defaultdict
++
++from knowledgenexus.foundation.domain.models.chunking_profile import ChunkingProfile
++from knowledgenexus.foundation.domain.models.git_code_source import CodeDocumentPlan, GitFileObservation
++from knowledgenexus.foundation.domain.models.symbol_index import (
++    BuildGitSymbolsRequest,
++    GitSymbolIndexFailureCategory,
++    GitSymbolIndexMetrics,
++    GitSymbolIndexResult,
++    GitSymbolIndexStatus,
++    ParsedSymbol,
++    SymbolParseResult,
++    SymbolParseStatus,
++)
++from knowledgenexus.foundation.domain.records.chunk_record_builder import ChunkRecordBuilder
++from knowledgenexus.foundation.domain.rules.chunk_id_generator import ChunkIdGenerator
++from knowledgenexus.foundation.domain.rules.symbol_id_generator import SymbolIdGenerator
++from knowledgenexus.foundation.domain.rules.text_normalization import TextNormalizationRules
++from knowledgenexus.foundation.domain.rules.symbol_record_builder import SymbolRecordBuilder
++from knowledgenexus.foundation.ports.symbol_parser_port import SymbolParserPort
++from knowledgenexus.foundation.ports.tokenizer_port import TokenizerPort
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++
++
++_ACTIVE_CHUNKER_VERSION = "1.2.0"
++_AUTHORITY_EXTENSIONS = frozenset({".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".java"})
++_LANGUAGE_BY_EXTENSION = {
++    ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".h": "cpp", ".hh": "cpp",
++    ".hpp": "cpp", ".hxx": "cpp", ".inl": "cpp", ".java": "java",
++}
++_CHUNK_ID = re.compile(r"^chunk:git:[0-9a-f]{16}(?:-[0-9]+)?$")
++
++
++class BuildGitSymbols:
++    """Build an atomic authority-symbol stream from an approved M9-B plan."""
++
++    def __init__(
++        self,
++        *,
++        parser: SymbolParserPort,
++        tokenizer: TokenizerPort,
++        schema_validator: object | None = None,
++    ) -> None:
++        if not callable(getattr(parser, "parse", None)):
++            raise TypeError("parser is invalid")
++        if not callable(getattr(tokenizer, "tokenize", None)):
++            raise TypeError("tokenizer is invalid")
++        validator = FoundationSchemaValidator() if schema_validator is None else schema_validator
++        if not callable(getattr(validator, "validate_record", None)):
++            raise TypeError("schema_validator is invalid")
++        self._parser = parser
++        self._tokenizer = tokenizer
++        self._validator = validator
++
++    def execute(self, request: object) -> GitSymbolIndexResult:
++        try:
++            self._validate_request(request)
++            assert type(request) is BuildGitSymbolsRequest
++            observations = self._authority_observations(request.plan)
++            records: list[dict[str, object]] = []
++            chunks: list[dict[str, object]] = []
++            seen_chunk_ids: dict[str, str] = {}
++            partial_files = 0
++            fallback_files = 0
++            oversized_parts = 0
++            for observation in observations:
++                suffix = "." + observation.path.rsplit(".", 1)[-1].lower() if "." in observation.path else ""
++                language = _LANGUAGE_BY_EXTENSION.get(suffix)
++                if language is None:
++                    continue
++                parsed = self._parser.parse(
++                    path=observation.path,
++                    language=language,
++                    source_text=observation.normalized_text,
++                )
++                if type(parsed) is not SymbolParseResult:
++                    raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++                SymbolParseResult.__post_init__(parsed)
++                if parsed.path != observation.path or parsed.language != language:
++                    raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++                self._validate_parsed_symbols(parsed, observation)
++                if parsed.status is SymbolParseStatus.PARTIAL:
++                    partial_files += 1
++                symbols = self._dedupe_symbols(parsed.symbols)
++                if not symbols:
++                    fallback_files += 1
++                    file_chunks = self._build_fallback_windows(observation, request.chunking_profile, request.plan)
++                    self._append_chunks(chunks, file_chunks, seen_chunk_ids)
++                    continue
++                grouped: dict[str, list[ParsedSymbol]] = defaultdict(list)
++                for symbol in symbols:
++                    grouped[symbol.qualified_name].append(symbol)
++                symbol_ids: dict[int, str] = {}
++                for symbol in symbols:
++                    overloaded = len(grouped[symbol.qualified_name]) > 1
++                    if overloaded and len({item.signature for item in grouped[symbol.qualified_name]}) != len(grouped[symbol.qualified_name]):
++                        raise _Failure(GitSymbolIndexFailureCategory.RESULT_INVALID)
++                    symbol_ids[id(symbol)] = SymbolIdGenerator.generate(
++                        repo=request.plan.repo_name,
++                        branch=request.plan.branch,
++                        file_path=symbol.path,
++                        qualified_name=symbol.qualified_name,
++                        signature=symbol.signature,
++                        overloaded=overloaded,
++                    )
++                for symbol in parsed.symbols:
++                    symbol_id = symbol_ids[id(symbol)]
++                    rendered = self._render_symbol(symbol, symbols, observation.normalized_text)
++                    parts = self._split_symbol(
++                        rendered=rendered,
++                        symbol=symbol,
++                        observation=observation,
++                        profile=request.chunking_profile,
++                        plan=request.plan,
++                        all_symbols=symbols,
++                    )
++                    if len(parts) > 1:
++                        oversized_parts += len(parts)
++                    first_chunk_id: str | None = None
++                    for part_index, (text, line_start, line_end, unit_key) in enumerate(parts):
++                        chunk = self._build_chunk(
++                            text=text,
++                            unit_key=unit_key,
++                            symbol=symbol,
++                            line_start=line_start,
++                            line_end=line_end,
++                            part_index=part_index if len(parts) > 1 else None,
++                            part_total=len(parts) if len(parts) > 1 else None,
++                            observation=observation,
++                            profile=request.chunking_profile,
++                            plan=request.plan,
++                        )
++                        chunk_id = chunk["chunk_id"]
++                        if type(chunk_id) is not str or _CHUNK_ID.fullmatch(chunk_id) is None:
++                            raise _Failure(GitSymbolIndexFailureCategory.RESULT_INVALID)
++                        if first_chunk_id is None:
++                            first_chunk_id = chunk_id
++                        self._append_chunks(chunks, [chunk], seen_chunk_ids)
++                    if first_chunk_id is None:
++                        raise _Failure(GitSymbolIndexFailureCategory.RESULT_INVALID)
++                    records.append(
++                        SymbolRecordBuilder.build(
++                            symbol=symbol,
++                            repo=request.plan.repo_name,
++                            branch=request.plan.branch,
++                            commit_hash=request.plan.commit_sha,
++                            scanned_at=request.scanned_at,
++                            symbol_id=symbol_id,
++                            chunk_id=first_chunk_id,
++                            schema_validator=self._validator,
++                        )
++                    )
++            records.sort(key=lambda value: (value["file_path"], value["line_start"], value["symbol_id"]))
++            chunks.sort(key=lambda value: (value["file_path"], value.get("line_start", 0), value["chunk_id"]))
++            metrics = GitSymbolIndexMetrics(
++                authority_file_count=len(observations),
++                symbol_count=len(records),
++                chunk_count=len(chunks),
++                partial_file_count=partial_files,
++                fallback_file_count=fallback_files,
++                oversized_part_count=oversized_parts,
++            )
++            return GitSymbolIndexResult(
++                status=GitSymbolIndexStatus.SUCCESS,
++                symbol_records=tuple(records),
++                chunks=tuple(chunks),
++                metrics=metrics,
++            )
++        except _Failure as exc:
++            return GitSymbolIndexResult(status=GitSymbolIndexStatus.FAILED, error_category=exc.category)
++        except Exception:
++            return GitSymbolIndexResult(status=GitSymbolIndexStatus.FAILED, error_category=GitSymbolIndexFailureCategory.INTERNAL_FAILURE)
++
++    def _validate_request(self, request: object) -> None:
++        if type(request) is not BuildGitSymbolsRequest:
++            raise _Failure(GitSymbolIndexFailureCategory.INVALID_REQUEST)
++        try:
++            BuildGitSymbolsRequest.__post_init__(request)
++        except Exception as exc:
++            raise _Failure(GitSymbolIndexFailureCategory.INVALID_REQUEST) from exc
++        if request.chunking_profile.chunker_version != _ACTIVE_CHUNKER_VERSION:
++            raise _Failure(GitSymbolIndexFailureCategory.INVALID_REQUEST)
++        if not callable(getattr(self._parser, "parse", None)) or not callable(getattr(self._tokenizer, "tokenize", None)):
++            raise _Failure(GitSymbolIndexFailureCategory.INVALID_DEPENDENCY)
++
++    @staticmethod
++    def _authority_observations(plan: CodeDocumentPlan) -> tuple[GitFileObservation, ...]:
++        canonical = {item.path: item for item in plan.observations}
++        result: list[GitFileObservation] = []
++        for item in plan.authority_observations:
++            expected = canonical.get(item.path)
++            if expected is None or expected != item or not item.symbol_authority:
++                raise _Failure(GitSymbolIndexFailureCategory.PLAN_INVALID)
++            suffix = "." + item.path.rsplit(".", 1)[-1].lower() if "." in item.path else ""
++            if suffix not in _AUTHORITY_EXTENSIONS:
++                raise _Failure(GitSymbolIndexFailureCategory.PLAN_INVALID)
++            result.append(item)
++        return tuple(result)
++
++    @staticmethod
++    def _dedupe_symbols(symbols: tuple[ParsedSymbol, ...]) -> tuple[ParsedSymbol, ...]:
++        selected: dict[tuple[str, str], ParsedSymbol] = {}
++        for symbol in symbols:
++            key = (symbol.qualified_name, BuildGitSymbols._canonical_signature(symbol.signature))
++            previous = selected.get(key)
++            if previous is None or (previous.body_start_byte is None and symbol.body_start_byte is not None):
++                selected[key] = symbol
++        return tuple(sorted(selected.values(), key=lambda item: (item.start_byte, item.end_byte, item.qualified_name)))
++
++    @staticmethod
++    def _canonical_signature(signature: str | None) -> str:
++        if signature is None:
++            return ""
++        value = re.sub(r"\b(?:[A-Za-z_]\w*::)+(?=[~A-Za-z_]\w*\s*\()", "", signature)
++        value = re.sub(r"\s+[A-Za-z_]\w*(?=[,)])", "", value)
++        return re.sub(r"\s+", "", value).rstrip(";")
++
++    @staticmethod
++    def _validate_parsed_symbols(parsed: SymbolParseResult, observation: GitFileObservation) -> None:
++        source_bytes = observation.normalized_text.encode("utf-8")
++        line_count = max(1, len(observation.normalized_text.split("\n")))
++
++        def line_for(offset: int, *, end: bool = False) -> int:
++            prefix = source_bytes[:offset]
++            line = prefix.count(b"\n") + 1
++            if end and offset > 0 and offset <= len(source_bytes) and source_bytes[offset - 1 : offset] == b"\n":
++                line -= 1
++            return max(1, line)
++
++        for symbol in parsed.symbols:
++            if symbol.path != observation.path or symbol.language not in {"cpp", "java"}:
++                raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++            if not (1 <= symbol.line_start <= symbol.line_end <= line_count):
++                raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++            if not (0 <= symbol.start_byte < symbol.end_byte <= len(source_bytes)):
++                raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++            start_line = line_for(symbol.start_byte)
++            end_line = line_for(symbol.end_byte, end=True)
++            if not (symbol.line_start <= start_line <= symbol.line_end):
++                raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++            if not (symbol.line_start <= end_line <= symbol.line_end):
++                raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++            if symbol.body_start_byte is not None and not (
++                symbol.start_byte <= symbol.body_start_byte <= symbol.end_byte
++            ):
++                raise _Failure(GitSymbolIndexFailureCategory.PARSER_RESULT_INVALID)
++
++    def _render_symbol(self, symbol: ParsedSymbol, all_symbols: tuple[ParsedSymbol, ...], source_text: str) -> str:
++        header, body_lines, _ = self._render_components(symbol, all_symbols, source_text)
++        return TextNormalizationRules.normalize_text(header + "\n\n" + "\n".join(body_lines))
++
++    def _split_symbol(self, *, rendered: str, symbol: ParsedSymbol, observation: GitFileObservation, profile: ChunkingProfile, plan: CodeDocumentPlan, all_symbols: tuple[ParsedSymbol, ...]) -> list[tuple[str, int, int, str]]:
++        count = self._token_count(rendered)
++        if count <= profile.hard_maximum_tokens:
++            return [(rendered, symbol.line_start, symbol.line_end, self._unit_key(symbol))]
++        header, lines, source_start = self._render_components(symbol, all_symbols, observation.normalized_text)
++        parts: list[tuple[str, int, int, str]] = []
++        cursor = 0
++        while cursor < len(lines):
++            end = cursor
++            best = None
++            while end < len(lines) and end - cursor < profile.code_window_max_lines:
++                candidate = header + "\n\n" + "\n".join(lines[cursor : end + 1])
++                if self._token_count(candidate) > profile.hard_maximum_tokens:
++                    break
++                best = end + 1
++                end += 1
++            if best is None:
++                raise _Failure(GitSymbolIndexFailureCategory.UNSPLITTABLE_CODE_LINE)
++            part_text = TextNormalizationRules.normalize_text(header + "\n\n" + "\n".join(lines[cursor:best]))
++            line_start = min(source_start + cursor, symbol.line_end)
++            line_end = min(source_start + best - 1, symbol.line_end)
++            if line_end < line_start:
++                line_start, line_end = symbol.line_start, symbol.line_end
++            parts.append((part_text, line_start, line_end, f"{self._unit_key(symbol)}#p{len(parts)}"))
++            if best >= len(lines):
++                break
++            cursor = max(cursor + 1, best - profile.code_window_overlap_lines)
++        return parts
++
++    def _render_components(
++        self,
++        symbol: ParsedSymbol,
++        all_symbols: tuple[ParsedSymbol, ...],
++        source_text: str,
++    ) -> tuple[str, list[str], int]:
++        prefix = f"// spen-sdk \u00b7 {symbol.path} \u00b7 {symbol.qualified_name}"
++        header = prefix + ("\n\n" + symbol.leading_comment if symbol.leading_comment else "")
++        if symbol.aggregate:
++            body_lines = [symbol.signature or symbol.name]
++            body_lines.extend(
++                child.signature
++                for child in all_symbols
++                if child.parent_qualified_name == symbol.qualified_name and child.signature
++            )
++            return header, body_lines, symbol.line_start
++        source_lines = source_text.split("\n")
++        comment_line_count = symbol.leading_comment.count("\n") + 1 if symbol.leading_comment else 0
++        source_start = symbol.line_start + comment_line_count
++        return header, source_lines[source_start - 1 : symbol.line_end], source_start
++
++    def _build_fallback_windows(self, observation: GitFileObservation, profile: ChunkingProfile, plan: CodeDocumentPlan) -> list[dict[str, object]]:
++        lines = observation.normalized_text.split("\n")
++        output: list[dict[str, object]] = []
++        cursor = 0
++        while cursor < len(lines):
++            end = cursor
++            best = None
++            while end < len(lines) and end - cursor < profile.code_window_max_lines:
++                candidate = self._prefix(observation.path) + "\n\n" + "\n".join(lines[cursor : end + 1])
++                if self._token_count(candidate) > profile.hard_maximum_tokens:
++                    break
++                best = end + 1
++                end += 1
++            if best is None:
++                raise _Failure(GitSymbolIndexFailureCategory.UNSPLITTABLE_CODE_LINE)
++            text = self._prefix(observation.path) + "\n\n" + "\n".join(lines[cursor:best])
++            output.append({
++                "text": TextNormalizationRules.normalize_text(text),
++                "unit_key": f"{observation.path}#w{len(output)}",
++                "line_start": cursor + 1,
++                "line_end": best,
++            })
++            if best >= len(lines):
++                break
++            cursor = max(cursor + 1, best - profile.code_window_overlap_lines)
++        total = len(output)
++        return [
++            self._build_chunk(
++                text=item["text"],
++                unit_key=item["unit_key"],
++                symbol=None,
++                line_start=item["line_start"],
++                line_end=item["line_end"],
++                part_index=index,
++                part_total=total,
++                observation=observation,
++                profile=profile,
++                plan=plan,
++                content_kind="code_window",
++            )
++            for index, item in enumerate(output)
++        ]
++
++    def _build_chunk(self, *, text: str, unit_key: str, symbol: ParsedSymbol | None, line_start: int, line_end: int, part_index: int | None, part_total: int | None, observation: GitFileObservation, profile: ChunkingProfile, plan: CodeDocumentPlan, content_kind: str = "code_symbol") -> dict[str, object]:
++        text = TextNormalizationRules.normalize_text(text)
++        token_count = self._token_count(text)
++        document_id = f"git:spen-sdk:{observation.path}"
++        chunk_id = ChunkIdGenerator.generate_chunk_id("git", f"git:spen-sdk:{observation.path}", unit_key, text)
++        record = ChunkRecordBuilder.build(
++            chunk_id=chunk_id,
++            document_id=document_id,
++            source_system="git",
++            source_type="code_file",
++            text=text,
++            content_kind=content_kind,
++            language=_LANGUAGE_BY_EXTENSION["." + observation.path.rsplit(".", 1)[-1].lower()],
++            token_count=token_count,
++            acl_tags=["repo:spen-sdk"],
++            chunker_version=profile.chunker_version,
++            heading_path=[],
++            repo=plan.repo_name,
++            branch=plan.branch,
++            file_path=observation.path,
++            symbol=symbol.qualified_name if symbol is not None else None,
++            line_start=line_start,
++            line_end=line_end,
++            part_index=part_index,
++            part_total=part_total,
++            jira_keys=[],
++            relation_ids=[],
++            source_version=plan.commit_sha,
++        )
++        self._validator.validate_record("ChunkRecord", record)
++        if record.get("token_count") != token_count or record.get("source_version") != plan.commit_sha:
++            raise _Failure(GitSymbolIndexFailureCategory.RESULT_INVALID)
++        return record
++
++    @staticmethod
++    def _append_chunks(target: list[dict[str, object]], new_chunks: list[dict[str, object]], seen: dict[str, str]) -> None:
++        for chunk in new_chunks:
++            chunk_id = chunk["chunk_id"]
++            preimage = repr((chunk_id, chunk["text"], chunk.get("file_path"), chunk.get("symbol")))
++            if chunk_id in seen and seen[chunk_id] != preimage:
++                raise _Failure(GitSymbolIndexFailureCategory.CHUNK_ID_COLLISION)
++            if chunk_id in seen:
++                raise _Failure(GitSymbolIndexFailureCategory.CHUNK_ID_COLLISION)
++            seen[chunk_id] = preimage
++            target.append(chunk)
++
++    @staticmethod
++    def _unit_key(symbol: ParsedSymbol) -> str:
++        return symbol.qualified_name
++
++    def _token_count(self, text: str) -> int:
++        try:
++            result = self._tokenizer.tokenize(text=text)
++            return result.token_count
++        except Exception as exc:
++            raise _Failure(GitSymbolIndexFailureCategory.TOKENIZER_FAILED) from exc
++
++    @staticmethod
++    def _prefix(path: str) -> str:
++        return f"// spen-sdk \u00b7 {path}"
++
++
++class _Failure(Exception):
++    def __init__(self, category: GitSymbolIndexFailureCategory) -> None:
++        self.category = category
++
++
++__all__ = ["BuildGitSymbols"]
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index f978f81..083f7de 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -91,6 +91,16 @@ from knowledgenexus.foundation.domain.models.git_code_source import (
+     GitScanMetrics,
+     GitSourceConfig,
+ )
++from knowledgenexus.foundation.domain.models.symbol_index import (
++    BuildGitSymbolsRequest,
++    GitSymbolIndexFailureCategory,
++    GitSymbolIndexMetrics,
++    GitSymbolIndexResult,
++    GitSymbolIndexStatus,
++    ParsedSymbol,
++    SymbolParseResult,
++    SymbolParseStatus,
++)
+ from knowledgenexus.foundation.domain.models.confluence_chunking import (
+     ChunkingResult,
+     ConfluenceChunkingError,
+@@ -275,6 +285,14 @@ __all__ = [
+     "GitScanBudgets",
+     "GitScanMetrics",
+     "GitSourceConfig",
++    "BuildGitSymbolsRequest",
++    "GitSymbolIndexFailureCategory",
++    "GitSymbolIndexMetrics",
++    "GitSymbolIndexResult",
++    "GitSymbolIndexStatus",
++    "ParsedSymbol",
++    "SymbolParseResult",
++    "SymbolParseStatus",
+     "ChunkingResult",
+     "ConfluenceChunkingError",
+     "ConfluenceChunkingFailureCategory",
+diff --git a/src/knowledgenexus/foundation/domain/models/symbol_index.py b/src/knowledgenexus/foundation/domain/models/symbol_index.py
+new file mode 100644
+index 0000000..9a1af6c
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/symbol_index.py
+@@ -0,0 +1,277 @@
++"""Validated domain values for the bounded Git symbol-index seam."""
++
++from __future__ import annotations
++
++import copy
++import hashlib
++import json
++import re
++import unicodedata
++from dataclasses import dataclass
++from datetime import datetime, timezone
++from enum import StrEnum
++
++from knowledgenexus.foundation.domain.models.chunking_profile import ChunkingProfile
++from knowledgenexus.foundation.domain.models.git_code_source import CodeDocumentPlan
++
++
++_SHA256 = re.compile(r"^[0-9a-f]{64}$")
++_RFC3339 = re.compile(
++    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:"
++    r"[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
++)
++_LANGUAGES = frozenset({"cpp", "java"})
++_SYMBOL_TYPES = frozenset(
++    {"class", "struct", "interface", "enum", "function", "method", "namespace", "package"}
++)
++
++
++class SymbolParseStatus(StrEnum):
++    OK = "ok"
++    PARTIAL = "partial"
++
++
++class GitSymbolIndexStatus(StrEnum):
++    SUCCESS = "success"
++    FAILED = "failed"
++
++
++class GitSymbolIndexFailureCategory(StrEnum):
++    INVALID_REQUEST = "invalid_request"
++    INVALID_DEPENDENCY = "invalid_dependency"
++    PLAN_INVALID = "plan_invalid"
++    PARSER_FAILED = "parser_failed"
++    PARSER_RESULT_INVALID = "parser_result_invalid"
++    SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
++    TOKENIZER_FAILED = "tokenizer_failed"
++    UNSPLITTABLE_CODE_LINE = "unsplittable_code_line"
++    CHUNK_ID_COLLISION = "chunk_id_collision"
++    RESULT_INVALID = "result_invalid"
++    INTERNAL_FAILURE = "internal_failure"
++
++
++def _non_empty_string(name: str, value: object) -> str:
++    if type(value) is not str or not value:
++        raise TypeError(f"{name} is invalid")
++    return unicodedata.normalize("NFC", value)
++
++
++def _timestamp(value: object) -> str:
++    if type(value) is not str or _RFC3339.fullmatch(value) is None:
++        raise ValueError("scanned_at is invalid")
++    try:
++        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    except ValueError:
++        raise ValueError("scanned_at is invalid") from None
++    if parsed.tzinfo is None:
++        raise ValueError("scanned_at is invalid")
++    canonical = parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
++    return canonical
++
++
++def _json_safe(value: object) -> object:
++    if value is None or type(value) in {str, int, bool}:
++        return value
++    if type(value) is float:
++        if value != value or value in {float("inf"), float("-inf")}:
++            raise ValueError("non-finite value")
++        return value
++    if type(value) is list:
++        return [_json_safe(item) for item in value]
++    if type(value) is dict:
++        if any(type(key) is not str for key in value):
++            raise TypeError("JSON object keys must be strings")
++        return {key: _json_safe(item) for key, item in value.items()}
++    raise TypeError("value is not JSON-safe")
++
++
++@dataclass(frozen=True, repr=False)
++class ParsedSymbol:
++    path: str
++    language: str
++    symbol_type: str
++    name: str
++    qualified_name: str
++    signature: str | None
++    line_start: int
++    line_end: int
++    parent_qualified_name: str | None
++    leading_comment: str
++    parse_status: SymbolParseStatus
++    start_byte: int
++    end_byte: int
++    body_start_byte: int | None = None
++    aggregate: bool = False
++
++    def __post_init__(self) -> None:
++        for name in ("path", "language", "symbol_type", "name", "qualified_name"):
++            _non_empty_string(name, getattr(self, name))
++        if self.language not in _LANGUAGES:
++            raise ValueError("language is invalid")
++        if self.symbol_type not in _SYMBOL_TYPES:
++            raise ValueError("symbol_type is invalid")
++        if self.signature is not None and type(self.signature) is not str:
++            raise TypeError("signature is invalid")
++        if self.parent_qualified_name is not None and type(self.parent_qualified_name) is not str:
++            raise TypeError("parent_qualified_name is invalid")
++        if type(self.leading_comment) is not str:
++            raise TypeError("leading_comment is invalid")
++        if type(self.parse_status) is not SymbolParseStatus:
++            raise TypeError("parse_status is invalid")
++        for name in ("line_start", "line_end", "start_byte", "end_byte"):
++            value = getattr(self, name)
++            if type(value) is not int or value < 0:
++                raise ValueError(f"{name} is invalid")
++        if self.line_start < 1 or self.line_end < self.line_start:
++            raise ValueError("line range is invalid")
++        if self.end_byte <= self.start_byte:
++            raise ValueError("byte range is invalid")
++        if self.body_start_byte is not None and (
++            type(self.body_start_byte) is not int
++            or self.body_start_byte < self.start_byte
++            or self.body_start_byte > self.end_byte
++        ):
++            raise ValueError("body_start_byte is invalid")
++        if type(self.aggregate) is not bool:
++            raise TypeError("aggregate is invalid")
++
++
++@dataclass(frozen=True, repr=False)
++class SymbolParseResult:
++    path: str
++    language: str
++    status: SymbolParseStatus
++    symbols: tuple[ParsedSymbol, ...]
++    error_count: int = 0
++
++    def __post_init__(self) -> None:
++        _non_empty_string("path", self.path)
++        if self.language not in _LANGUAGES:
++            raise ValueError("language is invalid")
++        if type(self.status) is not SymbolParseStatus:
++            raise TypeError("status is invalid")
++        if type(self.symbols) is not tuple or any(type(item) is not ParsedSymbol for item in self.symbols):
++            raise TypeError("symbols are invalid")
++        if type(self.error_count) is not int or self.error_count < 0:
++            raise ValueError("error_count is invalid")
++        previous = (-1, -1, "")
++        for symbol in self.symbols:
++            ParsedSymbol.__post_init__(symbol)
++            if symbol.path != self.path or symbol.language != self.language:
++                raise ValueError("symbol provenance is invalid")
++            if symbol.parse_status is not self.status:
++                raise ValueError("symbol parse status is inconsistent")
++            key = (symbol.start_byte, symbol.end_byte, symbol.qualified_name)
++            if key < previous:
++                raise ValueError("symbols are not deterministically ordered")
++            previous = key
++        if self.status is SymbolParseStatus.OK and self.error_count != 0:
++            raise ValueError("ok result cannot have parser errors")
++        if self.status is SymbolParseStatus.PARTIAL and self.error_count < 1:
++            raise ValueError("partial result requires parser errors")
++
++
++@dataclass(frozen=True)
++class GitSymbolIndexMetrics:
++    authority_file_count: int
++    symbol_count: int
++    chunk_count: int
++    partial_file_count: int
++    fallback_file_count: int
++    oversized_part_count: int
++
++    def __post_init__(self) -> None:
++        values = (
++            self.authority_file_count,
++            self.symbol_count,
++            self.chunk_count,
++            self.partial_file_count,
++            self.fallback_file_count,
++            self.oversized_part_count,
++        )
++        if any(type(value) is not int or value < 0 for value in values):
++            raise ValueError("metrics are invalid")
++        if self.partial_file_count > self.authority_file_count:
++            raise ValueError("partial count is inconsistent")
++        if self.fallback_file_count > self.authority_file_count:
++            raise ValueError("fallback count is inconsistent")
++        if self.symbol_count > 0 and self.chunk_count < self.symbol_count:
++            raise ValueError("symbol/chunk counts are inconsistent")
++
++
++@dataclass(frozen=True, repr=False)
++class GitSymbolIndexResult:
++    status: GitSymbolIndexStatus
++    symbol_records: tuple[dict[str, object], ...] = ()
++    chunks: tuple[dict[str, object], ...] = ()
++    metrics: GitSymbolIndexMetrics | None = None
++    error_category: GitSymbolIndexFailureCategory | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.status) is not GitSymbolIndexStatus:
++            raise TypeError("status is invalid")
++        if type(self.symbol_records) is not tuple or type(self.chunks) is not tuple:
++            raise TypeError("records/chunks are invalid")
++        if any(type(record) is not dict for record in self.symbol_records) or any(
++            type(chunk) is not dict for chunk in self.chunks
++        ):
++            raise TypeError("records/chunks entries are invalid")
++        copied_records = tuple(copy.deepcopy(_json_safe(record)) for record in self.symbol_records)
++        copied_chunks = tuple(copy.deepcopy(_json_safe(chunk)) for chunk in self.chunks)
++        object.__setattr__(self, "symbol_records", copied_records)
++        object.__setattr__(self, "chunks", copied_chunks)
++        if self.status is GitSymbolIndexStatus.SUCCESS:
++            if type(self.metrics) is not GitSymbolIndexMetrics or self.error_category is not None:
++                raise ValueError("success result is inconsistent")
++            if self.metrics.symbol_count != len(self.symbol_records) or self.metrics.chunk_count != len(self.chunks):
++                raise ValueError("result metrics are inconsistent")
++        else:
++            if self.symbol_records or self.chunks or self.metrics is not None:
++                raise ValueError("failed result must not contain output")
++            if type(self.error_category) is not GitSymbolIndexFailureCategory:
++                raise ValueError("failed result category is invalid")
++
++    def to_bytes(self) -> bytes:
++        return json.dumps(
++            {
++                "status": self.status.value,
++                "symbol_records": self.symbol_records,
++                "chunks": self.chunks,
++                "metrics": self.metrics.__dict__ if self.metrics else None,
++                "error_category": self.error_category.value if self.error_category else None,
++            },
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++        ).encode("utf-8")
++
++    def digest(self) -> str:
++        return hashlib.sha256(self.to_bytes()).hexdigest()
++
++
++@dataclass(frozen=True)
++class BuildGitSymbolsRequest:
++    plan: CodeDocumentPlan
++    chunking_profile: ChunkingProfile
++    scanned_at: str
++
++    def __post_init__(self) -> None:
++        if type(self.plan) is not CodeDocumentPlan:
++            raise TypeError("plan is invalid")
++        CodeDocumentPlan.__post_init__(self.plan)
++        if type(self.chunking_profile) is not ChunkingProfile:
++            raise TypeError("chunking_profile is invalid")
++        ChunkingProfile.__post_init__(self.chunking_profile)
++        object.__setattr__(self, "scanned_at", _timestamp(self.scanned_at))
++
++
++__all__ = [
++    "BuildGitSymbolsRequest",
++    "GitSymbolIndexFailureCategory",
++    "GitSymbolIndexMetrics",
++    "GitSymbolIndexResult",
++    "GitSymbolIndexStatus",
++    "ParsedSymbol",
++    "SymbolParseResult",
++    "SymbolParseStatus",
++]
+diff --git a/src/knowledgenexus/foundation/domain/rules/__init__.py b/src/knowledgenexus/foundation/domain/rules/__init__.py
+index 5c51c14..7f0a5ad 100644
+--- a/src/knowledgenexus/foundation/domain/rules/__init__.py
++++ b/src/knowledgenexus/foundation/domain/rules/__init__.py
+@@ -14,6 +14,8 @@ from knowledgenexus.foundation.domain.rules.media_asset_record_builder import (
+     MediaAssetRecordBuilder,
+ )
+ from knowledgenexus.foundation.domain.rules.tombstone_id_generator import TombstoneIdGenerator
++from knowledgenexus.foundation.domain.rules.symbol_id_generator import SymbolIdGenerator
++from knowledgenexus.foundation.domain.rules.symbol_record_builder import SymbolRecordBuilder
+ from knowledgenexus.foundation.domain.rules.wiki_structure_parser import (
+     WikiStructureParseError,
+     WikiStructureParser,
+@@ -30,6 +32,8 @@ __all__ = [
+     "ChunkStabilitySummaryBuilder",
+     "MediaAssetRecordBuilder",
+     "TombstoneIdGenerator",
++    "SymbolIdGenerator",
++    "SymbolRecordBuilder",
+     "WikiStructureParseError",
+     "WikiStructureParser",
+     "OccurrenceResolutionConflict",
+diff --git a/src/knowledgenexus/foundation/domain/rules/symbol_id_generator.py b/src/knowledgenexus/foundation/domain/rules/symbol_id_generator.py
+new file mode 100644
+index 0000000..fe337cb
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/rules/symbol_id_generator.py
+@@ -0,0 +1,35 @@
++from __future__ import annotations
++
++import hashlib
++
++
++class SymbolIdGenerator:
++    """Generate stable branch-bound symbol identities."""
++
++    @classmethod
++    def generate(
++        cls,
++        *,
++        repo: str,
++        branch: str,
++        file_path: str,
++        qualified_name: str,
++        signature: str | None = None,
++        overloaded: bool = False,
++    ) -> str:
++        values = (repo, branch, file_path, qualified_name)
++        if any(type(value) is not str or not value for value in values):
++            raise TypeError("symbol identity fields are invalid")
++        if type(overloaded) is not bool:
++            raise TypeError("overloaded is invalid")
++        if overloaded:
++            if type(signature) is not str or not signature:
++                raise ValueError("overload signature is invalid")
++            suffix = hashlib.sha256(signature.encode("utf-8")).hexdigest()[:8]
++            qualified_name = f"{qualified_name}~{suffix}"
++        elif signature is not None and type(signature) is not str:
++            raise TypeError("signature is invalid")
++        return f"{repo}:{branch}:{file_path}:{qualified_name}"
++
++
++__all__ = ["SymbolIdGenerator"]
+diff --git a/src/knowledgenexus/foundation/domain/rules/symbol_record_builder.py b/src/knowledgenexus/foundation/domain/rules/symbol_record_builder.py
+new file mode 100644
+index 0000000..6ea5e8e
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/rules/symbol_record_builder.py
+@@ -0,0 +1,61 @@
++from __future__ import annotations
++
++from knowledgenexus.foundation.domain.models.symbol_index import (
++    ParsedSymbol,
++)
++from knowledgenexus.foundation.domain.records.common_constants import SCHEMA_VERSION
++
++
++class SymbolRecordBuilder:
++    """Build a schema-shaped SymbolRecord without owning parsing or I/O."""
++
++    @classmethod
++    def build(
++        cls,
++        *,
++        symbol: ParsedSymbol,
++        repo: str,
++        branch: str,
++        commit_hash: str,
++        scanned_at: str,
++        symbol_id: str,
++        chunk_id: str | None,
++        schema_validator: object,
++    ) -> dict[str, object]:
++        if type(symbol) is not ParsedSymbol:
++            raise TypeError("symbol is invalid")
++        ParsedSymbol.__post_init__(symbol)
++        values = {"repo": repo, "branch": branch, "commit_hash": commit_hash, "scanned_at": scanned_at, "symbol_id": symbol_id}
++        if any(type(value) is not str or not value for value in values.values()):
++            raise TypeError("record identity is invalid")
++        if chunk_id is not None and (type(chunk_id) is not str or not chunk_id):
++            raise TypeError("chunk_id is invalid")
++        if not callable(getattr(schema_validator, "validate_record", None)):
++            raise TypeError("schema_validator is invalid")
++        record: dict[str, object] = {
++            "schema_version": SCHEMA_VERSION,
++            "symbol_id": symbol_id,
++            "repo": repo,
++            "branch": branch,
++            "commit_hash": commit_hash,
++            "file_path": symbol.path,
++            "language": symbol.language,
++            "symbol_type": symbol.symbol_type,
++            "name": symbol.name,
++            "qualified_name": symbol.qualified_name,
++            "line_start": symbol.line_start,
++            "line_end": symbol.line_end,
++            "parse_status": symbol.parse_status.value,
++            "scanned_at": scanned_at,
++        }
++        if symbol.signature is not None:
++            record["signature"] = symbol.signature
++        if symbol.parent_qualified_name is not None:
++            record["parent_symbol"] = symbol.parent_qualified_name
++        if chunk_id is not None:
++            record["chunk_id"] = chunk_id
++        schema_validator.validate_record("SymbolRecord", record)
++        return dict(record)
++
++
++__all__ = ["SymbolRecordBuilder"]
+diff --git a/src/knowledgenexus/foundation/infrastructure/parsers/__init__.py b/src/knowledgenexus/foundation/infrastructure/parsers/__init__.py
+new file mode 100644
+index 0000000..aab26f4
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/parsers/__init__.py
+@@ -0,0 +1,5 @@
++from knowledgenexus.foundation.infrastructure.parsers.tree_sitter_symbol_parser import (
++    TreeSitterSymbolParser,
++)
++
++__all__ = ["TreeSitterSymbolParser"]
+diff --git a/src/knowledgenexus/foundation/infrastructure/parsers/tree_sitter_symbol_parser.py b/src/knowledgenexus/foundation/infrastructure/parsers/tree_sitter_symbol_parser.py
+new file mode 100644
+index 0000000..ca934c2
+--- /dev/null
++++ b/src/knowledgenexus/foundation/infrastructure/parsers/tree_sitter_symbol_parser.py
+@@ -0,0 +1,290 @@
++"""Tree-sitter backed C++/Java symbol extraction."""
++
++from __future__ import annotations
++
++import re
++from collections.abc import Iterable
++from dataclasses import replace
++
++from tree_sitter import Language, Parser
++import tree_sitter_cpp
++import tree_sitter_java
++
++from knowledgenexus.foundation.domain.models.symbol_index import (
++    ParsedSymbol,
++    SymbolParseResult,
++    SymbolParseStatus,
++)
++
++
++_AGGREGATE_TYPES = {
++    "class_specifier": "class",
++    "struct_specifier": "struct",
++    "enum_specifier": "enum",
++    "class_declaration": "class",
++    "interface_declaration": "interface",
++    "enum_declaration": "enum",
++    "namespace_definition": "namespace",
++    "package_declaration": "package",
++}
++_COMMENT_LINE = re.compile(r"^\s*(?://|/\*|\*|\*/|#)")
++
++
++class TreeSitterSymbolParser:
++    """Extract the intentionally small MVP symbol vocabulary."""
++
++    def __init__(self) -> None:
++        self._languages = {
++            "cpp": Language(tree_sitter_cpp.language()),
++            "java": Language(tree_sitter_java.language()),
++        }
++
++    def parse(self, *, path: str, language: str, source_text: str) -> SymbolParseResult:
++        if type(path) is not str or not path:
++            raise TypeError("path is invalid")
++        if language not in self._languages:
++            raise ValueError("language is invalid")
++        if type(source_text) is not str:
++            raise TypeError("source_text is invalid")
++        source_bytes = source_text.encode("utf-8")
++        parser = Parser(self._languages[language])
++        tree = parser.parse(source_bytes)
++        error_count = sum(1 for node in self._walk(tree.root_node) if node.is_error or node.is_missing)
++        status = SymbolParseStatus.PARTIAL if tree.root_node.has_error or error_count else SymbolParseStatus.OK
++        symbols: list[ParsedSymbol] = []
++        known_classes = self._known_class_names(tree.root_node, source_bytes, language)
++        self._collect(
++            node=tree.root_node,
++            source_bytes=source_bytes,
++            source_text=source_text,
++            path=path,
++            language=language,
++            status=status,
++            parents=(),
++            known_classes=known_classes,
++            output=symbols,
++        )
++        if language == "java":
++            package = next((item for item in symbols if item.symbol_type == "package"), None)
++            if package is not None:
++                for index, item in enumerate(symbols):
++                    if item.symbol_type == "package":
++                        continue
++                    parent = item.parent_qualified_name
++                    qualified = f"{package.qualified_name}::{item.qualified_name}"
++                    if parent is None:
++                        parent = package.qualified_name
++                    else:
++                        parent = f"{package.qualified_name}::{parent}"
++                    symbols[index] = replace(item, qualified_name=qualified, parent_qualified_name=parent)
++        symbols.sort(key=lambda item: (item.start_byte, item.end_byte, item.qualified_name, item.symbol_type))
++        return SymbolParseResult(
++            path=path,
++            language=language,
++            status=status,
++            symbols=tuple(symbols),
++            error_count=error_count,
++        )
++
++    def _collect(
++        self,
++        *,
++        node: object,
++        source_bytes: bytes,
++        source_text: str,
++        path: str,
++        language: str,
++        status: SymbolParseStatus,
++        parents: tuple[ParsedSymbol, ...],
++        known_classes: frozenset[str],
++        output: list[ParsedSymbol],
++    ) -> None:
++        function_name, qualifier = self._function_name_and_qualifier(node, source_bytes, language)
++        symbol_type = self._symbol_type(node, language, parents, qualifier, known_classes, function_name)
++        current_parents = parents
++        if symbol_type is not None:
++            name = function_name or self._name(node, source_bytes, language)
++            if name:
++                qualified_name = self._qualified_name(name, parents)
++                parent_qualified_name = parents[-1].qualified_name if parents else None
++                if qualifier:
++                    qualified_name = f"{qualifier}::{name}"
++                    parent_qualified_name = qualifier if symbol_type == "method" else self._namespace_parent(qualifier)
++                start_row = node.start_point[0]
++                end_row = node.end_point[0]
++                leading_comment, comment_row = self._leading_comment(source_text, start_row)
++                body = node.child_by_field_name("body")
++                signature_end = body.start_byte if body is not None else node.end_byte
++                signature = source_bytes[node.start_byte:signature_end].decode("utf-8", "strict").strip()
++                aggregate = symbol_type in {"class", "struct", "interface", "enum", "namespace", "package"}
++                parsed = ParsedSymbol(
++                    path=path,
++                    language=language,
++                    symbol_type=symbol_type,
++                    name=name,
++                    qualified_name=qualified_name,
++                    signature=signature or None,
++                    line_start=comment_row + 1 if comment_row is not None else start_row + 1,
++                    line_end=max(start_row + 1, end_row + 1),
++                    parent_qualified_name=parent_qualified_name,
++                    leading_comment=leading_comment,
++                    parse_status=status,
++                    start_byte=node.start_byte,
++                    end_byte=node.end_byte,
++                    body_start_byte=body.start_byte if body is not None else None,
++                    aggregate=aggregate,
++                )
++                output.append(parsed)
++                current_parents = parents + (parsed,)
++        for child in node.named_children:
++            self._collect(
++                node=child,
++                source_bytes=source_bytes,
++                source_text=source_text,
++                path=path,
++                language=language,
++                status=status,
++                parents=current_parents,
++                known_classes=known_classes,
++                output=output,
++            )
++
++    @staticmethod
++    def _symbol_type(
++        node: object,
++        language: str,
++        parents: tuple[ParsedSymbol, ...],
++        qualifier: str | None,
++        known_classes: frozenset[str],
++        function_name: str | None,
++    ) -> str | None:
++        node_type = node.type
++        if node_type in _AGGREGATE_TYPES:
++            return _AGGREGATE_TYPES[node_type]
++        if language == "cpp" and (
++            node_type == "function_definition"
++            or (node_type in {"declaration", "field_declaration"} and function_name is not None)
++        ):
++            if parents and parents[-1].symbol_type in {"class", "struct"}:
++                return "method"
++            if qualifier and qualifier in known_classes:
++                return "method"
++            return "function"
++        if language == "java" and node_type in {"method_declaration", "constructor_declaration"}:
++            return "method"
++        return None
++
++    @staticmethod
++    def _name(node: object, source_bytes: bytes, language: str) -> str | None:
++        named = node.child_by_field_name("name")
++        if named is None and node.type == "function_definition":
++            declarator = node.child_by_field_name("declarator")
++            named = TreeSitterSymbolParser._function_name_node(declarator)
++        if named is None and node.type == "package_declaration":
++            raw = source_bytes[node.start_byte:node.end_byte].decode("utf-8", "strict")
++            raw = raw.removeprefix("package").strip().rstrip(";").strip()
++            return raw or None
++        if named is None:
++            return None
++        value = source_bytes[named.start_byte:named.end_byte].decode("utf-8", "strict").strip()
++        return value or None
++
++    @staticmethod
++    def _function_name_and_qualifier(
++        node: object, source_bytes: bytes, language: str
++    ) -> tuple[str | None, str | None]:
++        if language != "cpp" or node.type not in {"function_definition", "declaration", "field_declaration"}:
++            return None, None
++        declarator = node.child_by_field_name("declarator")
++        while declarator is not None and declarator.type == "function_declarator":
++            declarator = declarator.child_by_field_name("declarator")
++        if declarator is None:
++            return None, None
++        raw = source_bytes[declarator.start_byte:declarator.end_byte].decode("utf-8", "strict").strip()
++        if "::" in raw:
++            qualifier, name = raw.rsplit("::", 1)
++            return name.strip(), qualifier.strip()
++        if declarator.type in {"identifier", "field_identifier", "type_identifier", "operator_name", "destructor_name"}:
++            return raw, None
++        found = TreeSitterSymbolParser._function_name_node(declarator)
++        if found is None:
++            return None, None
++        return source_bytes[found.start_byte:found.end_byte].decode("utf-8", "strict").strip(), None
++
++    @staticmethod
++    def _namespace_parent(qualifier: str) -> str | None:
++        return qualifier.rsplit("::", 1)[0] if "::" in qualifier else None
++
++    def _known_class_names(self, root: object, source_bytes: bytes, language: str) -> frozenset[str]:
++        if language != "cpp":
++            return frozenset()
++        found: set[str] = set()
++
++        def walk(node: object, parents: tuple[str, ...]) -> None:
++            next_parents = parents
++            if node.type == "namespace_definition":
++                name = self._name(node, source_bytes, language)
++                if name:
++                    next_parents = parents + (name,)
++            elif node.type in {"class_specifier", "struct_specifier"}:
++                name = self._name(node, source_bytes, language)
++                if name:
++                    qualified = "::".join((*parents, name))
++                    found.add(qualified)
++                    next_parents = parents + (name,)
++            for child in node.named_children:
++                walk(child, next_parents)
++
++        walk(root, ())
++        return frozenset(found)
++
++    @staticmethod
++    def _find_name_node(node: object | None) -> object | None:
++        if node is None:
++            return None
++        if node.type in {"identifier", "field_identifier", "type_identifier", "operator_name", "destructor_name"}:
++            return node
++        for child in reversed(node.named_children):
++            found = TreeSitterSymbolParser._find_name_node(child)
++            if found is not None:
++                return found
++        return None
++
++    @staticmethod
++    def _function_name_node(node: object | None) -> object | None:
++        if node is None:
++            return None
++        direct = node.child_by_field_name("declarator")
++        if direct is not None:
++            return TreeSitterSymbolParser._function_name_node(direct)
++        if node.type in {"identifier", "field_identifier", "operator_name", "destructor_name"}:
++            return node
++        return TreeSitterSymbolParser._find_name_node(node)
++
++    @staticmethod
++    def _qualified_name(name: str, parents: tuple[ParsedSymbol, ...]) -> str:
++        return f"{parents[-1].qualified_name}::{name}" if parents else name
++
++    @staticmethod
++    def _leading_comment(source_text: str, start_row: int) -> tuple[str, int | None]:
++        lines = source_text.split("\n")
++        if start_row <= 0:
++            return "", None
++        cursor = start_row - 1
++        selected: list[str] = []
++        while cursor >= 0 and _COMMENT_LINE.match(lines[cursor]):
++            selected.append(lines[cursor])
++            cursor -= 1
++        selected.reverse()
++        if not selected:
++            return "", None
++        return "\n".join(selected).strip(), cursor + 1
++
++    @staticmethod
++    def _walk(node: object) -> Iterable[object]:
++        yield node
++        for child in node.named_children:
++            yield from TreeSitterSymbolParser._walk(child)
++
++
++__all__ = ["TreeSitterSymbolParser"]
+diff --git a/src/knowledgenexus/foundation/ports/__init__.py b/src/knowledgenexus/foundation/ports/__init__.py
+index 1d848cd..f304047 100644
+--- a/src/knowledgenexus/foundation/ports/__init__.py
++++ b/src/knowledgenexus/foundation/ports/__init__.py
+@@ -50,6 +50,7 @@ from knowledgenexus.foundation.ports.git_repository_read_port import (
+     GitRepositoryReadPort,
+     GitRepositoryReaderError,
+ )
++from knowledgenexus.foundation.ports.symbol_parser_port import SymbolParserPort
+ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
+     CheckpointFailureCategory,
+     CheckpointCommitResult,
+@@ -147,6 +148,7 @@ __all__ = [
+     "TokenizerPort",
+     "GitRepositoryReadPort",
+     "GitRepositoryReaderError",
++    "SymbolParserPort",
+     "CheckpointFailureCategory",
+     "CheckpointCommitResult",
+     "CheckpointOperationFailure",
+diff --git a/src/knowledgenexus/foundation/ports/symbol_parser_port.py b/src/knowledgenexus/foundation/ports/symbol_parser_port.py
+new file mode 100644
+index 0000000..8e216dd
+--- /dev/null
++++ b/src/knowledgenexus/foundation/ports/symbol_parser_port.py
+@@ -0,0 +1,12 @@
++from __future__ import annotations
++
++from typing import Protocol
++
++from knowledgenexus.foundation.domain.models.symbol_index import SymbolParseResult
++
++
++class SymbolParserPort(Protocol):
++    def parse(self, *, path: str, language: str, source_text: str) -> SymbolParseResult: ...
++
++
++__all__ = ["SymbolParserPort"]
+diff --git a/tests/foundation/application/use_cases/test_build_git_symbols.py b/tests/foundation/application/use_cases/test_build_git_symbols.py
+new file mode 100644
+index 0000000..55c81ab
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_build_git_symbols.py
+@@ -0,0 +1,125 @@
++from pathlib import Path
++
++from knowledgenexus.foundation.application.use_cases.build_git_code_documents import (
++    BuildGitCodeDocuments,
++    BuildGitCodeDocumentsRequest,
++)
++from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
++from knowledgenexus.foundation.domain.models import (
++    BuildGitSymbolsRequest,
++    CharacterSpan,
++    ChunkingProfile,
++    GitCasePolicy,
++    GitFileObservation,
++    GitRepositorySnapshot,
++    GitScanBudgets,
++    GitScanMetrics,
++    GitSourceConfig,
++    GitSymbolIndexStatus,
++    TokenizationResult,
++    TokenizerAsset,
++)
++from knowledgenexus.foundation.infrastructure.parsers import TreeSitterSymbolParser
++from knowledgenexus.foundation.domain.models.symbol_index import ParsedSymbol, SymbolParseResult, SymbolParseStatus
++from knowledgenexus.foundation.domain.rules.text_normalization import TextNormalizationRules
++from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++
++
++def _profile() -> ChunkingProfile:
++    revision = "5617a9f61b028005a4858fdac845db406aefb181"
++    repository = "https://huggingface.co/BAAI/bge-m3"
++    return ChunkingProfile(
++        chunker_version="1.2.0", profile_status="provisional_until_benchmark", active_profile="medium",
++        model_name="BAAI/bge-m3", tokenizer_name="BAAI/bge-m3", tokenizer_family="SentencePiece / XLM-R",
++        vector_dimension=1024, maximum_model_tokens=8192, target_tokens=450, minimum_tokens=96,
++        hard_maximum_tokens=1000, overlap_tokens=64, code_window_target_tokens=450,
++        code_window_max_lines=40, code_window_overlap_lines=4, tokenizer_repository=repository,
++        tokenizer_revision=revision, observed_license="MIT", provenance_url=f"{repository}/tree/{revision}",
++        tokenizer_assets=(TokenizerAsset(filename="tokenizer.json", byte_size=1, sha256="0" * 64),),
++        transformers_version="4.57.6", tokenizers_version="0.22.2", sentencepiece_version="0.2.2",
++    )
++
++
++class _Tokenizer:
++    def tokenize(self, *, text: str) -> TokenizationResult:
++        return TokenizationResult(tuple(CharacterSpan(index, index + 1) for index in range(len(text))))
++
++
++class _Reader:
++    def __init__(self, snapshot: GitRepositorySnapshot) -> None:
++        self.snapshot = snapshot
++
++    def read(self, *, config: GitSourceConfig) -> GitRepositorySnapshot:
++        return self.snapshot
++
++
++def _plan(tmp_path: Path, source: str) -> object:
++    source = TextNormalizationRules.normalize_text(source)
++    root = tmp_path / "spen-sdk"
++    root.mkdir()
++    observation = GitFileObservation(
++        path="src/a.cpp", raw_bytes=source.encode(), raw_byte_size=len(source.encode()),
++        normalized_text=source, normalized_byte_size=len(source.encode()), symbol_authority=True,
++    )
++    snapshot = GitRepositorySnapshot(
++        repo_name="spen-sdk", branch="develop", commit_sha="a" * 40,
++        observations=(observation,),
++        metrics=GitScanMetrics(
++            seen=1, included=1, excluded_generated=0, excluded_vendor=0, excluded_binary=0,
++            excluded_bytes=0, included_raw_bytes=len(source.encode()), included_normalized_bytes=len(source.encode()),
++            included_chunk_count=0,
++        ),
++    )
++    config = GitSourceConfig(
++        clone_root=root, repo_name="spen-sdk", branch="develop", commit_sha="a" * 40,
++        crawled_at="2026-08-05T10:00:00Z",
++        budgets=GitScanBudgets(max_tree_entries=10, max_file_bytes=4096, max_total_raw_bytes=8192,
++            max_files=5, max_normalized_bytes=4096, max_in_memory_bytes=16384),
++        case_policy=GitCasePolicy.REJECT_CASEFOLD_COLLISIONS,
++    )
++    return BuildGitCodeDocuments(
++        repository_reader=_Reader(snapshot), tokenizer=_Tokenizer(), schema_validator=FoundationSchemaValidator(),
++    ).execute(BuildGitCodeDocumentsRequest(config, _profile())).plan
++
++
++def test_builds_schema_valid_symbol_records_and_chunks(tmp_path: Path) -> None:
++    plan = _plan(tmp_path, "namespace n { class A { public: void f() {} }; }\n")
++    result = BuildGitSymbols(parser=TreeSitterSymbolParser(), tokenizer=_Tokenizer()).execute(
++        BuildGitSymbolsRequest(plan=plan, chunking_profile=_profile(), scanned_at="2026-08-05T11:00:00Z")
++    )
++    assert result.status is GitSymbolIndexStatus.SUCCESS
++    assert {record["symbol_type"] for record in result.symbol_records} == {"namespace", "class", "method"}
++    assert all(chunk["content_kind"] == "code_symbol" for chunk in result.chunks)
++
++
++def test_invalid_request_fails_before_parser_call(tmp_path: Path) -> None:
++    class _Parser:
++        calls = 0
++        def parse(self, **kwargs: object) -> object:
++            self.calls += 1
++            return object()
++    parser = _Parser()
++    result = BuildGitSymbols(parser=parser, tokenizer=_Tokenizer()).execute(object())
++    assert result.status is GitSymbolIndexStatus.FAILED
++    assert parser.calls == 0
++
++
++def test_forged_parser_span_fails_closed_without_output(tmp_path: Path) -> None:
++    class _ForgedParser:
++        def parse(self, *, path: str, language: str, source_text: str) -> SymbolParseResult:
++            return SymbolParseResult(
++                path=path,
++                language=language,
++                status=SymbolParseStatus.OK,
++                symbols=(ParsedSymbol(
++                    path=path, language=language, symbol_type="function", name="f", qualified_name="f",
++                    signature="void f()", line_start=999, line_end=999, parent_qualified_name=None,
++                    leading_comment="", parse_status=SymbolParseStatus.OK, start_byte=0, end_byte=8,
++                ),),
++            )
++    plan = _plan(tmp_path, "void f() {}")
++    result = BuildGitSymbols(parser=_ForgedParser(), tokenizer=_Tokenizer()).execute(
++        BuildGitSymbolsRequest(plan=plan, chunking_profile=_profile(), scanned_at="2026-08-05T11:00:00Z")
++    )
++    assert result.status is GitSymbolIndexStatus.FAILED
++    assert not result.symbol_records and not result.chunks
+diff --git a/tests/foundation/domain/models/test_symbol_index.py b/tests/foundation/domain/models/test_symbol_index.py
+new file mode 100644
+index 0000000..d93681f
+--- /dev/null
++++ b/tests/foundation/domain/models/test_symbol_index.py
+@@ -0,0 +1,62 @@
++import pytest
++
++from knowledgenexus.foundation.domain.models.symbol_index import (
++    GitSymbolIndexFailureCategory,
++    GitSymbolIndexMetrics,
++    GitSymbolIndexResult,
++    GitSymbolIndexStatus,
++    ParsedSymbol,
++    SymbolParseStatus,
++)
++from knowledgenexus.foundation.domain.rules.symbol_id_generator import SymbolIdGenerator
++
++
++def _symbol() -> ParsedSymbol:
++    return ParsedSymbol(
++        path="src/a.cpp",
++        language="cpp",
++        symbol_type="function",
++        name="f",
++        qualified_name="f",
++        signature="void f()",
++        line_start=1,
++        line_end=1,
++        parent_qualified_name=None,
++        leading_comment="",
++        parse_status=SymbolParseStatus.OK,
++        start_byte=0,
++        end_byte=8,
++    )
++
++
++def test_symbol_id_overload_suffix_is_stable() -> None:
++    value = SymbolIdGenerator.generate(
++        repo="spen-sdk",
++        branch="develop",
++        file_path="src/a.cpp",
++        qualified_name="f",
++        signature="void f(int)",
++        overloaded=True,
++    )
++    assert value.endswith("f~" + __import__("hashlib").sha256(b"void f(int)").hexdigest()[:8])
++
++
++def test_failed_result_rejects_partial_payload() -> None:
++    with pytest.raises(ValueError):
++        GitSymbolIndexResult(
++            status=GitSymbolIndexStatus.FAILED,
++            symbol_records=({"symbol_id": "x"},),
++            error_category=GitSymbolIndexFailureCategory.PARSER_FAILED,
++        )
++
++
++def test_metrics_reject_impossible_counts() -> None:
++    with pytest.raises(ValueError):
++        GitSymbolIndexMetrics(
++            authority_file_count=1,
++            symbol_count=2,
++            chunk_count=1,
++            partial_file_count=0,
++            fallback_file_count=0,
++            oversized_part_count=0,
++        )
+diff --git a/tests/foundation/infrastructure/parsers/test_tree_sitter_symbol_parser.py b/tests/foundation/infrastructure/parsers/test_tree_sitter_symbol_parser.py
+new file mode 100644
+index 0000000..dab8cea
+--- /dev/null
++++ b/tests/foundation/infrastructure/parsers/test_tree_sitter_symbol_parser.py
+@@ -0,0 +1,53 @@
++from knowledgenexus.foundation.infrastructure.parsers import TreeSitterSymbolParser
++from knowledgenexus.foundation.domain.models import SymbolParseStatus
++
++
++def test_extracts_cpp_namespace_class_and_method_deterministically() -> None:
++    source = """// class docs
++namespace outer {\nclass Widget {\npublic:\n  // method docs\n  void run(int value) { return; }\n};\n}\n"""
++    result = TreeSitterSymbolParser().parse(path="src/widget.cpp", language="cpp", source_text=source)
++    assert result.status is SymbolParseStatus.OK
++    assert [(item.symbol_type, item.qualified_name) for item in result.symbols] == [
++        ("namespace", "outer"),
++        ("class", "outer::Widget"),
++        ("method", "outer::Widget::run"),
++    ]
++    assert result.symbols[-1].leading_comment == "// method docs"
++    assert result.symbols[-1].line_start == 5
++
++
++def test_extracts_java_package_and_method() -> None:
++    source = "package demo.core;\npublic class Service {\n  void start() {}\n}\n"
++    result = TreeSitterSymbolParser().parse(path="src/Service.java", language="java", source_text=source)
++    assert [(item.symbol_type, item.qualified_name) for item in result.symbols] == [
++        ("package", "demo.core"),
++        ("class", "demo.core::Service"),
++        ("method", "demo.core::Service::start"),
++    ]
++
++
++def test_error_tree_is_partial_without_aborting() -> None:
++    result = TreeSitterSymbolParser().parse(
++        path="src/broken.cpp",
++        language="cpp",
++        source_text="namespace broken { class Missing { void f( {\n",
++    )
++    assert result.status is SymbolParseStatus.PARTIAL
++    assert result.error_count > 0
++
++
++def test_cpp_declarations_and_qualified_definitions_have_complete_identity() -> None:
++    source = """namespace n {
++class A { public: A(); void f(int); };
++void g();
++}
++void n::A::f(int value) {}
++void n::A::A() {}
++void n::g();
++"""
++    result = TreeSitterSymbolParser().parse(path="src/a.cpp", language="cpp", source_text=source)
++    values = [(item.symbol_type, item.name, item.qualified_name, item.parent_qualified_name) for item in result.symbols]
++    assert ("method", "A", "n::A::A", "n::A") in values
++    assert ("method", "f", "n::A::f", "n::A") in values
++    assert ("function", "g", "n::g", "n") in values
++    assert all(item.qualified_name != "f" for item in result.symbols)
+-- 
+2.45.1.windows.1
+

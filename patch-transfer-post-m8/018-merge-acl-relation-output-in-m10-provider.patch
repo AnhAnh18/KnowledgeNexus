@@ -1,0 +1,105 @@
+From 828ce2e4fe64255ce2b145c71a9ca939bff869cc Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:01:29 +0700
+Subject: [PATCH] Merge ACL relation output in M10 provider
+
+---
+ .../foundation/domain/models/foundation_gate.py  | 15 +++++++++------
+ .../adapters/m10_source_adapters.py              | 16 ++++++++++++++++
+ 2 files changed, 25 insertions(+), 6 deletions(-)
+
+diff --git a/src/knowledgenexus/foundation/domain/models/foundation_gate.py b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+index 56ef95f..7bafc84 100644
+--- a/src/knowledgenexus/foundation/domain/models/foundation_gate.py
++++ b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+@@ -76,8 +76,8 @@ class OcrEngineApproval:
+     limits: OcrLimits = OcrLimits()
+     evidence_kind: str | None = None
+     evidence_digest: str | None = None
+-    approved_at: str | None = None
+     failure_reason: str | None = None
++    approved_at: str | None = None
+ 
+     def __post_init__(self) -> None:
+         if type(self.status) is not str or self.status not in {"approved", "pending_external_input", "failed"}:
+@@ -88,10 +88,10 @@ class OcrEngineApproval:
+             _optional_identity(getattr(self, field), field)
+         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
+             raise ValueError("evidence_kind is invalid")
+-        if self.approved_at is not None and (type(self.approved_at) is not str or _RFC3339.fullmatch(self.approved_at) is None):
+-            raise ValueError("approved_at is invalid")
+         if self.failure_reason is not None and (type(self.failure_reason) is not str or not self.failure_reason or len(self.failure_reason) > 256):
+             raise ValueError("failure_reason is invalid")
++        if self.approved_at is not None and (type(self.approved_at) is not str or _RFC3339.fullmatch(self.approved_at) is None):
++            raise ValueError("approved_at is invalid")
+         if self.status == "approved":
+             required = (self.engine_id, self.engine_version, self.runtime_identity, self.model_identity, self.build_identity, self.evidence_kind, self.evidence_digest, self.approved_at)
+             if any(value is None for value in required) or self.offline_only is not True:
+@@ -200,6 +200,7 @@ class ScaleGateEvidence:
+     duration_milliseconds: int | None = None
+     evidence_kind: str | None = None
+     evidence_digest: str | None = None
++    failure_reason: str | None = None
+ 
+     def __post_init__(self) -> None:
+         if type(self.status) is not str or self.status not in {"pass", "pending_external_input", "failed"}:
+@@ -237,8 +238,10 @@ class ScaleGateEvidence:
+             raise ValueError("RSS counters are inconsistent")
+         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
+             raise ValueError("evidence_kind is invalid")
++        if self.failure_reason is not None and (type(self.failure_reason) is not str or not self.failure_reason or len(self.failure_reason) > 256):
++            raise ValueError("failure_reason is invalid")
+         if self.status == "pending_external_input":
+-            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
++            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or self.failure_reason is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
+                 raise ValueError("pending scale gate carries observations")
+         elif self.status == "pass":
+             if self.observed_pages < self.target_pages or self.run_count < 2 or seen != _STREAM_SET:
+@@ -248,8 +251,8 @@ class ScaleGateEvidence:
+             if self.evidence_kind is None or self.evidence_digest is None:
+                 raise ValueError("scale evidence digest is missing")
+             _digest(self.evidence_digest, "evidence_digest")
+-        elif self.evidence_digest is not None:
+-            raise ValueError("failed scale gate carries evidence")
++        elif self.evidence_digest is not None or self.failure_reason is None:
++            raise ValueError("failed scale gate carries invalid evidence")
+ 
+     def __repr__(self) -> str:
+         return f"{type(self).__name__}(status={self.status!r}, target_pages={self.target_pages})"
+diff --git a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+index a152d14..ad13b8c 100644
+--- a/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
++++ b/src/knowledgenexus/foundation/infrastructure/adapters/m10_source_adapters.py
+@@ -122,6 +122,19 @@ def _stage_records(value: object, names: tuple[str, ...], field_name: str) -> tu
+     return _records(candidate, field_name)
+ 
+ 
++def _merge_records(left: tuple[dict[str, object], ...], right: tuple[dict[str, object], ...], *, identity: str) -> tuple[dict[str, object], ...]:
++    merged: dict[str, dict[str, object]] = {}
++    for record in (*left, *right):
++        key = record.get(identity)
++        if type(key) is not str or not key:
++            raise ValueError(f"invalid {identity}")
++        previous = merged.get(key)
++        if previous is not None and previous != record:
++            raise ValueError(f"conflicting {identity}")
++        merged[key] = record
++    return tuple(merged[key] for key in sorted(merged))
++
++
+ class ConfluenceM10MaterializedSource:
+     """Compose the approved Confluence producers into an M10 source port.
+ 
+@@ -177,6 +190,9 @@ class ConfluenceM10MaterializedSource:
+             elif stage_name == "acl_stage":
+                 acl_value = _field(result, "acl") or _field(result, "acl_records") or _field(result, "acl_record")
+                 acl = _records(acl_value, "acl") if acl_value is not None else ()
++                acl_relations = _field(result, "relations")
++                if acl_relations is not None:
++                    relations = _merge_records(relations, _records(acl_relations, "relations"), identity="relation_id")
+                 docs = _field(result, "documents") or _field(result, "enriched_canonical_document")
+                 chunks = _field(result, "chunks") or _field(result, "enriched_chunks")
+                 if docs is not None:
+-- 
+2.45.1.windows.1
+

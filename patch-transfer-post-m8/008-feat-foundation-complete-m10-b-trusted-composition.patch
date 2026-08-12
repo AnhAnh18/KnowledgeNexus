@@ -1,0 +1,1928 @@
+From 8851a51edbb9e8817222ab420bf407a6739211e0 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 5 Aug 2026 15:24:57 +0700
+Subject: [PATCH] feat(foundation): complete M10-B trusted composition
+
+---
+ .../20260805-m10/18-m10b-implementation.md    |  41 +++
+ .../20260805-m10/19-m10b-review-1.md          |  56 +++
+ .../20260805-m10/20-m10b-fix-plan.input.md    |  34 ++
+ .../20260805-m10/21-m10b-fix-plan-review.md   |  74 ++++
+ .../20260805-m10/22-m10b-fix-plan-revised.md  |  77 ++++
+ .../23-m10b-fix-plan-final-review.md          |  51 +++
+ .../20260805-m10/24-m10b-fix-plan-final.md    |  87 +++++
+ .../20260805-m10/25-m10b-fix-plan-approval.md |  30 ++
+ .../26-m10b-fix-implementation.md             |  57 +++
+ .../20260805-m10/27-m10b-review-final.md      |  26 ++
+ .../20260805-m10/28-m10b-fix2-plan.input.md   |  31 ++
+ .../20260805-m10/29-m10b-fix2-plan-review.md  |  43 +++
+ .../20260805-m10/30-m10b-fix2-plan-final.md   |  58 +++
+ .../31-m10b-fix2-plan-approval.md             |  28 ++
+ .../32-m10b-fix2-implementation.md            |  50 +++
+ .../20260805-m10/33-m10b-fix2-review-final.md |  31 ++
+ .../20260805-m10/34-m10b-fix3-plan.input.md   |  20 ++
+ .../35-m10b-fix3-plan-approval.md             |  32 ++
+ .../36-m10b-fix3-implementation.md            |  42 +++
+ .../20260805-m10/37-m10b-fix3-review-final.md |  45 +++
+ .local_ai/IMPLEMENTATION_STATE.md             |  29 +-
+ .local_ai/ROADMAP.md                          |   4 +-
+ .../application/use_cases/__init__.py         |  10 +
+ .../use_cases/compose_m10_snapshot.py         |  95 +++++
+ .../foundation/domain/models/__init__.py      |  14 +
+ .../domain/models/m10_composition.py          | 335 ++++++++++++++++++
+ .../foundation/domain/models/m10_snapshot.py  |   2 +-
+ .../use_cases/test_compose_m10_snapshot.py    | 137 +++++++
+ .../domain/models/test_m10_composition.py     | 112 ++++++
+ 29 files changed, 1644 insertions(+), 7 deletions(-)
+ create mode 100644 .codex-workflow/20260805-m10/18-m10b-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/19-m10b-review-1.md
+ create mode 100644 .codex-workflow/20260805-m10/20-m10b-fix-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/21-m10b-fix-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/22-m10b-fix-plan-revised.md
+ create mode 100644 .codex-workflow/20260805-m10/23-m10b-fix-plan-final-review.md
+ create mode 100644 .codex-workflow/20260805-m10/24-m10b-fix-plan-final.md
+ create mode 100644 .codex-workflow/20260805-m10/25-m10b-fix-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/26-m10b-fix-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/27-m10b-review-final.md
+ create mode 100644 .codex-workflow/20260805-m10/28-m10b-fix2-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/29-m10b-fix2-plan-review.md
+ create mode 100644 .codex-workflow/20260805-m10/30-m10b-fix2-plan-final.md
+ create mode 100644 .codex-workflow/20260805-m10/31-m10b-fix2-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/32-m10b-fix2-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/33-m10b-fix2-review-final.md
+ create mode 100644 .codex-workflow/20260805-m10/34-m10b-fix3-plan.input.md
+ create mode 100644 .codex-workflow/20260805-m10/35-m10b-fix3-plan-approval.md
+ create mode 100644 .codex-workflow/20260805-m10/36-m10b-fix3-implementation.md
+ create mode 100644 .codex-workflow/20260805-m10/37-m10b-fix3-review-final.md
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/compose_m10_snapshot.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/m10_composition.py
+ create mode 100644 tests/foundation/application/use_cases/test_compose_m10_snapshot.py
+ create mode 100644 tests/foundation/domain/models/test_m10_composition.py
+
+diff --git a/.codex-workflow/20260805-m10/18-m10b-implementation.md b/.codex-workflow/20260805-m10/18-m10b-implementation.md
+new file mode 100644
+index 0000000..751e74d
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/18-m10b-implementation.md
+@@ -0,0 +1,41 @@
++# M10-B Implementation
++
++Implemented the bounded typed-adapter and in-memory composition seam from the
++approved M10 plan.
++
++## Changes
++
++- Added `M10ConfluenceHandoff` and `M10GitHandoff` with exact runtime field
++  checks, generation/commit identity, defensive record copies, and sanitized
++  error tuples.
++- Added injected `M10ConfluenceAdapter`/`M10GitAdapter` protocols.
++- Added pure `compose_m10_projection` validation for provenance drift,
++  duplicate identities, source ownership, deny-safe ACL tags, relation
++  resolution policy, media parent/provenance/status policy, symbol linkage and
++  Git line provenance, sync-state linkage, deterministic stream ordering, and
++  tombstone-empty initial snapshots.
++- Added `ComposeM10Snapshot` application boundary with atomic adapter calls and
++  sanitized `M10CompositionFailure` categories; invalid requests are rejected
++  before dependency calls.
++- Added adversarial model/use-case coverage, including wrong runtime objects,
++  provenance drift, ACL gaps, duplicate IDs, wrong handoffs, adapter failures,
++  and zero-call invalid-request behavior.
++- Corrected `M10SnapshotRequest.dataset_root` validation to accept the concrete
++  Windows `Path` subclass while retaining absolute/plain-directory/symlink
++  checks.
++
++## Validation
++
++```text
++python -m pytest -q tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py tests/foundation/domain/models/test_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-focused
++35 passed in 0.40s
++
++python -m compileall -q src/knowledgenexus/foundation/domain/models/m10_composition.py src/knowledgenexus/foundation/application/use_cases/compose_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py
++passed
++
++git diff --check
++passed (line-ending warnings only)
++```
++
++No exporter, completer, CLI, roadmap/state, connector, network, or operator
++run was added. No commit or push was performed.
+diff --git a/.codex-workflow/20260805-m10/19-m10b-review-1.md b/.codex-workflow/20260805-m10/19-m10b-review-1.md
+new file mode 100644
+index 0000000..019b5d5
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/19-m10b-review-1.md
+@@ -0,0 +1,56 @@
++# M10-B Independent Review
++
++Review target: current uncommitted M10-B composition implementation, including
++`m10_composition.py`, `compose_m10_snapshot.py`, exports, and the M10-A path
++diff, against `06-plan-approved.md`, M9 schemas, and `AGENTS.md`. Source and
++test files were not modified.
++
++## Findings
++
++- **P1 - Cross-stream records are not schema-validated or fully shape-
++  validated.** Composition accepts arbitrary record dictionaries and checks
++  only a small subset of fields. A relation with
++  `resolution_status="unresolved_target"` and no target metadata is accepted;
++  an active sync record containing only `entity_id` and `status` is accepted;
++  and a Confluence document outside `ordered_page_ids`/scope with no source
++  version or page provenance is accepted. This violates the required M9
++  schema validation, selected-page/source-version consistency, unresolved Jira
++  target policy, and sanitized typed handoff boundary.
++
++- **P1 - Media policy and ACL inheritance are incomplete.** `max_assets` is
++  never enforced, and media records are not required to carry inherited ACL
++  tags or raw/content provenance tied to their parent. A probe with policy
++  `max_assets=0` and one `not_processed` media record (with only parent ID and
++  source version) composes successfully. This breaches the deny-safe media
++  parent/ACL/provenance requirements.
++
++- **P1 - Composition metrics undercount media processing.**
++  `media_processed` and `media_failed` are hard-coded to zero regardless of
++  emitted media statuses, so successful projections report incorrect metrics
++  whenever parsed/OCR/summarized/failed assets exist.
++
++- **P1 - `M10CompositionResult` lacks exact-field forged-instance guards.** Its
++  dataclass `__post_init__` validates combinations but does not reject missing
++  or forbidden fields, allowing a forged result object to cross the application
++  boundary without the required runtime shape validation.
++
++- **P2 - Adapter constructor accepts non-callable `collect` attributes.**
++  `ComposeM10Snapshot.__init__` uses `hasattr` rather than checking that
++  `collect` is callable, so malformed adapters are accepted until execution.
++
++- **P2 - Symbol and ACL field validation is incomplete.** Symbol file paths are
++  only checked non-empty (not approved POSIX/line provenance grammar), and ACL
++  records are checked for a non-empty list but not schema-valid tags, source
++  ownership, or inheritance consistency.
++
++## Validation
++
++- Focused M10-B model/use-case tests: `12 passed`.
++- Architecture suite: `88 passed`.
++- M9 bounded regression: `116 passed`.
++- M6G compatibility/golden slice: `37 passed`.
++- Adversarial probes confirmed acceptance of over-limit media, missing media
++  ACL/provenance, unresolved relation target omission, incomplete sync state,
++  and out-of-scope Confluence documents.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/20-m10b-fix-plan.input.md b/.codex-workflow/20260805-m10/20-m10b-fix-plan.input.md
+new file mode 100644
+index 0000000..7445696
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/20-m10b-fix-plan.input.md
+@@ -0,0 +1,34 @@
++# M10-B Boundary Validation Fix
++
++Address only the confirmed findings in
++`.codex-workflow/20260805-m10/19-m10b-review-1.md`.
++
++- Make the M10-B composition boundary use the shared Foundation schema
++  validator (injected at the application boundary and available to the pure
++  composition function) for all eight non-tombstone streams. Preserve
++  sanitized, atomic failures and reject malformed/extra record fields before
++  relation, media, ACL, symbol, or sync field access.
++- Add explicit M10-B provenance rules: Confluence document/chunk/media records
++  must carry the requested page/source version identity; selected pages must
++  be ordered and scope-valid; unresolved relations must retain a non-fabricated
++  target marker and valid status; sync rows must be schema-valid and match
++  source/entity/version identity; Git records must retain exact repository,
++  branch, commit, and deny-safe ACL ownership.
++- Enforce media count budget, parent ACL inheritance, source/content provenance,
++  and allowed processing statuses. Compute `media_processed` and
++  `media_failed` from emitted statuses rather than constants.
++- Add exact-field and forged-instance validation for `M10CompositionResult`,
++  require callable adapter `collect` methods, and strengthen ACL tag/path and
++  symbol line provenance checks using the shared contract grammar.
++- Update only M10-B source/tests and the M10-A Windows `Path` compatibility
++  correction already present in the working tree. Do not add exporter, CLI,
++  roadmap/state, connector, network, or real-run behavior.
++
++Required adversarial tests cover object/None/wrong containers, missing and
++forbidden fields, forged models, invalid schemas, page/source-version drift,
++unresolved Jira targets, ACL inheritance gaps, media budget/status/provenance,
++symbol path/line drift, sync mismatches, duplicate IDs, adapter exceptions,
++non-callable adapters, zero dependency calls, atomic failure, metrics, and
++empty initial tombstones. Re-run focused M10-B/M10-A tests, bounded M9/M6G and
++architecture regressions, compileall, and diff-check before a fresh independent
++review.
+diff --git a/.codex-workflow/20260805-m10/21-m10b-fix-plan-review.md b/.codex-workflow/20260805-m10/21-m10b-fix-plan-review.md
+new file mode 100644
+index 0000000..ff6708b
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/21-m10b-fix-plan-review.md
+@@ -0,0 +1,74 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-B Fix Plan Review
++
++The proposed fix plan addresses all confirmed findings in
++`19-m10b-review-1.md`, but the implementation contract needs the following
++precision before coding.
++
++## Required Clarifications
++
++- Define the injected Foundation schema-validator protocol and exact schema
++  names for all eight streams. `compose_m10_projection` must receive the
++  validator explicitly (and the application use case must require a callable
++  validator), validate exact record fields before any `.get`/field access, and
++  defensively copy records after validation so validator mutation cannot alter
++  the projection.
++- Enumerate provenance keys and equality rules per source/stream. Confluence
++  documents, chunks, and media must bind to `request.ordered_page_ids`, the
++  requested source version, and the selected scope; Git records must bind
++  repository/branch/commit and have exactly deny-safe repo ACL ownership.
++  State how records without a page/file identity are rejected.
++- Specify unresolved Jira relation requirements by status. In particular,
++  `unresolved_target` must carry an explicit non-fabricated target marker and
++  every other unresolved status must satisfy its corresponding schema shape;
++  resolved relations must not carry contradictory unresolved markers.
++- Specify sync-state identity fields (schema version, source, entity, source
++  version, status), uniqueness/cardinality, and the empty-stream rule. Reject
++  `error`/`tombstoned` rows and any row whose identity/version does not match
++  an emitted selected entity.
++- Specify media ACL inheritance and provenance fields, including the behavior
++  when `include_attachments` is false, `allowed_processing_statuses` is empty,
++  and `max_assets` is exceeded. Define processed counting (`parsed|ocr|
++  summarized`) versus failed/not-processed counting and require parent ACL
++  equality or an explicit safe superset rule.
++- Define the approved symbol file-path grammar and line-span constraints, and
++  require exact repo/branch/commit/file identity for every Git symbol. Clarify
++  whether non-Git symbols are allowed and their provenance contract.
++- Define exact fields and failure combinations for `M10CompositionResult`,
++  including forged missing/extra fields, wrong runtime values, and sanitized
++  exception behavior. Preserve the existing one-page/M6G models unchanged.
++
++## Risks and Scope
++
++- Schema-validator calls can mutate records or raise arbitrary exceptions;
++  tests must prove fail-closed `PROJECTION`/`ADAPTER` results, no leaked text,
++  no partial projection, and no output/filesystem calls.
++- Validation ordering is security-sensitive: wrong runtime types, handoff
++  exact fields, and schema shape must fail before relation/media/ACL/symbol/
++  sync field access. Invalid request objects must call neither adapter;
++  malformed handoffs must not invoke downstream dependencies.
++- Keep the change limited to M10-B models/use case/tests plus the explicitly
++  approved M10-A Windows `Path` compatibility correction; do not alter M9/M6G
++  schemas, exporters, CLI, roadmap/state, connectors, or real-run behavior.
++
++## Acceptance Tests
++
++- Parametrize `object()`, `None`, wrong containers, missing/extra/forged fields,
++  schema-invalid records, validator mutation/exception, and wrong adapter
++  runtime types. Assert sanitized categories, zero adapter calls where
++  applicable, empty/atomic failure output, and no leaked exception text.
++- Cover Confluence page ordering/scope/source-version drift; Git identity and
++  ACL gaps; duplicate IDs; inherited ACL mismatch; media parent, raw/content
++  provenance, status, attachment policy, and budget; relation statuses and
++  unresolved target markers; symbol path/provenance/line drift; sync identity,
++  status, version, duplicate, and empty-stream behavior; and empty tombstones.
++- Assert deterministic stream ordering, exact stream counts, source document
++  counts, unresolved relation count, media processed/failed counts, and
++  `tombstones == ()`.
++- Run focused M10-A/M10-B tests, bounded M9 and M6G compatibility/golden
++  suites, architecture tests, `python -m compileall -q src tests`, and
++  `git diff --check`; then obtain a fresh independent review before any
++  roadmap/state update.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/22-m10b-fix-plan-revised.md b/.codex-workflow/20260805-m10/22-m10b-fix-plan-revised.md
+new file mode 100644
+index 0000000..ea78ef3
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/22-m10b-fix-plan-revised.md
+@@ -0,0 +1,77 @@
++# M10-B Boundary Validation Fix - Revised
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Scope
++
++Address only the confirmed findings in
++`.codex-workflow/20260805-m10/19-m10b-review-1.md`; preserve M6G/M9 schemas,
++exporters, CLI, roadmap/state, connectors, network, and real-run behavior.
++The existing Windows `Path` compatibility correction in `m10_snapshot.py`
++remains in this bounded M10-B fix.
++
++## Required implementation
++
++1. Add an injected `_SchemaValidator` protocol with callable
++   `validate_record(schema_name, record)`. `ComposeM10Snapshot` must accept a
++   validator (defaulting to the shared `FoundationSchemaValidator` only when
++   omitted), reject a non-callable validator at construction, and pass the
++   same validator explicitly to `compose_m10_projection`. The pure function
++   must validate, before any field access, these exact schemas:
++   `CanonicalDocument`, `ChunkRecord`, `RelationRecord`, `ACLRecord`,
++   `MediaAsset`, `SymbolRecord`, and `SyncStateRecord` for their corresponding
++   streams. A tombstone stream is forbidden in this initial handoff and the
++   projected tuple remains exactly empty.
++
++2. Validate each record on an isolated deep copy, reject validator mutation or
++   arbitrary validator exceptions as a sanitized projection failure, and retain
++   a separate defensive copy for the projection. Reject wrong record runtime
++   types, missing/extra fields, and forged handoff/result instances before
++   `.get`/field access. Keep the existing exact handoff field sets and add
++   exact-field validation to `M10CompositionResult`; require callable adapter
++   `collect` attributes.
++
++3. Enforce source provenance after schema validation:
++   - Confluence documents/chunks/media have `source_system=confluence`, a
++     selected `page_id` in `request.ordered_page_ids`, and
++     `source_version == confluence.source_version`; documents must link to the
++     requested scope and chunks must link to an emitted Confluence document.
++   - Git documents/chunks have `source_system=git`, non-empty POSIX
++     `file_path`, `repo/branch == request.git_repository/git_branch`, and
++     `source_version == request.git_commit`; Git symbols must match the exact
++     repo/branch/commit/file and use the same approved relative POSIX path
++     grammar and positive line span.
++   - Every emitted document has one matching ACL record. Chunk ACL tags must
++     equal the parent document ACL tags. Git ACL tags are exactly
++     `repo:<repository>` or `restricted:unresolved`; Confluence ACL tags must
++     be schema-valid and non-empty.
++
++4. Enforce relations and sync state: every relation source and target must be
++   schema-valid and its source must be an emitted document/chunk. A
++   `mentions_jira_key` unresolved relation must retain its explicit
++   `jira:issue:<KEY>` target; no missing/placeholder target is accepted, and
++   resolved relations may not use unresolved placeholders. Sync rows are
++   optional but, when present, must be unique, `active`, source/entity-type
++   consistent (`confluence` page/attachment or Git file), match an emitted
++   selected document/media identity, and carry `last_seen_version` equal to
++   the corresponding source version/commit. Empty sync state is valid.
++
++5. Enforce media policy: non-empty media requires `include_attachments=True`,
++   count `<= max_assets`, allowed processing status, source/version and
++   parent-document provenance, and an existing parent ACL (deny-safe inherited
++   access). `parsed|ocr|summarized` count as processed; `failed` counts as
++   failed; `not_processed` counts neither. Populate `media_processed` and
++   `media_failed` from those statuses.
++
++## Tests and acceptance
++
++Update M10-B fixtures to be real schema-valid records and add adversarial
++coverage for object/None/wrong containers, missing/forbidden fields, forged
++models, schema-invalid records, validator mutation/exception, provenance and
++page-order drift, Git ACL/path/commit drift, ACL inheritance, media budget /
++status / parent / provenance, unresolved Jira targets, symbol path/line drift,
++sync identity/status/version/duplicates, duplicate IDs, non-callable adapters,
++zero dependency calls, atomic failures, exact metrics, and empty tombstones.
++Run focused M10-A/M10-B tests, bounded M9/M6G compatibility and architecture
++regressions, `python -m compileall -q src tests`, and `git diff --check`; then
++obtain a fresh independent review before roadmap/state updates or commit.
+diff --git a/.codex-workflow/20260805-m10/23-m10b-fix-plan-final-review.md b/.codex-workflow/20260805-m10/23-m10b-fix-plan-final-review.md
+new file mode 100644
+index 0000000..5c0abec
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/23-m10b-fix-plan-final-review.md
+@@ -0,0 +1,51 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-B Revised Fix Plan Review
++
++The revised plan materially addresses the findings in `19-m10b-review-1.md`
++and the clarification requests in `21-m10b-fix-plan-review.md`. It is close to
++implementable, but the following requirements remain necessary for an
++unambiguous, reviewable fix.
++
++## Required Corrections
++
++- Correct the validator wording: the listed schemas cover seven non-tombstone
++  streams (documents, chunks, relations, ACL, media, symbols, sync), while
++  M10 has eight total streams including the forbidden initial tombstone
++  stream. State this explicitly and require the tombstone tuple to remain
++  exactly empty.
++- For Git ACLs, state that `restricted:unresolved` is deny-safe only as a
++  failure condition for the initial successful projection (or otherwise define
++  the exact allowed-success behavior). The approved plan says a Git ACL that
++  cannot establish `repo:<repository>` fails the deny-safe gate; accepting a
++  restricted tag in a successful projection would violate that contract.
++- Add explicit media raw/content provenance fields and equality rules. Parent
++  ID and source version alone do not prove the media body/raw artifact is tied
++  to the selected source; require the approved provenance identity and reject
++  drift or missing values.
++- Enumerate all relation statuses and their target rules, not only
++  `mentions_jira_key`/`unresolved_target`: define required target/source fields
++  for `resolved`, `unresolved_without_jira_api`, `deferred_mvp`, and
++  `unresolved_target`, and forbid contradictory unresolved markers on resolved
++  records.
++- State the sync cardinality rule precisely: no duplicate entity rows, no
++  `error`/`tombstoned`, and at most/exactly one active row for each selected
++  page/file/repo/attachment entity as applicable. Require schema version,
++  source/entity/version equality and reject rows for non-emitted entities.
++- Define deterministic ordering requirements for each merged stream and
++  ensure selected Confluence page ordering is checked against the request, not
++  merely membership in `ordered_page_ids`.
++
++## Risks / Acceptance
++
++- Keep schema validation before every record field access and validate isolated
++  deep copies; prove validator mutation and arbitrary exceptions produce a
++  sanitized atomic projection failure with no partial streams.
++- Require invalid request/adapter cases to make zero adapter calls, and assert
++  non-callable validators/adapters fail at construction. Add direct forged
++  `M10CompositionResult` missing/extra-field probes.
++- Preserve M6G/M9 schemas and bytes exactly; run focused M10-A/M10-B tests,
++  bounded M9/M6G and architecture suites, compileall, diff-check, then obtain
++  a fresh independent review before roadmap/state changes.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/24-m10b-fix-plan-final.md b/.codex-workflow/20260805-m10/24-m10b-fix-plan-final.md
+new file mode 100644
+index 0000000..dcaa7d7
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/24-m10b-fix-plan-final.md
+@@ -0,0 +1,87 @@
++# M10-B Boundary Validation Fix - Final
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++## Scope
++
++Address only the confirmed M10-B review findings and preserve M6G/M9 schemas,
++exporters, CLI, roadmap/state, connectors, network, and real-run behavior. The
++existing Windows `Path` compatibility correction remains in this fix.
++
++M10 has eight streams: seven schema-validated non-tombstone streams
++(`documents`, `chunks`, `relations`, `acl`, `media_assets`, `symbols`, and
++`sync_state`) plus `tombstones`. Initial M10-B handoffs do not accept a
++tombstone input; the projected tombstone tuple must be exactly empty.
++
++## Implementation contract
++
++1. Inject a `_SchemaValidator` protocol with callable
++   `validate_record(schema_name, record)`. `ComposeM10Snapshot` uses the
++   shared `FoundationSchemaValidator` when omitted and rejects non-callable
++   validators/adapters at construction. The pure composer receives the
++   validator explicitly and validates isolated deep copies with exactly these
++   schemas: `CanonicalDocument`, `ChunkRecord`, `RelationRecord`, `ACLRecord`,
++   `MediaAsset`, `SymbolRecord`, and `SyncStateRecord`. Validator mutation or
++   arbitrary exceptions fail closed with a sanitized projection category; a
++   separate untouched defensive copy feeds the projection.
++
++2. Preserve exact handoff field sets and reject wrong runtime values, missing /
++   extra fields, forged instances, and malformed records before `.get` or any
++   provenance field access. Add exact-field validation to
++   `M10CompositionResult` and require callable adapter `collect` methods.
++
++3. Provenance and deterministic ordering:
++   - Confluence documents/chunks/media use `source_system=confluence`, selected
++     `page_id`, and `source_version == confluence.source_version`; document
++     page IDs must be unique and occur in the same relative order as
++     `request.ordered_page_ids`, and every chunk/media parent must be an
++     emitted selected document.
++   - Git documents/chunks use `source_system=git`, relative POSIX `file_path`
++     (no backslash, absolute root, or `..` segment), exact `repo`/`branch`, and
++     `source_version == request.git_commit`. Git symbols use the same path
++     grammar, exact repo/branch/commit/file provenance, and a positive ordered
++     line span.
++   - Each stream is emitted deterministically by its identity after the
++     source/page-order checks. Every document has one ACL record; chunk ACL
++     tags exactly equal the parent document ACL tags. A successful Git record
++     must carry the exact `repo:<repository>` tag; `restricted:unresolved` is
++     deny-safe only as a rejected/failure condition, never as a successful
++     M10-B projection.
++
++4. Relations and sync state:
++   - All relation records are schema-valid. `resolved` requires an emitted
++     target and no unresolved marker. `unresolved_without_jira_api`,
++     `deferred_mvp`, and `unresolved_target` require a non-empty target not
++     present in emitted entities; for `mentions_jira_key` the target must be
++     the explicit `jira:issue:<KEY>` marker. No missing, fabricated,
++     `unknown`, or contradictory target is accepted.
++   - Sync state is optional but deterministic and unique by entity. Every row
++     is schema-valid, `status=active`, has source/entity type consistent with
++     Confluence page/attachment or Git file, matches an emitted document/media
++     identity, and has `last_seen_version` equal to the corresponding source
++     version/commit. Reject duplicates, `error`/`tombstoned`, non-emitted
++     entities, and any second row for an entity; an empty sync stream is valid.
++
++5. Media policy and metrics:
++   - Non-empty media requires `include_attachments=True` and count `<=
++     max_assets`; each asset has the allowed processing status, selected
++     Confluence parent/source version, and an existing parent ACL. Raw/content
++     provenance is paired: `content_hash` and `raw_uri` are both null for
++     non-downloaded assets or both present for downloaded assets, with a
++     64-hex content hash and `raw://confluence/attachments/<id>/<hash>` URI
++         whose final hash matches; drift or missing provenance fails closed.
++   - `parsed|ocr|summarized` count as processed, `failed` as failed, and
++     `not_processed` as neither. Populate `media_processed` and
++     `media_failed` from emitted statuses.
++
++## Tests and acceptance
++
++Update fixtures to full schema-valid records. Add adversarial coverage for
++wrong containers/types, missing/extra/forged fields, validator mutation and
++exceptions, provenance/page-order/Git ACL/path/commit drift, ACL inheritance,
++all relation statuses and target rules, media budget/status/parent/raw/content
++provenance, symbol line drift, sync identity/status/version/cardinality,
++duplicates, non-callable adapters, zero calls, atomic failures, exact metrics,
++and empty tombstones. Run focused M10-A/M10-B tests, bounded M9/M6G and
++architecture regressions, compileall, and diff-check, then obtain a fresh
++independent review before roadmap/state updates or commit.
+diff --git a/.codex-workflow/20260805-m10/25-m10b-fix-plan-approval.md b/.codex-workflow/20260805-m10/25-m10b-fix-plan-approval.md
+new file mode 100644
+index 0000000..f1f7a49
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/25-m10b-fix-plan-approval.md
+@@ -0,0 +1,30 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-B Final Fix Plan Approval
++
++The final plan resolves the prior review gaps and is complete for bounded
++implementation.
++
++- It explicitly defines seven schema-validated non-tombstone streams and the
++  eighth tombstone stream as forbidden input with an exactly empty projected
++  tuple.
++- It makes `restricted:unresolved` a deny-safe failure condition, never a
++  successful Git projection.
++- It specifies media budget/status rules, parent ACL existence, source/version
++  identity, and paired raw/content provenance with hash/URI consistency.
++- It covers all four relation statuses, resolved-target requirements,
++  unresolved Jira markers, and contradictory/fabricated target rejection.
++- It defines deterministic, unique sync rows with active status, source/entity
++  consistency, version matching, duplicate/non-emitted rejection, and an empty
++  stream allowance.
++- It requires deterministic ordering after provenance/page-order checks,
++  exact metrics, forged result/handoff guards, validator isolation, atomic
++  sanitized failures, and zero dependency calls for invalid requests.
++- Scope remains bounded to M10-A compatibility correction plus M10-B source and
++  tests; M6G/M9 schemas, exporters, CLI, roadmap/state, connectors, network,
++  and real-run behavior remain protected.
++
++The required focused, adversarial, compatibility, architecture, compileall,
++diff-check, and fresh-independent-review gates are present.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/26-m10b-fix-implementation.md b/.codex-workflow/20260805-m10/26-m10b-fix-implementation.md
+new file mode 100644
+index 0000000..8f72d87
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/26-m10b-fix-implementation.md
+@@ -0,0 +1,57 @@
++# M10-B Fix Implementation
++
++Implemented the approved fix plan from `24-m10b-fix-plan-final.md` after the
++independent review findings in `19-m10b-review-1.md`.
++
++## Changes
++
++- Added the injected `M10SchemaValidator` protocol and defaulted
++  `ComposeM10Snapshot` to the shared `FoundationSchemaValidator`; construction
++  rejects non-callable adapters/validators.
++- Schema-validated isolated deep copies for all seven non-tombstone streams:
++  `CanonicalDocument`, `ChunkRecord`, `RelationRecord`, `ACLRecord`,
++  `MediaAsset`, `SymbolRecord`, and `SyncStateRecord`. Validator mutation and
++  arbitrary exceptions fail closed without altering projection inputs.
++- Tightened handoff/result exact-field and forged-instance checks.
++- Enforced Confluence selected-page ordering/source versions, Git
++  repo/branch/commit and POSIX path provenance, ACL cardinality/inheritance,
++  exact deny-safe Git ACL tags, duplicate identities, and deterministic stream
++  ordering.
++- Enforced all relation resolution statuses and explicit unresolved Jira target
++  markers; rejected fabricated/contradictory targets.
++- Enforced media attachment policy/budget, parent/source/version linkage,
++  paired raw/content provenance and attachment/hash URI equality; corrected
++  processed/failed metrics.
++- Enforced Git symbol file/commit/line-span/chunk linkage and active sync-state
++  identity/source/entity/version/status/cardinality. Initial tombstones remain
++  exactly empty.
++- Preserved the existing Windows `Path` compatibility correction in
++  `m10_snapshot.py`.
++- Expanded focused fixtures/tests to schema-valid records and adversarial
++  validator, provenance, ACL, relation, media, symbol, sync, forged-result,
++  adapter, and zero-call cases.
++
++## Validation
++
++```text
++python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-focused-final
++42 passed in 0.55s
++
++python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-m9
++120 passed in 0.82s
++
++python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-m6g
++37 passed in 1.60s
++
++python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10b-arch
++88 passed in 1.59s
++
++python -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warnings only)
++```
++
++No exporter, completer, CLI, roadmap/state, connector, network, or operator
++run was changed. No commit or push was performed.
+diff --git a/.codex-workflow/20260805-m10/27-m10b-review-final.md b/.codex-workflow/20260805-m10/27-m10b-review-final.md
+new file mode 100644
+index 0000000..4426eb2
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/27-m10b-review-final.md
+@@ -0,0 +1,26 @@
++# M10-B Independent Review (Final)
++
++Review target: current M10-B fix implementation in `m10_composition.py`,
++`compose_m10_snapshot.py`, and related exports. This review was performed in a
++fresh session without editing implementation files.
++
++## Findings
++
++- **P1 - Record shape is trusted to an injected validator and malformed records can escape the application boundary.** `_validate_records` (`src/knowledgenexus/foundation/domain/models/m10_composition.py:123-140`) only deep-copies records and calls the injected `validate_record`; it does not enforce the schema field sets/runtime containers itself. With a validator that returns successfully without validating, a document containing an extra field is projected successfully, while a document missing `source_system` reaches the direct indexing at line 170 and raises raw `KeyError`. `ComposeM10Snapshot.execute` (`src/knowledgenexus/foundation/application/use_cases/compose_m10_snapshot.py:81-84`) catches only `TypeError`, `ValueError`, and `M10SnapshotError`, so that malformed input is neither rejected before field access nor sanitized as a projection failure.
++
++- **P1 - Git chunk file paths are not checked against the required POSIX path grammar.** The Git chunk branch (`src/knowledgenexus/foundation/domain/models/m10_composition.py:197-207`) checks repository, branch, commit, and ACL tags but never calls `_path` for `file_path`. The `ChunkRecord` schema permits arbitrary strings (including `../escape` and backslashes), so a schema-valid chunk with traversal/Windows separators can compose successfully, violating the approved Git documents/chunks path provenance contract.
++
++- **P1 - Unresolved non-Jira relations accept the forbidden fabricated `unknown` target.** Relation checks (`src/knowledgenexus/foundation/domain/models/m10_composition.py:208-221`) require only a non-empty target that is not emitted for non-resolved statuses. A schema-valid `embeds_media`/`unresolved_target` relation with `target_id="unknown"` therefore succeeds, despite the plan explicitly forbidding missing, fabricated, `unknown`, or contradictory targets.
++
++- **P2 - Source ownership is not bound to the originating handoff.** The two handoff streams are concatenated before projection validation (`src/knowledgenexus/foundation/domain/models/m10_composition.py:160`), and records are accepted solely from their claimed `source_system` and request metadata. A Git handoff can therefore carry a valid Confluence document/chunk/ACL/media record (or vice versa) and be emitted; the typed adapter boundary does not enforce that each record came from its source-specific handoff.
++
++## Validation Evidence
++
++- Focused M10-A/M10-B tests: `42 passed` (implementation artifact).
++- Bounded M9 regression: `120 passed` (implementation artifact).
++- Bounded architecture regression: `88 passed` (implementation artifact).
++- Focused independent rerun of M10 composition/use-case tests: `19 passed`.
++- `compileall -q src tests` and `git diff --check`: passed per implementation artifact.
++- Additional adversarial probe with a no-op injected validator confirmed extra-field acceptance and raw `KeyError` leakage for a missing required field.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/28-m10b-fix2-plan.input.md b/.codex-workflow/20260805-m10/28-m10b-fix2-plan.input.md
+new file mode 100644
+index 0000000..c2532dc
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/28-m10b-fix2-plan.input.md
+@@ -0,0 +1,31 @@
++# M10-B Final Boundary Fix
++
++Address only the four confirmed findings in
++`.codex-workflow/20260805-m10/27-m10b-review-final.md`.
++
++- Keep the injected validator seam, but always run the canonical shared
++  `FoundationSchemaValidator` against an untouched deep copy in addition to
++  the injected validator. A no-op/custom validator must never bypass schema
++  shape/runtime validation; validator mutation and arbitrary exceptions fail
++  closed without changing the projection.
++- Make the application composition boundary sanitize every ordinary
++  exception from pure composition as `PROJECTION`, including malformed
++  missing-field records; never leak `KeyError`, source data, or exception text.
++- Apply the approved relative POSIX path grammar to Git chunks as well as Git
++  documents and symbols.
++- Reject `unknown` and other fabricated placeholders for every unresolved
++  relation status, while retaining explicit Jira targets for
++  `mentions_jira_key`.
++- Bind source ownership to the originating typed handoff before merged
++  projection: Confluence handoffs may contain only Confluence document/chunk/
++  ACL/media records and Confluence relations; Git handoffs may contain only
++  Git document/chunk/ACL/symbol records and no media/relations. Reject any
++  cross-source record before downstream field access.
++
++Add adversarial tests for no-op validator/schema-invalid records, validator
++mutation/exception, missing-field sanitization, Git chunk path traversal and
++backslash, unknown unresolved targets, cross-handoff ownership drift, zero
++partial output, and existing result/metrics/provenance invariants. Run the
++focused M10-A/M10-B suite, bounded M9/M6G/architecture regressions,
++compileall, and diff-check before fresh independent re-review. Do not touch
++M6G/M9 schemas, exporter/CLI, roadmap/state, or real-run behavior.
+diff --git a/.codex-workflow/20260805-m10/29-m10b-fix2-plan-review.md b/.codex-workflow/20260805-m10/29-m10b-fix2-plan-review.md
+new file mode 100644
+index 0000000..87ed59a
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/29-m10b-fix2-plan-review.md
+@@ -0,0 +1,43 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-B Fix2 Plan Review
++
++The fix2 plan directly addresses the four findings in
++`27-m10b-review-final.md`: canonical schema validation cannot be bypassed by a
++no-op validator, ordinary composition exceptions are sanitized, Git chunk
++paths use the approved grammar, unresolved `unknown` placeholders are
++rejected, and source ownership is checked before merging.
++
++## Required Clarifications
++
++- Define the complete forbidden-placeholder/target grammar for every
++  unresolved relation status. Rejecting the literal `unknown` is necessary but
++  insufficient if arbitrary fabricated values such as `none`, `null`, or
++  `unresolved` can still cross the boundary; retain schema-valid explicit Jira
++  markers and require the approved external-target identity for non-Jira
++  statuses.
++- Explicitly include `sync_state` ownership in both handoffs: Confluence may
++  provide page/attachment sync rows and Git may provide file/repository sync
++  rows. The current ownership sentence lists neither sync rows, leaving valid
++  sync handoffs ambiguous and risking accidental rejection or cross-source
++  acceptance.
++- Specify validation order and mutation detection: canonical validation must
++  run on an untouched deep copy before any record field access; the injected
++  validator must receive a separate copy, and any mutation or exception must be
++  detected and converted to a sanitized atomic `PROJECTION` failure.
++- Define behavior if canonical schema loading/validation itself raises or the
++  default fallback cannot be constructed. This must fail closed without
++  adapter calls, partial projection, filesystem writes, or leaked exception
++  text.
++
++## Acceptance Coverage
++
++The listed tests are appropriate, but add parametrized checks for Confluence
++and Git `sync_state` ownership, all unresolved relation statuses and forbidden
++placeholder variants, canonical-validator failure/mutation, and a missing
++required field that would otherwise trigger `KeyError`. Preserve zero-call
++invalid-request behavior, atomic empty results, exact result/metrics checks,
++M6G/M9 schemas and architecture regressions, compileall, diff-check, and a
++fresh independent review.
++
++VERDICT: CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/30-m10b-fix2-plan-final.md b/.codex-workflow/20260805-m10/30-m10b-fix2-plan-final.md
+new file mode 100644
+index 0000000..c7a0977
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/30-m10b-fix2-plan-final.md
+@@ -0,0 +1,58 @@
++# M10-B Final Boundary Fix - Approved Revision
++
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++Address only `.codex-workflow/20260805-m10/27-m10b-review-final.md` findings;
++preserve M6G/M9 schemas, exporters, CLI, roadmap/state, connectors, network,
++and real-run behavior.
++
++## Required implementation
++
++1. Keep the injected validator seam but pass two explicit validators to the
++   pure composer: the injected validator and a canonical shared
++   `FoundationSchemaValidator`. The application constructor creates the
++   canonical validator when omitted and rejects/sanitizes construction
++   failures before any adapter call. For each of the seven non-tombstone
++   streams, canonical validation runs first on an untouched deep copy, then
++   the injected validator runs on a separate copy; detect mutation in either
++   copy and fail closed. A third untouched copy is the only projection input.
++   Canonical validation uses `CanonicalDocument`, `ChunkRecord`,
++   `RelationRecord`, `ACLRecord`, `MediaAsset`, `SymbolRecord`, and
++   `SyncStateRecord`. Initial tombstones have no handoff input and the
++   projection tombstone tuple remains exactly empty. All validator/loader
++   exceptions are sanitized and atomic.
++
++2. Before merging handoffs, bind ownership:
++   - Confluence handoff: document/chunk/ACL/media `source_system=confluence`;
++     symbols, Git-only streams, and cross-source relations are forbidden;
++     relation sources must be Confluence document/chunk IDs; sync rows must
++     use `source_id=request.confluence_scope.source_id`, entity type `page` or
++     `attachment`, and IDs from that handoff's documents/media.
++   - Git handoff: document/chunk/ACL/symbol `source_system=git`; media and
++     relations are forbidden; sync rows use `source_id=request.git_repository`
++     and entity type `file` (emitted file) or `repo` (the requested repo ID).
++   Reject cross-source records before downstream field access.
++
++3. Apply `_path` to Git documents, chunks, and symbols. Reject unresolved
++   relation target placeholders (`unknown`, `none`, `null`, `unresolved`,
++   empty, or whitespace). For all unresolved statuses, require explicit
++   external identity grammar: Jira mentions use
++   `jira:issue:<KEY>`; `includes_page`/`links_to_page` use
++   `confluence:page:<id>`; `embeds_media` uses
++   `confluence:attachment:<id>`. The external target must not be emitted.
++   Resolved targets must be emitted and may not use external/unresolved
++   markers.
++
++4. Preserve existing ACL inheritance, media budget/raw-content provenance,
++   sync version/cardinality, deterministic ordering, metrics, result exact
++   fields, adapter-callability, and sanitized application failure behavior.
++
++## Acceptance
++
++Add adversarial tests for no-op/canonical validator bypass, canonical or
++injected validator mutation/exception/constructor failure, missing-field
++sanitization, Git chunk traversal/backslash, all unresolved statuses and
++placeholder variants, Confluence/Git sync ownership, cross-handoff records,
++zero calls, atomic empty output, and all existing M10-B invariants. Run
++focused M10-A/M10-B, bounded M9/M6G/architecture, compileall, diff-check, and
++fresh independent review before roadmap/state update or commit.
+diff --git a/.codex-workflow/20260805-m10/31-m10b-fix2-plan-approval.md b/.codex-workflow/20260805-m10/31-m10b-fix2-plan-approval.md
+new file mode 100644
+index 0000000..0136a4b
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/31-m10b-fix2-plan-approval.md
+@@ -0,0 +1,28 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-B Fix2 Plan Approval
++
++The final fix2 plan resolves the prior review requirements and is ready for
++bounded implementation.
++
++- It explicitly treats M10 as seven schema-validated non-tombstone streams
++  plus an exactly empty tombstone stream, with canonical validation before
++  field access and isolated-copy mutation detection for both validators.
++- It defines Confluence and Git handoff ownership, including page/attachment
++  versus file/repo sync rows and rejection of cross-source records.
++- It applies the approved POSIX path grammar to Git documents, chunks, and
++  symbols.
++- It enumerates unresolved relation target grammars for Jira issues,
++  Confluence pages, and attachments; rejects empty/placeholder/fabricated
++  targets and requires emitted targets for resolved relations.
++- It preserves ACL inheritance, media raw/content provenance and budgets, sync
++  version/cardinality, deterministic ordering, exact metrics/results, adapter
++  callability, and sanitized atomic failures.
++- Acceptance coverage includes canonical/no-op validator bypass, construction
++  and mutation failures, missing-field sanitization, ownership drift,
++  placeholder variants, zero calls, regressions, and independent review.
++
++No scope expansion beyond M10-B and the approved M10-A compatibility fix is
++introduced.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/32-m10b-fix2-implementation.md b/.codex-workflow/20260805-m10/32-m10b-fix2-implementation.md
+new file mode 100644
+index 0000000..5dfb79f
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/32-m10b-fix2-implementation.md
+@@ -0,0 +1,50 @@
++# M10-B Fix2 Implementation
++
++Implemented the approved fix2 plan from `30-m10b-fix2-plan-final.md` for the
++findings in `27-m10b-review-final.md`.
++
++## Changes
++
++- Kept the injected validator seam and added a canonical shared
++  `FoundationSchemaValidator` path. Each of the seven non-tombstone streams is
++  canonical-validated first on an untouched deep copy, then passed to the
++  injected validator on a separate copy; mutation or exceptions fail closed,
++  while a third untouched copy is projected. Initial tombstones remain empty.
++- Added source ownership checks before merged-stream validation: Confluence
++  owns page/chunk/ACL/media/relation/sync rows; Git owns document/chunk/ACL/
++  symbol/sync rows; cross-source streams and sync identities are rejected.
++- Applied POSIX path validation to Git documents, chunks, and symbols.
++- Enforced external target grammar for all unresolved relation types and
++  rejected whitespace/`unknown`/`none`/`null`/`unresolved` placeholders;
++  resolved targets must be emitted.
++- Sanitized all application construction/composition exceptions and retained
++  exact forged-result/adapter-callability guards.
++- Added adversarial coverage for canonical/injected validator mutation and
++  bypass, constructor failure, missing/extra records, source ownership,
++  Git path traversal/backslashes, unresolved target placeholders, sync
++  ownership, and zero adapter calls.
++
++## Validation
++
++```text
++python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix2-focused-final
++49 passed in 0.74s
++
++python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix2-m9
++120 passed in 0.67s
++
++python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix2-m6g
++37 passed in 1.43s
++
++python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix2-arch
++88 passed in 1.38s
++
++python -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warnings only)
++```
++
++No exporter, completer, CLI, roadmap/state, connector, network, or operator
++run was changed. No commit or push was performed.
+diff --git a/.codex-workflow/20260805-m10/33-m10b-fix2-review-final.md b/.codex-workflow/20260805-m10/33-m10b-fix2-review-final.md
+new file mode 100644
+index 0000000..346a74b
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/33-m10b-fix2-review-final.md
+@@ -0,0 +1,31 @@
++# M10-B Fix2 Independent Final Review
++
++Review target: current M10-B fix2 implementation after the changes described in
++`32-m10b-fix2-implementation.md`. This review was performed in a fresh,
++independent session. No source or test files were edited.
++
++## Findings
++
++- **P1 - The optional canonical-validator seam can bypass canonical schema validation.** `ComposeM10Snapshot.__init__` accepts a caller-supplied `canonical_schema_validator` and stores it as the only canonical validator (`src/knowledgenexus/foundation/application/use_cases/compose_m10_snapshot.py:55-71`). `_validate_records` trusts that object to enforce the schema (`src/knowledgenexus/foundation/domain/models/m10_composition.py:125-150`). Supplying a no-op object for both `schema_validator` and `canonical_schema_validator` allows a document with a forbidden extra field to compose successfully and return a projection. The default canonical path rejects the same record. This violates the approved no-op/canonical-bypass acceptance and leaves the application boundary dependent on an injectable validator for required-field/additional-property enforcement. Keep the shared `FoundationSchemaValidator` authoritative even when the injected seam is supplied; if a second canonical seam is retained for mutation testing, it must not replace the shared validator.
++
++## Adversarial Probe
++
++Using the existing valid M10 handoffs, a no-op validator for both seams produced
++`M10CompositionResult(projection=...)` for a Confluence document containing
++`{"forbidden": 1}`. With the default canonical validator, the same record
++returned sanitized `M10CompositionFailureCategory.PROJECTION`. A missing
++required field was sanitized as projection failure, but that does not close the
++extra-field bypass.
++
++## Validation Evidence
++
++- Focused M10-A/M10-B: `python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix2-review-final-rerun` -> **49 passed**.
++- Bounded M9 regression: the implementation-report command rerun with review basetemp -> **120 passed**.
++- Bounded M6G regression: the implementation-report command rerun with review basetemp -> **37 passed**.
++- Architecture suite: `python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix2-review-arch-rerun` -> **88 passed**.
++- `python -m compileall -q src tests` -> passed.
++- `git diff --check` -> passed; Git emitted only existing LF/CRLF conversion warnings.
++
++## VERDICT
++
++CHANGES_REQUIRED
+diff --git a/.codex-workflow/20260805-m10/34-m10b-fix3-plan.input.md b/.codex-workflow/20260805-m10/34-m10b-fix3-plan.input.md
+new file mode 100644
+index 0000000..555dfec
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/34-m10b-fix3-plan.input.md
+@@ -0,0 +1,20 @@
++# M10-B Canonical Validator Bypass Fix
++
++Address only the P1 finding in
++`.codex-workflow/20260805-m10/33-m10b-fix2-review-final.md`.
++
++- Make the canonical validator a concrete shared `FoundationSchemaValidator`
++  boundary, never an arbitrary caller-supplied protocol implementation. If a
++  canonical validator argument remains for pure-composer testing, require the
++  exact shared concrete type and reject subclasses/no-op fakes before record
++  access; the application constructor must sanitize any construction/type
++  failure before adapter calls.
++- Keep the injected validator as an additional isolated observer, but a no-op
++  injected validator must still be unable to bypass canonical schema
++  validation. Preserve mutation detection, sanitized exceptions, defensive
++  copies, and atomic failure behavior.
++- Update only M10-B source/tests/workflow artifacts. Add an adversarial test
++  passing no-op validators for both seams with an extra-field record and assert
++  sanitized failure/zero projection. Preserve all prior M10-B invariants and
++  rerun focused/bounded tests, compileall, diff-check, and a fresh independent
++  review. Do not touch roadmap/state/exporter/CLI.
+diff --git a/.codex-workflow/20260805-m10/35-m10b-fix3-plan-approval.md b/.codex-workflow/20260805-m10/35-m10b-fix3-plan-approval.md
+new file mode 100644
+index 0000000..3089232
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/35-m10b-fix3-plan-approval.md
+@@ -0,0 +1,32 @@
++RECOMMENDED_IMPLEMENTATION_PROFILE: complex
++
++# M10-B Fix3 Plan Approval
++
++The fix3 plan is appropriately bounded and directly closes the P1 canonical
++validator bypass from `33-m10b-fix2-review-final.md`.
++
++## Approval Basis
++
++- The shared concrete `FoundationSchemaValidator` remains authoritative for
++  all seven non-tombstone streams; an injected/no-op observer cannot replace
++  it. Exact concrete-type checks prevent fake or subclass canonical seams from
++  bypassing required/additional-property schema enforcement.
++- Construction failures and malformed validator inputs are required to be
++  sanitized before any adapter call, while mutation detection, defensive
++  copies, atomic failures, and prior provenance/ACL/media/relation/sync/result
++  invariants remain in scope.
++- The specified adversarial no-op-validator test exercises both seams with an
++  extra-field record and verifies sanitized failure with zero projection/output.
++- Scope is limited to M10-B source/tests/workflow artifacts; M6G/M9,
++  exporters, CLI, roadmap/state, and real-run behavior remain protected.
++
++## Required Verification
++
++Before implementation is accepted, confirm the canonical validator is created
++from the shared contract schemas, construction/type failures never leak raw
++exceptions, and both default and explicit pure-composer paths reject missing
++and extra fields before any downstream field access. Rerun the focused
++M10-A/M10-B, bounded M9/M6G/architecture, compileall, diff-check, and fresh
++independent-review gates listed in the plan.
++
++VERDICT: PASS
+diff --git a/.codex-workflow/20260805-m10/36-m10b-fix3-implementation.md b/.codex-workflow/20260805-m10/36-m10b-fix3-implementation.md
+new file mode 100644
+index 0000000..80f229c
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/36-m10b-fix3-implementation.md
+@@ -0,0 +1,42 @@
++# M10-B Fix3 Implementation
++
++Implemented the approved canonical-validator bypass fix from
++`34-m10b-fix3-plan.input.md`.
++
++## Changes
++
++- Canonical schema validation now requires the exact shared concrete
++  `FoundationSchemaValidator`; no-op fakes and subclasses are rejected before
++  adapter calls. The injected validator remains an isolated observer and
++  cannot replace canonical validation.
++- Preserved canonical-first/injected-second validation on separate copies,
++  mutation detection, defensive projection copies, atomic failure behavior,
++  and sanitized constructor/application exceptions.
++- Added adversarial tests for no-op validators on both seams with malformed
++  extra-field records, canonical subclass rejection, canonical mutation, and
++  zero adapter calls.
++
++## Validation
++
++```text
++python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix3-focused-final
++51 passed in 0.74s
++
++python -m pytest -q tests/foundation/application/use_cases/test_process_confluence_media_attachment.py tests/foundation/application/use_cases/test_build_git_code_documents.py tests/foundation/application/use_cases/test_build_git_symbols.py tests/foundation/application/use_cases/test_project_tombstones.py tests/foundation/domain/models/test_delta_propagation.py tests/foundation/application/use_cases/test_propagate_delta.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix3-m9
++120 passed in 0.69s
++
++python -m pytest -q tests/foundation/contracts/test_one_page_export_m6g_b_consistency.py tests/foundation/integration/test_golden_full_snapshot_export.py tests/foundation/application/use_cases/test_project_one_page_export.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix3-m6g
++37 passed in 1.34s
++
++python -m pytest -q tests/architecture --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix3-arch
++88 passed in 1.35s
++
++python -m compileall -q src tests
++passed
++
++git diff --check
++passed (line-ending warnings only)
++```
++
++No exporter, completer, CLI, roadmap/state, connector, network, or operator
++run was changed. No commit or push was performed.
+diff --git a/.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md b/.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md
+new file mode 100644
+index 0000000..b018711
+--- /dev/null
++++ b/.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md
+@@ -0,0 +1,45 @@
++# M10-B Fix3 Independent Final Review
++
++Review target: the current M10-B fix3 implementation described in
++`36-m10b-fix3-implementation.md`. This review was performed in an independent
++session. No implementation or test files were edited.
++
++## Findings
++
++No P0, P1, P2, or P3 findings.
++
++## Verification
++
++- The application constructor requires the exact shared concrete
++  `FoundationSchemaValidator` for the canonical seam. No-op validators and
++  subclasses are rejected as sanitized `adapter` failures before either
++  adapter is called. The pure composer uses the same exact-type guard when an
++  explicit canonical seam is supplied; the default constructs the shared
++  validator.
++- Canonical validation runs before injected validation on independent deep
++  copies. Canonical/injected mutation and exception paths fail closed as
++  sanitized projection failures, and projection records remain defensive
++  copies. A no-op injected validator cannot bypass canonical additional-field
++  or required-field enforcement.
++- Handoff exact-type/field guards, ownership/provenance checks, POSIX Git path
++  checks, deterministic identity ordering, relation target/status grammar,
++  media policy and raw/content pairing, sync-state cardinality/version rules,
++  ACL cardinality/inheritance and Git deny-safe tags, metrics consistency,
++  empty tombstones, and sanitized result/failure combinations were reviewed
++  against plans 34/35 and the current source/tests.
++- Scope remains limited to M10-B source/tests/workflow artifacts; no exporter,
++  CLI, connector/network, roadmap/state, or operator-run files were changed by
++  fix3.
++
++## Validation Evidence
++
++- `python -m pytest -q tests/foundation/domain/models/test_m10_snapshot.py tests/foundation/domain/models/test_m10_composition.py tests/foundation/application/use_cases/test_compose_m10_snapshot.py --basetemp=.codex-workflow/20260805-m10/pytest-m10b-fix3-review-final` -> **51 passed**.
++- Bounded M9 regression -> **120 passed**.
++- Bounded M6G regression -> **37 passed**.
++- Architecture suite -> **88 passed**.
++- `python -m compileall -q src tests` -> passed.
++- `git diff --check` -> passed; only existing line-ending warnings were emitted.
++
++## VERDICT
++
++PASS
+diff --git a/.local_ai/IMPLEMENTATION_STATE.md b/.local_ai/IMPLEMENTATION_STATE.md
+index 3ae1fda..f568823 100644
+--- a/.local_ai/IMPLEMENTATION_STATE.md
++++ b/.local_ai/IMPLEMENTATION_STATE.md
+@@ -29,9 +29,9 @@ independently reviewed `PASS`; M9-A3 is also independently reviewed `PASS`.
+ M9-B and M9-C are now independently approved. M9-D1 tombstone contract and
+ explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
+ reviewed `PASS`. M9-D2 remains a read-only deterministic tombstone seam with no
+-export/store/checkpoint side effects. M10-A wire models are complete and
+-independently reviewed `PASS`; M10-B is the next bounded stage. No M10
+-exporter/CLI or real full-snapshot run has started.
++export/store/checkpoint side effects. M10-A wire models and M10-B trusted
++multi-source composition are complete and independently reviewed `PASS`. No
++M10 exporter/CLI or real full-snapshot run has started.
+ 
+ ## Durable State Convention
+ 
+@@ -1776,5 +1776,26 @@ separate deferred follow-up; no 100k scale PASS is claimed.
+   diff-check passed. Final independent review is `VERDICT: PASS` in
+   `.codex-workflow/20260805-m10/17-m10a-review-3.md`.
+ - Residual boundary: no exporter, CLI, orchestration, or real full-snapshot
+-  invocation is included; M10-B is next and M8-AC remains
++  invocation is included; M10-B is now complete, M10-C is next, and M8-AC remains
++  `pending_external_input`.
++
++## M10-B Trusted Multi-Source Composition
++
++- Status: complete and independently reviewed `PASS`.
++- Added typed Confluence/Git handoffs and an all-or-nothing in-memory
++  composition boundary. Canonical shared Foundation schemas are authoritative;
++  injected validators are isolated observers and cannot bypass validation.
++  Source ownership, page/source-version and Git commit/path provenance, ACL
++  inheritance, relation target grammar, media budget/raw-content provenance,
++  symbol linkage, sync identity/version/cardinality, deterministic ordering,
++  exact metrics, and empty initial tombstones are enforced before projection.
++- Added sanitized application failures, callable adapter/validator checks,
++  forged result guards, and adversarial malformed-input coverage.
++- Validation: focused M10-A/B `51 passed`; bounded M9 `120 passed`; M6G
++  compatibility `37 passed`; architecture `88 passed`; compileall and
++  diff-check passed. Final fresh review is
++  `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` with
++  `VERDICT: PASS`.
++- Residual boundary: no exporter, generic completion, CLI/publication, or
++  real full-snapshot invocation is included; M10-C is next and M8-AC remains
+   `pending_external_input`.
+diff --git a/.local_ai/ROADMAP.md b/.local_ai/ROADMAP.md
+index 72575d7..61d587f 100644
+--- a/.local_ai/ROADMAP.md
++++ b/.local_ai/ROADMAP.md
+@@ -93,7 +93,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
+ | M7 - Crawl reliability and scale | Bounded stages complete through D5-B; C5-B2 measurement `PASS` only; 100k scale gate deferred | Durable inventory and raw-page/restriction replay checkpoint stages are independently reviewed `PASS`; the 100k scale gate and optimization remain deferred | Owner accepts bounded-stage roadmap closure; no 100k scale PASS is claimed. |
+ | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
+ | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; independently reviewed `PASS` | M9-A1/A2/A3, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; M8-AC real gate remains `pending_external_input` | Delta propagation is implemented as a read-only, deterministic tombstone seam; M10 remains gated on real operator inputs/full POC scope. |
+-| M10 - First full POC Foundation snapshot | in progress; M10-A complete | M10-A wire models independently reviewed `PASS`; M10-B/C/D/E remain pending; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
++| M10 - First full POC Foundation snapshot | in progress; M10-A/B complete | M10-A wire models and M10-B trusted composition independently reviewed `PASS`; M10-C/D remain pending; M10-E remains `pending_external_input`; M8-AC real gate remains `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+ 
+ ## 2. Current Task
+ 
+@@ -1074,7 +1074,7 @@ Acceptance categories:
+ | Stage | Status | Review / gate outcome |
+ |---|---|---|
+ | M10-A wire contract and trusted input models | complete; independently reviewed `PASS` | Added exact runtime-validated scope, exclusion, media-policy, profile-identity, request, metrics, projection, result, and quality-input models. Focused `23 passed`; M6G compatibility `37 passed`; compileall/diff-check passed. Fresh review `.codex-workflow/20260805-m10/17-m10a-review-3.md` is `VERDICT: PASS`. |
+-| M10-B trusted multi-source composition | pending | Next bounded stage; consumes M7/M8/M9 handoffs without exporter or CLI work. |
++| M10-B trusted multi-source composition | complete; independently reviewed `PASS` | Added typed Confluence/Git handoffs, canonical shared-schema validation, source ownership/provenance, ACL inheritance, relation/media/symbol/sync gates, deterministic composition, empty initial tombstones, and sanitized application boundary. Focused `51 passed`; M9 `120 passed`; M6G `37 passed`; architecture `88 passed`; compileall/diff-check passed. Final review `.codex-workflow/20260805-m10/37-m10b-fix3-review-final.md` is `VERDICT: PASS`. |
+ | M10-C cross-stream projection and generic completion | pending | Requires M10-B approved output; must preserve M6G one-page behavior. |
+ | M10-D CLI and publication boundary | pending | Requires M10-C approved generic projection/completion path. |
+ | M10-E synthetic acceptance and external real-run gate | pending_external_input | Synthetic acceptance follows M10-D; real operator evidence requires approved inputs and remains separate. |
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index 3ed9f7d..d476f1f 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -50,6 +50,12 @@ from knowledgenexus.foundation.application.use_cases.build_git_code_documents im
+ from knowledgenexus.foundation.application.use_cases.build_git_symbols import BuildGitSymbols
+ from knowledgenexus.foundation.application.use_cases.project_tombstones import ProjectTombstones
+ from knowledgenexus.foundation.application.use_cases.propagate_delta import PropagateDelta
++from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
++    ComposeM10Snapshot,
++    M10CompositionFailure,
++    M10CompositionFailureCategory,
++    M10CompositionResult,
++)
+ 
+ __all__ = [
+     "BuildConfluenceInventory",
+@@ -78,4 +84,8 @@ __all__ = [
+     "BuildGitSymbols",
+     "ProjectTombstones",
+     "PropagateDelta",
++    "ComposeM10Snapshot",
++    "M10CompositionFailure",
++    "M10CompositionFailureCategory",
++    "M10CompositionResult",
+ ]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/compose_m10_snapshot.py b/src/knowledgenexus/foundation/application/use_cases/compose_m10_snapshot.py
+new file mode 100644
+index 0000000..4d7a54d
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/compose_m10_snapshot.py
+@@ -0,0 +1,95 @@
++"""Application boundary for the pure M10 in-memory composition gate."""
++from __future__ import annotations
++
++from dataclasses import dataclass
++from enum import StrEnum
++
++from knowledgenexus.foundation.domain.models.m10_composition import (
++    M10ConfluenceAdapter,
++    M10ConfluenceHandoff,
++    M10GitAdapter,
++    M10GitHandoff,
++    M10SchemaValidator,
++    _require_canonical_validator,
++    compose_m10_projection,
++)
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotError, M10SnapshotProjection, M10SnapshotRequest
++
++
++class M10CompositionFailureCategory(StrEnum):
++    INVALID_REQUEST = "invalid_request"
++    ADAPTER = "adapter"
++    PROJECTION = "projection"
++
++
++class M10CompositionFailure(Exception):
++    """Sanitized failure; adapter exception text and source data never escape."""
++
++    def __init__(self, category: M10CompositionFailureCategory):
++        if type(category) is not M10CompositionFailureCategory:
++            raise TypeError("category is invalid")
++        self.category = category
++        super().__init__(category.value)
++
++
++@dataclass(frozen=True)
++class M10CompositionResult:
++    projection: M10SnapshotProjection | None
++    failure_category: M10CompositionFailureCategory | None = None
++
++    def __post_init__(self) -> None:
++        if type(self) is not M10CompositionResult or set(vars(self)) != {"projection", "failure_category"}:
++            raise TypeError("result has invalid fields")
++        if self.projection is None and self.failure_category is None:
++            raise ValueError("result must contain projection or failure")
++        if self.projection is not None and type(self.projection) is not M10SnapshotProjection:
++            raise TypeError("projection is invalid")
++        if self.projection is not None and self.failure_category is not None:
++            raise ValueError("result cannot contain both output and failure")
++        if self.projection is None and type(self.failure_category) is not M10CompositionFailureCategory:
++            raise ValueError("failure category is invalid")
++
++
++class ComposeM10Snapshot:
++    """Collects two injected handoffs, then composes them without side effects."""
++
++    def __init__(self, *, confluence_adapter: M10ConfluenceAdapter, git_adapter: M10GitAdapter, schema_validator: M10SchemaValidator | None = None, canonical_schema_validator: M10SchemaValidator | None = None) -> None:
++        try:
++            if not callable(getattr(confluence_adapter, "collect", None)) or not callable(getattr(git_adapter, "collect", None)):
++                raise ValueError("adapters must provide collect")
++            if canonical_schema_validator is None:
++                from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++                canonical_schema_validator = FoundationSchemaValidator()
++            canonical_schema_validator = _require_canonical_validator(canonical_schema_validator)
++            if schema_validator is None:
++                schema_validator = canonical_schema_validator
++            if not callable(getattr(schema_validator, "validate_record", None)) or not callable(getattr(canonical_schema_validator, "validate_record", None)):
++                raise ValueError("schema validator is invalid")
++        except Exception:
++            raise M10CompositionFailure(M10CompositionFailureCategory.ADAPTER) from None
++        self._confluence = confluence_adapter
++        self._git = git_adapter
++        self._validator = schema_validator
++        self._canonical_validator = canonical_schema_validator
++
++    def execute(self, request: object) -> M10CompositionResult:
++        if type(request) is not M10SnapshotRequest:
++            raise M10CompositionFailure(M10CompositionFailureCategory.INVALID_REQUEST)
++        try:
++            M10SnapshotRequest.__post_init__(request)
++        except Exception:
++            raise M10CompositionFailure(M10CompositionFailureCategory.INVALID_REQUEST) from None
++        try:
++            confluence = self._confluence.collect(request)
++            git = self._git.collect(request)
++        except Exception:
++            raise M10CompositionFailure(M10CompositionFailureCategory.ADAPTER) from None
++        if type(confluence) is not M10ConfluenceHandoff or type(git) is not M10GitHandoff:
++            raise M10CompositionFailure(M10CompositionFailureCategory.ADAPTER)
++        try:
++            return M10CompositionResult(compose_m10_projection(request, confluence, git, schema_validator=self._validator, canonical_schema_validator=self._canonical_validator))
++        except Exception:
++            raise M10CompositionFailure(M10CompositionFailureCategory.PROJECTION) from None
++
++
++__all__ = ["ComposeM10Snapshot", "M10CompositionFailure", "M10CompositionFailureCategory", "M10CompositionResult"]
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index 0dd4cc0..eb8cc08 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -421,3 +421,17 @@ __all__ = [
+     "M10SnapshotRequest", "M10SnapshotMetrics", "M10SnapshotProjection",
+     "M10SnapshotResult", "M10QualityReportInput",
+ ]
++
++from knowledgenexus.foundation.domain.models.m10_composition import (
++    M10SchemaValidator,
++    M10ConfluenceAdapter,
++    M10ConfluenceHandoff,
++    M10GitAdapter,
++    M10GitHandoff,
++    compose_m10_projection,
++)
++
++__all__ += [
++    "M10SchemaValidator", "M10ConfluenceAdapter", "M10ConfluenceHandoff", "M10GitAdapter",
++    "M10GitHandoff", "compose_m10_projection",
++]
+diff --git a/src/knowledgenexus/foundation/domain/models/m10_composition.py b/src/knowledgenexus/foundation/domain/models/m10_composition.py
+new file mode 100644
+index 0000000..f1a4552
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/m10_composition.py
+@@ -0,0 +1,335 @@
++"""Typed, schema-validated handoffs used by the M10 composition gate."""
++from __future__ import annotations
++
++import copy
++import re
++from dataclasses import dataclass
++from typing import Protocol
++
++from .confluence_crawl_run import CrawlRunId
++from .m10_snapshot import M10SnapshotError, M10SnapshotMetrics, M10SnapshotProjection, M10SnapshotRequest
++
++_HEX40 = re.compile(r"^[0-9a-f]{40}$")
++_HEX64 = re.compile(r"^[0-9a-f]{64}$")
++_JIRA = re.compile(r"^jira:issue:[A-Z][A-Z0-9_]*-[0-9]+$")
++_PAGE_TARGET = re.compile(r"^confluence:page:[^\s:]+$")
++_MEDIA_TARGET = re.compile(r"^confluence:attachment:[^\s:]+$")
++_HANDOFF_FIELDS = {"run_id", "generation_id", "source_version", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "raw_artifact_identity", "errors"}
++_GIT_FIELDS = {"repository", "branch", "commit", "documents", "chunks", "relations", "acl", "media_assets", "symbols", "sync_state", "errors"}
++_RESULT_FIELDS = {"projection", "failure_category"}
++_RELATION_STATUSES = {"resolved", "unresolved_without_jira_api", "deferred_mvp", "unresolved_target"}
++_MEDIA_STATUSES = {"parsed", "ocr", "summarized", "not_processed", "failed"}
++_SCHEMAS = {"documents": "CanonicalDocument", "chunks": "ChunkRecord", "relations": "RelationRecord", "acl": "ACLRecord", "media_assets": "MediaAsset", "symbols": "SymbolRecord", "sync_state": "SyncStateRecord"}
++_IDS = {"documents": "document_id", "chunks": "chunk_id", "relations": "relation_id", "acl": "acl_id", "media_assets": "media_id", "symbols": "symbol_id", "sync_state": "entity_id"}
++
++
++class M10SchemaValidator(Protocol):
++    def validate_record(self, schema_name: str, record: dict[str, object]) -> None: ...
++
++
++def _guard(value: object, cls: type, fields: set[str]) -> None:
++    if type(value) is not cls:
++        raise TypeError(f"{cls.__name__} expects exact type")
++    try:
++        actual = set(vars(value))
++    except Exception:
++        raise TypeError(f"{cls.__name__} has invalid fields") from None
++    if actual != fields:
++        raise ValueError(f"{cls.__name__} has invalid fields")
++
++
++def _records(name: str, value: object) -> tuple[dict[str, object], ...]:
++    if type(value) is not tuple or any(type(item) is not dict for item in value):
++        raise M10SnapshotError(f"{name} must be tuple of records")
++    return tuple(copy.deepcopy(item) for item in value)
++
++
++def _errors(value: object) -> tuple[str, ...]:
++    if type(value) is not tuple or any(type(x) is not str or not x or "\n" in x or "\r" in x for x in value):
++        raise M10SnapshotError("errors must be sanitized tuple")
++    return tuple(value)
++
++
++@dataclass(frozen=True)
++class M10ConfluenceHandoff:
++    run_id: CrawlRunId
++    generation_id: CrawlRunId
++    source_version: str
++    documents: tuple[dict[str, object], ...]
++    chunks: tuple[dict[str, object], ...]
++    relations: tuple[dict[str, object], ...]
++    acl: tuple[dict[str, object], ...]
++    media_assets: tuple[dict[str, object], ...]
++    symbols: tuple[dict[str, object], ...]
++    sync_state: tuple[dict[str, object], ...]
++    raw_artifact_identity: str
++    errors: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        _guard(self, M10ConfluenceHandoff, _HANDOFF_FIELDS)
++        if type(self.run_id) is not CrawlRunId or type(self.generation_id) is not CrawlRunId or self.run_id != self.generation_id:
++            raise M10SnapshotError("Confluence run/generation mismatch")
++        if type(self.source_version) is not str or not self.source_version or "\n" in self.source_version:
++            raise M10SnapshotError("invalid Confluence source version")
++        if type(self.raw_artifact_identity) is not str or not self.raw_artifact_identity or "\n" in self.raw_artifact_identity:
++            raise M10SnapshotError("invalid raw artifact identity")
++        for name in _SCHEMAS:
++            object.__setattr__(self, name, _records(name, getattr(self, name)))
++        object.__setattr__(self, "errors", _errors(self.errors))
++
++
++@dataclass(frozen=True)
++class M10GitHandoff:
++    repository: str
++    branch: str
++    commit: str
++    documents: tuple[dict[str, object], ...]
++    chunks: tuple[dict[str, object], ...]
++    relations: tuple[dict[str, object], ...]
++    acl: tuple[dict[str, object], ...]
++    media_assets: tuple[dict[str, object], ...]
++    symbols: tuple[dict[str, object], ...]
++    sync_state: tuple[dict[str, object], ...]
++    errors: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        _guard(self, M10GitHandoff, _GIT_FIELDS)
++        if type(self.repository) is not str or not self.repository or type(self.branch) is not str or not self.branch or type(self.commit) is not str or not _HEX40.fullmatch(self.commit):
++            raise M10SnapshotError("invalid Git identity")
++        for name in _SCHEMAS:
++            object.__setattr__(self, name, _records(name, getattr(self, name)))
++        object.__setattr__(self, "errors", _errors(self.errors))
++
++
++class M10ConfluenceAdapter(Protocol):
++    def collect(self, request: M10SnapshotRequest) -> M10ConfluenceHandoff: ...
++
++
++class M10GitAdapter(Protocol):
++    def collect(self, request: M10SnapshotRequest) -> M10GitHandoff: ...
++
++
++def _identity(record: dict[str, object], field: str) -> str:
++    value = record.get(field)
++    if type(value) is not str or not value:
++        raise M10SnapshotError(f"record missing {field}")
++    return value
++
++
++def _path(value: object) -> str:
++    if type(value) is not str or not value or value.startswith("/") or "\\" in value or any(part in {"", ".", ".."} for part in value.split("/")):
++        raise M10SnapshotError("invalid POSIX file path")
++    return value
++
++
++def _validate_records(streams: dict[str, tuple[dict[str, object], ...]], injected_validator: M10SchemaValidator, canonical_validator: M10SchemaValidator) -> dict[str, tuple[dict[str, object], ...]]:
++    if not callable(getattr(injected_validator, "validate_record", None)) or not callable(getattr(canonical_validator, "validate_record", None)):
++        raise TypeError("schema validator is invalid")
++    clean: dict[str, tuple[dict[str, object], ...]] = {}
++    for name, schema in _SCHEMAS.items():
++        untouched = []
++        for record in streams[name]:
++            if type(record) is not dict:
++                raise M10SnapshotError(f"{name} record is invalid")
++            validation_copy = copy.deepcopy(record)
++            canonical_before = copy.deepcopy(validation_copy)
++            try:
++                canonical_validator.validate_record(schema, validation_copy)
++            except Exception:
++                raise M10SnapshotError(f"{name} canonical validation failed") from None
++            if validation_copy != canonical_before:
++                raise M10SnapshotError(f"{name} canonical validator mutated record")
++            projection_copy = copy.deepcopy(record)
++            try:
++                injected_validator.validate_record(schema, projection_copy)
++            except Exception:
++                raise M10SnapshotError(f"{name} injected validation failed") from None
++            if projection_copy != record:
++                raise M10SnapshotError(f"{name} injected validator mutated record")
++            untouched.append(copy.deepcopy(record))
++        clean[name] = tuple(untouched)
++    return clean
++
++
++def _require_canonical_validator(value: object) -> M10SchemaValidator:
++    from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++    if type(value) is not FoundationSchemaValidator:
++        raise TypeError("canonical validator must be the shared FoundationSchemaValidator")
++    if not callable(getattr(value, "validate_record", None)):
++        raise TypeError("canonical validator is invalid")
++    return value
++
++
++def _handoff_ownership(name: str, streams: dict[str, tuple[dict[str, object], ...]], request: M10SnapshotRequest) -> None:
++    allowed = {"documents", "chunks", "acl", "media_assets", "relations"} if name == "confluence" else {"documents", "chunks", "acl", "symbols"}
++    forbidden = set(_SCHEMAS) - allowed - {"sync_state"}
++    for stream in forbidden:
++        if streams[stream]:
++            raise M10SnapshotError(f"{name} handoff contains forbidden {stream}")
++    for stream in allowed - {"relations", "symbols"}:
++        for record in streams[stream]:
++            if record.get("source_system") != name:
++                raise M10SnapshotError(f"{name} handoff source ownership drift")
++    if name == "confluence":
++        docs = {_identity(row, "document_id") for row in streams["documents"]}
++        chunks = {_identity(row, "chunk_id") for row in streams["chunks"]}
++        for row in streams["relations"]:
++            if row.get("source_id") not in docs and row.get("source_id") not in chunks:
++                raise M10SnapshotError("Confluence relation source ownership drift")
++        for row in streams["sync_state"]:
++            if row.get("source_id") != request.confluence_scope.source_id or row.get("entity_type") not in {"page", "attachment"}:
++                raise M10SnapshotError("Confluence sync ownership drift")
++    else:
++        if streams["relations"] or streams["media_assets"]:
++            raise M10SnapshotError("Git handoff contains forbidden stream")
++        for row in streams["sync_state"]:
++            if row.get("source_id") != request.git_repository or row.get("entity_type") not in {"file", "repo"}:
++                raise M10SnapshotError("Git sync ownership drift")
++
++
++def compose_m10_projection(request: M10SnapshotRequest, confluence: M10ConfluenceHandoff, git: M10GitHandoff, *, schema_validator: M10SchemaValidator, canonical_schema_validator: M10SchemaValidator | None = None) -> M10SnapshotProjection:
++    """Merge trusted handoffs atomically in memory; this function performs no I/O."""
++    if type(request) is not M10SnapshotRequest:
++        raise TypeError("request expects M10SnapshotRequest")
++    M10SnapshotRequest.__post_init__(request)
++    if type(confluence) is not M10ConfluenceHandoff or type(git) is not M10GitHandoff:
++        raise TypeError("invalid handoff")
++    M10ConfluenceHandoff.__post_init__(confluence)
++    M10GitHandoff.__post_init__(git)
++    if canonical_schema_validator is None:
++        from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++        canonical_schema_validator = FoundationSchemaValidator()
++    canonical_schema_validator = _require_canonical_validator(canonical_schema_validator)
++    if not callable(getattr(schema_validator, "validate_record", None)) or not callable(getattr(canonical_schema_validator, "validate_record", None)):
++        raise TypeError("schema validator is invalid")
++    if confluence.run_id != request.run_id or confluence.generation_id != request.generation_id or confluence.raw_artifact_identity != request.raw_generation_id:
++        raise M10SnapshotError("Confluence provenance drift")
++    if (git.repository, git.branch, git.commit) != (request.git_repository, request.git_branch, request.git_commit):
++        raise M10SnapshotError("Git provenance drift")
++    if confluence.errors or git.errors:
++        raise M10SnapshotError("adapter handoff contains errors")
++    confluence_streams = {name: getattr(confluence, name) for name in _SCHEMAS}
++    git_streams = {name: getattr(git, name) for name in _SCHEMAS}
++    _validate_records(confluence_streams, schema_validator, canonical_schema_validator)
++    _validate_records(git_streams, schema_validator, canonical_schema_validator)
++    _handoff_ownership("confluence", confluence_streams, request)
++    _handoff_ownership("git", git_streams, request)
++    streams = _validate_records({name: tuple(confluence_streams[name] + git_streams[name]) for name in _SCHEMAS}, schema_validator, canonical_schema_validator)
++    ids: dict[str, set[str]] = {}
++    for name, field in _IDS.items():
++        values = tuple(_identity(record, field) for record in streams[name])
++        if len(values) != len(set(values)):
++            raise M10SnapshotError(f"duplicate {name} identity")
++        ids[name] = set(values)
++    documents = streams["documents"]
++    confluence_pages: list[str] = []
++    for record in documents:
++        source = record["source_system"]
++        if source == "confluence":
++            page = record.get("page_id")
++            if type(page) is not str or page not in request.ordered_page_ids or record.get("source_version") != confluence.source_version:
++                raise M10SnapshotError("Confluence document provenance is invalid")
++            confluence_pages.append(page)
++        elif source == "git":
++            if record.get("repo") != request.git_repository or record.get("branch") != request.git_branch or record.get("source_version") != request.git_commit:
++                raise M10SnapshotError("Git document provenance is invalid")
++            _path(record.get("file_path"))
++        else:
++            raise M10SnapshotError("document source ownership is invalid")
++    page_positions = [request.ordered_page_ids.index(page) for page in confluence_pages]
++    if page_positions != sorted(page_positions) or len(set(confluence_pages)) != len(confluence_pages):
++        raise M10SnapshotError("Confluence page ordering is invalid")
++    acl_by_document: dict[str, dict[str, object]] = {}
++    for record in streams["acl"]:
++        document_id = _identity(record, "document_id")
++        document = next((doc for doc in documents if doc["document_id"] == document_id), None)
++        tags = record.get("acl_tags")
++        if document_id in acl_by_document or document is None or record.get("source_system") != document.get("source_system") or record.get("acl_id") != document.get("acl_id") or type(tags) is not list or not tags or any(type(tag) is not str or not tag for tag in tags):
++            raise M10SnapshotError("ACL cardinality or ownership is invalid")
++        if document.get("source_system") == "git" and tags != [f"repo:{request.git_repository}"]:
++            raise M10SnapshotError("Git ACL is not deny-safe")
++        acl_by_document[document_id] = record
++    if set(acl_by_document) != ids["documents"]:
++        raise M10SnapshotError("every document requires one ACL")
++    for record in streams["chunks"]:
++        parent = record.get("document_id")
++        if parent not in ids["documents"] or record.get("source_system") != next(doc["source_system"] for doc in documents if doc["document_id"] == parent):
++            raise M10SnapshotError("chunk parent/source is invalid")
++        parent_acl = acl_by_document[parent].get("acl_tags")
++        if record.get("acl_tags") != parent_acl:
++            raise M10SnapshotError("chunk ACL inheritance is invalid")
++        if record.get("source_system") == "confluence" and (record.get("page_id") not in request.ordered_page_ids or record.get("page_id") != next(doc.get("page_id") for doc in documents if doc["document_id"] == parent) or record.get("source_version") != confluence.source_version):
++            raise M10SnapshotError("Confluence chunk provenance is invalid")
++        if record.get("source_system") == "git" and (record.get("repo") != request.git_repository or record.get("branch") != request.git_branch or record.get("source_version") != request.git_commit or record["acl_tags"] != [f"repo:{request.git_repository}"]):
++            raise M10SnapshotError("Git chunk ACL/provenance is invalid")
++        if record.get("source_system") == "git":
++            _path(record.get("file_path"))
++    for record in streams["relations"]:
++        source = record.get("source_id")
++        target = record.get("target_id")
++        status = record.get("resolution_status")
++        if source not in ids["documents"] and source not in ids["chunks"]:
++            raise M10SnapshotError("relation source is missing")
++        if status not in _RELATION_STATUSES or type(target) is not str or not target or target.strip() != target or target.lower() in {"unknown", "none", "null", "unresolved"}:
++            raise M10SnapshotError("relation status/target is invalid")
++        if record.get("relation_type") == "mentions_jira_key" and _JIRA.fullmatch(target) is None:
++            raise M10SnapshotError("Jira relation target marker is invalid")
++        if status != "resolved":
++            grammar = {"mentions_jira_key": _JIRA, "includes_page": _PAGE_TARGET, "links_to_page": _PAGE_TARGET, "embeds_media": _MEDIA_TARGET}.get(record.get("relation_type"))
++            if grammar is None or grammar.fullmatch(target) is None:
++                raise M10SnapshotError("external relation target grammar is invalid")
++        if status == "resolved" and (target not in set().union(*ids.values()) or target.startswith("jira:issue:")):
++            raise M10SnapshotError("resolved relation target is invalid")
++        if status != "resolved" and (target in set().union(*ids.values()) or (record.get("relation_type") == "mentions_jira_key" and not _JIRA.fullmatch(target))):
++            raise M10SnapshotError("unresolved relation target is invalid")
++    for record in streams["media_assets"]:
++        if not request.media_policy.include_attachments or len(streams["media_assets"]) > request.media_policy.max_assets:
++            raise M10SnapshotError("media policy or budget is invalid")
++        parent = record.get("parent_document_id")
++        parent_record = next((doc for doc in documents if doc["document_id"] == parent), None)
++        if parent_record is None or parent_record.get("source_system") != "confluence" or record.get("source_system") != "confluence" or record.get("source_version") != confluence.source_version or record.get("processing_status") not in request.media_policy.allowed_processing_statuses:
++            raise M10SnapshotError("media provenance/policy is invalid")
++        downloaded = record.get("download_status") == "downloaded"
++        content_hash, raw_uri = record.get("content_hash"), record.get("raw_uri")
++        attachment_id = record["media_id"].split(":", 2)[-1]
++        if (content_hash is None) != (raw_uri is None) or downloaded != (content_hash is not None and raw_uri is not None) or (content_hash is not None and (type(content_hash) is not str or not _HEX64.fullmatch(content_hash) or type(raw_uri) is not str or raw_uri != f"raw://confluence/attachments/{attachment_id}/{content_hash}")):
++            raise M10SnapshotError("media raw/content provenance is invalid")
++    git_files = {(doc.get("repo"), doc.get("branch"), doc.get("source_version"), doc.get("file_path")) for doc in documents if doc.get("source_system") == "git"}
++    for record in streams["symbols"]:
++        if (record.get("repo"), record.get("branch"), record.get("commit_hash"), _path(record.get("file_path"))) not in git_files:
++            raise M10SnapshotError("symbol provenance is invalid")
++        if type(record.get("line_start")) is not int or type(record.get("line_end")) is not int or record["line_start"] < 1 or record["line_end"] < record["line_start"]:
++            raise M10SnapshotError("symbol line span is invalid")
++        if record.get("chunk_id") is not None and record["chunk_id"] not in ids["chunks"]:
++            raise M10SnapshotError("symbol chunk linkage is missing")
++    entity_ids = set().union(*ids.values())
++    sync_seen: set[str] = set()
++    for record in streams["sync_state"]:
++        entity = record.get("entity_id")
++        repo_sync = record.get("entity_type") == "repo" and record.get("source_id") == request.git_repository and entity == request.git_repository
++        if entity in sync_seen or (entity not in entity_ids and not repo_sync) or record.get("status") != "active" or record.get("schema_version") != "1.0":
++            raise M10SnapshotError("sync state is invalid")
++        sync_seen.add(entity)
++        matching = next((row for row in documents if row["document_id"] == entity), None) or next((row for row in streams["media_assets"] if row["media_id"] == entity), None)
++        if matching is None and not repo_sync:
++            raise M10SnapshotError("sync entity is not emitted")
++        if repo_sync:
++            expected_source, expected_type, expected_version = request.git_repository, "repo", request.git_commit
++        else:
++            expected_source = request.confluence_scope.source_id if matching.get("source_system") == "confluence" else request.git_repository
++            expected_type = "page" if matching.get("source_system") == "confluence" and entity.startswith("confluence:page:") else "attachment" if matching.get("source_system") == "confluence" else "file"
++            expected_version = matching.get("source_version")
++        if record.get("source_id") != expected_source or record.get("entity_type") != expected_type:
++            raise M10SnapshotError("sync source/entity type is invalid")
++        if expected_version is not None and record.get("last_seen_version") != expected_version:
++            raise M10SnapshotError("sync version drift")
++    ordered = {name: tuple(sorted(value, key=lambda record: _identity(record, _IDS[name]))) for name, value in streams.items()}
++    media_processed = sum(1 for row in ordered["media_assets"] if row["processing_status"] in {"parsed", "ocr", "summarized"})
++    media_failed = sum(1 for row in ordered["media_assets"] if row["processing_status"] == "failed")
++    confluence_documents = sum(1 for row in ordered["documents"] if row["source_system"] == "confluence")
++    git_documents = sum(1 for row in ordered["documents"] if row["source_system"] == "git")
++    metrics = M10SnapshotMetrics(len(ordered["documents"]), len(ordered["chunks"]), len(ordered["relations"]), len(ordered["acl"]), len(ordered["media_assets"]), len(ordered["symbols"]), len(ordered["sync_state"]), 0, confluence_documents, git_documents, sum(1 for row in ordered["relations"] if row["resolution_status"] != "resolved"), media_processed, media_failed, sum(1 for row in ordered["symbols"] if row.get("chunk_id") is not None), sum(1 for row in ordered["chunks"] if not row["acl_tags"]))
++    return M10SnapshotProjection.from_request(request, dataset_name="spen_knowledge_poc", schemas_version="1.0", source_scopes={"confluence": {"source_id": request.confluence_scope.source_id, "space_keys": request.confluence_scope.space_keys, "root_page_ids": request.confluence_scope.root_page_ids, "page_ids": request.confluence_scope.page_ids}, "git": {"repository": request.git_repository, "branch": request.git_branch, "commit": request.git_commit}}, documents=ordered["documents"], chunks=ordered["chunks"], relations=ordered["relations"], acl=ordered["acl"], media_assets=ordered["media_assets"], symbols=ordered["symbols"], sync_state=ordered["sync_state"], tombstones=(), metrics=metrics)
++
++
++__all__ = ["M10SchemaValidator", "M10ConfluenceHandoff", "M10GitHandoff", "M10ConfluenceAdapter", "M10GitAdapter", "compose_m10_projection"]
+diff --git a/src/knowledgenexus/foundation/domain/models/m10_snapshot.py b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+index a4d66b7..1a06ef4 100644
+--- a/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
++++ b/src/knowledgenexus/foundation/domain/models/m10_snapshot.py
+@@ -188,7 +188,7 @@ class M10SnapshotRequest:
+             if type(getattr(self, n)) is not str or not _POSIX.fullmatch(getattr(self, n)): raise M10SnapshotError(f"invalid {n}")
+         if type(self.git_commit) is not str or not _HEX40.fullmatch(self.git_commit): raise M10SnapshotError("invalid git_commit")
+         _timestamp(self.generated_at)
+-        if type(self.dataset_root) is not Path or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
++        if not isinstance(self.dataset_root, Path) or not self.dataset_root.is_absolute() or not self.dataset_root.exists() or not self.dataset_root.is_dir() or self.dataset_root.is_symlink() or _is_reparse_point(self.dataset_root): raise M10SnapshotError("unsafe dataset_root")
+         if self.export_mode != M10_EXPORT_MODE: raise M10SnapshotError("invalid export_mode")
+         object.__setattr__(self, "confluence_exclusions", ex); object.__setattr__(self, "ordered_page_ids", pages)
+ 
+diff --git a/tests/foundation/application/use_cases/test_compose_m10_snapshot.py b/tests/foundation/application/use_cases/test_compose_m10_snapshot.py
+new file mode 100644
+index 0000000..f3a7d3f
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_compose_m10_snapshot.py
+@@ -0,0 +1,137 @@
++import pytest
++
++from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import (
++    ComposeM10Snapshot,
++    M10CompositionFailure,
++    M10CompositionFailureCategory,
++)
++from knowledgenexus.foundation.domain.models.m10_composition import M10ConfluenceHandoff, M10GitHandoff
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10SnapshotRequest
++from tests.foundation.domain.models.test_m10_composition import _handoffs, _request
++
++
++class Adapter:
++    def __init__(self, value):
++        self.value = value
++        self.calls = 0
++
++    def collect(self, request):
++        self.calls += 1
++        return self.value
++
++
++def test_use_case_injected_adapters_are_called_once_and_composition_is_atomic(tmp_path):
++    confluence, git = _handoffs()
++    confluence_adapter, git_adapter = Adapter(confluence), Adapter(git)
++    result = ComposeM10Snapshot(confluence_adapter=confluence_adapter, git_adapter=git_adapter).execute(_request(tmp_path))
++    assert result.projection is not None
++    assert confluence_adapter.calls == git_adapter.calls == 1
++
++
++@pytest.mark.parametrize("bad", [None, object(), {"run_id": "x"}])
++def test_use_case_rejects_wrong_request_before_dependency_calls(tmp_path, bad):
++    confluence, git = _handoffs()
++    left, right = Adapter(confluence), Adapter(git)
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=left, git_adapter=right).execute(bad)
++    assert exc.value.category is M10CompositionFailureCategory.INVALID_REQUEST
++    assert left.calls == right.calls == 0
++
++
++def test_use_case_sanitizes_adapter_failure(tmp_path):
++    class Exploding:
++        def collect(self, request):
++            raise RuntimeError("secret path and page content")
++
++    _, git = _handoffs()
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=Exploding(), git_adapter=Adapter(git)).execute(_request(tmp_path))
++    assert exc.value.category is M10CompositionFailureCategory.ADAPTER
++    assert "secret" not in str(exc.value)
++
++
++def test_use_case_rejects_wrong_handoff_as_adapter_failure(tmp_path):
++    _, git = _handoffs()
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=Adapter(object()), git_adapter=Adapter(git)).execute(_request(tmp_path))
++    assert exc.value.category is M10CompositionFailureCategory.ADAPTER
++
++
++def test_constructor_rejects_non_callable_adapters_and_validator():
++    with pytest.raises(M10CompositionFailure) as first: ComposeM10Snapshot(confluence_adapter=object(), git_adapter=object())
++    assert first.value.category is M10CompositionFailureCategory.ADAPTER
++    with pytest.raises(M10CompositionFailure) as second: ComposeM10Snapshot(confluence_adapter=Adapter(None), git_adapter=Adapter(None), schema_validator=object())
++    assert second.value.category is M10CompositionFailureCategory.ADAPTER
++
++
++def test_noop_canonical_validator_cannot_bypass_schema_and_calls_zero_adapters(tmp_path):
++    confluence, git = _handoffs()
++    left, right = Adapter(confluence), Adapter(git)
++    class Noop:
++        def validate_record(self, schema_name, record): return None
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=left, git_adapter=right, schema_validator=Noop(), canonical_schema_validator=Noop())
++    assert exc.value.category is M10CompositionFailureCategory.ADAPTER
++    assert left.calls == right.calls == 0
++
++
++def test_canonical_validator_subclass_is_rejected_before_adapter_calls():
++    from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++    class DerivedValidator(FoundationSchemaValidator):
++        pass
++    left, right = Adapter(None), Adapter(None)
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=left, git_adapter=right, canonical_schema_validator=DerivedValidator())
++    assert exc.value.category is M10CompositionFailureCategory.ADAPTER
++    assert left.calls == right.calls == 0
++
++
++def test_validator_mutation_does_not_reach_projection(tmp_path):
++    confluence, git = _handoffs()
++    class MutatingValidator:
++        def validate_record(self, schema_name, record):
++            record["mutated"] = True
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=Adapter(confluence), git_adapter=Adapter(git), schema_validator=MutatingValidator()).execute(_request(tmp_path))
++    assert exc.value.category is M10CompositionFailureCategory.PROJECTION
++
++
++def test_canonical_validator_mutation_is_sanitized(tmp_path):
++    confluence, git = _handoffs()
++    from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
++    canonical = FoundationSchemaValidator()
++    canonical.validate_record = lambda schema_name, record: record.__setitem__("canonical_mutation", True)
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=Adapter(confluence), git_adapter=Adapter(git), schema_validator=type("V", (), {"validate_record": lambda self, name, record: None})(), canonical_schema_validator=canonical).execute(_request(tmp_path))
++    assert exc.value.category is M10CompositionFailureCategory.PROJECTION
++
++
++def test_validator_exception_is_sanitized_projection_failure(tmp_path):
++    confluence, git = _handoffs()
++    class ExplodingValidator:
++        def validate_record(self, schema_name, record): raise RuntimeError("secret schema internals")
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=Adapter(confluence), git_adapter=Adapter(git), schema_validator=ExplodingValidator()).execute(_request(tmp_path))
++    assert exc.value.category is M10CompositionFailureCategory.PROJECTION
++    assert "secret" not in str(exc.value)
++
++
++def test_shared_validator_rejects_extra_record_field(tmp_path):
++    confluence, git = _handoffs()
++    forged = {**confluence.documents[0], "forbidden": True}
++    from knowledgenexus.foundation.domain.models.m10_composition import M10ConfluenceHandoff
++    bad = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, (forged,), confluence.chunks, confluence.relations, confluence.acl, (), (), (), confluence.raw_artifact_identity)
++    with pytest.raises(M10CompositionFailure) as exc:
++        ComposeM10Snapshot(confluence_adapter=Adapter(bad), git_adapter=Adapter(git)).execute(_request(tmp_path))
++    assert exc.value.category is M10CompositionFailureCategory.PROJECTION
++
++
++def test_forged_result_fields_fail_closed(tmp_path):
++    confluence, git = _handoffs()
++    result = ComposeM10Snapshot(confluence_adapter=Adapter(confluence), git_adapter=Adapter(git), schema_validator=type("V", (), {"validate_record": lambda self, name, record: None})()).execute(_request(tmp_path))
++    forged = object.__new__(type(result))
++    object.__setattr__(forged, "projection", result.projection)
++    object.__setattr__(forged, "failure_category", None)
++    object.__setattr__(forged, "extra", True)
++    with pytest.raises((TypeError, ValueError)):
++        type(result).__post_init__(forged)
+diff --git a/tests/foundation/domain/models/test_m10_composition.py b/tests/foundation/domain/models/test_m10_composition.py
+new file mode 100644
+index 0000000..2d7a1ed
+--- /dev/null
++++ b/tests/foundation/domain/models/test_m10_composition.py
+@@ -0,0 +1,112 @@
++from pathlib import Path
++from dataclasses import replace
++
++import pytest
++
++from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
++from knowledgenexus.foundation.domain.models.m10_composition import M10ConfluenceHandoff, M10GitHandoff, compose_m10_projection
++from knowledgenexus.foundation.domain.models.m10_snapshot import M10ConfluenceScope, M10MediaPolicy, M10ProfileIdentity, M10SnapshotError, M10SnapshotRequest
++from knowledgenexus.foundation.domain.models.chunking_profile import ChunkingProfile, TokenizerAsset
++from knowledgenexus.foundation.domain.models.jira_relation_profile import JIRA_EXTRACTION_MODE, JIRA_KEY_PATTERN, JiraRelationProfile
++from knowledgenexus.foundation.domain.models.one_page_export import OnePageExportProfileBundle
++from tests.fixtures.foundation.record_factories import build_sample_acl_record, build_sample_chunk_record, build_sample_document_record, build_sample_relation_record
++
++RUN = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
++COMMIT = "a" * 40
++
++
++class NoopValidator:
++    def validate_record(self, schema_name, record):
++        return None
++
++
++def _request(tmp_path: Path) -> M10SnapshotRequest:
++    revision = "5617a9f61b028005a4858fdac845db406aefb181"
++    profile = ChunkingProfile(chunker_version="1.2.0", profile_status="provisional_until_benchmark", active_profile="medium", model_name="BAAI/bge-m3", tokenizer_name="BAAI/bge-m3", tokenizer_family="SentencePiece / XLM-R", vector_dimension=1024, maximum_model_tokens=8192, target_tokens=450, minimum_tokens=96, hard_maximum_tokens=1000, overlap_tokens=64, code_window_target_tokens=450, code_window_max_lines=40, code_window_overlap_lines=4, tokenizer_repository="https://huggingface.co/BAAI/bge-m3", tokenizer_revision=revision, observed_license="MIT", provenance_url=f"https://huggingface.co/BAAI/bge-m3/tree/{revision}", tokenizer_assets=(TokenizerAsset("tokenizer.json", 1, "0" * 64),), transformers_version="4.57.6", tokenizers_version="0.22.2", sentencepiece_version="0.2.2")
++    bundle = OnePageExportProfileBundle(chunking_profile=profile, jira_relation_profile=JiraRelationProfile(schema_version=1, extraction_mode=JIRA_EXTRACTION_MODE, key_pattern=JIRA_KEY_PATTERN, allowed_project_keys=("SVMCSPEN",)), normalized_embedding_profile_text="embedding-profile-text", normalized_jira_relation_profile_text="jira-profile-text")
++    return M10SnapshotRequest(RUN, RUN, M10ConfluenceScope("src", ("SVMC",), ("123",), ("123",)), (), ("123",), "raw-1", "org-repo", "main", COMMIT, M10MediaPolicy(False, False, (), 0), bundle, "2026-08-05T00:00:00Z", tmp_path, "full_snapshot", M10ProfileIdentity("embedding-profile-text", "jira-profile-text"))
++
++
++def _handoffs():
++    document = build_sample_document_record(); chunk = build_sample_chunk_record(); relation = build_sample_relation_record(); acl = build_sample_acl_record()
++    confluence = M10ConfluenceHandoff(RUN, RUN, "1", (document,), (chunk,), (relation,), (acl,), (), (), (), "raw-1")
++    gd = {"schema_version": "1.0", "document_id": "git:file:src-a.py", "source_system": "git", "source_type": "code_file", "title": "a.py", "repo": "org-repo", "branch": "main", "file_path": "src/a.py", "source_version": COMMIT, "content_hash": "b" * 64, "acl_id": "acl:repo:org-repo", "jira_keys": [], "relation_ids": [], "crawled_at": "2026-08-05T00:00:00Z", "metadata": {}}
++    gc = {"schema_version": "1.0", "chunk_id": "chunk:git:0123456789abcdef", "document_id": gd["document_id"], "source_system": "git", "source_type": "code_file", "title": "a.py", "text": "print(1)", "content_kind": "code_block", "language": "cpp", "token_count": 2, "heading_path": [], "repo": "org-repo", "branch": "main", "file_path": "src/a.py", "line_start": 1, "line_end": 1, "acl_tags": ["repo:org-repo"], "source_version": COMMIT, "content_hash": "c" * 64, "chunker_version": "1.2.0", "updated_at": None}
++    ga = {"schema_version": "1.0", "acl_id": "acl:repo:org-repo", "document_id": gd["document_id"], "source_system": "git", "is_restricted": False, "acl_tags": ["repo:org-repo"], "acl_extraction_status": "ok", "extracted_at": "2026-08-05T00:00:00Z"}
++    git = M10GitHandoff("org-repo", "main", COMMIT, (gd,), (gc,), (), (ga,), (), (), ())
++    return confluence, git
++
++
++def test_composition_merges_sources_deterministically(tmp_path):
++    projection = compose_m10_projection(_request(tmp_path), *_handoffs(), schema_validator=NoopValidator())
++    assert tuple(record["document_id"] for record in projection.documents) == ("confluence:page:123", "git:file:src-a.py")
++    assert projection.metrics.documents == 2 and projection.tombstones == ()
++
++
++@pytest.mark.parametrize("bad", [None, object(), {"run_id": RUN}])
++def test_handoff_rejects_wrong_runtime_types(bad):
++    with pytest.raises((TypeError, ValueError, M10SnapshotError)):
++        M10ConfluenceHandoff(bad, RUN, "v1", (), (), (), (), (), (), (), "raw")
++
++
++def test_composition_rejects_provenance_acl_and_duplicate_ids(tmp_path):
++    request = _request(tmp_path); confluence, git = _handoffs()
++    with pytest.raises(M10SnapshotError): compose_m10_projection(request, M10ConfluenceHandoff(RUN, RUN, "1", confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (), (), (), "other"), git, schema_validator=NoopValidator())
++    bad_acl = M10GitHandoff(git.repository, git.branch, git.commit, git.documents, ({**git.chunks[0], "acl_tags": ["repo:other"]},), (), git.acl, (), (), ())
++    with pytest.raises(M10SnapshotError): compose_m10_projection(request, confluence, bad_acl, schema_validator=NoopValidator())
++    duplicate = M10GitHandoff(git.repository, git.branch, git.commit, ({**git.documents[0], "document_id": "confluence:page:123"},), git.chunks, (), git.acl, (), (), ())
++    with pytest.raises(M10SnapshotError): compose_m10_projection(request, confluence, duplicate, schema_validator=NoopValidator())
++
++
++def test_symbol_requires_exact_git_provenance_and_emitted_chunk(tmp_path):
++    confluence, git = _handoffs(); symbol = {"schema_version": "1.0", "symbol_id": "sym:1", "repo": "org-repo", "branch": "main", "commit_hash": COMMIT, "file_path": "src/a.py", "language": "cpp", "symbol_type": "function", "name": "f", "qualified_name": "f", "line_start": 1, "line_end": 2, "chunk_id": "chunk:git:0123456789abcdef", "parse_status": "ok", "scanned_at": "2026-08-05T00:00:00Z"}
++    projection = compose_m10_projection(_request(tmp_path), confluence, M10GitHandoff(git.repository, git.branch, git.commit, git.documents, git.chunks, (), git.acl, (), (symbol,), ()), schema_validator=NoopValidator())
++    assert projection.metrics.symbols_resolved == 1
++    with pytest.raises(M10SnapshotError): compose_m10_projection(_request(tmp_path), confluence, M10GitHandoff(git.repository, git.branch, git.commit, git.documents, git.chunks, (), git.acl, (), ({**symbol, "commit_hash": "b" * 40},), ()), schema_validator=NoopValidator())
++
++
++def test_media_policy_provenance_and_metrics(tmp_path):
++    request = replace(_request(tmp_path), media_policy=M10MediaPolicy(True, False, ("failed", "not_processed", "parsed"), 2))
++    confluence, git = _handoffs()
++    media = {"schema_version": "1.0", "media_id": "confluence:attachment:1", "parent_document_id": "confluence:page:123", "source_system": "confluence", "filename": "a.txt", "mime_type": "text/plain", "size_bytes": 1, "download_status": "not_attempted", "processing_status": "parsed", "relevance": "high", "extracted_text": None, "summary": None, "confidence": None, "raw_uri": None, "content_hash": None, "source_version": "1", "updated_at": None, "crawled_at": "2026-08-05T00:00:00Z"}
++    enriched = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (media,), confluence.symbols, confluence.sync_state, confluence.raw_artifact_identity)
++    projection = compose_m10_projection(request, enriched, git, schema_validator=NoopValidator())
++    assert projection.metrics.media_processed == 1 and projection.metrics.media_failed == 0
++    with pytest.raises(M10SnapshotError):
++        compose_m10_projection(replace(request, media_policy=M10MediaPolicy(True, False, ("failed", "not_processed", "parsed"), 0)), enriched, git, schema_validator=NoopValidator())
++    with pytest.raises(M10SnapshotError):
++        compose_m10_projection(request, M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, ({**media, "content_hash": "d" * 64, "raw_uri": "raw://wrong"},), confluence.symbols, confluence.sync_state, confluence.raw_artifact_identity), git, schema_validator=NoopValidator())
++
++
++def test_relation_status_and_sync_state_rules(tmp_path):
++    request = _request(tmp_path); confluence, git = _handoffs()
++    unresolved = {"schema_version": "1.0", "relation_id": "rel:1234567890abcdef", "source_id": "confluence:page:123", "target_id": "jira:issue:SPEN-9999", "relation_type": "mentions_jira_key", "resolution_status": "unresolved_target", "created_at": "2026-08-05T00:00:00Z"}
++    enriched = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, (unresolved,), confluence.acl, (), confluence.symbols, confluence.sync_state, confluence.raw_artifact_identity)
++    projection = compose_m10_projection(request, enriched, git, schema_validator=NoopValidator())
++    assert projection.metrics.unresolved_relations == 1
++    bad_relation = {**unresolved, "target_id": "confluence:page:123"}
++    with pytest.raises(M10SnapshotError):
++        compose_m10_projection(request, M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, (bad_relation,), confluence.acl, (), confluence.symbols, confluence.sync_state, confluence.raw_artifact_identity), git, schema_validator=NoopValidator())
++    sync = {"schema_version": "1.0", "source_id": "src", "entity_id": "confluence:page:123", "entity_type": "page", "last_seen_version": "1", "last_content_hash": None, "last_synced_at": "2026-08-05T00:00:00Z", "status": "active"}
++    with_sync = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (), confluence.symbols, (sync,), confluence.raw_artifact_identity)
++    assert compose_m10_projection(request, with_sync, git, schema_validator=NoopValidator()).metrics.sync_state == 1
++    with pytest.raises(M10SnapshotError):
++        compose_m10_projection(request, M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, confluence.relations, confluence.acl, (), confluence.symbols, ({**sync, "status": "tombstoned"},), confluence.raw_artifact_identity), git, schema_validator=NoopValidator())
++
++
++@pytest.mark.parametrize("target", ["unknown", "none", "null", "unresolved", " "])
++def test_unresolved_relation_placeholders_fail_closed(tmp_path, target):
++    request = _request(tmp_path); confluence, git = _handoffs()
++    relation = {"schema_version": "1.0", "relation_id": "rel:1234567890abcdef", "source_id": "confluence:page:123", "target_id": target, "relation_type": "embeds_media", "resolution_status": "unresolved_target", "created_at": "2026-08-05T00:00:00Z"}
++    handoff = M10ConfluenceHandoff(confluence.run_id, confluence.generation_id, confluence.source_version, confluence.documents, confluence.chunks, (relation,), confluence.acl, (), confluence.symbols, (), confluence.raw_artifact_identity)
++    with pytest.raises(M10SnapshotError): compose_m10_projection(request, handoff, git, schema_validator=NoopValidator())
++
++
++def test_git_handoff_rejects_cross_source_and_chunk_path_traversal(tmp_path):
++    request = _request(tmp_path); confluence, git = _handoffs()
++    cross = M10GitHandoff(git.repository, git.branch, git.commit, confluence.documents, git.chunks, (), confluence.acl, (), (), ())
++    with pytest.raises(M10SnapshotError): compose_m10_projection(request, confluence, cross, schema_validator=NoopValidator())
++    traversal = M10GitHandoff(git.repository, git.branch, git.commit, git.documents, ({**git.chunks[0], "file_path": "../escape"},), (), git.acl, (), (), ())
++    with pytest.raises(M10SnapshotError): compose_m10_projection(request, confluence, traversal, schema_validator=NoopValidator())
++    backslash = M10GitHandoff(git.repository, git.branch, git.commit, git.documents, ({**git.chunks[0], "file_path": "src\\escape.cpp"},), (), git.acl, (), (), ())
++    with pytest.raises(M10SnapshotError): compose_m10_projection(request, confluence, backslash, schema_validator=NoopValidator())
+-- 
+2.45.1.windows.1
+

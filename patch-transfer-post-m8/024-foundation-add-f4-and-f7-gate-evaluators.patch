@@ -1,0 +1,892 @@
+From cc244ff8795e657f10f2305514023216ba14c75f Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Sat, 8 Aug 2026 13:16:56 +0700
+Subject: [PATCH] foundation: add F4 and F7 gate evaluators
+
+---
+ .../application/use_cases/__init__.py         |  48 +++
+ .../use_cases/evaluate_foundation_gates.py    | 204 ++++++++++++
+ .../foundation/domain/models/__init__.py      |  12 +
+ .../domain/models/foundation_gate.py          |  38 ++-
+ .../domain/models/foundation_gate_inputs.py   | 295 ++++++++++++++++++
+ .../test_evaluate_foundation_gates.py         | 131 ++++++++
+ 6 files changed, 721 insertions(+), 7 deletions(-)
+ create mode 100644 src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+ create mode 100644 src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
+ create mode 100644 tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
+
+diff --git a/src/knowledgenexus/foundation/application/use_cases/__init__.py b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+index d476f1f..513dc07 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/__init__.py
++++ b/src/knowledgenexus/foundation/application/use_cases/__init__.py
+@@ -1,12 +1,29 @@
+ from knowledgenexus.foundation.application.use_cases.build_confluence_inventory import (
+     BuildConfluenceInventory,
+ )
++from knowledgenexus.foundation.application.use_cases.build_sync_state_snapshot import (
++    BuildSyncStateSnapshot,
++    SyncStateSnapshotError,
++    SyncStateSnapshotResult,
++)
++from knowledgenexus.foundation.application.use_cases.assemble_m10_handoffs import (
++    AssembleConfluenceM10Handoff,
++    AssembleGitM10Handoff,
++    M10HandoffAssemblyError,
++)
+ from knowledgenexus.foundation.application.use_cases.build_confluence_chunks import (
+     BuildConfluenceChunks,
+ )
+ from knowledgenexus.foundation.application.use_cases.build_confluence_jira_relations import (
+     BuildConfluenceJiraRelations,
+ )
++from knowledgenexus.foundation.application.use_cases.materialize_confluence_media_relations import (
++    MaterializeConfluenceMediaRelations,
++    MediaRelationMaterializationError,
++    MediaRelationMaterializationFailureCategory,
++    MediaRelationMaterializationMetrics,
++    MediaRelationMaterializationResult,
++)
+ from knowledgenexus.foundation.application.use_cases.collect_confluence_page_observations import (  # noqa: E501
+     CollectConfluencePageObservations,
+     PageObservationCollectionError,
+@@ -43,6 +60,11 @@ from knowledgenexus.foundation.application.use_cases.accept_confluence_mini_corp
+ from knowledgenexus.foundation.application.use_cases.process_confluence_media_attachment import (
+     ProcessConfluenceMediaAttachment,
+ )
++from knowledgenexus.foundation.application.use_cases.process_confluence_media_batch import (
++    MediaBatchProcessingError,
++    MediaBatchProcessingResult,
++    ProcessConfluenceMediaBatch,
++)
+ from knowledgenexus.foundation.application.use_cases.build_git_code_documents import (
+     BuildGitCodeDocuments,
+     BuildGitCodeDocumentsRequest,
+@@ -56,11 +78,29 @@ from knowledgenexus.foundation.application.use_cases.compose_m10_snapshot import
+     M10CompositionFailureCategory,
+     M10CompositionResult,
+ )
++from knowledgenexus.foundation.application.use_cases.evaluate_foundation_gates import (
++    FoundationGateEvaluationError,
++    EvaluateBoundedMediaCorpusAcceptance,
++    EvaluateBoundedMediaGate,
++    EvaluateScaleGateEvidence,
++    EvaluateScaleGate,
++)
+ 
+ __all__ = [
+     "BuildConfluenceInventory",
++    "BuildSyncStateSnapshot",
++    "SyncStateSnapshotError",
++    "SyncStateSnapshotResult",
++    "AssembleConfluenceM10Handoff",
++    "AssembleGitM10Handoff",
++    "M10HandoffAssemblyError",
+     "BuildConfluenceChunks",
+     "BuildConfluenceJiraRelations",
++    "MaterializeConfluenceMediaRelations",
++    "MediaRelationMaterializationError",
++    "MediaRelationMaterializationFailureCategory",
++    "MediaRelationMaterializationMetrics",
++    "MediaRelationMaterializationResult",
+     "CollectConfluencePageObservations",
+     "PageObservationCollectionError",
+     "PageObservationCollectionResult",
+@@ -79,6 +119,9 @@ __all__ = [
+     "FetchAndStoreConfluenceAttachmentBody",
+     "AcceptConfluenceMiniCorpus",
+     "ProcessConfluenceMediaAttachment",
++    "MediaBatchProcessingError",
++    "MediaBatchProcessingResult",
++    "ProcessConfluenceMediaBatch",
+     "BuildGitCodeDocuments",
+     "BuildGitCodeDocumentsRequest",
+     "BuildGitSymbols",
+@@ -88,4 +131,9 @@ __all__ = [
+     "M10CompositionFailure",
+     "M10CompositionFailureCategory",
+     "M10CompositionResult",
++    "FoundationGateEvaluationError",
++    "EvaluateBoundedMediaCorpusAcceptance",
++    "EvaluateBoundedMediaGate",
++    "EvaluateScaleGateEvidence",
++    "EvaluateScaleGate",
+ ]
+diff --git a/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+new file mode 100644
+index 0000000..4438667
+--- /dev/null
++++ b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+@@ -0,0 +1,204 @@
++"""Evaluate the sanitized external-input gates for Foundation F4 and F7."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++from collections import Counter
++
++from knowledgenexus.foundation.domain.models.foundation_gate import (
++    BoundedMediaCorpusAcceptance,
++    ScaleGateEvidence,
++)
++from knowledgenexus.foundation.domain.models.foundation_gate_inputs import (
++    BoundedMediaGateRequest,
++    PublishedSnapshotReadback,
++    SanitizedMediaProcessorRun,
++    ScaleGateRequest,
++)
++
++
++class FoundationGateEvaluationError(ValueError):
++    """Malformed sanitized gate input; no source/runtime details are retained."""
++
++
++def _digest_facts(value: object) -> str:
++    try:
++        encoded = json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
++    except (TypeError, ValueError):
++        raise FoundationGateEvaluationError("gate facts are not serializable") from None
++    return hashlib.sha256(encoded).hexdigest()
++
++
++def _media_counts(run: SanitizedMediaProcessorRun) -> tuple[tuple[str, int], ...]:
++    counts = Counter(item.kind for item in run.outcomes)
++    return tuple(sorted((kind, count) for kind, count in counts.items()))
++
++
++def _media_failure_reason(
++    request: BoundedMediaGateRequest,
++    *,
++    counts: tuple[tuple[str, int], ...],
++) -> str | None:
++    first, second = request.first_run, request.second_run
++    reasons: list[str] = []
++    if first.canonical_facts() != second.canonical_facts():
++        reasons.append("nondeterministic_repeat")
++    if not first.source_unchanged or not second.source_unchanged:
++        reasons.append("source_changed")
++    if not first.writes_unchanged or not second.writes_unchanged:
++        reasons.append("writes_changed")
++    if sum(item.status == "failed" for item in first.outcomes) or sum(item.status == "failed" for item in second.outcomes):
++        reasons.append("processor_failure")
++    if {kind for kind, _ in counts} != {"chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf"}:
++        reasons.append("corpus_coverage_incomplete")
++    return ";".join(reasons) if reasons else None
++
++
++class EvaluateBoundedMediaCorpusAcceptance:
++    """Turn two bounded, sanitized media passes into the F4 gate record."""
++
++    def execute(self, *, request: object) -> BoundedMediaCorpusAcceptance:
++        if type(request) is not BoundedMediaGateRequest:
++            raise FoundationGateEvaluationError("request is invalid")
++        first, second = request.first_run, request.second_run
++        # The request model has already rejected duplicate/omitted identities;
++        # repeat facts are compared before any status-derived aggregation.
++        counts = _media_counts(first)
++        processed = sum(item.status == "processed" for item in first.outcomes)
++        skipped = sum(item.status == "skipped" for item in first.outcomes)
++        failed = sum(item.status == "failed" for item in first.outcomes)
++        reason = _media_failure_reason(request, counts=counts)
++        facts = {
++            "evidence_kind": request.evidence_kind,
++            "expected_media_ids": first.expected_media_ids,
++            "first": first.canonical_facts(),
++            "second": second.canonical_facts(),
++            "source": (
++                first.source_digest_before, first.source_digest_after,
++                second.source_digest_before, second.source_digest_after,
++            ),
++            "writes": (
++                first.write_digest_before, first.write_digest_after,
++                second.write_digest_before, second.write_digest_after,
++            ),
++        }
++        if reason is not None:
++            return BoundedMediaCorpusAcceptance(
++                status="failed",
++                evidence_kind=request.evidence_kind,
++                kind_counts=counts,
++                processed_count=processed,
++                skipped_count=skipped,
++                failed_count=failed,
++                deterministic_repeat=first.canonical_facts() == second.canonical_facts(),
++                source_unchanged=first.source_unchanged and second.source_unchanged,
++                no_silent_omission=True,
++                evidence_digest=None,
++                failure_reason=reason,
++            )
++        return BoundedMediaCorpusAcceptance(
++            status="complete",
++            evidence_kind=request.evidence_kind,
++            kind_counts=counts,
++            processed_count=processed,
++            skipped_count=skipped,
++            failed_count=failed,
++            deterministic_repeat=True,
++            source_unchanged=True,
++            no_silent_omission=True,
++            evidence_digest=_digest_facts(facts),
++        )
++
++
++def _scale_failure_reason(request: ScaleGateRequest) -> str | None:
++    first, second = request.first_readback, request.second_readback
++    reasons: list[str] = []
++    if first.content_digest != second.content_digest:
++        reasons.append("nondeterministic_repeat")
++    for label, value in (
++        ("first_readback", first.readback_valid),
++        ("second_readback", second.readback_valid),
++        ("relation_closure", first.relation_closed and second.relation_closed),
++        ("acl_closure", first.acl_closed and second.acl_closed),
++        ("sync_closure", first.sync_closed and second.sync_closed),
++        ("atomic_publish", first.atomic_publish and second.atomic_publish),
++        ("no_clobber", first.no_clobber and second.no_clobber),
++        ("sanitized_output", first.sanitized_output and second.sanitized_output),
++    ):
++        if not value:
++            reasons.append(label)
++    if first.stream_counts != second.stream_counts:
++        reasons.append("stream_counts_differ")
++    if first.observed_pages < request.target_pages or second.observed_pages < request.target_pages:
++        reasons.append("target_pages_unmet")
++    return ";".join(reasons) if reasons else None
++
++
++class EvaluateScaleGateEvidence:
++    """Evaluate two published snapshot readbacks for F5/F7 scale evidence."""
++
++    def execute(self, *, request: object) -> ScaleGateEvidence:
++        if type(request) is not ScaleGateRequest:
++            raise FoundationGateEvaluationError("request is invalid")
++        first, second = request.first_readback, request.second_readback
++        reason = _scale_failure_reason(request)
++        facts = {
++            "profile_id": request.profile_id,
++            "target_pages": request.target_pages,
++            "evidence_kind": request.evidence_kind,
++            "first": first.canonical_facts(),
++            "second": second.canonical_facts(),
++        }
++        common = dict(
++            profile_id=request.profile_id,
++            target_pages=request.target_pages,
++            observed_pages=min(first.observed_pages, second.observed_pages),
++            run_count=2,
++            stream_counts=first.stream_counts,
++            deterministic_repeat=first.content_digest == second.content_digest,
++            readback_valid=first.readback_valid and second.readback_valid,
++            relation_closed=first.relation_closed and second.relation_closed,
++            acl_closed=first.acl_closed and second.acl_closed,
++            sync_closed=first.sync_closed and second.sync_closed,
++            atomic_publish=first.atomic_publish and second.atomic_publish,
++            no_clobber=first.no_clobber and second.no_clobber,
++            sanitized_output=first.sanitized_output and second.sanitized_output,
++            transport=first.transport if first.transport == second.transport else "offline_fixture",
++            rss_baseline_bytes=min(
++                value for value in (first.rss_baseline_bytes, second.rss_baseline_bytes)
++                if value is not None
++            ) if first.rss_baseline_bytes is not None and second.rss_baseline_bytes is not None else None,
++            rss_peak_bytes=max(
++                value for value in (first.rss_peak_bytes, second.rss_peak_bytes)
++                if value is not None
++            ) if first.rss_peak_bytes is not None and second.rss_peak_bytes is not None else None,
++            duration_milliseconds=max(
++                value for value in (first.duration_milliseconds, second.duration_milliseconds)
++                if value is not None
++            ) if first.duration_milliseconds is not None and second.duration_milliseconds is not None else None,
++            evidence_kind=request.evidence_kind,
++        )
++        if reason is not None:
++            return ScaleGateEvidence(status="failed", **common, failure_reason=reason)
++        return ScaleGateEvidence(
++            status="pass", **common, evidence_digest=_digest_facts(facts)
++        )
++
++
++# Descriptive aliases for callers that prefer imperative use-case names.
++EvaluateBoundedMediaGate = EvaluateBoundedMediaCorpusAcceptance
++EvaluateScaleGate = EvaluateScaleGateEvidence
++
++
++__all__ = [
++    "FoundationGateEvaluationError",
++    "EvaluateBoundedMediaCorpusAcceptance",
++    "EvaluateBoundedMediaGate",
++    "EvaluateScaleGateEvidence",
++    "EvaluateScaleGate",
++    "BoundedMediaGateRequest",
++    "PublishedSnapshotReadback",
++    "SanitizedMediaProcessorRun",
++    "ScaleGateRequest",
++]
+diff --git a/src/knowledgenexus/foundation/domain/models/__init__.py b/src/knowledgenexus/foundation/domain/models/__init__.py
+index 3c61f65..7dcf3b6 100644
+--- a/src/knowledgenexus/foundation/domain/models/__init__.py
++++ b/src/knowledgenexus/foundation/domain/models/__init__.py
+@@ -187,6 +187,13 @@ from knowledgenexus.foundation.domain.models.foundation_gate import (
+     OcrEngineApproval,
+     ScaleGateEvidence,
+ )
++from knowledgenexus.foundation.domain.models.foundation_gate_inputs import (
++    BoundedMediaGateRequest,
++    PublishedSnapshotReadback,
++    SanitizedMediaProcessorOutcome,
++    SanitizedMediaProcessorRun,
++    ScaleGateRequest,
++)
+ from knowledgenexus.foundation.domain.models.confluence_mini_corpus_acceptance import (
+     MiniCorpusAcceptanceError,
+     MiniCorpusAcceptanceFailureCategory,
+@@ -397,6 +404,11 @@ __all__ = [
+     "BoundedMediaCorpusAcceptance",
+     "OcrEngineApproval",
+     "ScaleGateEvidence",
++    "BoundedMediaGateRequest",
++    "PublishedSnapshotReadback",
++    "SanitizedMediaProcessorOutcome",
++    "SanitizedMediaProcessorRun",
++    "ScaleGateRequest",
+     "text_digest",
+     "MiniCorpusAcceptanceError",
+     "MiniCorpusAcceptanceFailureCategory",
+diff --git a/src/knowledgenexus/foundation/domain/models/foundation_gate.py b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+index 56ef95f..1c82cf0 100644
+--- a/src/knowledgenexus/foundation/domain/models/foundation_gate.py
++++ b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+@@ -128,12 +128,19 @@ class BoundedMediaCorpusAcceptance:
+     source_unchanged: bool
+     no_silent_omission: bool
+     evidence_digest: str | None = None
++    failure_reason: str | None = None
+ 
+     def __post_init__(self) -> None:
+         if type(self.status) is not str or self.status not in {"complete", "pending_external_input", "failed"}:
+             raise ValueError("status is invalid")
+         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
+             raise ValueError("evidence_kind is invalid")
++        if self.failure_reason is not None and (
++            type(self.failure_reason) is not str
++            or not self.failure_reason
++            or len(self.failure_reason) > 256
++        ):
++            raise ValueError("failure_reason is invalid")
+         for field in ("processed_count", "skipped_count", "failed_count"):
+             value = getattr(self, field)
+             if type(value) is not int or value < 0:
+@@ -157,7 +164,7 @@ class BoundedMediaCorpusAcceptance:
+         if total != self.processed_count + self.skipped_count + self.failed_count:
+             raise ValueError("media counters are inconsistent")
+         if self.status == "pending_external_input":
+-            if self.kind_counts or total or any((self.deterministic_repeat, self.source_unchanged, self.no_silent_omission)) or self.evidence_kind is not None or self.evidence_digest is not None:
++            if self.kind_counts or total or any((self.deterministic_repeat, self.source_unchanged, self.no_silent_omission)) or self.evidence_kind is not None or self.evidence_digest is not None or self.failure_reason is not None:
+                 raise ValueError("pending media gate carries observations")
+         elif self.status == "complete":
+             if seen != _MEDIA_KIND_SET or any(count == 0 for _, count in self.kind_counts):
+@@ -169,8 +176,13 @@ class BoundedMediaCorpusAcceptance:
+             if self.evidence_kind is None or self.evidence_digest is None:
+                 raise ValueError("complete media gate evidence is missing")
+             _digest(self.evidence_digest, "evidence_digest")
+-        elif self.failed_count == 0 or not self.no_silent_omission:
+-            raise ValueError("failed media gate must report explicit failures")
++            if self.failure_reason is not None:
++                raise ValueError("complete media gate carries failure")
++        else:
++            if self.failure_reason is None:
++                raise ValueError("failed media gate requires failure reason")
++            if self.evidence_digest is not None:
++                raise ValueError("failed media gate carries evidence")
+ 
+     def __repr__(self) -> str:
+         return f"{type(self).__name__}(status={self.status!r}, total={sum(count for _, count in self.kind_counts)})"
+@@ -200,6 +212,7 @@ class ScaleGateEvidence:
+     duration_milliseconds: int | None = None
+     evidence_kind: str | None = None
+     evidence_digest: str | None = None
++    failure_reason: str | None = None
+ 
+     def __post_init__(self) -> None:
+         if type(self.status) is not str or self.status not in {"pass", "pending_external_input", "failed"}:
+@@ -227,7 +240,7 @@ class ScaleGateEvidence:
+             seen.add(stream)
+         for field in ("deterministic_repeat", "readback_valid", "relation_closed", "acl_closed", "sync_closed", "atomic_publish", "no_clobber", "sanitized_output"):
+             _bool(getattr(self, field), field)
+-        if self.transport not in {"offline_fixture", "production"}:
++        if type(self.transport) is not str or self.transport not in {"offline_fixture", "production"}:
+             raise ValueError("transport is invalid")
+         for field in ("rss_baseline_bytes", "rss_peak_bytes", "duration_milliseconds"):
+             value = getattr(self, field)
+@@ -237,8 +250,14 @@ class ScaleGateEvidence:
+             raise ValueError("RSS counters are inconsistent")
+         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
+             raise ValueError("evidence_kind is invalid")
++        if self.failure_reason is not None and (
++            type(self.failure_reason) is not str
++            or not self.failure_reason
++            or len(self.failure_reason) > 256
++        ):
++            raise ValueError("failure_reason is invalid")
+         if self.status == "pending_external_input":
+-            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
++            if self.observed_pages or self.run_count or self.stream_counts or self.evidence_digest is not None or self.failure_reason is not None or any((self.deterministic_repeat, self.readback_valid, self.relation_closed, self.acl_closed, self.sync_closed, self.atomic_publish, self.no_clobber, self.sanitized_output)):
+                 raise ValueError("pending scale gate carries observations")
+         elif self.status == "pass":
+             if self.observed_pages < self.target_pages or self.run_count < 2 or seen != _STREAM_SET:
+@@ -248,8 +267,13 @@ class ScaleGateEvidence:
+             if self.evidence_kind is None or self.evidence_digest is None:
+                 raise ValueError("scale evidence digest is missing")
+             _digest(self.evidence_digest, "evidence_digest")
+-        elif self.evidence_digest is not None:
+-            raise ValueError("failed scale gate carries evidence")
++            if self.failure_reason is not None:
++                raise ValueError("pass scale gate carries failure")
++        else:
++            if self.failure_reason is None:
++                raise ValueError("failed scale gate requires failure reason")
++            if self.evidence_digest is not None:
++                raise ValueError("failed scale gate carries evidence")
+ 
+     def __repr__(self) -> str:
+         return f"{type(self).__name__}(status={self.status!r}, target_pages={self.target_pages})"
+diff --git a/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py b/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
+new file mode 100644
+index 0000000..f507d12
+--- /dev/null
++++ b/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
+@@ -0,0 +1,295 @@
++"""Sanitized inputs accepted by the external Foundation gate evaluators.
++
++These records intentionally contain no page text, URLs, credentials, or raw
++processor payloads.  They are the narrow boundary between a local run and a
++committable F4/F7 gate result.
++"""
++
++from __future__ import annotations
++
++import re
++from dataclasses import dataclass
++
++
++_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
++_MEDIA_ID = re.compile(r"\Aconfluence:attachment:(?:att)?[0-9]+\Z")
++_DATASET_VERSION = re.compile(r"\Av[0-9]{8}-[0-9]{6}-[0-9]{6}Z\Z")
++_IDENTITY = re.compile(r"\A[a-z0-9][a-z0-9._:-]{0,127}\Z")
++_MEDIA_KINDS = frozenset({
++    "chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf",
++})
++_MEDIA_STATUSES = frozenset({"processed", "skipped", "failed"})
++_STREAMS = frozenset({
++    "acl", "chunks", "documents", "media_assets", "relations", "symbols",
++    "sync_state", "tombstones",
++})
++
++
++def _digest(value: object, field: str) -> str:
++    if type(value) is not str or _SHA256.fullmatch(value) is None:
++        raise ValueError(f"{field} is invalid")
++    return value
++
++
++@dataclass(frozen=True, repr=False)
++class SanitizedMediaProcessorOutcome:
++    """One processor outcome with only stable, non-content evidence."""
++
++    media_id: str
++    kind: str
++    status: str
++    result_digest: str
++    reason_code: str | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.media_id) is not str or _MEDIA_ID.fullmatch(self.media_id) is None:
++            raise ValueError("media_id is invalid")
++        if type(self.kind) is not str or self.kind not in _MEDIA_KINDS:
++            raise ValueError("media kind is invalid")
++        if type(self.status) is not str or self.status not in _MEDIA_STATUSES:
++            raise ValueError("media status is invalid")
++        _digest(self.result_digest, "result_digest")
++        if self.reason_code is not None and (
++            type(self.reason_code) is not str
++            or _IDENTITY.fullmatch(self.reason_code) is None
++        ):
++            raise ValueError("reason_code is invalid")
++        if self.status == "failed" and self.reason_code is None:
++            raise ValueError("failed outcome requires reason_code")
++        if self.status != "failed" and self.reason_code is not None:
++            raise ValueError("successful outcome carries reason_code")
++
++    def __repr__(self) -> str:
++        return f"{type(self).__name__}(media_id={self.media_id!r}, status={self.status!r})"
++
++
++@dataclass(frozen=True, repr=False)
++class SanitizedMediaProcessorRun:
++    """A complete, bounded processor pass represented by sanitized facts."""
++
++    outcomes: tuple[SanitizedMediaProcessorOutcome, ...]
++    expected_media_ids: tuple[str, ...]
++    source_digest_before: str
++    source_digest_after: str
++    write_digest_before: str
++    write_digest_after: str
++
++    def __post_init__(self) -> None:
++        if type(self.outcomes) is not tuple:
++            raise TypeError("outcomes are invalid")
++        if type(self.expected_media_ids) is not tuple:
++            raise TypeError("expected_media_ids are invalid")
++        for outcome in self.outcomes:
++            if type(outcome) is not SanitizedMediaProcessorOutcome:
++                raise TypeError("outcomes are invalid")
++        ids = tuple(outcome.media_id for outcome in self.outcomes)
++        expected = self.expected_media_ids
++        if (
++            any(type(value) is not str or _MEDIA_ID.fullmatch(value) is None for value in expected)
++            or tuple(sorted(expected)) != expected
++            or len(set(expected)) != len(expected)
++            or tuple(sorted(ids)) != ids
++            or len(set(ids)) != len(ids)
++            or set(ids) != set(expected)
++        ):
++            raise ValueError("media outcome identity or ordering is invalid")
++        for field in (
++            "source_digest_before", "source_digest_after",
++            "write_digest_before", "write_digest_after",
++        ):
++            _digest(getattr(self, field), field)
++
++    @property
++    def source_unchanged(self) -> bool:
++        return self.source_digest_before == self.source_digest_after
++
++    @property
++    def writes_unchanged(self) -> bool:
++        return self.write_digest_before == self.write_digest_after
++
++    def canonical_facts(self) -> tuple[tuple[str, str, str, str | None], ...]:
++        return tuple(
++            (item.media_id, item.kind, item.status, item.reason_code)
++            for item in self.outcomes
++        )
++
++    @classmethod
++    def from_batch(
++        cls,
++        *,
++        batch_result: object,
++        kind_by_media_id: tuple[tuple[str, str], ...],
++        expected_media_ids: tuple[str, ...],
++        source_digest_before: str,
++        source_digest_after: str,
++        write_digest_before: str,
++        write_digest_after: str,
++        skipped_media_ids: tuple[str, ...] = (),
++    ) -> "SanitizedMediaProcessorRun":
++        """Sanitize a trusted ``MediaBatchProcessingResult`` without copying text.
++
++        The exact batch type is checked before reading any attributes.  Only
++        media IDs, processing status, failure category, and asset content hash
++        are retained in the resulting gate input.
++        """
++        from knowledgenexus.foundation.application.use_cases.process_confluence_media_batch import (
++            MediaBatchProcessingResult,
++        )
++
++        if type(batch_result) is not MediaBatchProcessingResult:
++            raise TypeError("batch_result is invalid")
++        if type(kind_by_media_id) is not tuple or type(expected_media_ids) is not tuple or type(skipped_media_ids) is not tuple:
++            raise TypeError("media scope is invalid")
++        kinds = dict(kind_by_media_id)
++        if len(kinds) != len(kind_by_media_id):
++            raise ValueError("duplicate media kind mapping")
++        skipped = set(skipped_media_ids)
++        if any(type(value) is not str for value in skipped):
++            raise TypeError("skipped media IDs are invalid")
++        expected = tuple(expected_media_ids)
++        assets = batch_result.assets
++        if type(assets) is not tuple:
++            raise TypeError("batch assets are invalid")
++        outcomes: list[SanitizedMediaProcessorOutcome] = []
++        for asset in assets:
++            if type(asset) is not dict:
++                raise ValueError("batch asset is invalid")
++            media_id = asset.get("media_id")
++            if type(media_id) is not str or media_id not in kinds:
++                raise ValueError("batch asset identity is invalid")
++            status = "skipped" if media_id in skipped else (
++                "failed" if asset.get("processing_status") == "failed" else "processed"
++            )
++            failure = "processor_failure" if status == "failed" else None
++            result_digest = asset.get("content_hash")
++            outcomes.append(
++                SanitizedMediaProcessorOutcome(
++                    media_id=media_id,
++                    kind=kinds[media_id],
++                    status=status,
++                    result_digest=result_digest,
++                    reason_code=failure,
++                )
++            )
++        return cls(
++            outcomes=tuple(sorted(outcomes, key=lambda item: item.media_id)),
++            expected_media_ids=expected,
++            source_digest_before=source_digest_before,
++            source_digest_after=source_digest_after,
++            write_digest_before=write_digest_before,
++            write_digest_after=write_digest_after,
++        )
++
++
++@dataclass(frozen=True, repr=False)
++class BoundedMediaGateRequest:
++    """Input for :class:`EvaluateBoundedMediaCorpusAcceptance`."""
++
++    first_run: SanitizedMediaProcessorRun
++    second_run: SanitizedMediaProcessorRun
++    evidence_kind: str
++
++    def __post_init__(self) -> None:
++        if type(self.first_run) is not SanitizedMediaProcessorRun or type(self.second_run) is not SanitizedMediaProcessorRun:
++            raise TypeError("media runs are invalid")
++        if type(self.evidence_kind) is not str or self.evidence_kind not in {"synthetic_fixture", "sanitized_real_capture"}:
++            raise ValueError("evidence_kind is invalid")
++        if self.first_run.expected_media_ids != self.second_run.expected_media_ids:
++            raise ValueError("media run scopes differ")
++
++
++@dataclass(frozen=True, repr=False)
++class PublishedSnapshotReadback:
++    """Sanitized readback metadata for one published snapshot."""
++
++    dataset_version: str
++    content_digest: str
++    observed_pages: int
++    stream_counts: tuple[tuple[str, int], ...]
++    readback_valid: bool
++    relation_closed: bool
++    acl_closed: bool
++    sync_closed: bool
++    atomic_publish: bool
++    no_clobber: bool
++    sanitized_output: bool
++    transport: str
++    rss_baseline_bytes: int | None = None
++    rss_peak_bytes: int | None = None
++    duration_milliseconds: int | None = None
++
++    def __post_init__(self) -> None:
++        if type(self.dataset_version) is not str or _DATASET_VERSION.fullmatch(self.dataset_version) is None:
++            raise ValueError("dataset_version is invalid")
++        _digest(self.content_digest, "content_digest")
++        if type(self.observed_pages) is not int or self.observed_pages < 0:
++            raise ValueError("observed_pages is invalid")
++        if type(self.stream_counts) is not tuple:
++            raise TypeError("stream_counts are invalid")
++        previous: str | None = None
++        seen: set[str] = set()
++        for item in self.stream_counts:
++            if type(item) is not tuple or len(item) != 2:
++                raise TypeError("stream_counts are invalid")
++            stream, count = item
++            if type(stream) is not str or stream not in _STREAMS or stream in seen or (previous is not None and stream <= previous):
++                raise ValueError("stream_counts ordering is invalid")
++            if type(count) is not int or count < 0:
++                raise ValueError("stream count is invalid")
++            previous = stream
++            seen.add(stream)
++        if seen != _STREAMS:
++            raise ValueError("stream_counts must cover all Foundation streams")
++        for field in (
++            "readback_valid", "relation_closed", "acl_closed", "sync_closed",
++            "atomic_publish", "no_clobber", "sanitized_output",
++        ):
++            if type(getattr(self, field)) is not bool:
++                raise TypeError(f"{field} is invalid")
++        if self.transport not in {"offline_fixture", "production"}:
++            raise ValueError("transport is invalid")
++        for field in ("rss_baseline_bytes", "rss_peak_bytes", "duration_milliseconds"):
++            value = getattr(self, field)
++            if value is not None and (type(value) is not int or value < 0):
++                raise ValueError(f"{field} is invalid")
++        if self.rss_peak_bytes is not None and self.rss_baseline_bytes is not None and self.rss_peak_bytes < self.rss_baseline_bytes:
++            raise ValueError("RSS counters are inconsistent")
++
++    def canonical_facts(self) -> tuple[object, ...]:
++        return (
++            self.dataset_version, self.content_digest, self.observed_pages,
++            self.stream_counts, self.readback_valid, self.relation_closed,
++            self.acl_closed, self.sync_closed, self.atomic_publish,
++            self.no_clobber, self.sanitized_output, self.transport,
++            self.rss_baseline_bytes, self.rss_peak_bytes,
++            self.duration_milliseconds,
++        )
++
++
++@dataclass(frozen=True, repr=False)
++class ScaleGateRequest:
++    """Input for :class:`EvaluateScaleGateEvidence`."""
++
++    profile_id: str
++    target_pages: int
++    first_readback: PublishedSnapshotReadback
++    second_readback: PublishedSnapshotReadback
++    evidence_kind: str
++
++    def __post_init__(self) -> None:
++        if type(self.profile_id) is not str or self.profile_id not in {"m7-crawl-scale-acceptance-v2", "m7-crawl-reliability-v1"}:
++            raise ValueError("profile_id is invalid")
++        if type(self.target_pages) is not int or self.target_pages not in (10000, 100000):
++            raise ValueError("target_pages is invalid")
++        if self.profile_id == "m7-crawl-reliability-v1" and self.target_pages != 10000:
++            raise ValueError("reliability profile cannot claim 100k target")
++        if type(self.first_readback) is not PublishedSnapshotReadback or type(self.second_readback) is not PublishedSnapshotReadback:
++            raise TypeError("readback metadata is invalid")
++        if type(self.evidence_kind) is not str or self.evidence_kind not in {"synthetic_fixture", "sanitized_real_capture"}:
++            raise ValueError("evidence_kind is invalid")
++
++
++__all__ = [
++    "SanitizedMediaProcessorOutcome", "SanitizedMediaProcessorRun",
++    "BoundedMediaGateRequest", "PublishedSnapshotReadback", "ScaleGateRequest",
++]
+diff --git a/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py b/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
+new file mode 100644
+index 0000000..eb89e87
+--- /dev/null
++++ b/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
+@@ -0,0 +1,131 @@
++from __future__ import annotations
++
++import pytest
++
++from knowledgenexus.foundation.application.use_cases.evaluate_foundation_gates import (
++    FoundationGateEvaluationError,
++    EvaluateBoundedMediaCorpusAcceptance,
++    EvaluateScaleGateEvidence,
++)
++from knowledgenexus.foundation.domain.models.foundation_gate_inputs import (
++    BoundedMediaGateRequest,
++    PublishedSnapshotReadback,
++    SanitizedMediaProcessorOutcome,
++    SanitizedMediaProcessorRun,
++    ScaleGateRequest,
++)
++
++
++def _media_run(*, source_after: str = "a" * 64, failed: bool = False) -> SanitizedMediaProcessorRun:
++    kinds = ("chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf")
++    outcomes = tuple(
++        SanitizedMediaProcessorOutcome(
++            media_id=f"confluence:attachment:{index}",
++            kind=kind,
++            status="failed" if failed and index == 1003 else "processed",
++            result_digest=chr(96 + index - 999) * 64,
++            reason_code="capability_failure" if failed and index == 1003 else None,
++        )
++        for index, kind in zip(range(1000, 1005), kinds)
++    )
++    return SanitizedMediaProcessorRun(
++        outcomes=outcomes,
++        expected_media_ids=tuple(item.media_id for item in outcomes),
++        source_digest_before="a" * 64,
++        source_digest_after=source_after,
++        write_digest_before="c" * 64,
++        write_digest_after="c" * 64,
++    )
++
++
++def test_bounded_media_evaluator_derives_digest_and_requires_repeat() -> None:
++    request = BoundedMediaGateRequest(
++        first_run=_media_run(), second_run=_media_run(), evidence_kind="sanitized_real_capture"
++    )
++    result = EvaluateBoundedMediaCorpusAcceptance().execute(request=request)
++    assert result.status == "complete"
++    assert result.evidence_digest is not None
++    assert result.processed_count == 5
++
++    failed = EvaluateBoundedMediaCorpusAcceptance().execute(
++        request=BoundedMediaGateRequest(
++            first_run=_media_run(failed=True), second_run=_media_run(failed=True), evidence_kind="synthetic_fixture"
++        )
++    )
++    assert failed.status == "failed"
++    assert failed.failed_count == 1
++
++
++@pytest.mark.parametrize("value", [None, object(), {"first_run": 1}])
++def test_bounded_media_evaluator_rejects_wrong_runtime_types(value: object) -> None:
++    with pytest.raises(FoundationGateEvaluationError):
++        EvaluateBoundedMediaCorpusAcceptance().execute(request=value)
++
++
++def _readback(*, digest: str = "d" * 64, closed: bool = True) -> PublishedSnapshotReadback:
++    streams = (
++        ("acl", 10), ("chunks", 20), ("documents", 10), ("media_assets", 3),
++        ("relations", 4), ("symbols", 2), ("sync_state", 13), ("tombstones", 0),
++    )
++    return PublishedSnapshotReadback(
++        dataset_version="v20260808-120000-000001Z",
++        content_digest=digest,
++        observed_pages=10000,
++        stream_counts=streams,
++        readback_valid=closed,
++        relation_closed=closed,
++        acl_closed=closed,
++        sync_closed=closed,
++        atomic_publish=closed,
++        no_clobber=closed,
++        sanitized_output=closed,
++        transport="production",
++        rss_baseline_bytes=100,
++        rss_peak_bytes=200,
++        duration_milliseconds=300,
++    )
++
++
++def test_scale_evaluator_accepts_repeat_readback_and_rejects_closure_failure() -> None:
++    result = EvaluateScaleGateEvidence().execute(
++        request=ScaleGateRequest(
++            profile_id="m7-crawl-scale-acceptance-v2",
++            target_pages=10000,
++            first_readback=_readback(),
++            second_readback=_readback(),
++            evidence_kind="sanitized_real_capture",
++        )
++    )
++    assert result.status == "pass"
++    assert result.run_count == 2
++    assert result.evidence_digest is not None
++
++    failed = EvaluateScaleGateEvidence().execute(
++        request=ScaleGateRequest(
++            profile_id="m7-crawl-scale-acceptance-v2",
++            target_pages=10000,
++            first_readback=_readback(closed=False),
++            second_readback=_readback(closed=False),
++            evidence_kind="synthetic_fixture",
++        )
++    )
++    assert failed.status == "failed"
++    assert "readback" in (failed.failure_reason or "")
++
++
++def test_gate_input_rejects_impossible_stream_counts_before_field_access() -> None:
++    with pytest.raises(ValueError):
++        _readback().__class__(
++            dataset_version="v20260808-120000-000001Z",
++            content_digest="d" * 64,
++            observed_pages=10000,
++            stream_counts=(("documents", True),),
++            readback_valid=True,
++            relation_closed=True,
++            acl_closed=True,
++            sync_closed=True,
++            atomic_publish=True,
++            no_clobber=True,
++            sanitized_output=True,
++            transport="production",
++        )
+-- 
+2.45.1.windows.1
+
