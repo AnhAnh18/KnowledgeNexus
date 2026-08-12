@@ -44,7 +44,9 @@ def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
     assert "do not use Ctrl+C" in b_text + c_text
     assert "<ABS-DATASET-ROOT-A>" in b_text
     assert "<ABS-DATASET-ROOT-B>" in b_text
-    assert "dataset root must already exist as an empty plain directory" in b_text
+    assert "runtime roots must be absent" in b_text
+    assert "-RecoveryOnly" in b_text
+    assert "production strict readback" in b_text
     assert "and `LATEST.txt` must be absent" in b_text
     assert "delta dataset root must already exist as an empty plain directory" in c_text
     assert "--jira-relation-profile" in b_text + c_text
