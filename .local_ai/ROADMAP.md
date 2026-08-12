@@ -98,7 +98,8 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | W4 - Evidence-bound second-sync sparse delta | complete; approved and merged | W4-A, W4-B, W4-C1, and W4-C2 are approved with no open P0/P1/P2 at source-review head `cec2a8c`; the production, contract, and test range is present in `main` | W4 proves the bounded offline delta publication path. It does not constitute real operator evidence or a deployed Indexing import. |
 | W5 - Real-input Foundation acceptance and closeout | active staged gate; no live PASS claimed | W5 plan and W5-A inspection/runbooks are merged; the guarded W5-B Root-1 one-shot packet is present at `5c79924` | W5-B and W5-C each require separate explicit owner authorization. W5-D and consolidated independent closeout follow only after sanitized evidence is accepted. |
 | Indexing I0-I3 - Snapshot consumption and activation | I0 discovery complete; I1-I3 not authorized | Source inspection found reusable storage, BGE-M3, Qdrant, shared contracts, and DI seams, but no strict immutable resolver, snapshot importer, or two-store activation barrier | For one stable full run, freeze the Indexing base after W5 closeout, then implement/review I1, I2-A/I2-B, and I3. SnapshotReady remains later. |
-| M11 - PLM read-only ingestion | **hold** | No real PLM MCP response fixtures are available in this environment; no PLM crawler or adapter is authorized yet | Resume only after sanitized read-only MCP evidence proves the API contract. Confluence closeout is the current priority. |
+| M11 - Structure-aware retrieval handoff and chunking improvements | planned; post-M10/W5 and Indexing baseline | Current chunks preserve `document_id`, `heading_path`, stable IDs, and deterministic export order; retrieval context and semantic chunking still lack benchmark evidence | Cross-boundary milestone only. Foundation may add an approved structure/order handoff; Indexing/Retrieval own context assembly, parent expansion, embedding, and search. |
+| M12 - PLM read-only ingestion | **hold** | No real PLM MCP response fixtures are available in this environment; no PLM crawler or adapter is authorized yet | Resume only after sanitized read-only MCP evidence proves the API contract. Confluence closeout and the approved Foundation-to-Indexing sequence remain the current priority. |
 
 ## 2. Current Task
 
@@ -140,7 +141,7 @@ The Indexing handoff remains independently gated. I0 discovery is complete,
 while I1 strict resolution/validation, I2 full-snapshot import, and I3
 two-store verification/activation are not authorized or implemented. For the
 owner goal of a single stable Foundation-to-Indexing run, freeze the official
-Indexing base after W5-D closeout. PLM M11 remains held until the Confluence
+Indexing base after W5-D closeout. PLM M12 remains held until the Confluence
 work is accepted and sanitized PLM MCP evidence becomes available.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
@@ -1159,6 +1160,159 @@ explicit-version import and two-store activation. A library-only I1 could be
 implemented before W5 finishes only as an optional schedule optimization; it
 would not make the end-to-end system runnable and may require a post-W5 rebase.
 
+## 12.1 M11 - Structure-Aware Retrieval Handoff and Chunking Improvements
+
+Status: planned after M10/W5 and the first approved Indexing baseline. This
+milestone records future improvement work and must not be interpreted as
+permission to implement Retrieval inside Foundation or to change the active
+chunker before benchmark evidence exists.
+
+Purpose:
+- Preserve the current leaf `ChunkRecord` contract as the stable searchable
+  evidence unit while enabling later neighbor, section, parent-document, and
+  hierarchical retrieval.
+- Establish the minimum cross-boundary structure/order handoff needed by
+  Indexing and Retrieval without forcing full page text into Qdrant or changing
+  `ChunkRecord.text` silently.
+- Evaluate embedding-based semantic prose splitting against the approved
+  structural baseline before any production chunking migration.
+
+Current baseline:
+- A Confluence chunk is a retrievable leaf linked directly to its page through
+  `document_id`.
+- `heading_path` preserves logical section ancestry but is not a first-class
+  section node.
+- `part_index`/`part_total` describe forced-split parts only; they are not a
+  document-global order or parent-child model.
+- Retrieval is expected to search slim vector references and hydrate exact
+  chunk text. Full-page context is not the default contract.
+- Foundation export ordering is deterministic, but `ChunkRecord` does not
+  currently carry a global `document_order` field.
+
+### M11-A - Retrieval context baseline and policy decision
+
+Owner: Retrieval/Chat, with Indexing read-port support. Foundation scope is
+documentation/contract consultation only.
+
+Planned outcomes:
+- Implement and benchmark `leaf_only`, `same_section`, bounded neighbor, and
+  small-document/full-document fallback strategies.
+- Group results by `document_id`; use `heading_path` for same-section expansion.
+- Deduplicate overlap/repeated breadcrumb/table-header material for context
+  assembly without changing stored or embedded `ChunkRecord.text`.
+- Preserve leaf-level provenance/citations even when larger context is supplied
+  to the LLM.
+- Enforce ACL before context is returned or sent to Chat/Gauss.
+- Enforce an explicit context token budget and deterministic tie/order policy.
+
+M11-A gate:
+- Context assembly tests prove no cross-ACL leakage, deterministic ordering,
+  bounded context size, stable citations, and no implicit full-page expansion.
+- Retrieval application use cases exist; ports/adapters alone do not close the
+  stage.
+
+### M11-B - Deterministic document order handoff
+
+Initial least-invasive option:
+- Indexing derives and persists `document_order` from validated deterministic
+  `chunks.jsonl` order, scoped by `document_id`.
+
+Contract-hardening option:
+- After owner review, formalize document order in an additive structure
+  artifact or a versioned schema change.
+
+Requirements:
+- Do not reinterpret `part_index` as global chunk order.
+- Preserve order through snapshot validation/import/hydrate storage.
+- Neighbor expansion remains bounded and ACL-safe.
+- Same input and configuration produce the same order.
+- If a Foundation schema/export shape changes, update schema, manifest,
+  validators, importer, tests, and migration documentation together.
+
+M11-B gate:
+- A matched leaf can resolve deterministic previous/next siblings within the
+  same document without scanning or reparsing source systems.
+
+### M11-C - Optional additive structure artifact
+
+Candidate direction, subject to a focused plan and owner decision:
+- Add a versioned `structure.jsonl` or equivalent contract with page/section
+  nodes, parent identity, `heading_path`, deterministic document order, and
+  ordered child chunk IDs.
+- Keep `ChunkRecord` as the retrievable leaf and keep its text/ID semantics
+  unchanged unless a separate approved chunker migration requires otherwise.
+- Do not store full page text in Qdrant.
+- Define whether parent/section text is materialized by Foundation, derived by
+  Indexing from ordered child chunks, or stored as a separate hydrate-only
+  representation.
+- Define tombstone/delta behavior for structure nodes before the first delta
+  snapshot that contains them.
+
+M11-C gate:
+- Every child chunk resolves to exactly one valid owning document and, when
+  applicable, one section parent.
+- Structure graph is acyclic, ordered, schema-valid, deterministic, and coherent
+  with `documents.jsonl` and `chunks.jsonl`.
+- Existing leaf consumers can continue operating when the optional hierarchy is
+  not used, according to the approved compatibility policy.
+
+### M11-D - Parent-child retrieval
+
+Owner: Retrieval/Indexing; not Foundation runtime behavior.
+
+Target behavior:
+- Search small leaf chunks for precision.
+- Resolve the matched leaf to a parent section when more context is needed.
+- Hydrate parent/section context within a query-level token budget.
+- Retain leaf evidence for scoring, ACL, provenance, and citations.
+- Use full-document expansion only for small documents or explicit overview
+  intent.
+
+Optional later experiment:
+- Compare leaf-only vectors with leaf + section/page multi-level vectors.
+- Do not productionize multi-level indexing without benchmark evidence for
+  quality, duplicate-result handling, storage cost, and latency.
+
+M11-D gate:
+- Parent expansion improves the approved retrieval benchmark without unacceptable
+  context inflation, latency, duplicate evidence, or citation ambiguity.
+
+### M11-E - Semantic prose chunking benchmark and migration decision
+
+Prerequisites:
+- Replace placeholder retrieval cases with approved real corpus anchors.
+- Produce a retrieval baseline from the active structural BGE-M3 medium profile.
+- Keep table, fenced code, heading boundaries, exact token counting, hard
+  maximum, stable identity, and fail-closed rules in scope.
+
+Candidate experiment:
+- Run embedding-based semantic breakpoint detection only inside prose candidates
+  already isolated by the Foundation structural parser.
+- Compare at least structural baseline, semantic split only above hard maximum,
+  and an earlier activation threshold candidate.
+- Measure Recall@k, MRR/nDCG, context precision/recall, chunk count, token
+  distribution, latency, embedding cost, and chunk churn under local edits.
+
+Migration rule:
+- Do not import the archived experimental LangChain implementation directly as a
+  production dependency. If selected, implement a small pinned internal boundary
+  component according to approved architecture ownership.
+- A semantic splitting behavior change requires the approved chunker/config
+  version migration, a new full snapshot, and downstream re-index/re-embed.
+- If the benchmark does not show a material benefit, retain the structural
+  baseline and close the experiment without production migration.
+
+M11 completion gate:
+- Retrieval context policy is implemented and evidence-backed.
+- Deterministic neighbor resolution exists or is explicitly rejected by owner
+  decision.
+- Any structure artifact is contract-valid and backward-compatible according to
+  its approved migration plan.
+- Parent-child and semantic variants are adopted only with benchmark evidence;
+  otherwise the current leaf/structural baseline remains authoritative.
+- Foundation still performs no query-time retrieval, Qdrant operation, reranking,
+  chat, or Gauss work.
+
 ## 13. Current Execution Boundary and Next Priority
 
 The repository remains Confluence-first. W4 is complete; W5 is now the active
@@ -1179,7 +1333,7 @@ The M9-A4 OCR productionization gate and other deferred media capabilities
 remain separate; W5 is explicitly text plus Draw.io only and does not grant an
 OCR/PDF/image/audio/video PASS.
 
-M11 PLM remains a deferred, read-only future track. No PLM API fields,
+M12 PLM remains a deferred, read-only future track. No PLM API fields,
 pagination behavior, attachment authorization, or retry semantics may be
 implemented from tool descriptions alone.
 
