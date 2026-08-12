@@ -2,7 +2,8 @@
 
 This file is local execution guidance, not a normative contract.
 
-Last workspace verification: 2026-08-08.
+Last workspace verification: 2026-08-12.
+Last roadmap planning update: 2026-08-12.
 
 Precedence:
 1. `contracts/foundation/schemas/`
@@ -94,6 +95,9 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | M8 - Production-quality normalization and chunking | bounded implementation complete; M8-AC real gate `pending_external_input` | M8-A through M8-E independently reviewed `PASS`; M8-AC implementation/re-review `PASS`, but no approved real 10-20 page corpus was supplied | M8-D/E remain read-only; M8-AC does not claim a real-corpus PASS without operator-supplied generation, selection, and tokenizer assets. |
 | M9 - Media, Git, symbols, and deletion propagation | bounded implementation complete; M9-A4 contract/policy seam independently reviewed `PASS`; OCR production activation `pending_external_input` | M9-A1/A2/A3, M9-A4 Stage A, M9-B, M9-C, M9-D1, and M9-D2 are independently approved; no OCR engine approval/evidence exists yet; M8-AC real gate remains `pending_external_input` | Delta propagation and OCR contracts are bounded seams; engine activation, M10 real inputs, and full production evidence remain gated. |
 | M10 - First full POC Foundation snapshot | bounded implementation complete; real gates `pending_external_input` | M10-A/B/C/D complete and independently reviewed `PASS`; M10-E synthetic acceptance complete and independently reviewed `PASS`; M8-AC real gate and real M10 POC remain `pending_external_input` | Real delta/deletion propagation is required before the second sync or first delta export, not before the initial `full_snapshot`. |
+| W4 - Evidence-bound second-sync sparse delta | complete; approved and merged | W4-A, W4-B, W4-C1, and W4-C2 are approved with no open P0/P1/P2 at source-review head `cec2a8c`; the production, contract, and test range is present in `main` | W4 proves the bounded offline delta publication path. It does not constitute real operator evidence or a deployed Indexing import. |
+| W5 - Real-input Foundation acceptance and closeout | active staged gate; no live PASS claimed | W5 plan and W5-A inspection/runbooks are merged; the guarded W5-B Root-1 one-shot packet is present at `5c79924` | W5-B and W5-C each require separate explicit owner authorization. W5-D and consolidated independent closeout follow only after sanitized evidence is accepted. |
+| Indexing I0-I3 - Snapshot consumption and activation | I0 discovery complete; I1-I3 not authorized | Source inspection found reusable storage, BGE-M3, Qdrant, shared contracts, and DI seams, but no strict immutable resolver, snapshot importer, or two-store activation barrier | For one stable full run, freeze the Indexing base after W5 closeout, then implement/review I1, I2-A/I2-B, and I3. SnapshotReady remains later. |
 | M11 - PLM read-only ingestion | **hold** | No real PLM MCP response fixtures are available in this environment; no PLM crawler or adapter is authorized yet | Resume only after sanitized read-only MCP evidence proves the API contract. Confluence closeout is the current priority. |
 
 ## 2. Current Task
@@ -122,12 +126,22 @@ M9-B and M9-C are independently approved. M9-D1 tombstone contract and
 explicit cascade, and M9-D2 delta/inventory diff propagation, are independently
 approved. M9-D2 remains read-only and does not perform export/store/checkpoint
 side effects. M10-A through M10-D are complete and independently reviewed
-`PASS`. M10-E synthetic acceptance is complete and independently reviewed
-`PASS`; no real full-snapshot run has started, and the M8-AC real gate remains
-`pending_external_input`. The next active work is to complete the remaining
-Confluence real-input gates and produce a real, bounded Confluence snapshot.
-PLM M11 is explicitly held until that Confluence work is accepted and the
-required sanitized PLM MCP evidence becomes available.
+`PASS`; M10-E synthetic acceptance is also independently reviewed `PASS`.
+
+W4-A/W4-B/W4-C1/W4-C2 are now complete and approved, closing the bounded
+base-bound sparse-delta implementation path. W5 is the active real-input gate:
+its plan, W5-A inspection/runbooks, and guarded W5-B Root-1 execution packet are
+merged, but no W5-B live PASS is claimed here. The next external transition is
+the separately owner-authorized W5-B one-shot; W5-C requires another owner
+authorization after W5-B evidence is accepted, and W5-D performs sanitized
+evidence reconciliation and closeout.
+
+The Indexing handoff remains independently gated. I0 discovery is complete,
+while I1 strict resolution/validation, I2 full-snapshot import, and I3
+two-store verification/activation are not authorized or implemented. For the
+owner goal of a single stable Foundation-to-Indexing run, freeze the official
+Indexing base after W5-D closeout. PLM M11 remains held until the Confluence
+work is accepted and sanitized PLM MCP evidence becomes available.
 
 - M2C1 `CanonicalDocumentRecordBuilder` - done.
 - M2C2 `ChunkRecordBuilder` - done; source/test files and review artifacts
@@ -1107,19 +1121,63 @@ Acceptance categories:
 | M10-D CLI and publication boundary | complete; independently reviewed `PASS` | Added offline sanitized CLI, M3 writer/completer/publisher wiring, no-clobber preflight, strict post-publication acceptance, and bounded rollback on acceptance failure. Focused M10-D/E suite `40 passed`; architecture `89 passed`; fresh review `.codex-workflow/20260805-m10/62-m10de-fix-independent-review-final.md` is `PASS`. |
 | M10-E synthetic acceptance and external real-run gate | synthetic acceptance complete; real gate `pending_external_input` | Deterministic synthetic ten-file acceptance and repeatability are complete and independently reviewed `PASS`; real operator evidence still requires approved Confluence/Git inputs, ordered scope, and tokenizer assets. |
 
+### Full-snapshot capability timeline
+
+| Milestone | Proven capability | Remaining boundary |
+|---|---|---|
+| M3F/M4 | Deterministic schema-valid synthetic full snapshot, atomic publication, and `LATEST.txt` behavior | No real corpus and no Indexing import. |
+| M6G-D | One authorized real offline one-page full-snapshot export with sanitized closeout | Not the complete Root-1/Confluence-Git POC corpus. |
+| M10-A through M10-E | Complete bounded Foundation composition/export/readback implementation plus synthetic acceptance | Real bounded operator evidence remains a W5 responsibility. |
+| W4-A through W4-C2 | Approved evidence-bound second-sync sparse-delta implementation and strict effective-overlay path | No real W5-B/W5-C execution evidence. |
+| W5-A / W5-B packet | Transfer/preflight/runbooks and guarded Root-1 full-snapshot one-shot are prepared | W5-B live execution, owner acceptance, W5-C second sync, W5-D closeout, and consolidated independent review remain pending. |
+
+“Foundation can publish a full snapshot” must not be reported as “the complete
+Foundation-to-Indexing path is runnable.” The latter additionally requires the
+strict Indexing reader/import/activation stages below.
+
+### Foundation-to-Indexing execution order
+
+For the owner goal “run full once on one stable base”, use:
+
+```text
+owner-authorized W5-B Root-1 full snapshot
+-> owner accepts sanitized W5-B evidence
+-> separately authorized W5-C second sync + sparse delta
+-> W5-D reconciliation + consolidated independent review + closeout
+-> freeze the post-W5 Git head
+-> Indexing I1 strict immutable resolver and validate-before-write
+-> Indexing I2-A Foundation identity/provenance migration
+-> Indexing I2-B full-snapshot mapping, embedding, and staged writes
+-> Indexing I3 two-store verification and activation
+-> Foundation-to-Indexing full-snapshot acceptance
+-> Indexing I2-C delta/base-chain/tombstone import
+-> full + second-sync delta acceptance
+```
+
+SnapshotReady automation is deliberately later than successful
+explicit-version import and two-store activation. A library-only I1 could be
+implemented before W5 finishes only as an optional schedule optimization; it
+would not make the end-to-end system runnable and may require a post-W5 rebase.
+
 ## 13. Current Execution Boundary and Next Priority
 
-The repository remains Confluence-first. The next implementation work must stay
-within the existing Foundation contracts and close the bounded Confluence path
-before opening a new PLM connector track:
+The repository remains Confluence-first. W4 is complete; W5 is now the active
+staged acceptance path. The next work must stay within the reviewed W5 safety
+boundary:
 
-1. Supply and run the approved real M8-AC mini-corpus gate (10-20 pages plus
-   the required tokenizer assets).
-2. Resolve the M9-A4 OCR productionization decision and activate OCR only after
-   an approved engine/runtime/model and bounded acceptance evidence exist.
-3. Run the real M10 full-snapshot acceptance for the agreed Confluence/Git
-   scope, including schema, ACL, media, symbol, sync, and publication gates.
-4. Record the Confluence closeout and owner decision before resuming M11 PLM.
+1. Run W5-B only after a distinct explicit owner authorization, using the
+   guarded one-shot Root-1 packet and private external configuration.
+2. Return and reconcile aggregate sanitized W5-B evidence only; do not request
+   raw logs, page IDs, paths, principals, credentials, or source content.
+3. Begin W5-C only after the owner accepts W5-B and grants a new explicit live
+   authorization for the controlled second sync.
+4. Complete W5-D documentation-only reconciliation, consolidated independent
+   review, and owner closeout without claiming recurring-crawl readiness.
+5. Freeze the post-W5 head before authorizing the Indexing I1-I3 stage stack.
+
+The M9-A4 OCR productionization gate and other deferred media capabilities
+remain separate; W5 is explicitly text plus Draw.io only and does not grant an
+OCR/PDF/image/audio/video PASS.
 
 M11 PLM remains a deferred, read-only future track. No PLM API fields,
 pagination behavior, attachment authorization, or retry semantics may be
