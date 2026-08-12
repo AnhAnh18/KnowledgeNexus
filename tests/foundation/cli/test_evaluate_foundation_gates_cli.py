@@ -86,6 +86,28 @@ def test_media_cli_emits_only_sanitized_aggregate(
     assert "outcomes" not in captured.out
 
 
+def test_media_cli_accepts_explicit_drawio_only_scope(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = _media_run()
+    drawio = [item for item in run["outcomes"] if item["kind"] == "drawio"]
+    drawio_run = {**run, "outcomes": drawio, "expected_media_ids": [drawio[0]["media_id"]]}
+    path = _write(tmp_path, {"request": {
+        "first_run": drawio_run,
+        "second_run": drawio_run,
+        "evidence_kind": "sanitized_real_capture",
+        "real_capture_attested": True,
+        "transport": "production",
+        "media_scope": "drawio_only",
+    }})
+
+    assert cli.main(["--gate", "media", "--input", str(path)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "complete"
+    assert result["media_scope"] == "drawio_only"
+    assert result["kind_counts"] == [["drawio", 1]]
+
+
 def test_scale_cli_accepts_repeat_readback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _write(tmp_path, {"request": {
         "profile_id": "m7-crawl-scale-acceptance-v2",

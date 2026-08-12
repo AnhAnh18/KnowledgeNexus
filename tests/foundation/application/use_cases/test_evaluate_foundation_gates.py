@@ -66,6 +66,52 @@ def test_bounded_media_evaluator_derives_digest_and_requires_repeat() -> None:
     assert failed.failed_count == 1
 
 
+def test_bounded_media_evaluator_supports_explicit_drawio_only_scope() -> None:
+    drawio = _media_run()
+    # Keep only the Draw.io identity while preserving the sanitized run shape.
+    drawio_outcomes = tuple(item for item in drawio.outcomes if item.kind == "drawio")
+    drawio_run = SanitizedMediaProcessorRun(
+        outcomes=drawio_outcomes,
+        expected_media_ids=(drawio_outcomes[0].media_id,),
+        source_digest_before="a" * 64,
+        source_digest_after="a" * 64,
+        write_digest_before="c" * 64,
+        write_digest_after="c" * 64,
+    )
+    result = EvaluateBoundedMediaCorpusAcceptance().execute(
+        request=BoundedMediaGateRequest(
+            first_run=drawio_run,
+            second_run=drawio_run,
+            evidence_kind="sanitized_real_capture",
+            real_capture_attested=True,
+            transport="production",
+            media_scope="drawio_only",
+        )
+    )
+    assert result.status == "complete"
+    assert result.media_scope == "drawio_only"
+    assert result.kind_counts == (("drawio", 1),)
+
+
+@pytest.mark.parametrize("scope", [None, object(), "image_only", 1])
+def test_drawio_scope_rejects_invalid_runtime_enum(scope: object) -> None:
+    run = _media_run()
+    with pytest.raises((TypeError, ValueError)):
+        BoundedMediaGateRequest(
+            first_run=run, second_run=run, evidence_kind="synthetic_fixture",
+            media_scope=scope,  # type: ignore[arg-type]
+        )
+
+
+def test_drawio_scope_rejects_non_drawio_outcomes() -> None:
+    run = _media_run()
+    with pytest.raises(ValueError, match="non-Draw.io"):
+        BoundedMediaGateRequest(
+            first_run=run, second_run=run, evidence_kind="synthetic_fixture",
+            media_scope="drawio_only",
+        )
+
+
 @pytest.mark.parametrize("value", [None, object(), {"first_run": 1}])
 def test_bounded_media_evaluator_rejects_wrong_runtime_types(value: object) -> None:
     with pytest.raises(FoundationGateEvaluationError):

@@ -29,6 +29,7 @@ _MEDIA_KINDS = (
     "image_only_pdf",
 )
 _MEDIA_KIND_SET = frozenset(_MEDIA_KINDS)
+_MEDIA_SCOPES = frozenset({"all_media", "drawio_only"})
 _STREAMS = (
     "acl",
     "chunks",
@@ -129,12 +130,15 @@ class BoundedMediaCorpusAcceptance:
     no_silent_omission: bool
     evidence_digest: str | None = None
     failure_reason: str | None = None
+    media_scope: str = "all_media"
 
     def __post_init__(self) -> None:
         if type(self.status) is not str or self.status not in {"complete", "pending_external_input", "failed"}:
             raise ValueError("status is invalid")
         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
             raise ValueError("evidence_kind is invalid")
+        if type(self.media_scope) is not str or self.media_scope not in _MEDIA_SCOPES:
+            raise ValueError("media_scope is invalid")
         if self.failure_reason is not None and (
             type(self.failure_reason) is not str
             or not self.failure_reason
@@ -161,13 +165,16 @@ class BoundedMediaCorpusAcceptance:
                 raise ValueError("kind_counts count is invalid")
             previous, total = kind, total + count
             seen.add(kind)
+        if self.media_scope == "drawio_only" and any(kind != "drawio" for kind in seen):
+            raise ValueError("drawio_only result contains non-Draw.io media kind")
         if total != self.processed_count + self.skipped_count + self.failed_count:
             raise ValueError("media counters are inconsistent")
         if self.status == "pending_external_input":
             if self.kind_counts or total or any((self.deterministic_repeat, self.source_unchanged, self.no_silent_omission)) or self.evidence_kind is not None or self.evidence_digest is not None or self.failure_reason is not None:
                 raise ValueError("pending media gate carries observations")
         elif self.status == "complete":
-            if seen != _MEDIA_KIND_SET or any(count == 0 for _, count in self.kind_counts):
+            required_kinds = {"drawio"} if self.media_scope == "drawio_only" else _MEDIA_KIND_SET
+            if seen != required_kinds or any(count == 0 for _, count in self.kind_counts):
                 raise ValueError("complete media gate lacks required corpus kinds")
             if self.failed_count != 0:
                 raise ValueError("complete media gate contains failures")

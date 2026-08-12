@@ -344,7 +344,19 @@ def _parser() -> argparse.ArgumentParser:
         phase.add_argument("--resume-unique", action="store_true")
         phase.add_argument("--space-key")
         phase.add_argument("--root-page-id")
+        if name == "capture-pages":
+            phase.add_argument("--stop-after-batches", type=_positive_int)
     return parser
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("value must be a positive integer") from None
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be a positive integer")
+    return parsed
 
 
 def _load_reliability_profile(value: object) -> dict[str, object]:
@@ -572,7 +584,11 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
             page_fetcher=ConfluenceDataCenterPageAdapter(transport=transport),
             raw_page_store=composition.raw_page_store,
         )
-        captured = use_case.run(run_id=run_id, occurrences=facts, stop_after_batches=None)
+        captured = use_case.run(
+            run_id=run_id,
+            occurrences=facts,
+            stop_after_batches=getattr(args, "stop_after_batches", None),
+        )
         if captured.complete:
             session.complete_session()
         else:

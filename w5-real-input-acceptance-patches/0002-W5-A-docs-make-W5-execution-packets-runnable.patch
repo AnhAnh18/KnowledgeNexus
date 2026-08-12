@@ -1,0 +1,185 @@
+From 53736f33af62a3a68e4c23334ebd561745b179ea Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 20:51:44 +0700
+Subject: [PATCH 2/3] [W5-A] docs: make W5 execution packets runnable
+
+---
+ docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md     | 57 +++++++++++++++----
+ docs/runbooks/W5_C_SECOND_SYNC_DELTA.md       | 49 ++++++++++++++--
+ .../test_w5_a_runbook_artifacts.py            | 21 ++++++-
+ 3 files changed, 107 insertions(+), 20 deletions(-)
+
+diff --git a/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md b/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
+index 5f1a1a7..80fe8c4 100644
+--- a/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
++++ b/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
+@@ -19,26 +19,61 @@ the main machine only; never commit or transmit them.
+ 
+ ## Authorized sequence
+ 
+-Run the existing phases in order. The exact CLI signatures are discovered from
+-`--help` on the frozen head; do not invent historical flags.
++The frozen subtree CLI uses a positional phase and requires `--state-dir` and
++`--max-pages` for every phase. The operator fills the placeholders privately
++and keeps the resulting command transcript off-repository.
+ 
+ ```powershell
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase inventory <approved-options>
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-pages <approved-options>
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase process-pages <approved-options>
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-drawio <approved-options>
++$common = @(
++  "--state-dir", "<ABS-STATE-DIR>", "--max-pages", "<MAX-PAGES>",
++  "--raw-root", "<ABS-RAW-ROOT>",
++  "--reliability-profile-path", "<ABS-RELIABILITY-PROFILE>",
++  "--chunking-profile-path", "<ABS-CHUNKING-PROFILE>",
++  "--tokenizer-assets-dir", "<ABS-BGE-M3-DIR>",
++  "--space-key", "<SPACE-KEY>",
++  "--root-page-id", "<ROOT-PAGE-ID>"
++)
++ $inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
++ $run = $inventory.run_id
++ if (-not $run) { throw "inventory did not return a run identity" }
++# COMMAND 1: start page capture. The operator must interrupt this process with
++# Ctrl+C only after its output confirms a committed batch. This is the one
++# controlled stop; do not rerun COMMAND 1 after interruption.
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run
++# COMMAND 2: run exactly once after COMMAND 1 was interrupted. It resumes the
++# same run and raw root; do not execute it if COMMAND 1 completed normally.
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus process-pages @common `
++  --run-id $run
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-drawio @common `
++  --run-id $run
+ python -m knowledgenexus.foundation.cli.export_m10_snapshot `
+-  --export-mode full_snapshot <approved-offline-options>
++  --export-mode full_snapshot --raw-generation-root "<ABS-RAW-ROOT>" `
++  --run-id $run --generation-id $run `
++  --chunking-profile "<ABS-CHUNKING-PROFILE>" `
++  --tokenizer-assets-dir "<ABS-BGE-M3-DIR>" `
++  --jira-relation-profile "<ABS-JIRA-RELATION-PROFILE>" `
++  --dataset-root "<ABS-DATASET-ROOT-A>" --selection-path "<ABS-SELECTION>" `
++  --state-dir "<ABS-STATE-DIR>" --processing-state "<ABS-PROCESSING-STATE>" `
++  --drawio-state "<ABS-DRAWIO-STATE>" --space-key "<SPACE-KEY>" `
++  --root-page-id "<ROOT-PAGE-ID>" --media-policy required `
++  --git-repository "<PINNED-GIT-NAME>" --git-branch "<PINNED-GIT-BRANCH>" `
++  --git-commit "<PINNED-GIT-COMMIT>" --generated-at "<RFC3339>" `
++  --profile-identity "<PROFILE-IDENTITY>"
+ ```
+ 
+ Exercise one controlled stop after committed batches, then resume the same run
+ and prove committed windows/pages were not fetched again. Do not start a second
+ live sequence after the authorized sequence completes.
+ 
+-Publish the preserved generation twice into separate fresh dataset roots with
+-the same semantic inputs and `generated_at`. Verify privately that version
+-directories, dataset version, digest, eight streams, strict readback, counts,
+-cross-stream closure, `LATEST.txt`, and raw/state inputs are byte-identical.
++Repeat only the offline export command with `--dataset-root
++<ABS-DATASET-ROOT-B>` and the same semantic inputs and `generated_at`. Both
++dataset roots must be fresh and absent before each publish. Verify privately
++that version directories, dataset version, digest, eight streams, strict
++readback, counts, cross-stream closure, `LATEST.txt`, and raw/state inputs are
++byte-identical.
+ 
+ ## Sanitized return packet
+ 
+diff --git a/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md b/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
+index 1a3fbf0..16dd312 100644
+--- a/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
++++ b/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
+@@ -19,14 +19,51 @@ offline delta export. Never return credentials or raw runtime artifacts.
+ 
+ ## Authorized sequence
+ 
++The frozen subtree CLI uses a positional phase and requires `--state-dir` and
++`--max-pages` for every phase. Fill these placeholders privately on the main
++machine; do not copy the resulting command or values into Git.
++
+ ```powershell
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase inventory <approved-options>
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-pages <approved-options>
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase process-pages <approved-options>
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-drawio <approved-options>
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-delta-inventory <approved-options>
++$common = @(
++  "--state-dir", "<ABS-STATE-DIR>", "--max-pages", "<MAX-PAGES>",
++  "--raw-root", "<ABS-SECOND-RAW-ROOT>",
++  "--reliability-profile-path", "<ABS-RELIABILITY-PROFILE>",
++  "--chunking-profile-path", "<ABS-CHUNKING-PROFILE>",
++  "--tokenizer-assets-dir", "<ABS-BGE-M3-DIR>",
++  "--space-key", "<SPACE-KEY>",
++  "--root-page-id", "<ROOT-PAGE-ID>"
++)
++ $inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
++ $run = $inventory.run_id
++ if (-not $run) { throw "inventory did not return a run identity" }
++# COMMAND 1: start page capture. The operator must interrupt this process with
++# Ctrl+C only after a committed batch. Do not rerun COMMAND 1 after stopping.
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run
++# COMMAND 2: run exactly once after COMMAND 1 was interrupted. It resumes the
++# same run and raw root; do not execute it if COMMAND 1 completed normally.
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus process-pages @common `
++  --run-id $run
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-drawio @common `
++  --run-id $run
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-delta-inventory @common `
++  --run-id $run --dataset-root "<ABS-BASE-DATASET-ROOT>" `
++  --base-dataset-version "<ACCEPTED-BASE-VERSION>"
+ python -m knowledgenexus.foundation.cli.export_m10_snapshot `
+-  --export-mode delta --base-dataset-version <accepted-base-version> <approved-offline-options>
++  --export-mode delta --base-dataset-version "<ACCEPTED-BASE-VERSION>" `
++  --raw-generation-root "<ABS-SECOND-RAW-ROOT>" `
++  --run-id $run --generation-id $run `
++  --chunking-profile "<ABS-CHUNKING-PROFILE>" --tokenizer-assets-dir "<ABS-BGE-M3-DIR>" `
++  --jira-relation-profile "<ABS-JIRA-RELATION-PROFILE>" `
++  --dataset-root "<ABS-DELTA-DATASET-ROOT>" --selection-path "<ABS-SECOND-SELECTION>" `
++  --state-dir "<ABS-STATE-DIR>" --processing-state "<ABS-SECOND-PROCESSING-STATE>" `
++  --drawio-state "<ABS-SECOND-DRAWIO-STATE>" --space-key "<SPACE-KEY>" `
++  --root-page-id "<ROOT-PAGE-ID>" --media-policy required `
++  --git-repository "<PINNED-GIT-NAME>" --git-branch "<PINNED-GIT-BRANCH>" `
++  --git-commit "<PINNED-GIT-COMMIT>" --generated-at "<RFC3339>" `
++  --profile-identity "<PROFILE-IDENTITY>"
+ ```
+ 
+ Complete inventory must precede missing-page probes. Preserve status/body
+diff --git a/tests/foundation/integration/test_w5_a_runbook_artifacts.py b/tests/foundation/integration/test_w5_a_runbook_artifacts.py
+index bcb98b8..09f2af2 100644
+--- a/tests/foundation/integration/test_w5_a_runbook_artifacts.py
++++ b/tests/foundation/integration/test_w5_a_runbook_artifacts.py
+@@ -22,9 +22,24 @@ def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
+     assert "does not authorize" in (
+         _RUNBOOKS / "W5_A_REAL_INPUT_ACCEPTANCE.md"
+     ).read_text(encoding="utf-8")
+-    assert "--export-mode delta" in (
+-        _RUNBOOKS / "W5_C_SECOND_SYNC_DELTA.md"
+-    ).read_text(encoding="utf-8")
++    b_text = (_RUNBOOKS / "W5_B_ROOT1_FULL_SNAPSHOT.md").read_text(encoding="utf-8")
++    c_text = (_RUNBOOKS / "W5_C_SECOND_SYNC_DELTA.md").read_text(encoding="utf-8")
++    assert "--export-mode delta" in c_text
++    assert "--phase" not in b_text + c_text
++    assert "confluence_subtree_corpus inventory @common" in b_text
++    assert "confluence_subtree_corpus capture-delta-inventory @common" in c_text
++    assert '"--raw-root", "<ABS-RAW-ROOT>"' in b_text
++    assert '"--raw-root", "<ABS-SECOND-RAW-ROOT>"' in c_text
++    assert "$run = $inventory.run_id" in b_text + c_text
++    assert "--run-id $run" in b_text + c_text
++    assert "--resume-run-id $run" not in b_text + c_text
++    assert '--raw-generation-root "<ABS-RAW-ROOT>"' in b_text
++    assert '--raw-generation-root "<ABS-SECOND-RAW-ROOT>"' in c_text
++    assert "COMMAND 1" in b_text + c_text
++    assert "COMMAND 2" in b_text + c_text
++    assert "<ABS-DATASET-ROOT-A>" in b_text
++    assert "<ABS-DATASET-ROOT-B>" in b_text
++    assert "--jira-relation-profile" in b_text + c_text
+ 
+ 
+ def test_w5_a_sanitized_templates_are_valid_pending_envelopes() -> None:
+-- 
+2.55.0.windows.2
+

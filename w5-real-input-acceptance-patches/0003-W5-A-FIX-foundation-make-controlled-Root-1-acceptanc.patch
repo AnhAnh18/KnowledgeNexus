@@ -1,0 +1,440 @@
+From 5b8eb57c969de1b5f2886a887f89db2d48277609 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Wed, 12 Aug 2026 10:28:05 +0700
+Subject: [PATCH 3/3] [W5-A-FIX] foundation: make controlled Root-1 acceptance
+ executable
+
+---
+ contracts/foundation/CRAWL_ACCEPTANCE_SPEC.md |  18 +++
+ docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md     |  55 +++++----
+ docs/runbooks/W5_C_SECOND_SYNC_DELTA.md       |  41 +++++--
+ .../cli/confluence_subtree_corpus.py          |  18 ++-
+ .../test_confluence_subtree_capture_resume.py | 106 ++++++++++++++++++
+ .../cli/test_confluence_subtree_cli.py        |  36 ++++++
+ .../test_w5_a_runbook_artifacts.py            |  18 +++
+ 7 files changed, 261 insertions(+), 31 deletions(-)
+
+diff --git a/contracts/foundation/CRAWL_ACCEPTANCE_SPEC.md b/contracts/foundation/CRAWL_ACCEPTANCE_SPEC.md
+index 5906cb1..6005a1a 100644
+--- a/contracts/foundation/CRAWL_ACCEPTANCE_SPEC.md
++++ b/contracts/foundation/CRAWL_ACCEPTANCE_SPEC.md
+@@ -493,6 +493,24 @@ The live gate MUST use an approved transferred execution tree and repository-
+ local provenance under `REPOSITORY_TRANSFER_POLICY.md`. Foreign Git SHAs are
+ not checkout requirements.
+ 
++### 13.1 W5 bounded media acceptance scope
++
++The W5 gate request records exactly one explicit `media_scope` value:
++
++```text
++all_media
++drawio_only
++```
++
++`all_media` preserves the complete bounded-media gate: Draw.io, PDF, image,
++chart, and unsupported media outcomes are all required by the existing gate.
++`drawio_only` is the text-first Root-1 acceptance variant. It requires only
++Draw.io outcomes, rejects every non-Draw.io media outcome in the request and
++result, and does not claim PDF, image, chart, OCR, audio, or video acceptance.
++The selected scope is part of the sanitized gate result and determinism
++evidence. It is never inferred from missing media and must not weaken the
++complete `all_media` gate.
++
+ ## 14. Live prohibitions
+ 
+ The live acceptance MUST NOT:
+diff --git a/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md b/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
+index 80fe8c4..93fbf30 100644
+--- a/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
++++ b/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
+@@ -7,8 +7,9 @@ the main machine only; never commit or transmit them.
+ ## Required controls
+ 
+ - Freeze and record the approved execution head; require a clean tracked tree.
+-- Use fresh absent output roots with plain existing parents; reject symlink or
+-  reparse components and insufficient free disk.
++- Use existing empty plain dataset roots outside the repository; reject
++  symlink/reparse components and insufficient free disk. The generated
++  version/staging directories and `LATEST.txt` must be absent before publish.
+ - Keep credentials in the live process environment only and clear them before
+   offline processing/export.
+ - Use the active reliability profile and explicit BGE-M3 tokenizer directory.
+@@ -33,18 +34,33 @@ $common = @(
+   "--space-key", "<SPACE-KEY>",
+   "--root-page-id", "<ROOT-PAGE-ID>"
+ )
+- $inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
+- $run = $inventory.run_id
+- if (-not $run) { throw "inventory did not return a run identity" }
+-# COMMAND 1: start page capture. The operator must interrupt this process with
+-# Ctrl+C only after its output confirms a committed batch. This is the one
+-# controlled stop; do not rerun COMMAND 1 after interruption.
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+-  --run-id $run
+-# COMMAND 2: run exactly once after COMMAND 1 was interrupted. It resumes the
+-# same run and raw root; do not execute it if COMMAND 1 completed normally.
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+-  --run-id $run
++# The first call durably completes inventory work. The second call reads the
++# unique completed run and publishes its bound selection. Neither is a page
++# body capture invocation.
++$inventoryStarted = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0) { throw "inventory start failed" }
++$inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common `
++  --resume-unique | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0 -or $inventory.status -ne "complete") {
++  throw "inventory completion readback failed"
++}
++$run = $inventory.run_id
++if (-not $run) { throw "inventory did not return a run identity" }
++# COMMAND 1: stop cleanly after two committed 100-page batches. The command
++# must return exit 0 with semantic status "stopped"; do not use Ctrl+C.
++$stopped = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run --stop-after-batches 2 | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0 -or $stopped.status -ne "stopped") {
++  throw "controlled page-capture stop did not complete"
++}
++# COMMAND 2: resume the same durable run and raw root without a stop limit.
++# It must return exit 0 with semantic status "complete" and must not refetch
++# pages already committed by COMMAND 1.
++$resumed = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0 -or $resumed.status -ne "complete") {
++  throw "resumed page capture did not complete"
++}
+ python -m knowledgenexus.foundation.cli.confluence_subtree_corpus process-pages @common `
+   --run-id $run
+ python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-drawio @common `
+@@ -69,11 +85,12 @@ and prove committed windows/pages were not fetched again. Do not start a second
+ live sequence after the authorized sequence completes.
+ 
+ Repeat only the offline export command with `--dataset-root
+-<ABS-DATASET-ROOT-B>` and the same semantic inputs and `generated_at`. Both
+-dataset roots must be fresh and absent before each publish. Verify privately
+-that version directories, dataset version, digest, eight streams, strict
+-readback, counts, cross-stream closure, `LATEST.txt`, and raw/state inputs are
+-byte-identical.
++<ABS-DATASET-ROOT-B>` and the same semantic inputs and `generated_at`. Before
++each publish, its dataset root must already exist as an empty plain directory
++outside the repository. The generated version directory, its staging sibling,
++and `LATEST.txt` must be absent. Verify privately that version directories,
++dataset version, digest, eight streams, strict readback, counts, cross-stream
++closure, `LATEST.txt`, and raw/state inputs are byte-identical.
+ 
+ ## Sanitized return packet
+ 
+diff --git a/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md b/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
+index 16dd312..ce0c066 100644
+--- a/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
++++ b/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
+@@ -16,6 +16,9 @@ disposition.
+ 
+ Credentials remain only in the live process environment and are cleared before
+ offline delta export. Never return credentials or raw runtime artifacts.
++The delta dataset root must already exist as an empty plain directory outside
++the repository; its generated version/staging directories and `LATEST.txt`
++must be absent before publication.
+ 
+ ## Authorized sequence
+ 
+@@ -33,17 +36,33 @@ $common = @(
+   "--space-key", "<SPACE-KEY>",
+   "--root-page-id", "<ROOT-PAGE-ID>"
+ )
+- $inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
+- $run = $inventory.run_id
+- if (-not $run) { throw "inventory did not return a run identity" }
+-# COMMAND 1: start page capture. The operator must interrupt this process with
+-# Ctrl+C only after a committed batch. Do not rerun COMMAND 1 after stopping.
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+-  --run-id $run
+-# COMMAND 2: run exactly once after COMMAND 1 was interrupted. It resumes the
+-# same run and raw root; do not execute it if COMMAND 1 completed normally.
+-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+-  --run-id $run
++# The first call durably completes inventory work. The second call reads the
++# unique completed run and publishes its bound selection. Neither is a page
++# body capture invocation.
++$inventoryStarted = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0) { throw "inventory start failed" }
++$inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common `
++  --resume-unique | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0 -or $inventory.status -ne "complete") {
++  throw "inventory completion readback failed"
++}
++$run = $inventory.run_id
++if (-not $run) { throw "inventory did not return a run identity" }
++# COMMAND 1: stop cleanly after two committed 100-page batches. The command
++# must return exit 0 with semantic status "stopped"; do not use Ctrl+C.
++$stopped = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run --stop-after-batches 2 | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0 -or $stopped.status -ne "stopped") {
++  throw "controlled page-capture stop did not complete"
++}
++# COMMAND 2: resume the same durable run and raw root without a stop limit.
++# It must return exit 0 with semantic status "complete" and must not refetch
++# pages already committed by COMMAND 1.
++$resumed = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
++  --run-id $run | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0 -or $resumed.status -ne "complete") {
++  throw "resumed page capture did not complete"
++}
+ python -m knowledgenexus.foundation.cli.confluence_subtree_corpus process-pages @common `
+   --run-id $run
+ python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-drawio @common `
+diff --git a/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py b/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py
+index 6754dda..c3870d7 100644
+--- a/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py
++++ b/src/knowledgenexus/foundation/cli/confluence_subtree_corpus.py
+@@ -349,9 +349,21 @@ def _parser() -> argparse.ArgumentParser:
+         phase.add_argument("--exclude-ancestor-page-id", action="append", dest="excluded_ancestor_page_ids")
+         phase.add_argument("--base-dataset-version")
+         phase.add_argument("--dataset-root")
++        if name == "capture-pages":
++            phase.add_argument("--stop-after-batches", type=_positive_int)
+     return parser
+ 
+ 
++def _positive_int(value: str) -> int:
++    try:
++        parsed = int(value)
++    except (TypeError, ValueError):
++        raise argparse.ArgumentTypeError("value must be a positive integer") from None
++    if parsed <= 0:
++        raise argparse.ArgumentTypeError("value must be a positive integer")
++    return parsed
++
++
+ def _load_reliability_profile(value: object) -> dict[str, object]:
+     if type(value) is not str:
+         raise ValueError("reliability profile is required")
+@@ -577,7 +589,11 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
+             page_fetcher=ConfluenceDataCenterPageAdapter(transport=transport),
+             raw_page_store=composition.raw_page_store,
+         )
+-        captured = use_case.run(run_id=run_id, occurrences=facts, stop_after_batches=None)
++        captured = use_case.run(
++            run_id=run_id,
++            occurrences=facts,
++            stop_after_batches=getattr(args, "stop_after_batches", None),
++        )
+         if captured.complete:
+             session.complete_session()
+         else:
+diff --git a/tests/foundation/application/use_cases/test_confluence_subtree_capture_resume.py b/tests/foundation/application/use_cases/test_confluence_subtree_capture_resume.py
+index 89ee993..3836abf 100644
+--- a/tests/foundation/application/use_cases/test_confluence_subtree_capture_resume.py
++++ b/tests/foundation/application/use_cases/test_confluence_subtree_capture_resume.py
+@@ -1,3 +1,6 @@
++import hashlib
++import json
++
+ import pytest
+ 
+ from knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages import (
+@@ -9,7 +12,14 @@ from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
+     CrawlRunId,
+     InventoryRootCommit,
+ )
++from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import (
++    InventoryOccurrence,
++)
+ from knowledgenexus.foundation.domain.models.confluence_page_metadata import ConfluencePageMetadata
++from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
++    ConfluenceRawPageArtifact,
++    ConfluenceRawPagePublicationOutcome,
++)
+ from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
+     RawPageReplayDecision,
+     RawPageReplayResult,
+@@ -75,3 +85,99 @@ def test_root_inventory_fact_is_included_in_page_capture():
+     assert result.replayed == 1
+     assert result.expected_total == 1
+     assert result.complete is True
++
++
++def test_two_batch_controlled_stop_resumes_without_refetching_committed_pages(tmp_path):
++    run_id = CrawlRunId("123e4567-e89b-42d3-a456-426614174000")
++    roots = CanonicalIncludeRoots(("1000",))
++    root = InventoryRootCommit(
++        run_id, 0, "1000",
++        ConfluencePageMetadata("1000", "Root", "SPACE", source_version="1"),
++        roots,
++    )
++    descendants = tuple(
++        InventoryOccurrence(
++            run_id, 0, "1000", 0, ordinal, page_id,
++            ConfluencePageMetadata(
++                page_id, f"Page {page_id}", "SPACE", parent_page_id="1000",
++                ancestor_page_ids=("1000",), ancestor_titles=("Root",),
++                source_version="1",
++            ),
++            roots,
++        )
++        for ordinal, page_id in enumerate(str(value) for value in range(1001, 1201))
++    )
++    occurrences = (root, *descendants)
++
++    class State:
++        def __init__(self) -> None:
++            self.committed: set[str] = set()
++
++        def replay_raw_page(self, command, _inspector):
++            page_id = command.request.page_id
++            decision = (
++                RawPageReplayDecision.COMMITTED
++                if page_id in self.committed
++                else RawPageReplayDecision.MISSING
++            )
++            return RawPageReplayResult(decision)
++
++        def acknowledge_raw_page(self, acknowledgement):
++            self.committed.add(acknowledgement.envelope.page_id)
++            return RawPageReplayResult(RawPageReplayDecision.COMMITTED)
++
++    class Inspector:
++        def inspect_raw_page(self, _request):
++            raise AssertionError("the state fake owns replay decisions")
++
++    class Fetcher:
++        def __init__(self) -> None:
++            self.calls: list[str] = []
++
++        def fetch_page_raw(self, page_id):
++            self.calls.append(page_id)
++            return json.dumps({"id": page_id, "version": {"number": 1}}).encode()
++
++    class Store:
++        def __init__(self) -> None:
++            self.envelopes = {}
++
++        def publish_page(self, *, envelope):
++            self.envelopes[envelope.page_id] = envelope
++            serialized = envelope.to_bytes()
++            return ConfluenceRawPageArtifact(
++                path=(tmp_path / f"{envelope.page_id}.json").resolve(),
++                run_id=envelope.run_id,
++                page_id=envelope.page_id,
++                raw_sha256=hashlib.sha256(serialized).hexdigest(),
++                byte_count=len(serialized),
++                outcome=ConfluenceRawPagePublicationOutcome.PUBLISHED,
++            )
++
++        def read_page(self, *, run_id, page_id):
++            envelope = self.envelopes[page_id]
++            assert envelope.run_id == run_id
++            return envelope
++
++    state = State()
++    fetcher = Fetcher()
++    use_case = CaptureConfluenceSubtreePages(
++        state_session=state,
++        orphan_inspector=Inspector(),
++        page_fetcher=fetcher,
++        raw_page_store=Store(),
++    )
++
++    stopped = use_case.run(
++        run_id=run_id, occurrences=occurrences, stop_after_batches=2
++    )
++    assert stopped.stopped is True
++    assert stopped.captured == 200
++    assert len(fetcher.calls) == 200
++
++    resumed = use_case.run(run_id=run_id, occurrences=occurrences)
++    assert resumed.complete is True
++    assert resumed.replayed == 200
++    assert resumed.captured == 1
++    assert len(fetcher.calls) == 201
++    assert len(set(fetcher.calls)) == 201
+diff --git a/tests/foundation/cli/test_confluence_subtree_cli.py b/tests/foundation/cli/test_confluence_subtree_cli.py
+index 70f93a9..fdabde9 100644
+--- a/tests/foundation/cli/test_confluence_subtree_cli.py
++++ b/tests/foundation/cli/test_confluence_subtree_cli.py
+@@ -114,6 +114,42 @@ def test_help_exits_zero_without_failure_payload(capsys):
+     assert '"status":"failed"' not in capsys.readouterr().out
+ 
+ 
++def test_capture_pages_parser_accepts_only_positive_controlled_batch_stop() -> None:
++    parsed = cli._parser().parse_args([
++        "capture-pages", "--state-dir", "C:/state", "--max-pages", "5000",
++        "--stop-after-batches", "2",
++    ])
++    assert parsed.stop_after_batches == 2
++    with pytest.raises(SystemExit):
++        cli._parser().parse_args([
++            "capture-pages", "--state-dir", "C:/state", "--max-pages", "5000",
++            "--stop-after-batches", "0",
++        ])
++    with pytest.raises(SystemExit):
++        cli._parser().parse_args([
++            "inventory", "--state-dir", "C:/state", "--max-pages", "5000",
++            "--stop-after-batches", "2",
++        ])
++
++
++def test_capture_pages_main_forwards_controlled_batch_stop(monkeypatch, tmp_path, capsys) -> None:
++    observed = {}
++
++    def capture(args, state):
++        observed["stop_after_batches"] = args.stop_after_batches
++        observed["state"] = state
++        return {"status": "stopped", "phase": "capture-pages"}
++
++    monkeypatch.setattr(cli, "_capture_pages_phase", capture)
++    state = tmp_path.resolve()
++    assert main([
++        "capture-pages", "--state-dir", str(state), "--max-pages", "5000",
++        "--stop-after-batches", "2",
++    ]) == 0
++    assert observed == {"stop_after_batches": 2, "state": state}
++    assert json.loads(capsys.readouterr().out)["status"] == "stopped"
++
++
+ def test_drawio_phase_fails_closed_without_production_adapters(capsys, tmp_path):
+     result = main(["capture-drawio", "--state-dir", str(tmp_path), "--max-pages", "5000"])
+     assert result == 2
+diff --git a/tests/foundation/integration/test_w5_a_runbook_artifacts.py b/tests/foundation/integration/test_w5_a_runbook_artifacts.py
+index 09f2af2..1696e78 100644
+--- a/tests/foundation/integration/test_w5_a_runbook_artifacts.py
++++ b/tests/foundation/integration/test_w5_a_runbook_artifacts.py
+@@ -27,6 +27,8 @@ def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
+     assert "--export-mode delta" in c_text
+     assert "--phase" not in b_text + c_text
+     assert "confluence_subtree_corpus inventory @common" in b_text
++    assert "--resume-unique | ConvertFrom-Json" in b_text + c_text
++    assert "inventory completion readback failed" in b_text + c_text
+     assert "confluence_subtree_corpus capture-delta-inventory @common" in c_text
+     assert '"--raw-root", "<ABS-RAW-ROOT>"' in b_text
+     assert '"--raw-root", "<ABS-SECOND-RAW-ROOT>"' in c_text
+@@ -37,11 +39,27 @@ def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
+     assert '--raw-generation-root "<ABS-SECOND-RAW-ROOT>"' in c_text
+     assert "COMMAND 1" in b_text + c_text
+     assert "COMMAND 2" in b_text + c_text
++    assert "--stop-after-batches 2" in b_text + c_text
++    assert "must interrupt" not in (b_text + c_text).lower()
++    assert "do not use Ctrl+C" in b_text + c_text
+     assert "<ABS-DATASET-ROOT-A>" in b_text
+     assert "<ABS-DATASET-ROOT-B>" in b_text
++    assert "dataset root must already exist as an empty plain directory" in b_text
++    assert "and `LATEST.txt` must be absent" in b_text
++    assert "delta dataset root must already exist as an empty plain directory" in c_text
+     assert "--jira-relation-profile" in b_text + c_text
+ 
+ 
++def test_w5_media_scope_is_registered_in_the_active_acceptance_contract() -> None:
++    text = (
++        _ROOT / "contracts" / "foundation" / "CRAWL_ACCEPTANCE_SPEC.md"
++    ).read_text(encoding="utf-8")
++    assert "### 13.1 W5 bounded media acceptance scope" in text
++    assert "all_media" in text
++    assert "drawio_only" in text
++    assert "does not claim PDF, image, chart, OCR, audio, or video acceptance" in text
++
++
+ def test_w5_a_sanitized_templates_are_valid_pending_envelopes() -> None:
+     for name in (
+         "W5_B_SANITIZED_EVIDENCE_TEMPLATE.json",
+-- 
+2.55.0.windows.2
+

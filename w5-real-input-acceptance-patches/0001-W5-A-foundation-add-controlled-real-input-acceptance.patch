@@ -1,0 +1,643 @@
+From 5ef81c1f82b615ffcb9b031a1da37a9c2d73ed08 Mon Sep 17 00:00:00 2001
+From: ADMIN <ducanh059@gmail.com>
+Date: Tue, 11 Aug 2026 20:15:27 +0700
+Subject: [PATCH 1/3] [W5-A] foundation: add controlled real-input acceptance
+ runbooks
+
+---
+ docs/runbooks/W5_A_REAL_INPUT_ACCEPTANCE.md   | 100 ++++++++++++++++++
+ docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md     |  48 +++++++++
+ .../W5_B_SANITIZED_EVIDENCE_TEMPLATE.json     |  30 ++++++
+ .../W5_C_SANITIZED_EVIDENCE_TEMPLATE.json     |  23 ++++
+ docs/runbooks/W5_C_SECOND_SYNC_DELTA.md       |  42 ++++++++
+ .../use_cases/evaluate_foundation_gates.py    |   9 +-
+ .../cli/evaluate_foundation_gates.py          |   5 +-
+ .../domain/models/foundation_gate.py          |   9 +-
+ .../domain/models/foundation_gate_inputs.py   |   9 ++
+ .../test_evaluate_foundation_gates.py         |  46 ++++++++
+ .../cli/test_evaluate_foundation_gates_cli.py |  22 ++++
+ .../domain/models/test_foundation_gate.py     |  27 +++++
+ .../test_w5_a_runbook_artifacts.py            |  41 +++++++
+ 13 files changed, 407 insertions(+), 4 deletions(-)
+ create mode 100644 docs/runbooks/W5_A_REAL_INPUT_ACCEPTANCE.md
+ create mode 100644 docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
+ create mode 100644 docs/runbooks/W5_B_SANITIZED_EVIDENCE_TEMPLATE.json
+ create mode 100644 docs/runbooks/W5_C_SANITIZED_EVIDENCE_TEMPLATE.json
+ create mode 100644 docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
+ create mode 100644 tests/foundation/integration/test_w5_a_runbook_artifacts.py
+
+diff --git a/docs/runbooks/W5_A_REAL_INPUT_ACCEPTANCE.md b/docs/runbooks/W5_A_REAL_INPUT_ACCEPTANCE.md
+new file mode 100644
+index 0000000..823a9f6
+--- /dev/null
++++ b/docs/runbooks/W5_A_REAL_INPUT_ACCEPTANCE.md
+@@ -0,0 +1,100 @@
++# W5-A - real-input acceptance inspection and runbook candidate
++
++This is the portable, local-only W5-A handoff. It prepares the main-machine
++execution packets but performs no Confluence request. Keep raw generations,
++credentials, tokenizer files, and runtime evidence outside this repository.
++
++## Boundary and stop conditions
++
++- Run from a frozen committed head with a clean tracked tree.
++- Use only metadata from external artifacts; never copy page IDs, titles,
++  URLs, hostnames, paths, raw bodies, principals, credentials, or full hashes
++  into Git or a review message.
++- W5-B and W5-C are separate owner-authorized live operations. This document
++  does not authorize either operation.
++- Stop if transfer equivalence, profile/tokenizer verification, safe output
++  roots, Draw.io-only gate coverage, or sanitization cannot be proven.
++
++## Local inspection
++
++From the repository root, verify the expected W5 base and branch without
++printing sensitive paths:
++
++```powershell
++git rev-parse HEAD
++git diff --quiet
++git diff --cached --quiet
++git diff --check
++```
++
++The execution head must be the reviewed W5-A commit (or a later approved
++commit). The main-machine operator records its own `MAIN_EXECUTION_HEAD`; SHA
++values are kept in local provenance and are not included in sanitized evidence.
++
++Inspect the transferred W4 production, contract, and test paths by comparing
++scoped Git blobs, not by trusting branch names:
++
++```powershell
++git ls-tree -r --full-tree HEAD -- <scoped-paths>
++git -C <main-checkout> ls-tree -r --full-tree <main-transfer-head> -- <scoped-paths>
++```
++
++The operator must retain the comparison privately and return only:
++`transfer_equivalent=true|false`, `scoped_path_count`, and a sanitized failure
++category when false. Do not return the path list or blob hashes.
++
++## Profile and asset preflight
++
++Use the exact committed `contracts/foundation/crawl_reliability_profile.yaml`
++and `contracts/foundation/embedding_profile.yaml`. The BGE-M3 bundle must be
++an explicit external directory matching the committed profile; implicit cache
++or network fallback is forbidden. If the bundle is absent, asset-backed tests
++must fail or be reported not run, never silently skip as passed.
++
++```powershell
++$env:PYTHONUTF8 = "1"
++$env:HF_HUB_OFFLINE = "1"
++$env:TRANSFORMERS_OFFLINE = "1"
++python -m compileall -q src tests
++```
++
++## Draw.io-only gate inspection
++
++W5 text-first acceptance uses the explicit `drawio_only` coverage profile. The
++default media gate remains `all_media` and still requires all five historical
++media kinds. The Draw.io-only profile accepts only Draw.io outcomes and never
++activates OCR, PDF, image, chart, audio, or video processing.
++
++```powershell
++python -m pytest tests/foundation/application/use_cases/test_evaluate_foundation_gates.py -q
++```
++
++## Offline preflight matrix
++
++Run the required offline suites with the explicit tokenizer option when the
++bundle exists. Keep the command output aggregate-only.
++
++```powershell
++python -m pytest `
++  tests/foundation/cli/test_w4_c2_composition.py `
++  tests/foundation/cli/test_confluence_subtree_cli.py `
++  tests/foundation/cli/test_export_m10_snapshot_cli.py `
++  tests/foundation/cli/test_m10_operator_cli_e2e.py `
++  tests/foundation/application/use_cases/test_capture_delta_inventory.py `
++  tests/foundation/application/use_cases/test_project_m10_delta.py `
++  tests/foundation/application/use_cases/test_export_m10_snapshot.py `
++  tests/foundation/infrastructure/exporters/test_delta_snapshot_reader.py `
++  tests/foundation/domain/rules/test_snapshot_readback.py `
++  tests/architecture -q
++```
++
++Record only pass/fail counts, skipped asset-backed tests, `compileall`,
++`git diff --check`, and tracked-tree status in the W5-A notice.
++
++## Handoff
++
++After independent W5-A approval and the W5-A commit is pushed, give the main
++machine operator `W5_B_ROOT1_FULL_SNAPSHOT.md`. Stop and wait for explicit
++owner authorization. After sanitized W5-B evidence is returned and reconciled,
++give the operator `W5_C_SECOND_SYNC_DELTA.md`. No live phase is executed from
++the local repository.
+diff --git a/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md b/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
+new file mode 100644
+index 0000000..5f1a1a7
+--- /dev/null
++++ b/docs/runbooks/W5_B_ROOT1_FULL_SNAPSHOT.md
+@@ -0,0 +1,48 @@
++# W5-B - Root-1 controlled full snapshot packet
++
++Main-machine operator packet. Execute only after a distinct owner
++authorization naming this one live sequence. Replace angle-bracket values on
++the main machine only; never commit or transmit them.
++
++## Required controls
++
++- Freeze and record the approved execution head; require a clean tracked tree.
++- Use fresh absent output roots with plain existing parents; reject symlink or
++  reparse components and insufficient free disk.
++- Keep credentials in the live process environment only and clear them before
++  offline processing/export.
++- Use the active reliability profile and explicit BGE-M3 tokenizer directory.
++- Text plus Draw.io only. Set media policy to `required` only for Draw.io
++  references; do not enable generic PDF/image/OCR paths.
++- No automatic operator retry. Preserve valid raw/checkpoint artifacts after
++  failure and report aggregate counters only.
++
++## Authorized sequence
++
++Run the existing phases in order. The exact CLI signatures are discovered from
++`--help` on the frozen head; do not invent historical flags.
++
++```powershell
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase inventory <approved-options>
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-pages <approved-options>
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase process-pages <approved-options>
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-drawio <approved-options>
++python -m knowledgenexus.foundation.cli.export_m10_snapshot `
++  --export-mode full_snapshot <approved-offline-options>
++```
++
++Exercise one controlled stop after committed batches, then resume the same run
++and prove committed windows/pages were not fetched again. Do not start a second
++live sequence after the authorized sequence completes.
++
++Publish the preserved generation twice into separate fresh dataset roots with
++the same semantic inputs and `generated_at`. Verify privately that version
++directories, dataset version, digest, eight streams, strict readback, counts,
++cross-stream closure, `LATEST.txt`, and raw/state inputs are byte-identical.
++
++## Sanitized return packet
++
++Return only the aggregate fields in `W5_B_SANITIZED_EVIDENCE_TEMPLATE.json`.
++Do not return IDs, URLs, hostnames, paths, titles, raw logs, credentials, or
++full hashes. Include `authorization_consumed` even when the run fails after its
++first live invocation.
+diff --git a/docs/runbooks/W5_B_SANITIZED_EVIDENCE_TEMPLATE.json b/docs/runbooks/W5_B_SANITIZED_EVIDENCE_TEMPLATE.json
+new file mode 100644
+index 0000000..a6fa2c7
+--- /dev/null
++++ b/docs/runbooks/W5_B_SANITIZED_EVIDENCE_TEMPLATE.json
+@@ -0,0 +1,30 @@
++{
++  "schema": "w5-b-sanitized-v1",
++  "authorization_consumed": false,
++  "transfer_equivalent": false,
++  "invocation_count": 0,
++  "controlled_stop_resume": false,
++  "committed_work_not_refetched": false,
++  "drawio_only": true,
++  "tokenizer_verified": false,
++  "profile_verified": false,
++  "publish_repeat_deterministic": false,
++  "version_tree_identical": false,
++  "raw_state_unchanged": false,
++  "strict_readback": false,
++  "cross_stream_closed": false,
++  "atomic_publication": false,
++  "staging_residue_absent": false,
++  "stream_counts": {
++    "documents": 0,
++    "chunks": 0,
++    "relations": 0,
++    "acl": 0,
++    "media_assets": 0,
++    "sync_state": 0,
++    "tombstones": 0,
++    "symbols": 0
++  },
++  "status": "pending_external_input",
++  "failure_category": null
++}
+diff --git a/docs/runbooks/W5_C_SANITIZED_EVIDENCE_TEMPLATE.json b/docs/runbooks/W5_C_SANITIZED_EVIDENCE_TEMPLATE.json
+new file mode 100644
+index 0000000..e63e7ce
+--- /dev/null
++++ b/docs/runbooks/W5_C_SANITIZED_EVIDENCE_TEMPLATE.json
+@@ -0,0 +1,23 @@
++{
++  "schema": "w5-c-sanitized-v1",
++  "authorization_consumed": false,
++  "base_binding_verified": false,
++  "safe_scenario_attested": false,
++  "scenario_cases": {
++    "content_changed": false,
++    "source_deleted_404": false,
++    "access_revoked_403": false,
++    "moved_out_of_scope": false,
++    "acl_only": false
++  },
++  "invocation_count": 0,
++  "offline_socket_forbidden": false,
++  "zero_gets_during_export": false,
++  "sparse_delta": false,
++  "strict_overlay_readback": false,
++  "unchanged_empty_delta": false,
++  "deterministic_repeat": false,
++  "base_raw_state_unchanged": false,
++  "status": "pending_external_input",
++  "failure_category": null
++}
+diff --git a/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md b/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
+new file mode 100644
+index 0000000..1a3fbf0
+--- /dev/null
++++ b/docs/runbooks/W5_C_SECOND_SYNC_DELTA.md
+@@ -0,0 +1,42 @@
++# W5-C - controlled second-sync sparse delta packet
++
++Main-machine operator packet. Execute only after the owner has inspected and
++accepted the sanitized W5-B packet and grants a new authorization. This packet
++must bind to the accepted W5-B base dataset version without exposing it in
++chat or Git.
++
++## Required safe scenario
++
++The owner or authorized administrator must attest a safe, reversible scenario
++containing, where available, one content change, one approved 404 case, one
++403 access-revoked case, one moved-out-of-scope case, and one ACL-only change.
++If any case cannot be established safely, stop and return a pending gate. Never
++edit or delete Confluence content from this runbook and never fabricate a
++disposition.
++
++Credentials remain only in the live process environment and are cleared before
++offline delta export. Never return credentials or raw runtime artifacts.
++
++## Authorized sequence
++
++```powershell
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase inventory <approved-options>
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-pages <approved-options>
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase process-pages <approved-options>
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-drawio <approved-options>
++python -m knowledgenexus.foundation.cli.confluence_subtree_corpus --phase capture-delta-inventory <approved-options>
++python -m knowledgenexus.foundation.cli.export_m10_snapshot `
++  --export-mode delta --base-dataset-version <accepted-base-version> <approved-offline-options>
++```
++
++Complete inventory must precede missing-page probes. Preserve status/body
++evidence before checkpointing `delta-inventory.json`. Offline delta export
++must run with sockets forbidden and must perform zero GETs.
++
++## Required assertions
++
++Verify sparse rows/tombstones, strict base-overlay readback, exact 404 detail,
++403 access revocation, 401/retry failure, in-scope missing inconsistency,
++chunk/media/relation/ACL cascade, ACL-only behavior, unchanged empty delta,
++deterministic repeat, and unchanged base/raw/state inputs. Return aggregate
++results only using `W5_C_SANITIZED_EVIDENCE_TEMPLATE.json`.
+diff --git a/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+index 0844f5d..6533e75 100644
+--- a/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
++++ b/src/knowledgenexus/foundation/application/use_cases/evaluate_foundation_gates.py
+@@ -51,7 +51,10 @@ def _media_failure_reason(
+         reasons.append("writes_changed")
+     if sum(item.status == "failed" for item in first.outcomes) or sum(item.status == "failed" for item in second.outcomes):
+         reasons.append("processor_failure")
+-    if {kind for kind, _ in counts} != {"chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf"}:
++    required_kinds = {"drawio"} if request.media_scope == "drawio_only" else {
++        "chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf"
++    }
++    if {kind for kind, _ in counts} != required_kinds:
+         reasons.append("corpus_coverage_incomplete")
+     return ";".join(reasons) if reasons else None
+ 
+@@ -79,6 +82,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
+                 no_silent_omission=False,
+                 evidence_digest=None,
+                 failure_reason=None,
++                media_scope=request.media_scope,
+             )
+         first, second = request.first_run, request.second_run
+         # The request model has already rejected duplicate/omitted identities;
+@@ -90,6 +94,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
+         reason = _media_failure_reason(request, counts=counts)
+         facts = {
+             "evidence_kind": request.evidence_kind,
++            "media_scope": request.media_scope,
+             "real_capture_attested": request.real_capture_attested,
+             "transport": request.transport,
+             "expected_media_ids": first.expected_media_ids,
+@@ -117,6 +122,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
+                 no_silent_omission=True,
+                 evidence_digest=None,
+                 failure_reason=reason,
++                media_scope=request.media_scope,
+             )
+         return BoundedMediaCorpusAcceptance(
+             status="complete",
+@@ -129,6 +135,7 @@ class EvaluateBoundedMediaCorpusAcceptance:
+             source_unchanged=True,
+             no_silent_omission=True,
+             evidence_digest=_digest_facts(facts),
++            media_scope=request.media_scope,
+         )
+ 
+ 
+diff --git a/src/knowledgenexus/foundation/cli/evaluate_foundation_gates.py b/src/knowledgenexus/foundation/cli/evaluate_foundation_gates.py
+index 351bcb1..23cb939 100644
+--- a/src/knowledgenexus/foundation/cli/evaluate_foundation_gates.py
++++ b/src/knowledgenexus/foundation/cli/evaluate_foundation_gates.py
+@@ -64,7 +64,7 @@ _READBACK_FIELDS = frozenset({
+     "atomic_publish", "no_clobber", "sanitized_output", "transport",
+     "rss_baseline_bytes", "rss_peak_bytes", "duration_milliseconds",
+ })
+-_MEDIA_REQUEST_FIELDS = frozenset({"first_run", "second_run", "evidence_kind", "real_capture_attested", "transport"})
++_MEDIA_REQUEST_FIELDS = frozenset({"first_run", "second_run", "evidence_kind", "real_capture_attested", "transport", "media_scope"})
+ _SCALE_REQUEST_FIELDS = frozenset({
+     "profile_id", "target_pages", "first_readback", "second_readback", "evidence_kind",
+ })
+@@ -238,6 +238,7 @@ def _request(gate: str, payload: object) -> BoundedMediaGateRequest | OcrEngineA
+             evidence_kind=data["evidence_kind"],  # type: ignore[arg-type]
+             real_capture_attested=data.get("real_capture_attested", False),  # type: ignore[arg-type]
+             transport=data.get("transport", "offline_fixture"),  # type: ignore[arg-type]
++            media_scope=data.get("media_scope", "all_media"),  # type: ignore[arg-type]
+         )
+     data = _object(payload, _SCALE_REQUEST_FIELDS)
+     return ScaleGateRequest(
+@@ -313,7 +314,7 @@ def _safe_result(result: object, gate: str) -> dict[str, object]:
+     payload = dataclasses.asdict(result)
+     if set(payload) - {
+         "status", "evidence_kind", "kind_counts", "processed_count", "skipped_count", "failed_count",
+-        "deterministic_repeat", "source_unchanged", "no_silent_omission", "evidence_digest", "failure_reason",
++        "deterministic_repeat", "source_unchanged", "no_silent_omission", "evidence_digest", "failure_reason", "media_scope",
+         "profile_id", "target_pages", "observed_pages", "run_count", "stream_counts", "readback_valid",
+         "relation_closed", "acl_closed", "sync_closed", "atomic_publish", "no_clobber", "sanitized_output",
+         "transport", "rss_baseline_bytes", "rss_peak_bytes", "duration_milliseconds",
+diff --git a/src/knowledgenexus/foundation/domain/models/foundation_gate.py b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+index 6e370e8..3f95263 100644
+--- a/src/knowledgenexus/foundation/domain/models/foundation_gate.py
++++ b/src/knowledgenexus/foundation/domain/models/foundation_gate.py
+@@ -29,6 +29,7 @@ _MEDIA_KINDS = (
+     "image_only_pdf",
+ )
+ _MEDIA_KIND_SET = frozenset(_MEDIA_KINDS)
++_MEDIA_SCOPES = frozenset({"all_media", "drawio_only"})
+ _STREAMS = (
+     "acl",
+     "chunks",
+@@ -129,12 +130,15 @@ class BoundedMediaCorpusAcceptance:
+     no_silent_omission: bool
+     evidence_digest: str | None = None
+     failure_reason: str | None = None
++    media_scope: str = "all_media"
+ 
+     def __post_init__(self) -> None:
+         if type(self.status) is not str or self.status not in {"complete", "pending_external_input", "failed"}:
+             raise ValueError("status is invalid")
+         if self.evidence_kind is not None and self.evidence_kind not in _EVIDENCE_KINDS:
+             raise ValueError("evidence_kind is invalid")
++        if type(self.media_scope) is not str or self.media_scope not in _MEDIA_SCOPES:
++            raise ValueError("media_scope is invalid")
+         if self.failure_reason is not None and (
+             type(self.failure_reason) is not str
+             or not self.failure_reason
+@@ -161,13 +165,16 @@ class BoundedMediaCorpusAcceptance:
+                 raise ValueError("kind_counts count is invalid")
+             previous, total = kind, total + count
+             seen.add(kind)
++        if self.media_scope == "drawio_only" and any(kind != "drawio" for kind in seen):
++            raise ValueError("drawio_only result contains non-Draw.io media kind")
+         if total != self.processed_count + self.skipped_count + self.failed_count:
+             raise ValueError("media counters are inconsistent")
+         if self.status == "pending_external_input":
+             if self.kind_counts or total or any((self.deterministic_repeat, self.source_unchanged, self.no_silent_omission)) or self.evidence_kind is not None or self.evidence_digest is not None or self.failure_reason is not None:
+                 raise ValueError("pending media gate carries observations")
+         elif self.status == "complete":
+-            if seen != _MEDIA_KIND_SET or any(count == 0 for _, count in self.kind_counts):
++            required_kinds = {"drawio"} if self.media_scope == "drawio_only" else _MEDIA_KIND_SET
++            if seen != required_kinds or any(count == 0 for _, count in self.kind_counts):
+                 raise ValueError("complete media gate lacks required corpus kinds")
+             if self.failed_count != 0:
+                 raise ValueError("complete media gate contains failures")
+diff --git a/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py b/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
+index 0735d6a..b04cddf 100644
+--- a/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
++++ b/src/knowledgenexus/foundation/domain/models/foundation_gate_inputs.py
+@@ -18,6 +18,7 @@ _IDENTITY = re.compile(r"\A[a-z0-9][a-z0-9._:-]{0,127}\Z")
+ _MEDIA_KINDS = frozenset({
+     "chart_screenshot", "digital_pdf", "drawio", "image", "image_only_pdf",
+ })
++_MEDIA_SCOPES = frozenset({"all_media", "drawio_only"})
+ _MEDIA_STATUSES = frozenset({"processed", "skipped", "failed"})
+ _STREAMS = frozenset({
+     "acl", "chunks", "documents", "media_assets", "relations", "symbols",
+@@ -190,6 +191,7 @@ class BoundedMediaGateRequest:
+     evidence_kind: str
+     real_capture_attested: bool = False
+     transport: str = "offline_fixture"
++    media_scope: str = "all_media"
+ 
+     def __post_init__(self) -> None:
+         if type(self.first_run) is not SanitizedMediaProcessorRun or type(self.second_run) is not SanitizedMediaProcessorRun:
+@@ -200,12 +202,19 @@ class BoundedMediaGateRequest:
+             raise TypeError("real_capture_attested is invalid")
+         if type(self.transport) is not str or self.transport not in {"offline_fixture", "production"}:
+             raise ValueError("transport is invalid")
++        if type(self.media_scope) is not str or self.media_scope not in _MEDIA_SCOPES:
++            raise ValueError("media_scope is invalid")
+         if self.evidence_kind == "synthetic_fixture" and self.real_capture_attested:
+             raise ValueError("synthetic media evidence cannot be real-capture attested")
+         if self.evidence_kind == "synthetic_fixture" and self.transport != "offline_fixture":
+             raise ValueError("synthetic media evidence must use offline transport")
+         if self.first_run.expected_media_ids != self.second_run.expected_media_ids:
+             raise ValueError("media run scopes differ")
++        if self.media_scope == "drawio_only" and any(
++            outcome.kind != "drawio"
++            for outcome in (*self.first_run.outcomes, *self.second_run.outcomes)
++        ):
++            raise ValueError("drawio_only media scope contains non-Draw.io outcomes")
+ 
+ 
+ @dataclass(frozen=True, repr=False)
+diff --git a/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py b/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
+index 9a3de08..c3521a1 100644
+--- a/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
++++ b/tests/foundation/application/use_cases/test_evaluate_foundation_gates.py
+@@ -66,6 +66,52 @@ def test_bounded_media_evaluator_derives_digest_and_requires_repeat() -> None:
+     assert failed.failed_count == 1
+ 
+ 
++def test_bounded_media_evaluator_supports_explicit_drawio_only_scope() -> None:
++    drawio = _media_run()
++    # Keep only the Draw.io identity while preserving the sanitized run shape.
++    drawio_outcomes = tuple(item for item in drawio.outcomes if item.kind == "drawio")
++    drawio_run = SanitizedMediaProcessorRun(
++        outcomes=drawio_outcomes,
++        expected_media_ids=(drawio_outcomes[0].media_id,),
++        source_digest_before="a" * 64,
++        source_digest_after="a" * 64,
++        write_digest_before="c" * 64,
++        write_digest_after="c" * 64,
++    )
++    result = EvaluateBoundedMediaCorpusAcceptance().execute(
++        request=BoundedMediaGateRequest(
++            first_run=drawio_run,
++            second_run=drawio_run,
++            evidence_kind="sanitized_real_capture",
++            real_capture_attested=True,
++            transport="production",
++            media_scope="drawio_only",
++        )
++    )
++    assert result.status == "complete"
++    assert result.media_scope == "drawio_only"
++    assert result.kind_counts == (("drawio", 1),)
++
++
++@pytest.mark.parametrize("scope", [None, object(), "image_only", 1])
++def test_drawio_scope_rejects_invalid_runtime_enum(scope: object) -> None:
++    run = _media_run()
++    with pytest.raises((TypeError, ValueError)):
++        BoundedMediaGateRequest(
++            first_run=run, second_run=run, evidence_kind="synthetic_fixture",
++            media_scope=scope,  # type: ignore[arg-type]
++        )
++
++
++def test_drawio_scope_rejects_non_drawio_outcomes() -> None:
++    run = _media_run()
++    with pytest.raises(ValueError, match="non-Draw.io"):
++        BoundedMediaGateRequest(
++            first_run=run, second_run=run, evidence_kind="synthetic_fixture",
++            media_scope="drawio_only",
++        )
++
++
+ @pytest.mark.parametrize("value", [None, object(), {"first_run": 1}])
+ def test_bounded_media_evaluator_rejects_wrong_runtime_types(value: object) -> None:
+     with pytest.raises(FoundationGateEvaluationError):
+diff --git a/tests/foundation/cli/test_evaluate_foundation_gates_cli.py b/tests/foundation/cli/test_evaluate_foundation_gates_cli.py
+index c8e273f..73cbf92 100644
+--- a/tests/foundation/cli/test_evaluate_foundation_gates_cli.py
++++ b/tests/foundation/cli/test_evaluate_foundation_gates_cli.py
+@@ -86,6 +86,28 @@ def test_media_cli_emits_only_sanitized_aggregate(
+     assert "outcomes" not in captured.out
+ 
+ 
++def test_media_cli_accepts_explicit_drawio_only_scope(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    run = _media_run()
++    drawio = [item for item in run["outcomes"] if item["kind"] == "drawio"]
++    drawio_run = {**run, "outcomes": drawio, "expected_media_ids": [drawio[0]["media_id"]]}
++    path = _write(tmp_path, {"request": {
++        "first_run": drawio_run,
++        "second_run": drawio_run,
++        "evidence_kind": "sanitized_real_capture",
++        "real_capture_attested": True,
++        "transport": "production",
++        "media_scope": "drawio_only",
++    }})
++
++    assert cli.main(["--gate", "media", "--input", str(path)]) == 0
++    result = json.loads(capsys.readouterr().out)
++    assert result["status"] == "complete"
++    assert result["media_scope"] == "drawio_only"
++    assert result["kind_counts"] == [["drawio", 1]]
++
++
+ def test_scale_cli_accepts_repeat_readback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+     path = _write(tmp_path, {"request": {
+         "profile_id": "m7-crawl-scale-acceptance-v2",
+diff --git a/tests/foundation/domain/models/test_foundation_gate.py b/tests/foundation/domain/models/test_foundation_gate.py
+index 29f2f4b..48f1ab6 100644
+--- a/tests/foundation/domain/models/test_foundation_gate.py
++++ b/tests/foundation/domain/models/test_foundation_gate.py
+@@ -76,6 +76,33 @@ def test_bounded_media_corpus_requires_every_kind_and_balanced_counters() -> Non
+         )
+ 
+ 
++def test_bounded_media_corpus_drawio_only_requires_explicit_scope_and_counts() -> None:
++    result = BoundedMediaCorpusAcceptance(
++        status="complete", evidence_kind="sanitized_real_capture",
++        kind_counts=(("drawio", 1),), processed_count=1, skipped_count=0,
++        failed_count=0, deterministic_repeat=True, source_unchanged=True,
++        no_silent_omission=True, evidence_digest="d" * 64,
++        media_scope="drawio_only",
++    )
++    assert result.media_scope == "drawio_only"
++    with pytest.raises(ValueError):
++        BoundedMediaCorpusAcceptance(
++            status="complete", evidence_kind="sanitized_real_capture",
++            kind_counts=(("drawio", 1),), processed_count=1, skipped_count=0,
++            failed_count=0, deterministic_repeat=True, source_unchanged=True,
++            no_silent_omission=True, evidence_digest="d" * 64,
++            media_scope="not-approved",
++        )
++    with pytest.raises(ValueError):
++        BoundedMediaCorpusAcceptance(
++            status="complete", evidence_kind="sanitized_real_capture",
++            kind_counts=(("image", 1),), processed_count=1, skipped_count=0,
++            failed_count=0, deterministic_repeat=True, source_unchanged=True,
++            no_silent_omission=True, evidence_digest="d" * 64,
++            media_scope="drawio_only",
++        )
++
++
+ def test_scale_gate_requires_two_readback_runs_and_all_streams() -> None:
+     streams = (
+         ("acl", 1), ("chunks", 2), ("documents", 1), ("media_assets", 1),
+diff --git a/tests/foundation/integration/test_w5_a_runbook_artifacts.py b/tests/foundation/integration/test_w5_a_runbook_artifacts.py
+new file mode 100644
+index 0000000..bcb98b8
+--- /dev/null
++++ b/tests/foundation/integration/test_w5_a_runbook_artifacts.py
+@@ -0,0 +1,41 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++
++_ROOT = Path(__file__).resolve().parents[3]
++_RUNBOOKS = _ROOT / "docs" / "runbooks"
++
++
++def test_w5_a_runbooks_are_portable_and_separate_live_phases() -> None:
++    names = (
++        "W5_A_REAL_INPUT_ACCEPTANCE.md",
++        "W5_B_ROOT1_FULL_SNAPSHOT.md",
++        "W5_C_SECOND_SYNC_DELTA.md",
++    )
++    for name in names:
++        text = (_RUNBOOKS / name).read_text(encoding="utf-8")
++        assert "credentials" in text.lower()
++        assert "sanitized" in text.lower()
++        assert "owner" in text.lower()
++    assert "does not authorize" in (
++        _RUNBOOKS / "W5_A_REAL_INPUT_ACCEPTANCE.md"
++    ).read_text(encoding="utf-8")
++    assert "--export-mode delta" in (
++        _RUNBOOKS / "W5_C_SECOND_SYNC_DELTA.md"
++    ).read_text(encoding="utf-8")
++
++
++def test_w5_a_sanitized_templates_are_valid_pending_envelopes() -> None:
++    for name in (
++        "W5_B_SANITIZED_EVIDENCE_TEMPLATE.json",
++        "W5_C_SANITIZED_EVIDENCE_TEMPLATE.json",
++    ):
++        payload = json.loads((_RUNBOOKS / name).read_text(encoding="utf-8"))
++        assert payload["status"] == "pending_external_input"
++        assert payload["authorization_consumed"] is False
++        assert payload["failure_category"] is None
++        serialized = json.dumps(payload).lower()
++        for forbidden in ("http://", "https://", "password", "page_id"):
++            assert forbidden not in serialized
+-- 
+2.55.0.windows.2
+
