@@ -57,20 +57,21 @@ rebased against that frozen head before code work starts.
 - Evidence: `docs/learning/IDX-I0_COMPATIBILITY_REPORT.md` and
   a fresh independent review `REV-IDX-01` before I1 scope freeze.
 
-### IDX-D12
+## Owner Decision IDX-D12
 
 - Owner: Foundation/shared-contract owners. Status: review.
-- Objective: Decide the versioned dataset identity and the policy for snapshots
+- Objective: Decide versioned dataset identity and the policy for snapshots
   published before the new integrity contract.
 - Scope: Choose a versioned manifest identity or trusted transport namespace,
-  and require re-export or a bounded explicitly controlled compatibility flag
-  for pre-contract snapshots.
-- Out of scope: Producer/shared-contract code, importer, Qdrant, delivery
-  automation, and delta recovery.
+  and choose re-export or a bounded compatibility flag for pre-contract
+  snapshots.
+- Out of scope: Producer/shared-contract implementation, importer, Qdrant,
+  delivery automation, and delta recovery.
 - depends_on: Owner disposition.
-- Acceptance: The decision identifies the dataset identity and old-snapshot
-  policy that `IDX-C1` must implement.
-- Evidence: Recorded owner decision before `IDX-C1` begins.
+- Acceptance: The recorded decision identifies the dataset identity and old-
+  snapshot policy that `IDX-C1` must implement; malformed or contradictory
+  decision records are rejected before implementation authorization.
+- Evidence: Owner decision record before `IDX-C1` begins.
 
 ### IDX-C1
 
@@ -88,6 +89,10 @@ rebased against that frozen head before code work starts.
   compatibility policy.
 - Evidence: Versioned schema/contract diff, producer tests, negative integrity
   tests, and independent review `REV-IDX-02`.
+
+`IDX-D12` remains an owner decision, not a work item: it selects the versioned
+dataset identity and pre-contract snapshot policy that `IDX-C1` implements. Its
+evidence is the recorded owner disposition before `IDX-C1` begins.
 
 ### IDX-B1
 
