@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from knowledgenexus.foundation.cli import confluence_subtree_corpus
 
@@ -83,13 +88,115 @@ def test_w5_root1_runbook_locks_post_inventory_failure_vocabulary() -> None:
         encoding="utf-8"
     )
     expected = set(confluence_subtree_corpus._ACTIVATION_FAILURE_CATEGORIES.values())
-    expected.update({"inventory_stream", "selection_publication"})
-    for category in expected:
-        assert f'"{category}"' in text
+    expected.update({
+        "inventory_stream",
+        "inventory_selection_invalid",
+        "selection_publication",
+    })
+    match = re.search(
+        r"\$script:PostInventoryFailureCategories\s*=\s*@\((.*?)\)",
+        text,
+        flags=re.DOTALL,
+    )
+    assert match is not None
+    assert set(re.findall(r'"([^"]+)"', match.group(1))) == expected
 
-    function_start = text.index("function Assert-InventoryResult")
-    function_end = text.index("function Assert-CaptureResult", function_start)
+    function_start = text.index("function Assert-PhaseResultEnvelope")
+    function_end = text.index("function Assert-InventoryResult", function_start)
     boundary = text[function_start:function_end]
     assert boundary.index("$Value.PSObject.Properties.Name") < boundary.index(
         "$Value.status"
     )
+    assert "Fail-Gate $Stage" in boundary
+
+    inventory_start = text.index("function Assert-InventoryResult")
+    capture_start = text.index("function Assert-CaptureResult", inventory_start)
+    processing_start = text.index("function Assert-ProcessingResult", capture_start)
+    assert "Assert-PhaseResultEnvelope" in text[inventory_start:capture_start]
+    assert "Assert-PhaseResultEnvelope" in text[capture_start:processing_start]
+
+
+def test_w5_root1_runbook_executes_adversarial_phase_envelope_checks(
+    tmp_path: Path,
+) -> None:
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("PowerShell is required to execute the Windows runbook validator")
+    text = (_ROOT / "scripts" / "run-w5-root1-live.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assignment_start = text.index("$script:PostInventoryFailureCategories")
+    assignment_end = text.index("\n)", assignment_start) + 2
+    fail_start = text.index("function Fail-Gate")
+    fail_end = text.index("function Get-StrictTopLevelJsonPropertyNames", fail_start)
+    exact_start = text.index("function Assert-ExactObject")
+    exact_end = text.index("function Full-Path", exact_start)
+    phase_start = text.index("function Assert-PhaseResultEnvelope")
+    phase_end = text.index("function Assert-ProcessingResult", phase_start)
+
+    production_definitions = "\n".join((
+        '$ErrorActionPreference = "Stop"',
+        '$script:FailureStage = "probe"',
+        text[assignment_start:assignment_end],
+        text[fail_start:fail_end],
+        text[exact_start:exact_end],
+        text[phase_start:phase_end],
+    ))
+    probe = production_definitions + r'''
+function Expect-StageFailure([object]$Value, [string]$Expected) {
+    $script:FailureStage = "unset"
+    $threw = $false
+    try {
+        Assert-PhaseResultEnvelope $Value @("status", "phase") "probe"
+    }
+    catch {
+        $threw = $true
+    }
+    if (-not $threw -or $script:FailureStage -ne $Expected) {
+        throw "unexpected validation outcome"
+    }
+}
+
+Expect-StageFailure $null "probe"
+Expect-StageFailure @() "probe"
+Expect-StageFailure "scalar" "probe"
+Expect-StageFailure ([pscustomobject]@{status="failed"}) "probe"
+Expect-StageFailure ([pscustomobject]@{
+    status="failed"; failure_category="inventory_stream"; extra=$true
+}) "probe"
+Expect-StageFailure ([pscustomobject]@{
+    status="complete"; failure_category="inventory_stream"
+}) "probe"
+Expect-StageFailure ([pscustomobject]@{
+    status="failed"; failure_category="unknown"
+}) "probe"
+Expect-StageFailure ([pscustomobject]@{
+    status="failed"; failure_category="inventory_stream"
+}) "inventory_stream"
+
+$script:FailureStage = "unset"
+try {
+    Assert-CaptureResult ([pscustomobject]@{
+        status="failed"; failure_category="selection_publication"
+    }) "complete" "capture_resume"
+}
+catch {}
+if ($script:FailureStage -ne "selection_publication") {
+    throw "capture failure category was discarded"
+}
+
+Assert-PhaseResultEnvelope ([pscustomobject]@{
+    status="complete"; phase="inventory"
+}) @("status", "phase") "probe"
+'''
+    probe_path = tmp_path / "runbook-validator-probe.ps1"
+    probe_path.write_text(probe, encoding="utf-8")
+    completed = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-File", str(probe_path)],
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr

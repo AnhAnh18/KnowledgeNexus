@@ -6,15 +6,25 @@ from pathlib import Path
 import pytest
 
 import knowledgenexus.foundation.infrastructure.confluence as confluence_pkg
+import knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_adapter as page_adapter_module
 import knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport as retry_transport_module
+import knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector as orphan_inspector_module
+import knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages as capture_pages_module
 from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_inventory import (
     ExecuteDurableConfluenceInventory,
 )
 from knowledgenexus.foundation.cli import confluence_subtree_corpus as cli
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CanonicalIncludeRoots,
+    CrawlRunSnapshot,
+    CrawlRunStatus,
     CrawlRunId,
+    IncludeRootProgress,
+    InventoryPhaseStatus,
     InventoryRootCommit,
+)
+from knowledgenexus.foundation.domain.models.confluence_crawl_fingerprint import (
+    ConfluenceCrawlFingerprint,
 )
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
 from knowledgenexus.foundation.domain.models.confluence_inventory_window import ConfluenceInventoryWindow
@@ -42,7 +52,9 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachmen
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     ActivateRawGenerationRequest,
+    CheckpointRunInventoryComplete,
     CheckpointRunSelectionFailure,
+    CheckpointRunSelectionFailureCategory,
     ResumeExplicitRunRequest,
     ResumeUniqueIncompleteRunRequest,
     StartNewRunRequest,
@@ -724,14 +736,57 @@ def test_five_phases_run_sequentially_against_one_state_dir_and_run_id(monkeypat
         cli._export_phase(_args(**base, run_id=run_id, output_dir=str(output_dir)), state)
 
 
+_EXPECTED_ACTIVATION_FAILURE_CATEGORIES = {
+    CheckpointRunSelectionFailureCategory.RUN_OPERATION_INVALID:
+        "raw_generation_activation_run_operation_invalid",
+    CheckpointRunSelectionFailureCategory.RUN_NOT_FOUND:
+        "raw_generation_activation_run_not_found",
+    CheckpointRunSelectionFailureCategory.RUN_NOT_RESUMABLE:
+        "raw_generation_activation_run_not_resumable",
+    CheckpointRunSelectionFailureCategory.RUN_MATCH_AMBIGUOUS:
+        "raw_generation_activation_run_match_ambiguous",
+    CheckpointRunSelectionFailureCategory.INCOMPLETE_RUN_CONFLICT:
+        "raw_generation_activation_incomplete_run_conflict",
+}
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
-    tuple(cli._ACTIVATION_FAILURE_CATEGORIES.items()),
+    tuple(_EXPECTED_ACTIVATION_FAILURE_CATEGORIES.items()),
 )
 def test_activation_failure_preserves_locked_selection_category(source, expected):
     assert cli._activation_failure(CheckpointRunSelectionFailure(source)) == {
         "status": "failed",
         "failure_category": expected,
+    }
+
+
+def test_activation_failure_mapping_is_total_over_public_categories():
+    public_categories = {
+        value
+        for name, value in vars(CheckpointRunSelectionFailureCategory).items()
+        if name.isupper() and type(value) is str
+    }
+    assert public_categories == set(_EXPECTED_ACTIVATION_FAILURE_CATEGORIES)
+    assert cli._ACTIVATION_FAILURE_CATEGORIES == (
+        _EXPECTED_ACTIVATION_FAILURE_CATEGORIES
+    )
+
+
+def test_inventory_complete_activation_outcome_fails_closed():
+    roots = CanonicalIncludeRoots(("1000",))
+    snapshot = CrawlRunSnapshot(
+        RUN_ID,
+        RUN_ID,
+        ConfluenceCrawlFingerprint._from_digest("a" * 64),
+        CrawlRunStatus.INCOMPLETE,
+        InventoryPhaseStatus.PENDING,
+        roots,
+        (IncludeRootProgress.ROOT_PENDING,),
+    )
+    assert cli._activation_failure(CheckpointRunInventoryComplete(snapshot)) == {
+        "status": "failed",
+        "failure_category": "raw_generation_activation_run_operation_invalid",
     }
 
 
@@ -831,6 +886,35 @@ def test_inventory_stream_failure_pauses_and_does_not_publish(monkeypatch, tmp_p
     assert calls == {"paused": 1, "published": 0}
 
 
+def test_inventory_hostile_activation_fails_before_publication(monkeypatch, tmp_path):
+    calls = {"published": 0}
+
+    class HostileSession:
+        @property
+        def stream_inventory_occurrences(self):
+            raise RuntimeError("must be sanitized")
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _InventoryPhaseComposition(HostileSession()),
+    )
+
+    def unexpected_publication(*_args, **_kwargs):
+        calls["published"] += 1
+        raise AssertionError("publication must not run")
+
+    monkeypatch.setattr(cli, "_atomic_json", unexpected_publication)
+    result = cli._inventory_phase(_inventory_phase_args(tmp_path), tmp_path.resolve())
+
+    assert result == {
+        "status": "failed",
+        "failure_category": "raw_generation_activation_run_operation_invalid",
+    }
+    assert calls == {"published": 0}
+
+
 def test_selection_publication_failure_uses_valid_inventory_fact(monkeypatch, tmp_path):
     calls = {"paused": 0, "published": 0}
     roots = CanonicalIncludeRoots(("1000",))
@@ -868,3 +952,225 @@ def test_selection_publication_failure_uses_valid_inventory_fact(monkeypatch, tm
         "failure_category": "selection_publication",
     }
     assert calls == {"paused": 1, "published": 1}
+
+
+def test_invalid_inventory_selection_is_not_mislabeled_as_publication(
+    monkeypatch, tmp_path
+):
+    calls = {"paused": 0, "published": 0}
+    roots = CanonicalIncludeRoots(("2000",))
+    fact = InventoryRootCommit(
+        RUN_ID,
+        0,
+        "2000",
+        ConfluencePageMetadata("2000", "Other", "SPACE", source_version="1"),
+        roots,
+    )
+
+    class ValidButWrongScopeSession:
+        def stream_inventory_occurrences(self, *, batch_size):
+            return iter((fact,))
+
+        def pause_session(self):
+            calls["paused"] += 1
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _InventoryPhaseComposition(
+            ValidButWrongScopeSession()
+        ),
+    )
+
+    def unexpected_publication(*_args, **_kwargs):
+        calls["published"] += 1
+        raise AssertionError("invalid selection must not be published")
+
+    monkeypatch.setattr(cli, "_atomic_json", unexpected_publication)
+    result = cli._inventory_phase(_inventory_phase_args(tmp_path), tmp_path.resolve())
+
+    assert result == {
+        "status": "failed",
+        "failure_category": "inventory_selection_invalid",
+    }
+    assert calls == {"paused": 1, "published": 0}
+
+
+class _CapturePhaseSession:
+    def __init__(self, facts, *, stream_error=None):
+        self._facts = facts
+        self._stream_error = stream_error
+        self.paused = 0
+        self.completed = 0
+
+    def stream_inventory_occurrences(self, *, batch_size):
+        if self._stream_error is not None:
+            raise self._stream_error
+        return iter(self._facts)
+
+    def pause_session(self):
+        self.paused += 1
+
+    def complete_session(self):
+        self.completed += 1
+
+
+class _CapturePhaseComposition:
+    def __init__(self, outcome):
+        self.checkpoint_run_port = self
+        self._outcome = outcome
+        self.http_inner = object()
+        self.retry_profile = object()
+
+    def activate_raw_generation(self, request):
+        return _ActivationContext(self._outcome)
+
+    def guarded_raw_page_store(self, *, activation):
+        return object()
+
+
+def _capture_phase_fixture(monkeypatch, tmp_path, session, *, capture_result=None,
+                           capture_error=None):
+    state = (tmp_path / "state").resolve()
+    state.mkdir()
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    selection_path = cli._state_path(
+        state, str(RUN_ID), "inventory-selection.json"
+    )
+    cli._atomic_json(selection_path, _selection())
+    calls = {"capture_constructed": 0, "capture_run": 0}
+
+    class FakeCapture:
+        def __init__(self, **_kwargs):
+            calls["capture_constructed"] += 1
+
+        def run(self, **_kwargs):
+            calls["capture_run"] += 1
+            if capture_error is not None:
+                raise capture_error
+            return capture_result
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _CapturePhaseComposition(session),
+    )
+    monkeypatch.setattr(
+        retry_transport_module,
+        "RetryingConfluenceHttpTransport",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        page_adapter_module,
+        "ConfluenceDataCenterPageAdapter",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        orphan_inspector_module,
+        "ConfluenceRawPageOrphanInspector",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        capture_pages_module,
+        "CaptureConfluenceSubtreePages",
+        FakeCapture,
+    )
+    args = _args(
+        raw_root=str(raw_root),
+        reliability_profile_path=str(APPROVED_PROFILE_PATH),
+        selection_path=str(selection_path),
+        stop_after_batches=None,
+    )
+    return args, state, calls
+
+
+def _capture_inventory_fact():
+    roots = CanonicalIncludeRoots(("1000",))
+    return InventoryRootCommit(
+        RUN_ID,
+        0,
+        "1000",
+        ConfluencePageMetadata("1000", "Root", "SPACE", source_version="7"),
+        roots,
+    )
+
+
+def test_capture_stream_failure_pauses_once_before_capture_side_effects(
+    monkeypatch, tmp_path
+):
+    session = _CapturePhaseSession(
+        (), stream_error=ValueError("sanitized stream failure")
+    )
+    args, state, calls = _capture_phase_fixture(
+        monkeypatch, tmp_path, session
+    )
+
+    result = cli._capture_pages_phase(args, state)
+
+    assert result == {"status": "failed", "failure_category": "inventory_stream"}
+    assert session.paused == 1
+    assert session.completed == 0
+    assert calls == {"capture_constructed": 0, "capture_run": 0}
+
+
+@pytest.mark.parametrize(
+    ("complete", "expected_status", "expected_pauses", "expected_completions"),
+    ((True, "complete", 0, 1), (False, "stopped", 1, 0)),
+)
+def test_capture_result_closes_checkpoint_session_by_result(
+    monkeypatch,
+    tmp_path,
+    complete,
+    expected_status,
+    expected_pauses,
+    expected_completions,
+):
+    session = _CapturePhaseSession((_capture_inventory_fact(),))
+    capture_result = type(
+        "CaptureResult",
+        (),
+        {
+            "complete": complete,
+            "captured": 1 if complete else 0,
+            "replayed": 0,
+            "skipped": 0,
+            "failed": 0,
+        },
+    )()
+    args, state, calls = _capture_phase_fixture(
+        monkeypatch, tmp_path, session, capture_result=capture_result
+    )
+
+    result = cli._capture_pages_phase(args, state)
+
+    assert result["status"] == expected_status
+    assert session.paused == expected_pauses
+    assert session.completed == expected_completions
+    assert calls == {"capture_constructed": 1, "capture_run": 1}
+
+
+def test_capture_failure_is_not_mislabeled_and_pauses_for_resume(
+    monkeypatch, tmp_path
+):
+    class CaptureFailure(RuntimeError):
+        pass
+
+    session = _CapturePhaseSession((_capture_inventory_fact(),))
+    args, state, calls = _capture_phase_fixture(
+        monkeypatch,
+        tmp_path,
+        session,
+        capture_error=CaptureFailure("sanitized capture failure"),
+    )
+
+    with pytest.raises(CaptureFailure):
+        cli._capture_pages_phase(args, state)
+
+    # Capture failures deliberately pause the durable run so that a separately
+    # authorized phase resume can continue from committed page acknowledgements.
+    assert session.paused == 1
+    assert session.completed == 0
+    assert calls == {"capture_constructed": 1, "capture_run": 1}

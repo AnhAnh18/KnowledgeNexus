@@ -27,17 +27,23 @@ from knowledgenexus.foundation.domain.models.confluence_page_set import Confluen
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     CheckpointRunInventoryComplete,
     CheckpointRunSelectionFailure,
+    CheckpointRunSelectionFailureCategory,
 )
 from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain, require_plain_file
 
 
 _SELECTION_FORMAT = "confluence-subtree-selection-v1"
 _ACTIVATION_FAILURE_CATEGORIES = {
-    "run_operation_invalid": "raw_generation_activation_run_operation_invalid",
-    "run_not_found": "raw_generation_activation_run_not_found",
-    "run_not_resumable": "raw_generation_activation_run_not_resumable",
-    "run_match_ambiguous": "raw_generation_activation_run_match_ambiguous",
-    "incomplete_run_conflict": "raw_generation_activation_incomplete_run_conflict",
+    CheckpointRunSelectionFailureCategory.RUN_OPERATION_INVALID:
+        "raw_generation_activation_run_operation_invalid",
+    CheckpointRunSelectionFailureCategory.RUN_NOT_FOUND:
+        "raw_generation_activation_run_not_found",
+    CheckpointRunSelectionFailureCategory.RUN_NOT_RESUMABLE:
+        "raw_generation_activation_run_not_resumable",
+    CheckpointRunSelectionFailureCategory.RUN_MATCH_AMBIGUOUS:
+        "raw_generation_activation_run_match_ambiguous",
+    CheckpointRunSelectionFailureCategory.INCOMPLETE_RUN_CONFLICT:
+        "raw_generation_activation_incomplete_run_conflict",
 }
 _PROCESSING_FORMAT = "confluence-subtree-processing-state-v1"
 _STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json", "delta-inventory.json"})
@@ -602,8 +608,14 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
             "failure_category": "raw_generation_activation_run_operation_invalid",
         }
     try:
-        selection_path = _state_path(state, str(snapshot.run_id), "inventory-selection.json")
-        if selection_path.exists():
+        selection_path = _state_path(
+            state, str(snapshot.run_id), "inventory-selection.json"
+        )
+    except (OSError, TypeError, ValueError):
+        return {"status": "failed", "failure_category": "selection_publication"}
+
+    if selection_path.exists():
+        try:
             existing, existing_items = _load_selection_payload(
                 selection_path,
                 run_id=snapshot.run_id,
@@ -618,7 +630,19 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
             if candidate != existing:
                 raise ValueError("selection replay conflict")
             selection = existing
-        else:
+            _assert_root_page_in_selection(args.root_page_id, selection)
+        except OSError:
+            return {
+                "status": "failed",
+                "failure_category": "selection_publication",
+            }
+        except (TypeError, ValueError):
+            return {
+                "status": "failed",
+                "failure_category": "inventory_selection_invalid",
+            }
+    else:
+        try:
             crawled_at = (
                 datetime.now(timezone.utc)
                 .isoformat(timespec="microseconds")
@@ -630,10 +654,19 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
                 max_pages=args.max_pages,
                 crawled_at=crawled_at,
             )
+            _assert_root_page_in_selection(args.root_page_id, selection)
+        except (TypeError, ValueError):
+            return {
+                "status": "failed",
+                "failure_category": "inventory_selection_invalid",
+            }
+        try:
             _atomic_json(selection_path, selection)
-        _assert_root_page_in_selection(args.root_page_id, selection)
-    except (OSError, TypeError, ValueError):
-        return {"status": "failed", "failure_category": "selection_publication"}
+        except (OSError, TypeError, ValueError):
+            return {
+                "status": "failed",
+                "failure_category": "selection_publication",
+            }
     return {"status": "complete", "phase": "inventory", "selected_pages": len(selection["items"]), "run_id": str(snapshot.run_id)}
 
 
