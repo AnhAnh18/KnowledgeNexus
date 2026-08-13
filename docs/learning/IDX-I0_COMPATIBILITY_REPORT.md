@@ -20,6 +20,26 @@ The report uses repository-relative source paths and line citations only. It
 contains no snapshot content, source identifiers, local artifact paths,
 credentials, or full artifact hashes.
 
+## Inspected state and reproducibility
+
+The committed bundle head inspected for this report is `c34af48`, following the
+RET-R2 documentation commits `8017963` and `c34af48`; it is not the older
+planning head `203b599`. At review time, the following working-tree evidence
+was not committed at that head: modified
+`src/knowledgenexus/indexing/domain/models/chunk.py`, untracked
+`src/knowledgenexus/indexing/infrastructure/importers/snapshot_resolver.py`,
+untracked `src/knowledgenexus/indexing/infrastructure/importers/__init__.py`,
+and untracked `tests/indexing/infrastructure/importers/test_snapshot_resolver.py`.
+The unrelated untracked transfer-patch directory was not read or used.
+
+Accordingly, a clean checkout of `c34af48` has no resolver draft. The five
+matrix rows marked **draft-dependent** below use that uncommitted resolver or
+its test; their `Partial` classification is reproducible only if the draft is
+deliberately preserved. At clean head those capabilities are **Not present**.
+P0-1 and P0-4 are conditional observations about the retained draft, not gaps
+of the committed base. The independent bundle-preservation branch now records
+that draft separately; it is not merged and does not alter I1 scope.
+
 ## Draft reconciliation
 
 The superseded draft is corrected as follows.
@@ -76,28 +96,29 @@ line ranges are therefore part of every cited path.
 
 | Area | State | Evidence and required owner |
 |---|---|---|
-| Snapshot resolver | Partial | `snapshot_resolver.py:57-91` resolves explicit/latest and validates layout; I1 owns immutable explicit-version resolver after D12/B1. |
-| Strict manifest/JSONL validation | Partial | Resolver parses manifest at `snapshot_resolver.py:80-90`; streams use shared validator at `schema_validator.py:89-129`. I1 adds strict duplicate-key/non-finite rejection, digest, bounds, and verified-byte ownership. |
+| Snapshot resolver | Draft-dependent partial; clean head not present | Untracked `snapshot_resolver.py:57-91` resolves explicit/latest and validates layout. I1 owns immutable explicit-version resolver after D12/B1. |
+| Strict manifest/JSONL validation | Draft-dependent partial; clean head not present | Untracked resolver parses manifest at `snapshot_resolver.py:80-90`; streams use shared validator at `schema_validator.py:89-129`. I1 adds strict duplicate-key/non-finite rejection, digest, bounds, and verified-byte ownership. |
 | Full import | Not present | No `ImportFoundationSnapshot` application composition exists in the Indexing tree; I2-B owns it. |
-| Delta import | Not present | Only resolver stream-name mapping at `snapshot_resolver.py:21-38`; no mode/base/tombstone behavior. I2-C owns it after D13 and retention. |
+| Delta import | Not present | The untracked resolver has only stream-name mapping at `snapshot_resolver.py:21-38`; no mode/base/tombstone behavior. I2-C owns it after D13 and retention. |
 | Ingest job/idempotency storage | Partial | Status model `ingest_job.py:8-23` and repository `sqlite_ingest_job_repo.py:15-39`; no dataset/version/digest identity at `database/models.py:41-50`. I2-A/B own it. |
 | Document/chunk repositories and hydrate text | Partial | SQLite document/chunk repos exist (`sqlite_document_repo.py:17-79`, `sqlite_chunk_repo.py:18-100`) and chunk text is stored (`database/models.py:26-38`); UUID-shaped identity conflicts with Foundation strings (`database/models.py:16,30`, `mappers.py:25-36,72-87`). I2-A owns migration. |
 | Relation/ACL/media/symbol repositories | Not present | Database models contain only Document, Chunk, and IngestJob (`database/models.py:12-50`); no matching repository/port in the bundle. I2-A owns it. |
-| Tombstone by entity type | Not present | Resolver recognizes a tombstone stream (`snapshot_resolver.py:37`), but no application implementation exists. I2-C owns all six schema entity types. |
+| Tombstone by entity type | Not present | The untracked resolver recognizes a tombstone stream (`snapshot_resolver.py:37`), but no application implementation exists. I2-C owns all six schema entity types. |
 | BGE-M3 document embedding | Partial | Batch BAAI/bge-m3, 1024 dimensions, normalization exist (`bge_m3_embedder.py:12-18,87-105`); no importer invokes it. I2-B owns verbatim document embedding. |
 | Deterministic Qdrant IDs | Not present / incompatible | `_to_point_id` accepts UUID only (`qdrant_store.py:32-37`), while Foundation chunk IDs are strings (`defs.schema.json:42-45`). I2-A owns D6 UUIDv5 mapping. |
 | Slim payload and payload indexes | Partial / incompatible | Payload has six keys (`qdrant_store.py:40-52`) and config indexes only five fields (`config/qdrant.collection.yaml:1-15`). I2-A adds required ACL, provenance, dataset/version, and indexes. |
 | Staging and activation | Not present | Qdrant targets one configured collection (`qdrant_store.py:165-244`); SQLite writes commit immediately (`sqlite_chunk_repo.py:21-47`, `sqlite_document_repo.py:19-40`). I2-A/I3 own staged references and D13 ledger. |
 | Retry/recovery | Not present | Jobs only expose PENDING/RUNNING/COMPLETED/FAILED (`ingest_job.py:8-13`); no resumable recovery implementation. B1, I2-B, I3, and I4 own their respective recovery paths. |
 | API/CLI composition | Partial, prohibited as handoff | Direct `POST /api/v1/store/chunks` writes chunks (`presentation/api/v1/store.py:20-55`); no snapshot-import CLI/API composition. This endpoint must not be the Foundation handoff; I2-B/I4-B own approved boundaries. |
-| Dependency-boundary tests | Partial | Resolver/vector/repository/embedder tests exist, e.g. `tests/indexing/infrastructure/importers/test_snapshot_resolver.py:15-63`; current architecture test is Foundation-internal only (`tests/architecture/test_application_import_boundary.py:8-50`). I1-I4 add Indexing-to-Foundation isolation tests. |
+| Dependency-boundary tests | Partial; resolver test draft-dependent | Vector/repository/embedder tests exist; the untracked resolver test is `tests/indexing/infrastructure/importers/test_snapshot_resolver.py:15-63`. Current architecture test is Foundation-internal only (`tests/architecture/test_application_import_boundary.py:8-50`). I1-I4 add Indexing-to-Foundation isolation tests. |
 | Database migrations | Not present (explicit absence finding) | No Alembic/migration tree exists; bootstrap calls `Base.metadata.create_all` (`database/engine.py:43-45`). I2-A owns reviewed migration/rollback design. |
 
 ## Verified gaps and ownership
 
 ### P0
 
-1. The resolver's `_REQUIRED_FILES` hard-codes the old ten-file inventory
+1. **Conditional on retaining the untracked resolver draft:** its
+   `_REQUIRED_FILES` hard-codes the old ten-file inventory
    (`snapshot_resolver.py:17-28`) and rejects every unexpected entry
    (`:109-120`). D12's digest-set would fail every snapshot until D12 updates
    the producer and I1 replaces the consumer inventory rule.
@@ -109,7 +130,8 @@ line ranges are therefore part of every cited path.
    `content_kind`, `language`, `chunker_version`, `embedding_model`,
    `config_hash`, and `acl_tags` (`qdrant_store.py:40-52`). I2-A must add the
    approved slim deny-safe payload and payload indexes before writes.
-4. Resolver trust is insufficient: `resolve(None)` reads `LATEST.txt`
+4. **Conditional on retaining the untracked resolver draft:** resolver trust is
+   insufficient: `resolve(None)` reads `LATEST.txt`
    (`snapshot_resolver.py:68-73`); parsing uses bare `json.loads`
    (`snapshot_resolver.py:80-84`, `schema_validator.py:99-129`); checks are
    symlink-only (`snapshot_resolver.py:77,95,119`); and no digest, byte/record
@@ -174,13 +196,15 @@ Before any implementation, the owner must answer:
 
 1. Use `[HANDOFF-I1]` commit tags as the handoff plan shows, or `IDX-I1` as
    roadmap naming rules require?
-2. By what mechanism, and at what post-W5-D frozen head, is the Indexing base
-   imported into the primary repository? The inspected bundle's short planning
-   head is `203b599`; it is not an implementation authorization.
+2. By what mechanism, and at what frozen post-W5 closeout head, is the Indexing
+   base imported into the primary repository? The inspected committed bundle
+   head is `c34af48`; its resolver draft was not committed there and is not an
+   implementation authorization.
 3. For pre-D12 ten-file snapshots without digest-set, require re-export or
    allow a bounded controlled compatibility flag?
 
-I0 stops here. W5-B/W5-C have not run, so all subsequent work risks rebase
-after the post-W5-D freeze. D12 and D13 remain owner decisions; B1, I1, and all
-production changes require a new authorization and a fresh independent I0
-review before the I1 scope is frozen.
+I0 stops here. W5-B is in progress; W5-C and the W5-D closeout are not complete,
+so all subsequent work risks rebase after the frozen post-W5 closeout head. D12
+and D13 remain owner decisions; B1, I1, and all production changes require a
+new authorization and a fresh independent I0 review before the I1 scope is
+frozen.
