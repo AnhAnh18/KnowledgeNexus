@@ -42,6 +42,7 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachmen
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     ActivateRawGenerationRequest,
+    CheckpointRunSelectionFailure,
     ResumeExplicitRunRequest,
     ResumeUniqueIncompleteRunRequest,
     StartNewRunRequest,
@@ -721,3 +722,149 @@ def test_five_phases_run_sequentially_against_one_state_dir_and_run_id(monkeypat
     # A second export at the same output directory must refuse to clobber.
     with pytest.raises(ValueError):
         cli._export_phase(_args(**base, run_id=run_id, output_dir=str(output_dir)), state)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    tuple(cli._ACTIVATION_FAILURE_CATEGORIES.items()),
+)
+def test_activation_failure_preserves_locked_selection_category(source, expected):
+    assert cli._activation_failure(CheckpointRunSelectionFailure(source)) == {
+        "status": "failed",
+        "failure_category": expected,
+    }
+
+
+def test_activation_methods_reject_malformed_and_hostile_results():
+    class Hostile:
+        @property
+        def stream_inventory_occurrences(self):
+            raise RuntimeError("must be sanitized")
+
+    class NonCallable:
+        stream_inventory_occurrences = object()
+        pause_session = object()
+
+    assert cli._activation_methods(None) is None
+    assert cli._activation_methods(object()) is None
+    assert cli._activation_methods(Hostile()) is None
+    assert cli._activation_methods(NonCallable()) is None
+
+
+class _InventoryPhaseSnapshot:
+    run_id = RUN_ID
+
+    class _Complete:
+        value = "complete"
+
+    inventory_phase = _Complete()
+
+
+class _InventoryPhaseResult:
+    snapshot = _InventoryPhaseSnapshot()
+    status = "complete"
+
+
+class _InventoryPhaseUseCase:
+    def execute(self, *, request):
+        return _InventoryPhaseResult()
+
+
+class _ActivationContext:
+    def __init__(self, outcome):
+        self._outcome = outcome
+
+    def __enter__(self):
+        return self._outcome
+
+    def __exit__(self, *_args):
+        return False
+
+
+class _InventoryPhaseComposition:
+    def __init__(self, outcome):
+        self.checkpoint_run_port = self
+        self._outcome = outcome
+
+    def inventory_use_case(self, *, max_search_pages):
+        return _InventoryPhaseUseCase()
+
+    def activate_raw_generation(self, request):
+        return _ActivationContext(self._outcome)
+
+
+def _inventory_phase_args(tmp_path):
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    return _args(
+        run_id=None,
+        raw_root=str(raw_root),
+        reliability_profile_path=str(APPROVED_PROFILE_PATH),
+    )
+
+
+def test_inventory_stream_failure_pauses_and_does_not_publish(monkeypatch, tmp_path):
+    calls = {"paused": 0, "published": 0}
+
+    class FailingSession:
+        def stream_inventory_occurrences(self, *, batch_size):
+            raise ValueError("sanitized stream failure")
+
+        def pause_session(self):
+            calls["paused"] += 1
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _InventoryPhaseComposition(FailingSession()),
+    )
+
+    def unexpected_publication(*_args, **_kwargs):
+        calls["published"] += 1
+        raise AssertionError("publication must not run after stream failure")
+
+    monkeypatch.setattr(cli, "_atomic_json", unexpected_publication)
+    result = cli._inventory_phase(_inventory_phase_args(tmp_path), tmp_path.resolve())
+
+    assert result == {"status": "failed", "failure_category": "inventory_stream"}
+    assert calls == {"paused": 1, "published": 0}
+
+
+def test_selection_publication_failure_uses_valid_inventory_fact(monkeypatch, tmp_path):
+    calls = {"paused": 0, "published": 0}
+    roots = CanonicalIncludeRoots(("1000",))
+    fact = InventoryRootCommit(
+        RUN_ID,
+        0,
+        "1000",
+        ConfluencePageMetadata("1000", "Root", "SPACE", source_version="1"),
+        roots,
+    )
+
+    class ValidSession:
+        def stream_inventory_occurrences(self, *, batch_size):
+            return iter((fact,))
+
+        def pause_session(self):
+            calls["paused"] += 1
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _InventoryPhaseComposition(ValidSession()),
+    )
+
+    def fail_publication(*_args, **_kwargs):
+        calls["published"] += 1
+        raise OSError("sanitized publication failure")
+
+    monkeypatch.setattr(cli, "_atomic_json", fail_publication)
+    result = cli._inventory_phase(_inventory_phase_args(tmp_path), tmp_path.resolve())
+
+    assert result == {
+        "status": "failed",
+        "failure_category": "selection_publication",
+    }
+    assert calls == {"paused": 1, "published": 1}

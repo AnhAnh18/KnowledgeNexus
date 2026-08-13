@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from knowledgenexus.foundation.cli import confluence_subtree_corpus
+
 
 _ROOT = Path(__file__).resolve().parents[3]
 _RUNBOOKS = _ROOT / "docs" / "runbooks"
@@ -74,3 +76,20 @@ def test_w5_a_sanitized_templates_are_valid_pending_envelopes() -> None:
         serialized = json.dumps(payload).lower()
         for forbidden in ("http://", "https://", "password", "page_id"):
             assert forbidden not in serialized
+
+
+def test_w5_root1_runbook_locks_post_inventory_failure_vocabulary() -> None:
+    text = (_ROOT / "scripts" / "run-w5-root1-live.ps1").read_text(
+        encoding="utf-8"
+    )
+    expected = set(confluence_subtree_corpus._ACTIVATION_FAILURE_CATEGORIES.values())
+    expected.update({"inventory_stream", "selection_publication"})
+    for category in expected:
+        assert f'"{category}"' in text
+
+    function_start = text.index("function Assert-InventoryResult")
+    function_end = text.index("function Assert-CaptureResult", function_start)
+    boundary = text[function_start:function_end]
+    assert boundary.index("$Value.PSObject.Properties.Name") < boundary.index(
+        "$Value.status"
+    )
