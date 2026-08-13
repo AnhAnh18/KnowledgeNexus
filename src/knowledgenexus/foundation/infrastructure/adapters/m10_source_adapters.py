@@ -215,6 +215,9 @@ class ConfluenceM10MaterializedSource:
             page_targets = _field(page, "page_target_map")
         if page_targets is None:
             page_targets = ()
+        normalized_bodies = _field(page, "normalized_bodies")
+        if normalized_bodies is None:
+            normalized_bodies = ()
         page_media_result = _field(page, "media_result")
         if page_media_result is None:
             page_media_result = _field(page, "media")
@@ -226,6 +229,7 @@ class ConfluenceM10MaterializedSource:
             # Keep the legacy name for injected facades while exposing the
             # materializer's canonical keyword-only API.
             "reference_intents_by_page": page_references,
+            "normalized_bodies": normalized_bodies,
         }
         relations: tuple[dict[str, object], ...] = _records_from_result(page, ("relations",), "relations") if _field(page, "relations") is not None else ()
         acl: tuple[dict[str, object], ...] = _records_from_result(page, ("acl", "acl_records"), "acl") if _field(page, "acl") is not None or _field(page, "acl_records") is not None else ()

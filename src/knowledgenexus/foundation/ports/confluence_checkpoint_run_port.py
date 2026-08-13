@@ -185,6 +185,8 @@ class CheckpointRunActivation(ConfluenceCheckpointStatePort, Protocol):
     snapshot: CrawlRunSnapshot
     session_id: CrawlSessionId
 
+    def guard_raw_publication(self) -> ContextManager[None]: ...
+
 
 CheckpointRunOutcome = (
     CheckpointRunActivation

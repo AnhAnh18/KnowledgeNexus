@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 import re
+from contextlib import contextmanager
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CanonicalIncludeRoots,
@@ -609,6 +610,16 @@ class _CheckpointStateSession:
         self._active = False
         self._observed_page_ids = None
         self._last_data_version = None
+
+    @contextmanager
+    def guard_raw_publication(self) -> Iterator[None]:
+        """Verify the activation-owned OS writer lease around raw publish."""
+        self._require_active()
+        self._workspace._verify_writer_lock()
+        try:
+            yield
+        finally:
+            self._workspace._verify_writer_lock()
 
     @staticmethod
     def _data_version(transaction: object) -> int:

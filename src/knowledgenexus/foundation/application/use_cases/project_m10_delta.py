@@ -84,7 +84,13 @@ def _canonical_hash(value: object) -> str:
 
 
 def _canonical_bytes(value: Mapping[str, object]) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    def plain(item: object) -> object:
+        if isinstance(item, Mapping):
+            return {str(key): plain(value) for key, value in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [plain(value) for value in item]
+        return item
+    return json.dumps(plain(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
 def _stream_view(value: object) -> dict[str, tuple[dict[str, object], ...]]:

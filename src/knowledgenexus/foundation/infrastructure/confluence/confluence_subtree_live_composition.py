@@ -45,8 +45,14 @@ from knowledgenexus.foundation.infrastructure.checkpoint.sqlite_checkpoint_run_p
 from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_generation_store import (
     ConfluenceRawPageGenerationStore,
 )
+from knowledgenexus.foundation.infrastructure.raw_store.budgeted_confluence_raw_page_store import (
+    BudgetedConfluenceRawPageStore,
+)
 from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_inventory import (
     ExecuteDurableConfluenceInventory,
+)
+from knowledgenexus.foundation.ports.confluence_raw_page_store_port import (
+    ConfluenceRawPageStorePort,
 )
 
 
@@ -62,9 +68,12 @@ class LiveSubtreeComposition:
     inventory_adapter: ConfluenceDataCenterInventoryAdapter
     page_adapter: ConfluenceDataCenterPageAdapter
     checkpoint_run_port: SqliteConfluenceCheckpointRunPort
-    raw_page_store: ConfluenceRawPageGenerationStore
+    raw_page_store: ConfluenceRawPageStorePort
     retry_profile: ConfluenceRetryExecutorProfile
     http_inner: object
+    raw_root: Path
+    max_raw_bytes: int
+    minimum_free_disk_reserve_bytes: int
 
     def __repr__(self) -> str:
         return "LiveSubtreeComposition()"
@@ -83,6 +92,18 @@ class LiveSubtreeComposition:
             inventory_window_port_factory=lambda transport: ConfluenceDataCenterInventoryAdapter(
                 transport=transport, max_search_pages=max_search_pages
             ),
+        )
+
+    def guarded_raw_page_store(self, *, activation: object) -> ConfluenceRawPageStorePort:
+        guard = getattr(activation, "guard_raw_publication", None)
+        if not callable(guard):
+            raise TypeError("raw publication activation is invalid")
+        return BudgetedConfluenceRawPageStore(
+            inner=self.raw_page_store,
+            raw_root=self.raw_root,
+            publication_guard=guard,
+            max_total_bytes=self.max_raw_bytes,
+            minimum_free_disk_reserve_bytes=self.minimum_free_disk_reserve_bytes,
         )
 
     def attachment_components(self, *, attachment_root: Path, budget: MediaBodyStoreBudget, attachment_page_size: int = 100, max_attachment_pages: int = 100, transport: object | None = None):
@@ -126,6 +147,12 @@ def compose_live_subtree(
         raise ValueError("max_search_pages must be positive")
     if not isinstance(reliability_profile, Mapping):
         raise TypeError("reliability_profile must be a mapping")
+    max_raw_bytes = reliability_profile.get("max_raw_bytes_per_run")
+    minimum_free_disk = reliability_profile.get("minimum_free_disk_reserve_bytes")
+    if type(max_raw_bytes) is not int or max_raw_bytes <= 0:
+        raise ValueError("raw byte budget is invalid")
+    if type(minimum_free_disk) is not int or minimum_free_disk < 0:
+        raise ValueError("free disk budget is invalid")
     endpoint = base_url if base_url is not None else os.environ.get(BASE_URL_ENV)
     token = personal_access_token if personal_access_token is not None else os.environ.get(PAT_ENV)
     if type(endpoint) is not str or not endpoint or type(token) is not str or not token:
@@ -153,6 +180,9 @@ def compose_live_subtree(
         raw_page_store=ConfluenceRawPageGenerationStore(raw_root=raw_root),
         retry_profile=profile,
         http_inner=inner,
+        raw_root=raw_root,
+        max_raw_bytes=max_raw_bytes,
+        minimum_free_disk_reserve_bytes=minimum_free_disk,
     )
 
 

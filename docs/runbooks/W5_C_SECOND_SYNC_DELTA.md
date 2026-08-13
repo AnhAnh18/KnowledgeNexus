@@ -16,6 +16,9 @@ disposition.
 
 Credentials remain only in the live process environment and are cleared before
 offline delta export. Never return credentials or raw runtime artifacts.
+The delta dataset root must already exist as an empty plain directory outside
+the repository; its generated version/staging directories and `LATEST.txt`
+must be absent before publication.
 
 ## Authorized sequence
 
@@ -33,17 +36,33 @@ $common = @(
   "--space-key", "<SPACE-KEY>",
   "--root-page-id", "<ROOT-PAGE-ID>"
 )
- $inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
- $run = $inventory.run_id
- if (-not $run) { throw "inventory did not return a run identity" }
-# COMMAND 1: start page capture. The operator must interrupt this process with
-# Ctrl+C only after a committed batch. Do not rerun COMMAND 1 after stopping.
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
-  --run-id $run
-# COMMAND 2: run exactly once after COMMAND 1 was interrupted. It resumes the
-# same run and raw root; do not execute it if COMMAND 1 completed normally.
-python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
-  --run-id $run
+# The first call durably completes inventory work. The second call reads the
+# unique completed run and publishes its bound selection. Neither is a page
+# body capture invocation.
+$inventoryStarted = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw "inventory start failed" }
+$inventory = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus inventory @common `
+  --resume-unique | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $inventory.status -ne "complete") {
+  throw "inventory completion readback failed"
+}
+$run = $inventory.run_id
+if (-not $run) { throw "inventory did not return a run identity" }
+# COMMAND 1: stop cleanly after two committed 100-page batches. The command
+# must return exit 0 with semantic status "stopped"; do not use Ctrl+C.
+$stopped = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+  --run-id $run --stop-after-batches 2 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $stopped.status -ne "stopped") {
+  throw "controlled page-capture stop did not complete"
+}
+# COMMAND 2: resume the same durable run and raw root without a stop limit.
+# It must return exit 0 with semantic status "complete" and must not refetch
+# pages already committed by COMMAND 1.
+$resumed = python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-pages @common `
+  --run-id $run | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $resumed.status -ne "complete") {
+  throw "resumed page capture did not complete"
+}
 python -m knowledgenexus.foundation.cli.confluence_subtree_corpus process-pages @common `
   --run-id $run
 python -m knowledgenexus.foundation.cli.confluence_subtree_corpus capture-drawio @common `

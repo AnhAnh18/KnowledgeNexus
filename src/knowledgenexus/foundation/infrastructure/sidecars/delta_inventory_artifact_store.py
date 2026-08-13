@@ -29,7 +29,7 @@ class DeltaInventoryArtifactStore:
     """Atomic, no-clobber storage for one generation's derived inventory."""
 
     def __init__(self, *, state_root: Path) -> None:
-        if type(state_root) is not Path or not state_root.is_absolute():
+        if not isinstance(state_root, Path) or not state_root.is_absolute():
             raise DeltaInventoryArtifactStoreError("invalid_artifact_path")
         try:
             require_plain_directory_chain(state_root)

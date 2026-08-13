@@ -22,6 +22,13 @@ from knowledgenexus.foundation.application.use_cases.build_git_symbols import Bu
 from knowledgenexus.foundation.application.use_cases.process_confluence_page_set import (
     ProcessConfluencePageSet,
 )
+from knowledgenexus.foundation.application.use_cases.build_confluence_jira_relations import BuildConfluenceJiraRelations
+from knowledgenexus.foundation.application.use_cases.materialize_confluence_acl import MaterializeConfluenceAcl
+from knowledgenexus.foundation.domain.models.confluence_chunking import ChunkingResult
+from knowledgenexus.foundation.domain.models.confluence_jira_relations import ConfluenceJiraRelationResult
+from knowledgenexus.foundation.domain.records.relation_record_builder import RelationRecordBuilder
+from knowledgenexus.foundation.domain.rules.document_id_generator import DocumentIdGenerator
+from knowledgenexus.foundation.domain.rules.relation_id_generator import RelationIdGenerator
 from knowledgenexus.foundation.domain.models.confluence_page_set import (
     ACTIVE_PAGE_SET_PROFILE_IDENTITY,
     ConfluencePageSetRequest,
@@ -68,6 +75,7 @@ class _StageOutput:
     page_references: tuple[object, ...] = ()
     symbols: tuple[dict[str, object], ...] = ()
     acl: tuple[dict[str, object], ...] = ()
+    normalized_bodies: tuple[tuple[str, str], ...] = ()
 
 
 class _ConfluencePageSetStage:
@@ -116,13 +124,83 @@ class _ConfluencePageSetStage:
                 raise M10CompositionRootError("Confluence source version is invalid")
             versions.add(version)
         source_version = next(iter(versions)) if len(versions) == 1 else "mixed"
+        normalized: list[tuple[str, str]] = []
+        # The approved relation producer needs the exact normalized body. The
+        # page-set result intentionally omits it, so recover it through the
+        # same processor seams (never by reparsing raw JSON here).
+        read_envelope = getattr(self._processor, "_read_envelope", None)
+        normalize = getattr(self._processor, "_normalize", None)
+        if callable(read_envelope) and callable(normalize):
+            for item in items:
+                envelope = read_envelope(request=page_request, item=item)
+                content = normalize(item=item, envelope=envelope)
+                normalized.append((item.page_id, content.normalized_body_text))
         return _StageOutput(
             documents=documents,
             chunks=chunks,
             source_version=source_version,
             raw_artifact_identity=request.raw_generation_id,
             page_references=tuple(result.reference_intents_by_page),
+            normalized_bodies=tuple(normalized),
         )
+
+
+class _ConfluenceAclRelationStage:
+    """Drive Jira relation extraction and deny-safe ACL through approved use cases."""
+
+    def __init__(self, *, validator: object) -> None:
+        if not callable(getattr(validator, "validate_record", None)):
+            raise TypeError("schema validator is invalid")
+        self._validator = validator
+
+    def execute(self, *, request: M10SnapshotRequest, documents: object, chunks: object, normalized_bodies: object = (), **_: object) -> dict[str, object]:
+        if type(request) is not M10SnapshotRequest or type(documents) is not tuple or type(chunks) is not tuple or type(normalized_bodies) is not tuple:
+            raise TypeError("invalid ACL stage input")
+        bodies = dict(normalized_bodies)
+        by_document: dict[str, list[dict[str, object]]] = {}
+        for chunk in chunks:
+            if type(chunk) is not dict or type(chunk.get("document_id")) is not str:
+                raise TypeError("invalid chunk")
+            by_document.setdefault(chunk["document_id"], []).append(copy.deepcopy(chunk))
+        relation_builder = BuildConfluenceJiraRelations(
+            profile=request.profile_bundle.jira_relation_profile,
+            document_id_generator=DocumentIdGenerator,
+            relation_id_generator=RelationIdGenerator,
+            relation_record_builder=RelationRecordBuilder,
+            schema_validator=self._validator,
+        )
+        acl_builder = MaterializeConfluenceAcl(schema_validator=self._validator)
+        output_docs: list[dict[str, object]] = []
+        output_chunks: list[dict[str, object]] = []
+        acl_rows: list[dict[str, object]] = []
+        relations: list[dict[str, object]] = []
+        for document in documents:
+            if type(document) is not dict:
+                raise TypeError("invalid document")
+            document_id = document.get("document_id")
+            page_id = document.get("page_id")
+            if type(document_id) is not str or type(page_id) is not str or page_id not in bodies:
+                raise ValueError("normalized page body is missing")
+            doc_chunks = tuple(by_document.get(document_id, ()))
+            chunking = ChunkingResult(records=doc_chunks, metrics={"chunks_total": len(doc_chunks), "chunks_over_hard_max": 0})
+            jira = relation_builder.execute(
+                normalized_body_text=bodies[page_id],
+                canonical_document=document,
+                chunking_result=chunking,
+                created_at=request.generated_at,
+            )
+            observation = ({"source_page_id": page_id, "http_status": 404, "classification": "unavailable", "users": [], "groups": []},)
+            acl = acl_builder.execute(
+                jira_relation_result=jira,
+                restriction_observations=observation,
+                crawler_identity="m10-offline-replay",
+                extracted_at=request.generated_at,
+            )
+            output_docs.append(acl.enriched_canonical_document)
+            output_chunks.extend(acl.enriched_chunks)
+            acl_rows.append(acl.acl_record)
+            relations.extend(jira.relations)
+        return {"documents": tuple(output_docs), "chunks": tuple(output_chunks), "acl": tuple(acl_rows), "relations": tuple(relations)}
 
 
 class ConfluenceM10CompositionRoot:
@@ -147,6 +225,7 @@ class ConfluenceM10CompositionRoot:
         relation_stage: object | None = None,
         acl_stage: object | None = None,
         media_stage: object | None = None,
+        tombstone_stage: object | None = None,
         sync_inventory_stage: object | None = None,
         schema_validator: object | None = None,
     ) -> ConfluenceM10Adapter:
@@ -163,14 +242,23 @@ class ConfluenceM10CompositionRoot:
                 storage_normalizer=storage_normalizer,
                 schema_validator=validator,
             )
+            # Never publish a silently incomplete M10 handoff. These stages
+            # must be explicitly composed by the operator/application profile.
+            if relation_stage is None or media_stage is None:
+                raise M10CompositionRootError("Confluence relation/media stages are not configured")
+            if acl_stage is None:
+                acl_stage = _ConfluenceAclRelationStage(validator=validator)
             source = ConfluenceM10MaterializedSource(
                 page_stage=_ConfluencePageSetStage(processor),
                 relation_stage=relation_stage,
                 acl_stage=acl_stage,
                 media_stage=media_stage,
+                tombstone_stage=tombstone_stage,
                 inventory_stage=sync_inventory_stage,
             )
             return ConfluenceM10Adapter(source=source)
+        except M10CompositionRootError:
+            raise
         except (TypeError, ValueError):
             raise
         except Exception:
