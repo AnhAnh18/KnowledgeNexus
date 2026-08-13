@@ -1148,17 +1148,25 @@ owner-authorized W5-B Root-1 full snapshot
 -> separately authorized W5-C second sync + sparse delta
 -> W5-D reconciliation + consolidated independent review + closeout
 -> freeze the post-W5 Git head
+-> resolve D12 integrity/dataset-identity contract and implement it in Foundation/shared contracts
+-> publish the D12 eleventh digest-set member and update Foundation file-set gates
+-> configure D10 Indexing-host onboarding
+-> implement D9 unified sanitized operator-status view and acknowledgement plumbing
+-> Foundation B1 immutable delivery bridge (transfer ledger, verify, atomic expose, exact trigger)
 -> Indexing I1 strict immutable resolver and validate-before-write
 -> Indexing I2-A Foundation identity/provenance migration
 -> Indexing I2-B full-snapshot mapping, embedding, and staged writes
 -> Indexing I3 two-store verification and activation
 -> Foundation-to-Indexing full-snapshot acceptance
+-> resolve D13 active-base acknowledgement, retention, divergence, and full-snapshot fallback
+-> implement and test retention/GC before delta import
 -> Indexing I2-C delta/base-chain/tombstone import
 -> full + second-sync delta acceptance
 -> Foundation W6 URL-driven start/resume/status operation
 -> Indexing I4-A durable Foundation SnapshotReady producer
 -> Indexing I4-B idempotent Indexing consumer
 -> Indexing I5 end-to-end acceptance and closeout
+-> optionally migrate D11 Phase-2 transport when POC delivery/security scale requires it
 ```
 
 SnapshotReady automation is deliberately later than successful
@@ -1180,7 +1188,9 @@ Indexing ownership is already defined by
 - I2 imports full/delta records, embeds, and stages hydrate/Qdrant data;
 - I3 verifies and atomically activates both stores;
 - I4-A/I4-B produce and consume durable `SnapshotReady` notifications;
-- I5 performs complete Foundation-to-Indexing acceptance and closeout.
+- I5 performs complete Foundation-to-Indexing acceptance and closeout,
+  including transport availability, terminal Indexing acknowledgement, and
+  sanitized end-to-end progress/ETA status.
 
 W6 must not duplicate those stages. Its terminal Foundation outcome is a
 validated, atomically published snapshot. When I4 is available, W6 invokes the
@@ -1217,7 +1227,8 @@ full or approved short Confluence URL
   phase resume for recovery. Power loss must not refetch committed windows,
   pages, or resolved Draw.io assets.
 - Report aggregate phase/progress counters without content, page IDs, URLs,
-  credentials, or filesystem paths.
+  credentials, or filesystem paths. Report an ETA only with an explicit
+  aggregate calculation basis; omit it when no reliable estimate exists.
 
 ### W6-C - Bounded supervision and recovery
 
@@ -1239,8 +1250,22 @@ full or approved short Confluence URL
   `LATEST.txt`-last semantics. Never use uncommitted chunk streaming as the
   authoritative Indexing handoff.
 - Recurring runs use W4 evidence-bound delta/base-chain/tombstone semantics.
+- Offer owner-configured recurrence plus an explicit manual sync action; both
+  reuse the same scope fingerprint, checkpoint/resume, delta, and publication
+  rules.
+- A scheduled or manual trigger defers when the scope has an active writer;
+  it may resume only one exact uniquely resumable run, otherwise reports a
+  sanitized operator-action state. Repeated deferrals and exhausted automatic
+  restart budget must be observable rather than silently stopping sync.
+- Do not publish a delta for Indexing until D13's active-base acknowledgement
+  and reconciliation policy permit it; otherwise retain/replay the published
+  full snapshot or issue the owner-authorized full-snapshot fallback.
 - W6 does not define the event contract, delivery ledger, Indexing consumer,
   embedding, Qdrant writes, activation, or acknowledgement; those are I1-I5.
+  Its terminal Foundation state is `published`, then `delivery_pending` or
+  `delivery_available`; it must never report `indexing_complete`. The
+  Indexing terminal acknowledgement owns that outcome. The immutable bridge
+  and host onboarding requirements are D10/D11 in the handoff plan.
 
 W6 completion requires URL-driven Root-1 and HQ runs, forced interruption and
 manual/automatic resume without refetch, deterministic publication, and an

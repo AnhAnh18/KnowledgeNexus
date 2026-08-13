@@ -32,6 +32,17 @@ Indexing
 The snapshot remains the durable source of truth and replay boundary.
 `SnapshotReady` is a delivery trigger, not a replacement for the snapshot.
 
+### Operational Product Flow
+
+```text
+Confluence URL -> resolve space/root page -> crawl/resume -> normalize/chunk
+-> publish immutable snapshot -> deliver to Indexing host -> validate/embed/stage
+-> verify/activate -> durable acknowledgement -> sanitized progress/ETA
+```
+
+Foundation never hands off uncommitted chunks. A published snapshot is the
+only Foundation-to-Indexing data handoff.
+
 ## 2. Current verified state
 
 Foundation already has the approved primitives for:
@@ -45,7 +56,9 @@ Foundation already has the approved primitives for:
 
 The current checkout does not yet prove a complete Indexing importer:
 
-- `indexing/application/use_cases/import_akp_snapshot.py` is empty;
+- the empty legacy `indexing/application/use_cases/import_akp_snapshot.py` is
+  replaced/removed when `ImportFoundationSnapshot` is implemented; it is not a
+  second importer entry point;
 - a BGE-M3 document embedder and Indexing ports exist;
 - the concrete hydrate repositories, Qdrant writer, import job state machine,
   snapshot resolver and activation coordinator must be inspected from the
@@ -85,13 +98,15 @@ Locked boundaries:
 This plan does not add:
 
 - Foundation-to-Qdrant writes;
-- direct per-chunk best-effort streaming as the only handoff;
+- direct per-chunk streaming or a generic direct chunk-write endpoint as a
+  Foundation-to-Indexing handoff;
 - a second copy of Foundation contracts;
 - implicit Hugging Face cache access;
 - Indexing re-normalization or re-chunking of Foundation records;
 - retrieval, reranking, chat, OCR or media extraction;
 - live Confluence work;
-- scheduler policy for Foundation crawling.
+- scheduler policy beyond the explicit recurring-root/manual-sync interface and
+  owner-configured cadence.
 
 ## 5. Required owner decisions
 
@@ -121,39 +136,127 @@ Choose one versioned immutable location form:
 2. HTTPS artifact endpoint;
 3. object-store URI.
 
-Recommended initial choice: shared filesystem only when Foundation and Indexing
-run on the same trusted host. Do not put a machine-local Windows path in an
-event consumed on another host.
+Recommended initial choice: a shared filesystem only inside one trusted
+security boundary whose permissions and atomicity are verified. It need not be
+one machine. Do not put a machine-local Windows path in an event consumed on
+another host.
 
 ### D3 — Notification transport
 
 Recommended progression:
 
 ```text
-Phase 1: explicit importer CLI/API using LATEST.txt or an exact version
+Phase 1: explicit importer CLI/API using an exact version plus both integrity digests
 Phase 2: durable local outbox + Indexing poller/dispatcher
 Phase 3: message broker only if operational scale requires it
 ```
 
 Do not introduce Kafka/RabbitMQ solely to close the initial POC.
 
+### D10 -- Indexing-Host Onboarding Checklist
+
+Before implementation, the Indexing team provides through an approved
+deployment channel: API base URL plus TLS/auth/network policy; chosen transport
+and host-visible immutable root/URI; least-privilege Foundation write and
+Indexing read identities; transport atomicity/checksum/retention/backup policy;
+persistent database, Qdrant, collection/alias, and BGE-M3 runtime settings;
+protected importer trigger; acknowledgement/status receiver; and retry/outage
+ownership. Secrets never enter plans, events, logs, or the repository.
+
+### D9 -- Sanitized Progress, ETA, and Acknowledgement
+
+Define one operation-status contract spanning Foundation delivery and Indexing
+import. It exposes only operation/run identity, dataset version when assigned,
+bounded phase, terminal state, aggregate counters, elapsed time, retry/resume
+state, and an optional phase-scoped ETA with its calculation basis. Omit/reset
+ETA when rate or phase makes the estimate unreliable. Never expose chunk text,
+page IDs, source URLs, credentials, local paths, raw payloads, or full hashes.
+
+Indexing persists a control-plane terminal acknowledgement containing exact
+version, digest, terminal state, and aggregate counters. The operator-facing
+status redacts the digest. A valid Foundation publication remains
+`delivery_pending` while Indexing is unavailable; it is not an end-to-end
+failure merely because import has not started.
+
+### D11 -- Bridge Rollout
+
+Phase 1 is a separately implemented bridge, not deployment configuration:
+
+```text
+published full snapshot -> unique destination .incoming -> verify integrity
+-> transport-qualified atomic expose -> exact version/digest trigger
+-> Indexing stages, activates, and acknowledges
+```
+
+The bridge has a delivery ledger, single writer per dataset, no-clobber final
+versions, crash-safe cleanup of only its own partial transfers, retry/replay,
+and sanitized `delivery_pending`/`delivery_available` status. Destination
+`LATEST.txt` is not used by an event-triggered import. A host outage leaves the
+source snapshot published and delivery pending; recovery replays delivery and
+import without re-crawling or re-chunking.
+
+B1 owns the D9 Foundation/delivery status projection through
+`delivery_available`. I4-B extends that read-only projector with the durable
+Indexing acknowledgement to form the terminal operator-facing view; I5 verifies
+the complete projection.
+
+Phase 2 replaces the shared root with immutable object storage or an HTTPS
+artifact service. Events contain only dataset/version, both integrity digests,
+and a non-secret immutable location reference. The consumer uses workload
+identity or mints a short-lived URL at fetch time; it never persists signed
+URLs or credentials. Add a broker only when outbox/poller scale requires it.
+
+### D12 -- Snapshot Integrity and Dataset Identity
+
+The current manifest does not bind every snapshot member and has no
+`dataset_name`; I1-I5 are blocked until Foundation/shared-contract owners make
+a versioned contract decision. The digest-set is the required eleventh regular
+file inside each immutable version directory. It is written last after the
+existing ten files, lists those ten filenames with byte size and SHA-256, and
+does not digest itself. Foundation must update all writer/completer/publisher
+`EXPECTED_COMPLETE_FILES`/publisher exact-file-set gates from ten to eleven;
+`EXPECTED_MACHINE_FILES` remains the nine-file staging gate. The bridge transfers and
+atomically exposes all eleven files together; I1 rejects any other set.
+
+Indexing verifies the digest-set binding and every listed member before parsing
+or mutation, then uses an ownership-isolated verified copy/handle to prevent
+TOCTOU replacement.
+
+The approved trigger/event contract must carry both `manifest_sha256` and
+`digest_set_sha256`; Indexing verifies both exact control-plane bytes before
+trusting the inventory.
+
+Either add dataset identity to a versioned manifest schema or define it as a
+trusted transport namespace. I1 must not assert nonexistent
+`manifest.dataset_name`. Existing snapshots need an explicit compatibility or
+re-export policy.
+
+### D13 -- Activation, Ordering, and Delta Recovery
+
+I2/I3 use versioned Qdrant collections and an application-owned durable
+activation ledger as the single reader gate. The ledger binds version, digest,
+profile, hydrate reference, Qdrant reference, and crash-recoverable state.
+Reject stale/out-of-order full snapshots except explicit audited rollback.
+
+The first bridge supports full snapshots only. Delta remains blocked until
+Indexing acknowledges its active base, reconciliation detects divergence,
+retention preserves required bases, and an owner-approved full-snapshot
+fallback exists. In-place shared-collection UUIDv5 delta updates are prohibited
+until a separate transactional recovery design is reviewed.
+
 ### D4 — Hydrate database and transaction strategy
 
 Record the actual backend and how a staged dataset version is committed or
-rolled back. SQLite and PostgreSQL require different concurrency/activation
-mechanisms.
+rolled back. For SQLite, decide and test WAL/read concurrency, one-writer
+ownership, bounded import transaction sizes, staged-versus-active layout,
+backup, retention/VACUUM, and crash recovery before I2-A. PostgreSQL requires
+its own transaction/isolation and migration plan.
 
 ### D5 — Qdrant activation strategy
 
-Choose and test one:
-
-- versioned collection plus atomic alias switch; or
-- one collection with a staged dataset-version filter and atomic application
-  activation pointer.
-
-Recommended: versioned collection plus alias switch for the first full-snapshot
-implementation. Delta support may later use an active collection with a strict
-ingest transaction/recovery ledger.
+Use versioned collections plus an application activation ledger for the first
+full-snapshot implementation. The former single-collection/filter option is
+superseded by D13 because it collides with deterministic UUIDv5 point IDs.
 
 ### D6 — Deterministic point namespace
 
@@ -196,8 +299,8 @@ src/knowledgenexus/indexing/application/
 src/knowledgenexus/indexing/infrastructure/
 src/knowledgenexus/presentation/
 src/knowledgenexus/shared/contracts/
-config/qdrant.collection.yaml
-database migrations
+config/qdrant_collection.yaml
+database schema/migration mechanism, including an explicit absence finding
 Indexing, storage, embedding and retrieval tests
 ```
 
@@ -226,6 +329,17 @@ Output:
 
 I0 must receive independent review before I1 scope is frozen.
 
+## Stage B1 -- Snapshot Delivery Bridge
+
+Implement the Phase-1 bridge with `.incoming` isolation, a delivery ledger,
+no-clobber/single-writer rules, destination integrity verification, a
+transport-qualified atomic expose, and exact version/digest triggering. Test
+partial-copy crashes, quota failure, tamper, duplicate triggers, outage replay,
+path/reparse escape, concurrency, and atomic visibility. If the mount cannot
+prove atomicity, use an artifact/object-store transport.
+
+Candidate: `[HANDOFF-B1] foundation: deliver immutable snapshots to Indexing`
+
 ## 7. Stage I1 — Strict immutable snapshot resolver
 
 Implement an Indexing-owned resolver/reader without importing Foundation
@@ -236,9 +350,12 @@ Inputs:
 ```text
 export_root
 dataset_name
-use_latest OR explicit dataset_version
+explicit dataset_version
+expected manifest digest
+expected digest-set digest
 contract_root
-optional expected manifest digest
+`use_latest` only for local Foundation/fixture inspection, never destination or
+event-triggered import
 ```
 
 ### LATEST.txt rules
@@ -254,10 +371,10 @@ The resolver must:
    whitespace;
 6. resolve the version as a direct child of the configured dataset root;
 7. require the immutable version directory and expected file set;
-8. validate `manifest.dataset_name` and `manifest.dataset_version` against the
-   configured name, pointer/explicit version and directory name;
-9. when a digest is supplied by `SnapshotReady`, hash the exact manifest bytes
-   and compare before parsing/import;
+8. validate `manifest.dataset_version` against the pointer/explicit version and
+   directory name; validate dataset identity only through D12's approved form;
+9. hash exact manifest and digest-set bytes against both supplied digests before
+   parsing, then verify each of the ten listed members' size and SHA-256;
 10. bind the opened version/digest for the entire import; never re-read
     `LATEST.txt` midway.
 
@@ -267,7 +384,8 @@ Before any storage mutation:
 
 - validate manifest schema and supported schema/profile versions;
 - validate every JSONL record against the correct shared schema;
-- reject duplicate IDs, blank lines, duplicate JSON keys, NaN/infinity,
+- reject symlink/reparse objects for root, dataset, version, and every member;
+  reject duplicate IDs, blank lines, duplicate JSON keys, NaN/infinity,
   malformed UTF-8, unexpected files and count mismatches;
 - verify deterministic stream identities and cross-stream closure required by
   the active snapshot mode;
@@ -283,21 +401,31 @@ Candidate:
 [HANDOFF-I1] indexing: resolve and validate immutable Foundation snapshots
 ```
 
-## 8. Stage I2 — Idempotent Indexing import core
+## Stage I2-A -- Identity and Staged Storage Migration
 
-Implement `ImportAkpSnapshot` as an Indexing application use case over injected
-ports.
+Add version/provenance storage, required payload indexes, entity repositories,
+ingest identity, versioned Qdrant collection/alias support, and D13's durable
+activation ledger. Independently review before import/activation. Retention,
+capacity, quota behavior, and safe cleanup are owned by the dedicated
+Retention/GC stage before I2-C.
+
+## 8. Stage I2-B — Idempotent Full-Snapshot Import Core
+
+Implement `ImportFoundationSnapshot` as an Indexing application use case over
+injected ports. Replace/remove the empty legacy
+`import_akp_snapshot.py`; do not preserve it as a second importer entry point.
 
 ### Import job identity
 
 Use a durable identity at least equivalent to:
 
 ```text
-dataset_name + dataset_version + manifest_digest + importer_profile_version
+dataset_name + dataset_version + manifest_digest + importer_profile_identity
 ```
 
 The same successful job is idempotent. A conflicting digest for the same
-dataset version fails closed.
+dataset version fails closed. The profile identity includes embedding model,
+dimension, normalization policy, and importer configuration version.
 
 ### Full snapshot behavior
 
@@ -320,6 +448,8 @@ dataset version fails closed.
 5. update ACL/filter payload even when chunk text is unchanged;
 6. ensure removed Qdrant points and hydrate rows cannot remain visible;
 7. fail closed if a delta targets a different active base.
+
+These rules belong exclusively to I2-C and are not authorized in I2-B.
 
 ### Required payload provenance
 
@@ -371,11 +501,22 @@ pass. A failure leaves the previous version active and records a resumable or
 terminal sanitized job state. Never expose a partially staged version to
 retrieval.
 
+Commit the activation ledger as the sole reader-visible switch only after both
+staged references pass verification. On restart, reconcile incomplete ledger
+states before serving or retrying; never infer active state from a Qdrant alias
+alone.
+
 Candidate:
 
 ```text
 [HANDOFF-I3] indexing: verify and activate staged snapshot versions
 ```
+
+## Stage I2-C -- Delta/Base-Chain/Tombstone Import
+
+Authorize only after D13 active-base acknowledgement, divergence detection,
+retention, and full-snapshot fallback are implemented and independently
+reviewed.
 
 ## 10. Stage I4 — Durable SnapshotReady automation
 
@@ -394,6 +535,7 @@ Create a small versioned shared contract. Minimum envelope:
   "dataset_name": "spen_knowledge_poc",
   "dataset_version": "<immutable version>",
   "manifest_sha256": "<lowercase sha256>",
+  "digest_set_sha256": "<lowercase sha256>",
   "snapshot_location": "<approved URI or location reference>"
 }
 ```
@@ -427,6 +569,11 @@ permanently invisible merely because notification failed.
 - tolerate duplicate and out-of-order delivery;
 - reject a conflicting digest/version binding;
 - expose aggregate sanitized status only.
+- persist and publish the D9 terminal acknowledgement only after activation or
+  a sanitized terminal rejection; never acknowledge mere event receipt or
+  download completion.
+- extend B1's D9 status projector over durable Indexing records; it must not
+  infer success from a missing acknowledgement.
 
 Candidate commits:
 
@@ -466,6 +613,18 @@ Mandatory scenarios:
     original chunk text.
 12. Network, filesystem, symlink/reparse, path traversal, retry and resource
     exhaustion failures remain sanitized and bounded.
+13. Tamper, replacement, or truncation of the digest-set or any individual
+    snapshot member fails integrity validation with zero Indexing storage mutation.
+14. Crash during transfer or activation preserves the prior ledger-selected
+    active version and leaves no partial delivery visible.
+15. A stale/out-of-order full trigger cannot replace a newer active version.
+16. Delta divergence stops import and recovers only through the defined
+    full-snapshot fallback.
+17. A URL-driven operation reports phase-scoped sanitized progress from crawl
+    through delivery, staging, activation, and acknowledgement; ETA is omitted
+    when its basis is unavailable.
+18. An unavailable Indexing host leaves the snapshot published and delivery
+    pending; recovery replays delivery/import without re-crawling or re-chunking.
 
 Acceptance evidence must contain aggregate counts and booleans only. It must
 not contain chunk text, page IDs, local paths, credentials, raw payloads or full
@@ -479,9 +638,15 @@ Recommended stack:
 
 ```text
 I0 — discovery/contract reconciliation
+Contract integrity — D12 schema/integrity decision and implementation
+B1 — immutable delivery bridge
 I1 — resolver and validate-before-write
-I2 — importer and staged persistence
+I2-A — identity/provenance, staging, collections, and activation ledger
+I2-B — full-snapshot importer and staged persistence
 I3 — two-store verification/activation
+Retention/GC -- implement and test owner-approved snapshot, staged-artifact, and
+rollback retention before I2-C or long-lived delivery pending states
+I2-C -- delta import only after D13 and retention/GC are satisfied
 I4-A — Foundation outbox producer
 I4-B — Indexing consumer
 I5 — end-to-end acceptance and closeout
@@ -509,7 +674,7 @@ While Foundation W4 is in progress, perform I0 only:
 obtain latest Indexing branch/patch
 → inspect actual importer/storage/Qdrant state
 → produce compatibility and gap report
-→ resolve D1-D8
+-> resolve D1-D13 and retention/GC ownership
 → independent plan review
 ```
 
