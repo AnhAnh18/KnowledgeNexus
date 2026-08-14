@@ -1280,10 +1280,14 @@ separate contracts and do not block Root-1/HQ text operation.
 
 ## 12.1 M11 - Structure-Aware Retrieval Handoff and Chunking Improvements
 
-Status: planned after M10/W5 and the first approved Indexing baseline. This
-milestone records future improvement work and must not be interpreted as
-permission to implement Retrieval inside Foundation or to change the active
-chunker before benchmark evidence exists.
+Status: superseded by `RET-R2`. RET-R2's implementation plan and context
+document own the structure-aware retrieval direction. Historical M11-A through
+M11-D are superseded and must not be interpreted as permission to implement
+Retrieval inside Foundation or to change the active chunker before benchmark
+evidence exists.
+
+Cross-links: `KnowledgeNexus/KnowledgeNexus/docs/RET-R2_IMPLEMENTATION_PLAN.md`
+and `KnowledgeNexus/KnowledgeNexus/docs/RET-R2_CONTEXT_EXPANDED_RETRIEVAL.md`.
 
 Purpose:
 - Preserve the current leaf `ChunkRecord` contract as the stable searchable

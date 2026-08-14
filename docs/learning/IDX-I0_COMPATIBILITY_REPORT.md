@@ -177,31 +177,21 @@ importer, delta/tombstone, rollback, and activation
 eleven-name set would require a second resolver migration when the structure
 stream arrives.
 
-Recommended decision input, not an I0 decision: make the digest-set the member
-inventory source of truth; require actual members to equal digest-set entries
-plus the digest-set itself; and constrain permitted filenames/streams by
-`schema_version`. This preserves strict rejection while making a versioned
-structure-stream addition an inventory/schema extension rather than another
-hard-coded file-count migration.
+Phase A adopts the recommendation: the digest-set is the member inventory
+source of truth; actual members equal its entries plus the digest-set itself;
+and permitted filenames/streams are constrained by `schema_version`. The
+byte-stable specification is `docs/learning/IDX-D12_DIGEST_SET_SPECIFICATION.md`.
 
-The owner should also decide whether the RET-R2 structure stream belongs in the
-same D12 schema bump. Combining can avoid two migrations but broadens and may
-delay D12/I1; separating requires the explicit compatibility window, full
-re-export/re-index, and rollback plan called for by RET-R2. I0 does not choose
-either option.
+RET-R2 supersedes historical M11-A through M11-D. Its stream timing remains a
+future RET-R2 decision with the required compatibility, re-export/re-index, and
+rollback plan; Phase A does not authorize that work.
 
-## Decisions and stop condition
+## Phase A decisions and stop condition
 
-Before any implementation, the owner must answer:
-
-1. Use `[HANDOFF-I1]` commit tags as the handoff plan shows, or `IDX-I1` as
-   roadmap naming rules require?
-2. By what mechanism, and at what frozen post-W5 closeout head, is the Indexing
-   base imported into the primary repository? The inspected committed bundle
-   head is `c34af48`; its resolver draft was not committed there and is not an
-   implementation authorization.
-3. For pre-D12 ten-file snapshots without digest-set, require re-export or
-   allow a bounded controlled compatibility flag?
+Phase A resolves the tag convention as `IDX-*`, requires offline re-export for
+pre-D12 snapshots, adopts the digest-set inventory rule, and reserves Indexing
+base import for IDX-I2-A after the frozen post-W5-D head. The complete record is
+`docs/learning/IDX-I0_PHASE_A_OWNER_DECISIONS.md`.
 
 I0 stops here. W5-B is in progress; W5-C and the W5-D closeout are not complete,
 so all subsequent work risks rebase after the frozen post-W5 closeout head. D12

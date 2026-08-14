@@ -11,19 +11,18 @@ before its stated dependencies, owner decisions, and independent review gate.
 Naming follows `docs/ROADMAP_WRITING_RULES.md`. `IDX-D9`, `IDX-D10`,
 `IDX-D11`, `IDX-D12`, and `IDX-D13` are qualified references to the handoff
 plan's owner decisions D9-D13 rather than inferred implementation approvals.
-`IDX-C1`, `IDX-B1`, and `IDX-RET-GC` are proposed qualified backlog IDs for
-the named plan stages; the owner must settle the `[HANDOFF-I#]` versus `IDX-I#`
-commit-tag convention before implementation.
+`IDX-C1`, `IDX-B1`, and `IDX-RET-GC` are qualified backlog IDs for the named
+plan stages. Phase A resolves the commit-tag convention as `IDX-*`.
 
 ## Status and order
 
 | Order | ID | Level | Owner | Status | Blocking condition |
 |---:|---|---|---|---|---|
 | 1 | IDX-I0 | discovery/report | Indexing | review | None; may require rebase after `M10-W5 (historically W5-D closeout)`. |
-| 2 | IDX-D12 | owner decision | Foundation/shared-contract owners | review | Owner disposition required before IDX-C1. |
+| 2 | IDX-D12 | owner decision | Foundation/shared-contract owners | done | Phase A disposition and digest-set specification recorded. |
 | 3 | IDX-C1 | contract implementation | Foundation/shared-contract owners | blocked | IDX-D12 and `M10-W5 (historically W5-D closeout)`. |
 | 4 | IDX-B1 | immutable delivery bridge | Foundation/delivery | blocked | IDX-C1, IDX-D10, IDX-D11, IDX-D9, `M10-W5 (historically W5-D closeout)`. |
-| 5 | IDX-I1 | resolver + validate-before-write | Indexing | blocked | IDX-D12, IDX-C1, IDX-B1, IDX-D10, `M10-W5 (historically W5-D closeout)`. |
+| 5 | IDX-I1 | resolver + validate-before-write | Indexing | blocked | Implementation: separate owner GO after IDX-D12/A7; acceptance: IDX-C1, IDX-B1, IDX-D10, `M10-W5 (historically W5-D closeout)`. |
 | 6 | IDX-I2-A | identity/provenance/staging migration | Indexing | blocked | IDX-I1, IDX-D4, IDX-D5, IDX-D6, IDX-D7, IDX-D8, IDX-D13, `M10-W5 (historically W5-D closeout)`. |
 | 7 | IDX-I2-B | full-snapshot staged importer | Indexing | blocked | IDX-I2-A, IDX-D7, `M10-W5 (historically W5-D closeout)`. |
 | 8 | IDX-I3 | two-store verification + activation | Indexing | blocked | IDX-I2-B, IDX-D8, IDX-D13, `M10-W5 (historically W5-D closeout)`. |
@@ -59,19 +58,18 @@ rebased against that frozen head before code work starts.
 
 ## Owner Decision IDX-D12
 
-- Owner: Foundation/shared-contract owners. Status: review.
-- Objective: Decide versioned dataset identity and the policy for snapshots
-  published before the new integrity contract.
-- Scope: Choose a versioned manifest identity or trusted transport namespace,
-  and choose re-export or a bounded compatibility flag for pre-contract
-  snapshots.
+- Owner: Foundation/shared-contract owners. Status: done for the Phase A
+  inventory disposition.
+- Objective: Record the D12 member-inventory rule and pre-D12 snapshot policy.
+- Scope: Digest-set source-of-truth membership, schema-version-keyed allowed
+  names, and mandatory offline re-export for pre-contract snapshots.
 - Out of scope: Producer/shared-contract implementation, importer, Qdrant,
   delivery automation, and delta recovery.
 - depends_on: Owner disposition.
-- Acceptance: The recorded decision identifies the dataset identity and old-
-  snapshot policy that `IDX-C1` must implement; malformed or contradictory
-  decision records are rejected before implementation authorization.
-- Evidence: Owner decision record before `IDX-C1` begins.
+- Acceptance: The recorded decision identifies the inventory rule and re-export
+  policy; it does not invent a `manifest.dataset_name` field.
+- Evidence: `docs/learning/IDX-I0_PHASE_A_OWNER_DECISIONS.md` and
+  `docs/learning/IDX-D12_DIGEST_SET_SPECIFICATION.md`.
 
 ### IDX-C1
 
@@ -83,16 +81,16 @@ rebased against that frozen head before code work starts.
   digests; update Foundation exact-file gates.
 - Out of scope: Importer, Qdrant, delivery automation, and delta recovery.
 - depends_on: `M10-W5 (historically W5-D closeout)`, owner decision `IDX-D12`.
-- Acceptance: All eleven delivered members verify before parsing; a missing,
+- Acceptance: The current schema-version member table has eleven delivered
+  members; all members verify before parsing; a missing,
   extra, substituted, truncated, or digest-mismatched member fails closed;
-  old snapshots follow the `IDX-D12` owner-approved re-export or bounded
-  compatibility policy.
+  old snapshots follow the `IDX-D12` owner-approved re-export policy.
 - Evidence: Versioned schema/contract diff, producer tests, negative integrity
   tests, and independent review `REV-IDX-02`.
 
-`IDX-D12` remains an owner decision, not a work item: it selects the versioned
-dataset identity and pre-contract snapshot policy that `IDX-C1` implements. Its
-evidence is the recorded owner disposition before `IDX-C1` begins.
+`IDX-D12` records the Phase A inventory/re-export disposition. It does not
+select an unapproved `manifest.dataset_name` form; that contract boundary must
+be resolved before IDX-C1 implementation is authorized.
 
 ### IDX-B1
 
@@ -114,7 +112,10 @@ evidence is the recorded owner disposition before `IDX-C1` begins.
 
 ### IDX-I1
 
-- Owner: Indexing team. Status: blocked by `IDX-D12`, `IDX-C1`, `IDX-B1`, `IDX-D10`, and
+- Owner: Indexing team. Status: blocked.
+- Implementation gate: separate owner GO after Phase A4/A7; it has no
+  dependency on `IDX-C1` implementation or `IDX-B1` delivery.
+- Acceptance gate: `IDX-C1`, `IDX-B1`, `IDX-D10`, and
   `M10-W5 (historically W5-D closeout)`.
 - Objective: Resolve one exact immutable snapshot and validate it entirely
   before any storage mutation.
@@ -123,7 +124,12 @@ evidence is the recorded owner disposition before `IDX-C1` begins.
   ownership-isolated verified reader.
 - Out of scope: Storage mutation, embedding, Qdrant, delta application, and
   destination/event-triggered `LATEST.txt`.
-- depends_on: `IDX-D12`, `IDX-C1`, `IDX-B1`, `M10-W5 (historically W5-D closeout)`, owner decision `IDX-D10`.
+- implementation_depends_on: Phase A4/A7 as recorded in
+  `docs/learning/IDX-I0_PHASE_A_OWNER_DECISIONS.md` and
+  `docs/learning/IDX-D12_DIGEST_SET_SPECIFICATION.md`; no dependency on
+  `IDX-C1` implementation or `IDX-B1` delivery.
+- acceptance_depends_on: `IDX-C1`, `IDX-B1`,
+  `M10-W5 (historically W5-D closeout)`, and owner decision `IDX-D10`.
 - Acceptance: Wrong runtime types, `None`, duplicate JSON keys, NaN/infinity,
   blank lines, forbidden files, missing members, bad counts, reparse objects,
   path traversal, digest mismatch, and TOCTOU replacement fail before a write.
@@ -267,13 +273,10 @@ evidence is the recorded owner disposition before `IDX-C1` begins.
   --check`, aggregate-only acceptance evidence, and independent review
   `REV-IDX-12`.
 
-## Required owner decisions before implementation
+## Phase A owner dispositions
 
-1. Commit tag: use `[HANDOFF-I1]` as in the handoff plan, or `IDX-I1` as the
-   roadmap convention requires?
-2. Import the Indexing base into the primary repository by what mechanism and
-   at which frozen post-W5 closeout head? The inspected committed bundle head
-   is `c34af48`; its resolver draft was not committed there and is not the
-   authorized implementation baseline.
-3. For snapshots published before D12 with ten files and no digest-set, require
-   re-export, or allow a bounded explicitly controlled compatibility flag?
+Phase A resolves the commit-tag convention as `IDX-*`; requires offline
+re-export (not a compatibility flag) for pre-D12 snapshots; records the
+digest-set inventory rule/specification; and reserves Indexing-base import for
+IDX-I2-A after the frozen post-W5-D head. See
+`docs/learning/IDX-I0_PHASE_A_OWNER_DECISIONS.md`.

@@ -114,19 +114,22 @@ These decisions must be recorded before the corresponding stage begins.
 
 ### D1 — Current Indexing source head
 
-Resolved for I0 inspection:
+Resolved for I0 inspection (planning evidence only):
 
 ```text
-repository: C:\Users\SPen\Downloads\Quick Share\KnowledgeNexus\KnowledgeNexus
-branch: feature/anh.dd1_W4-B
-source head: 203b599fc7d7c8a79e09f298386b8366908f67c3
-origin/main at inspection: 203b599fc7d7c8a79e09f298386b8366908f67c3
+repository: KnowledgeNexus/KnowledgeNexus read-only bundle
+source head: c34af48
 ```
 
 The scoped Indexing/shared/presentation/config/test tree is content-equivalent
-to the previously supplied unpacked bundle after LF/CRLF normalization. Future
-implementation must still start from a newly frozen head after W4 transfer and
-must not assume this planning head remains current.
+to the inspected bundle after LF/CRLF normalization. The outer repository
+`D:\Claude\KnowledgeNexus` owns `contracts/foundation/` and the Foundation
+producer; the bundle owns its `config/` tree. Synchronization is one-way from
+outer repository to bundle and is verified by parsed-JSON equality or
+LF-normalized SHA-256. Future implementation must start from a newly frozen
+post-W5-D head and must not assume this planning head remains current. See
+`docs/learning/IDX-I0_PHASE_A_OWNER_DECISIONS.md` for the complete ownership
+record.
 
 ### D2 — Snapshot transport/location
 
@@ -209,14 +212,15 @@ URLs or credentials. Add a broker only when outbox/poller scale requires it.
 ### D12 -- Snapshot Integrity and Dataset Identity
 
 The current manifest does not bind every snapshot member and has no
-`dataset_name`; I1-I5 are blocked until Foundation/shared-contract owners make
-a versioned contract decision. The digest-set is the required eleventh regular
-file inside each immutable version directory. It is written last after the
-existing ten files, lists those ten filenames with byte size and SHA-256, and
-does not digest itself. Foundation must update all writer/completer/publisher
-`EXPECTED_COMPLETE_FILES`/publisher exact-file-set gates from ten to eleven;
-`EXPECTED_MACHINE_FILES` remains the nine-file staging gate. The bridge transfers and
-atomically exposes all eleven files together; I1 rejects any other set.
+`dataset_name`; the approved D12 inventory disposition is that the digest-set
+is the source of truth for membership. For the current schema-version member
+table it is the eleventh regular file inside each immutable version directory,
+written last after the existing ten files, listing those ten filenames with byte
+size and SHA-256, and not digesting itself. The actual file set must equal the
+digest-set entries plus the digest-set itself. Allowed names are keyed by
+`schema_version`; I1 must not hard-code a numeric file count. The bridge
+transfers and atomically exposes the full set. See
+`docs/learning/IDX-D12_DIGEST_SET_SPECIFICATION.md`.
 
 Indexing verifies the digest-set binding and every listed member before parsing
 or mutation, then uses an ownership-isolated verified copy/handle to prevent
@@ -226,10 +230,9 @@ The approved trigger/event contract must carry both `manifest_sha256` and
 `digest_set_sha256`; Indexing verifies both exact control-plane bytes before
 trusting the inventory.
 
-Either add dataset identity to a versioned manifest schema or define it as a
-trusted transport namespace. I1 must not assert nonexistent
-`manifest.dataset_name`. Existing snapshots need an explicit compatibility or
-re-export policy.
+I1 must not assert nonexistent `manifest.dataset_name`; dataset identity remains
+the separate D12 contract form. Existing ten-file snapshots are re-exported
+offline with a new dataset version; no compatibility flag is allowed.
 
 ### D13 -- Activation, Ordering, and Delta Recovery
 
@@ -324,7 +327,7 @@ Produce a compatibility matrix covering:
 Output:
 
 ```text
-[HANDOFF-I0] docs: reconcile Foundation snapshot and Indexing import seams
+IDX-I0 docs: reconcile Foundation snapshot and Indexing import seams
 ```
 
 I0 must receive independent review before I1 scope is frozen.
@@ -338,7 +341,7 @@ partial-copy crashes, quota failure, tamper, duplicate triggers, outage replay,
 path/reparse escape, concurrency, and atomic visibility. If the mount cannot
 prove atomicity, use an artifact/object-store transport.
 
-Candidate: `[HANDOFF-B1] foundation: deliver immutable snapshots to Indexing`
+Candidate: `IDX-B1 foundation: deliver immutable snapshots to Indexing`
 
 ## 7. Stage I1 — Strict immutable snapshot resolver
 
@@ -374,7 +377,8 @@ The resolver must:
 8. validate `manifest.dataset_version` against the pointer/explicit version and
    directory name; validate dataset identity only through D12's approved form;
 9. hash exact manifest and digest-set bytes against both supplied digests before
-   parsing, then verify each of the ten listed members' size and SHA-256;
+   parsing, then verify every member listed by the schema-version-keyed
+   digest-set table for size and SHA-256; do not hard-code a file count;
 10. bind the opened version/digest for the entire import; never re-read
     `LATEST.txt` midway.
 
@@ -398,7 +402,7 @@ ownership-isolated records or a safe streaming handle bound to verified bytes.
 Candidate:
 
 ```text
-[HANDOFF-I1] indexing: resolve and validate immutable Foundation snapshots
+IDX-I1 indexing: resolve and validate immutable Foundation snapshots
 ```
 
 ## Stage I2-A -- Identity and Staged Storage Migration
@@ -477,7 +481,7 @@ Full text remains in hydrate storage, not Qdrant.
 Candidate:
 
 ```text
-[HANDOFF-I2] indexing: stage idempotent Foundation snapshot imports
+IDX-I2-B indexing: stage idempotent Foundation snapshot imports
 ```
 
 ## 9. Stage I3 — Verified two-store activation
@@ -509,7 +513,7 @@ alone.
 Candidate:
 
 ```text
-[HANDOFF-I3] indexing: verify and activate staged snapshot versions
+IDX-I3 indexing: verify and activate staged snapshot versions
 ```
 
 ## Stage I2-C -- Delta/Base-Chain/Tombstone Import
@@ -578,8 +582,8 @@ permanently invisible merely because notification failed.
 Candidate commits:
 
 ```text
-[HANDOFF-I4-A] foundation: publish durable snapshot-ready notifications
-[HANDOFF-I4-B] indexing: consume snapshot-ready import requests
+IDX-I4-A foundation: publish durable snapshot-ready notifications
+IDX-I4-B indexing: consume snapshot-ready import requests
 ```
 
 These two commits require separate bounded-context and integration reviews.
