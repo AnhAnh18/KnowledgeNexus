@@ -7,7 +7,9 @@ param(
     [string]$OutputRoot,
 
     [ValidateRange(1, 5000)]
-    [int]$MaxPages = 5000
+    [int]$MaxPages = 5000,
+
+    [switch]$AllowPartialProcessing
 )
 
 Set-StrictMode -Version Latest
@@ -37,10 +39,16 @@ try {
     } else {
         "$sourceRoot$([IO.Path]::PathSeparator)$previousPythonPath"
     }
-    & $pythonPath -B -m knowledgenexus.foundation.cli.export_confluence_url_text_snapshot `
-        --url $Url `
-        --output-root $OutputRoot `
-        --max-pages $MaxPages
+    $arguments = @(
+        "-B", "-m", "knowledgenexus.foundation.cli.export_confluence_url_text_snapshot",
+        "--url", $Url,
+        "--output-root", $OutputRoot,
+        "--max-pages", "$MaxPages"
+    )
+    if ($AllowPartialProcessing) {
+        $arguments += "--allow-partial-processing"
+    }
+    & $pythonPath @arguments
     exit $LASTEXITCODE
 }
 finally {

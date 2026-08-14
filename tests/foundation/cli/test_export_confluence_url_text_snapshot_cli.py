@@ -303,6 +303,106 @@ def test_failed_capture_stops_before_processing_and_remains_resumable(
     assert not (output / "LATEST.txt").exists()
 
 
+def test_explicit_best_effort_mode_publishes_partial_packet_without_downstream_phases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = _operator_files(tmp_path, monkeypatch)
+    phases = _PhaseMain()
+
+    class _Exporter:
+        def __init__(self, *, validator: object) -> None:
+            assert callable(getattr(validator, "validate_record", None))
+
+        def publish(self, *, output_dir: Path, documents, chunks, media_assets, summary):
+            assert tuple(media_assets) == ()
+            output_dir.mkdir()
+            (output_dir / "documents.jsonl").write_text("{}\n", encoding="utf-8")
+            (output_dir / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
+            (output_dir / "media_assets.jsonl").write_text("", encoding="utf-8")
+            payload = dict(summary)
+            payload.update({
+                "format_version": "confluence-subtree-indexing-packet-v1",
+                "document_count": len(tuple(documents)),
+                "chunk_count": len(tuple(chunks)),
+                "media_asset_count": 0,
+                "acl_mode": "restricted_unresolved",
+            })
+            (output_dir / "packet_summary.json").write_text(
+                json.dumps(payload) + "\n", encoding="utf-8",
+            )
+            return {
+                "document_count": payload["document_count"],
+                "chunk_count": payload["chunk_count"],
+                "media_asset_count": 0,
+            }
+
+    monkeypatch.setattr(cli, "SubtreePacketExporter", _Exporter)
+    partial = cli._PartialProcessingResult(
+        documents=({"document_id": "document-1"},),
+        chunks=({"chunk_id": "chunk-1"},),
+        requested_pages=2,
+        succeeded_pages=1,
+        failure_categories=(("unsplittable_table_row", 1),),
+    )
+    output = tmp_path / "operator-output"
+    result = cli.run(
+        url="https://confluence.example/spaces/SPACE/pages/12345/Root",
+        output_root=str(output), tokenizer_assets_dir=str(tokenizer),
+        max_pages=200, allow_partial_processing=True,
+        phase_main=phases, partial_processor=lambda **_kwargs: partial,
+    )
+
+    assert result["status"] == "partial"
+    assert result["requested_pages"] == 2
+    assert result["succeeded_pages"] == 1
+    assert result["failed_pages"] == 1
+    assert result["failure_categories"] == {"unsplittable_table_row": 1}
+    assert [call[0] for call in phases.calls] == [
+        "inventory", "capture-pages", "capture-pages",
+    ]
+    summary = json.loads(
+        (output / "versions" / f"confluence-{_RUN_ID}" / "packet_summary.json")
+        .read_text(encoding="utf-8")
+    )
+    assert summary["processing_status"] == "partial"
+    assert summary["drawio_status"] == "not_captured_in_best_effort_mode"
+
+    replay = cli.run(
+        url="https://confluence.example/spaces/SPACE/pages/12345/Root",
+        output_root=str(output), tokenizer_assets_dir=str(tokenizer),
+        max_pages=200, phase_main=lambda _argv: pytest.fail("replay called a phase"),
+    )
+    assert replay["status"] == "partial"
+
+    summary["failed_pages"] = 2
+    (output / "versions" / f"confluence-{_RUN_ID}" / "packet_summary.json").write_text(
+        json.dumps(summary) + "\n", encoding="utf-8",
+    )
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli.run(
+            url="https://confluence.example/spaces/SPACE/pages/12345/Root",
+            output_root=str(output), tokenizer_assets_dir=str(tokenizer),
+            max_pages=200, phase_main=lambda _argv: pytest.fail("called a phase"),
+        )
+    assert raised.value.category == "publication"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    (
+        {"documents": (), "chunks": (), "requested_pages": 2,
+         "succeeded_pages": 0, "failure_categories": (("failed", 2),)},
+        {"documents": ({},), "chunks": ({},), "requested_pages": 2,
+         "succeeded_pages": 1, "failure_categories": (("failed", 2),)},
+        {"documents": ({},), "chunks": ({},), "requested_pages": 2,
+         "succeeded_pages": 1, "failure_categories": (("z", 1), ("a", 1))},
+    ),
+)
+def test_partial_result_rejects_impossible_cross_field_states(kwargs) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        cli._PartialProcessingResult(**kwargs)
+
+
 def test_capture_allows_one_terminal_confirmation_after_final_committed_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -392,6 +492,33 @@ def test_page_bound_rejects_wrong_runtime_types_and_out_of_range(
     assert raised.value.category == "page_bound"
 
 
+@pytest.mark.parametrize("value", (object(), None, "true", 1, 0, (), {}))
+def test_partial_mode_rejects_wrong_runtime_types(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: object,
+) -> None:
+    tokenizer = _operator_files(tmp_path, monkeypatch)
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli.run(
+            url="https://confluence.example/spaces/SPACE/pages/12345/Root",
+            output_root=str(tmp_path / "out"), tokenizer_assets_dir=str(tokenizer),
+            allow_partial_processing=value,
+        )
+    assert raised.value.category == "partial_mode"
+
+
+def test_partial_processor_is_forbidden_without_explicit_partial_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = _operator_files(tmp_path, monkeypatch)
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli.run(
+            url="https://confluence.example/spaces/SPACE/pages/12345/Root",
+            output_root=str(tmp_path / "out"), tokenizer_assets_dir=str(tokenizer),
+            partial_processor=lambda **_kwargs: object(),
+        )
+    assert raised.value.category == "partial_mode"
+
+
 @pytest.mark.parametrize(
     "phase_main",
     (
@@ -421,8 +548,10 @@ def test_powershell_entrypoint_exposes_two_required_operator_parameters() -> Non
     assert "KN_TOKENIZER_ASSETS_DIR" in text
     assert 'Join-Path $repositoryRoot "src"' in text
     assert "$env:PYTHONPATH" in text
-    assert "--url $Url" in text
-    assert "--output-root $OutputRoot" in text
+    assert '"--url", $Url' in text
+    assert '"--output-root", $OutputRoot' in text
+    assert "[switch]$AllowPartialProcessing" in text
+    assert '"--allow-partial-processing"' in text
     assert "--pat" not in text.lower()
 
 

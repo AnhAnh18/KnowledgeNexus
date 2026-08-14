@@ -18,13 +18,21 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 from urllib.parse import parse_qsl, quote, unquote, urljoin, urlsplit
 
+from knowledgenexus.foundation.application.use_cases.confluence_subtree_corpus import (
+    SubtreePacketExporter,
+)
 from knowledgenexus.foundation.ports.path_safety import (
     require_plain_directory_chain,
     require_plain_file,
+)
+from knowledgenexus.shared.contracts.foundation.schema_validator import (
+    FoundationSchemaValidator,
 )
 
 
@@ -59,6 +67,47 @@ class TextSnapshotOperatorError(Exception):
     def __init__(self, category: str) -> None:
         super().__init__()
         self.category = category
+
+
+@dataclass(frozen=True, repr=False)
+class _PartialProcessingResult:
+    documents: tuple[dict[str, object], ...]
+    chunks: tuple[dict[str, object], ...]
+    requested_pages: int
+    succeeded_pages: int
+    failure_categories: tuple[tuple[str, int], ...]
+
+    def __post_init__(self) -> None:
+        if type(self.documents) is not tuple or type(self.chunks) is not tuple:
+            raise TypeError("partial records are invalid")
+        if any(type(row) is not dict for row in (*self.documents, *self.chunks)):
+            raise TypeError("partial records are invalid")
+        if (
+            type(self.requested_pages) is not int
+            or type(self.succeeded_pages) is not int
+            or self.requested_pages <= 0
+            or self.succeeded_pages <= 0
+            or self.succeeded_pages > self.requested_pages
+        ):
+            raise ValueError("partial page counts are invalid")
+        if type(self.failure_categories) is not tuple or any(
+            type(item) is not tuple
+            or len(item) != 2
+            or type(item[0]) is not str
+            or not item[0]
+            or type(item[1]) is not int
+            or item[1] <= 0
+            for item in self.failure_categories
+        ):
+            raise TypeError("partial failure categories are invalid")
+        if tuple(sorted(self.failure_categories)) != self.failure_categories:
+            raise ValueError("partial failure categories must be sorted")
+        if sum(count for _, count in self.failure_categories) != self.failed_pages:
+            raise ValueError("partial failure counts are inconsistent")
+
+    @property
+    def failed_pages(self) -> int:
+        return self.requested_pages - self.succeeded_pages
 
 
 def _decode_short_page_id(token: str) -> str:
@@ -480,7 +529,7 @@ def _common_phase_args(
     ]
 
 
-def _verify_existing_packet(version: Path) -> None:
+def _verify_existing_packet(version: Path) -> dict[str, object]:
     try:
         require_plain_directory_chain(version)
         names = {item.name for item in version.iterdir()}
@@ -501,16 +550,130 @@ def _verify_existing_packet(version: Path) -> None:
         or summary["chunk_count"] <= 0
     ):
         raise TextSnapshotOperatorError("publication")
+    processing_status = summary.get("processing_status", "complete")
+    if processing_status not in {"complete", "partial"}:
+        raise TextSnapshotOperatorError("publication")
+    if processing_status == "partial":
+        requested = summary.get("requested_pages")
+        succeeded = summary.get("succeeded_pages")
+        failed = summary.get("failed_pages")
+        categories = summary.get("failure_categories")
+        if (
+            summary.get("processing_mode") != "best_effort_text_demo"
+            or summary.get("drawio_status")
+            != "not_captured_in_best_effort_mode"
+            or summary.get("media_asset_count") != 0
+            or any(type(value) is not int or value < 0 for value in (
+                requested, succeeded, failed,
+            ))
+            or requested <= 0
+            or succeeded <= 0
+            or succeeded + failed != requested
+            or succeeded != summary.get("document_count")
+            or type(categories) is not dict
+            or any(
+                type(name) is not str
+                or not name
+                or type(count) is not int
+                or count <= 0
+                for name, count in categories.items()
+            )
+            or sum(categories.values()) != failed
+        ):
+            raise TextSnapshotOperatorError("publication")
+    return dict(summary)
+
+
+def _process_pages_best_effort(
+    *, state: Path, raw: Path, run_id: str, tokenizer: Path,
+    max_pages: int, common: list[str],
+) -> _PartialProcessingResult:
+    from knowledgenexus.foundation.application.use_cases.process_confluence_page_set import (
+        ProcessConfluencePageSet,
+    )
+    from knowledgenexus.foundation.cli import confluence_subtree_corpus as corpus_cli
+    from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
+    from knowledgenexus.foundation.domain.models.confluence_page_set import (
+        ACTIVE_PAGE_SET_PROFILE_IDENTITY,
+        ConfluencePageSetError,
+        ConfluencePageSetRequest,
+    )
+    from knowledgenexus.foundation.infrastructure.config.chunking_profile_loader import (
+        load_chunking_profile,
+    )
+    from knowledgenexus.foundation.infrastructure.processors import (
+        ConfluenceDataCenterRawPageMapper,
+        ConfluenceStorageXhtmlNormalizer,
+    )
+    from knowledgenexus.foundation.infrastructure.raw_store import (
+        ConfluenceRawPageGenerationStore,
+    )
+    from knowledgenexus.foundation.infrastructure.tokenization import BgeM3LocalTokenizer
+
+    typed_run_id = CrawlRunId(run_id)
+    phase_args = corpus_cli._parser().parse_args([
+        "process-pages", *common, "--run-id", run_id,
+        "--chunking-profile-path", str(_DEFAULT_CHUNKING_PROFILE),
+        "--tokenizer-assets-dir", str(tokenizer),
+    ])
+    _selection, items = corpus_cli._load_selection_payload(
+        corpus_cli._selection_file(phase_args, state, typed_run_id),
+        run_id=typed_run_id,
+        max_pages=max_pages,
+    )
+    profile = load_chunking_profile(_DEFAULT_CHUNKING_PROFILE)
+    validator = FoundationSchemaValidator()
+    processor = ProcessConfluencePageSet(
+        chunking_profile=profile,
+        tokenizer=BgeM3LocalTokenizer(
+            profile=profile, tokenizer_assets_dir=tokenizer,
+        ),
+        raw_page_store=ConfluenceRawPageGenerationStore(raw_root=raw),
+        raw_page_mapper=ConfluenceDataCenterRawPageMapper(),
+        storage_normalizer=ConfluenceStorageXhtmlNormalizer(),
+        schema_validator=validator,
+    )
+    documents: list[dict[str, object]] = []
+    chunks: list[dict[str, object]] = []
+    failures: Counter[str] = Counter()
+    for item in items:
+        try:
+            result = processor.execute(request=ConfluencePageSetRequest(
+                run_id=typed_run_id,
+                generation_id=typed_run_id,
+                items=(item,),
+                profile_identity=ACTIVE_PAGE_SET_PROFILE_IDENTITY,
+            ))
+        except ConfluencePageSetError as exc:
+            failures[exc.category.value] += 1
+            continue
+        documents.extend(dict(row) for row in result.documents)
+        chunks.extend(dict(row) for row in result.chunks)
+    return _PartialProcessingResult(
+        documents=tuple(documents),
+        chunks=tuple(chunks),
+        requested_pages=len(items),
+        succeeded_pages=len(documents),
+        failure_categories=tuple(sorted(failures.items())),
+    )
 
 
 def run(
     *, url: object, output_root: object, tokenizer_assets_dir: object,
     max_pages: object = 5_000,
+    allow_partial_processing: object = False,
     phase_main: Callable[[list[str] | None], int] | None = None,
     short_space_resolver: Callable[[str, str], object] | None = None,
+    partial_processor: Callable[..., _PartialProcessingResult] | None = None,
 ) -> dict[str, object]:
     if type(max_pages) is not int or max_pages <= 0 or max_pages > 5_000:
         raise TextSnapshotOperatorError("page_bound")
+    if type(allow_partial_processing) is not bool:
+        raise TextSnapshotOperatorError("partial_mode")
+    if partial_processor is not None and not callable(partial_processor):
+        raise TextSnapshotOperatorError("partial_mode")
+    if partial_processor is not None and not allow_partial_processing:
+        raise TextSnapshotOperatorError("partial_mode")
     tokenizer = _require_operator_inputs(tokenizer_assets_dir)
     resolver = _resolve_short_space_key if short_space_resolver is None else short_space_resolver
     base_url, space_key, root_page_id = parse_canonical_page_url(
@@ -583,14 +746,18 @@ def run(
     version = versions / version_name
     latest = root / "LATEST.txt"
     if version.exists():
-        _verify_existing_packet(version)
+        existing_summary = _verify_existing_packet(version)
         if latest.exists():
             require_plain_file(latest)
             if latest.read_bytes() != (version_name + "\n").encode("ascii"):
                 raise TextSnapshotOperatorError("publication")
         else:
             _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
-        return {"status": "complete", "already_published": True, "acl_mode": "restricted_unresolved"}
+        return {
+            "status": existing_summary.get("processing_status", "complete"),
+            "already_published": True,
+            "acl_mode": "restricted_unresolved",
+        }
 
     capture_args = ["capture-pages", *common, "--run-id", run_id, "--stop-after-batches", "1"]
     maximum_batches = (max_pages + 99) // 100
@@ -615,6 +782,50 @@ def run(
             raise TextSnapshotOperatorError("capture_incomplete")
     else:
         raise TextSnapshotOperatorError("capture_incomplete")
+
+    if allow_partial_processing:
+        processor = (
+            _process_pages_best_effort
+            if partial_processor is None
+            else partial_processor
+        )
+        partial = processor(
+            state=state, raw=raw, run_id=run_id, tokenizer=tokenizer,
+            max_pages=max_pages, common=common,
+        )
+        if type(partial) is not _PartialProcessingResult:
+            raise TextSnapshotOperatorError("partial_processing")
+        packet = SubtreePacketExporter(
+            validator=FoundationSchemaValidator()
+        ).publish(
+            output_dir=version,
+            documents=partial.documents,
+            chunks=partial.chunks,
+            media_assets=(),
+            summary={
+                "processing_status": "partial",
+                "processing_mode": "best_effort_text_demo",
+                "requested_pages": partial.requested_pages,
+                "succeeded_pages": partial.succeeded_pages,
+                "failed_pages": partial.failed_pages,
+                "failure_categories": dict(partial.failure_categories),
+                "drawio_status": "not_captured_in_best_effort_mode",
+            },
+        )
+        _verify_existing_packet(version)
+        _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
+        return {
+            "status": "partial",
+            "already_published": False,
+            "document_count": packet["document_count"],
+            "chunk_count": packet["chunk_count"],
+            "media_asset_count": 0,
+            "requested_pages": partial.requested_pages,
+            "succeeded_pages": partial.succeeded_pages,
+            "failed_pages": partial.failed_pages,
+            "failure_categories": dict(partial.failure_categories),
+            "acl_mode": "restricted_unresolved",
+        }
 
     processing = [
         "process-pages", *common, "--run-id", run_id,
@@ -659,6 +870,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--url", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--max-pages", type=int, default=5_000)
+    parser.add_argument("--allow-partial-processing", action="store_true")
     return parser
 
 
@@ -669,6 +881,7 @@ def main(argv: list[str] | None = None) -> int:
             url=args.url, output_root=args.output_root,
             tokenizer_assets_dir=os.environ.get("KN_TOKENIZER_ASSETS_DIR"),
             max_pages=args.max_pages,
+            allow_partial_processing=args.allow_partial_processing,
         )
         sys.stdout.write(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
         return 0
