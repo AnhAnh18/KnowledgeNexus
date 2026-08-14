@@ -16,9 +16,11 @@ import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Callable, Mapping
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urljoin, urlsplit
 
 from knowledgenexus.foundation.ports.path_safety import (
     require_plain_directory_chain,
@@ -48,6 +50,7 @@ _SHORT_PAGE_PATH = re.compile(
 _RUN_ID = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 
 class TextSnapshotOperatorError(Exception):
@@ -79,6 +82,7 @@ def _decode_short_page_id(token: str) -> str:
 def parse_canonical_page_url(
     value: object, *,
     short_space_resolver: Callable[[str, str], object] | None = None,
+    short_link_resolver: Callable[[str, str], object] | None = None,
 ) -> tuple[str, str, str]:
     """Return ``(base_url, space_key, page_id)`` from a canonical page URL."""
 
@@ -113,15 +117,36 @@ def parse_canonical_page_url(
         view_match = _VIEW_PAGE_PATH.fullmatch(decoded_path)
         short_match = _SHORT_PAGE_PATH.fullmatch(decoded_path)
         if short_match is not None:
-            if parsed.query or short_space_resolver is None:
+            if parsed.query:
                 raise TextSnapshotOperatorError("url_requires_resolution")
-            page_id = _decode_short_page_id(short_match.group("token"))
             context = short_match.group("context").rstrip("/")
             base_url = f"https://{authority}{context}"
             try:
-                space_key = short_space_resolver(base_url, page_id)
+                page_id = _decode_short_page_id(short_match.group("token"))
             except TextSnapshotOperatorError:
-                raise
+                if short_link_resolver is None:
+                    raise TextSnapshotOperatorError("url_requires_resolution") from None
+                try:
+                    resolved = short_link_resolver(base_url, short_match.group("token"))
+                except TextSnapshotOperatorError:
+                    raise
+                except Exception:
+                    raise TextSnapshotOperatorError("short_url_resolution") from None
+                if (
+                    type(resolved) is not tuple
+                    or len(resolved) != 2
+                    or type(resolved[0]) is not str
+                    or re.fullmatch(r"[A-Z0-9]+", resolved[0]) is None
+                    or type(resolved[1]) is not str
+                    or not resolved[1].isascii()
+                    or not resolved[1].isdecimal()
+                ):
+                    raise TextSnapshotOperatorError("short_url_resolution")
+                return base_url, resolved[0], resolved[1]
+            if short_space_resolver is None:
+                raise TextSnapshotOperatorError("url_requires_resolution")
+            try:
+                space_key = short_space_resolver(base_url, page_id)
             except Exception:
                 raise TextSnapshotOperatorError("short_url_resolution") from None
             if type(space_key) is not str or re.fullmatch(r"[A-Z0-9]+", space_key) is None:
@@ -141,19 +166,110 @@ def parse_canonical_page_url(
             if key in query or key not in _VIEW_PAGE_QUERY_FIELDS:
                 raise TextSnapshotOperatorError("url")
             query[key] = item
-        if set(query) not in ({"pageId", "spaceKey"}, _VIEW_PAGE_QUERY_FIELDS):
+        query_fields = set(query)
+        if query_fields not in (
+            {"pageId"}, {"pageId", "title"},
+            {"pageId", "spaceKey"}, _VIEW_PAGE_QUERY_FIELDS,
+        ):
             raise TextSnapshotOperatorError("url")
-        page_id, space_key = query["pageId"], query["spaceKey"]
+        page_id = query["pageId"]
         if (
             not page_id
             or not page_id.isascii()
             or not page_id.isdecimal()
-            or re.fullmatch(r"[A-Z0-9]+", space_key) is None
             or ("title" in query and not query["title"])
         ):
             raise TextSnapshotOperatorError("url")
         context = view_match.group("context").rstrip("/")
+        base_url = f"https://{authority}{context}"
+        space_key = query.get("spaceKey")
+        if space_key is None:
+            if short_space_resolver is None:
+                raise TextSnapshotOperatorError("url_requires_resolution")
+            try:
+                space_key = short_space_resolver(base_url, page_id)
+            except TextSnapshotOperatorError:
+                raise
+            except Exception:
+                raise TextSnapshotOperatorError("short_url_resolution") from None
+        if type(space_key) is not str or re.fullmatch(r"[A-Z0-9]+", space_key) is None:
+            raise TextSnapshotOperatorError("url")
     return f"https://{authority}{context}", space_key, page_id
+
+
+class _RefuseShortLinkRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+def _read_short_redirect_location(
+    base_url: str, token: str, *, opener: object | None = None,
+) -> str:
+    if (
+        type(base_url) is not str
+        or type(token) is not str
+        or _SHORT_PAGE_PATH.fullmatch(f"/x/{token}") is None
+    ):
+        raise TextSnapshotOperatorError("short_url_resolution")
+    pat = os.environ.get("CONFLUENCE_PAT")
+    if type(pat) is not str or not pat or "\r" in pat or "\n" in pat:
+        raise TextSnapshotOperatorError("credentials")
+    request_url = f"{base_url.rstrip('/')}/x/{quote(token, safe='')}"
+    request = urllib.request.Request(
+        request_url,
+        headers={"Accept": "text/html", "Authorization": f"Bearer {pat}"},
+        method="GET",
+    )
+    active_opener = opener or urllib.request.build_opener(_RefuseShortLinkRedirect())
+    try:
+        response = active_opener.open(request, timeout=30.0)
+    except urllib.error.HTTPError as exc:
+        try:
+            status = exc.code
+            location = exc.headers.get("Location") if exc.headers is not None else None
+        finally:
+            exc.close()
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        raise TextSnapshotOperatorError("short_url_resolution") from None
+    else:
+        try:
+            status = getattr(response, "status", None)
+            location = response.headers.get("Location") if getattr(response, "headers", None) is not None else None
+        finally:
+            response.close()
+    if type(status) is not int or status not in _REDIRECT_STATUSES:
+        raise TextSnapshotOperatorError("short_url_resolution")
+    if type(location) is not str or not location or "\r" in location or "\n" in location:
+        raise TextSnapshotOperatorError("short_url_resolution")
+    resolved = urljoin(request_url, location)
+    source = urlsplit(base_url)
+    target = urlsplit(resolved)
+    try:
+        same_origin = (
+            target.scheme == "https"
+            and target.hostname is not None
+            and source.hostname is not None
+            and target.hostname.lower() == source.hostname.lower()
+            and (target.port or 443) == (source.port or 443)
+            and target.username is None
+            and target.password is None
+            and not target.fragment
+        )
+    except ValueError:
+        same_origin = False
+    if not same_origin:
+        raise TextSnapshotOperatorError("short_url_resolution")
+    return resolved
+
+
+def _resolve_short_link(base_url: str, token: str) -> tuple[str, str]:
+    location = _read_short_redirect_location(base_url, token)
+    resolved_base, space_key, page_id = parse_canonical_page_url(
+        location, short_space_resolver=_resolve_short_space_key,
+    )
+    if resolved_base != base_url:
+        raise TextSnapshotOperatorError("short_url_resolution")
+    return space_key, page_id
 
 
 def _resolve_short_space_key(base_url: str, page_id: str) -> str:
@@ -399,6 +515,7 @@ def run(
     resolver = _resolve_short_space_key if short_space_resolver is None else short_space_resolver
     base_url, space_key, root_page_id = parse_canonical_page_url(
         url, short_space_resolver=resolver,
+        short_link_resolver=_resolve_short_link,
     )
     root = _safe_root(output_root)
     state, raw, versions = root / ".state", root / ".raw", root / "versions"

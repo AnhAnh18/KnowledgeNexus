@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -148,6 +149,84 @@ def test_short_url_without_resolver_fails_before_network() -> None:
     with pytest.raises(cli.TextSnapshotOperatorError) as raised:
         cli.parse_canonical_page_url("https://host/x/bS72Nw")
     assert raised.value.category == "url_requires_resolution"
+
+
+def test_non_base64_short_url_uses_bounded_redirect_resolver() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def resolve(base_url: str, token: str) -> tuple[str, str]:
+        calls.append((base_url, token))
+        return "SVMC", "217"
+
+    assert cli.parse_canonical_page_url(
+        "https://confluence-mx.sec.samsung.net/x/r1wAm",
+        short_space_resolver=lambda _base, _page: pytest.fail("local decoder was used"),
+        short_link_resolver=resolve,
+    ) == ("https://confluence-mx.sec.samsung.net", "SVMC", "217")
+    assert calls == [("https://confluence-mx.sec.samsung.net", "r1wAm")]
+
+
+class _RedirectOpener:
+    def __init__(self, location: str, *, status: int = 302) -> None:
+        self.location = location
+        self.status = status
+        self.requests: list[object] = []
+
+    def open(self, request, timeout):
+        self.requests.append(request)
+        assert timeout == 30.0
+        raise urllib.error.HTTPError(
+            request.full_url, self.status, "redirect",
+            {"Location": self.location}, None,
+        )
+
+
+def test_redirect_reader_accepts_only_same_origin_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _RedirectOpener(
+        "/pages/viewpage.action?pageId=217&spaceKey=SVMC"
+    )
+
+    location = cli._read_short_redirect_location(
+        "https://confluence.example", "r1wAm", opener=opener,
+    )
+
+    assert location == (
+        "https://confluence.example/pages/viewpage.action?"
+        "pageId=217&spaceKey=SVMC"
+    )
+    assert opener.requests[0].get_header("Authorization") == "Bearer fixture-secret"
+
+
+@pytest.mark.parametrize(
+    "location",
+    (
+        "http://confluence.example/pages/viewpage.action?pageId=217&spaceKey=SVMC",
+        "https://evil.example/pages/viewpage.action?pageId=217&spaceKey=SVMC",
+        "https://user:secret@confluence.example/pages/viewpage.action?pageId=217&spaceKey=SVMC",
+        "https://confluence.example/pages/viewpage.action?pageId=217&spaceKey=SVMC#fragment",
+    ),
+)
+def test_redirect_reader_rejects_unsafe_locations(
+    monkeypatch: pytest.MonkeyPatch, location: str,
+) -> None:
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    with pytest.raises(cli.TextSnapshotOperatorError):
+        cli._read_short_redirect_location(
+            "https://confluence.example", "r1wAm",
+            opener=_RedirectOpener(location),
+        )
+
+
+def test_viewpage_redirect_without_space_uses_metadata_resolver() -> None:
+    assert cli.parse_canonical_page_url(
+        "https://host/pages/viewpage.action?pageId=217",
+        short_space_resolver=lambda base, page: (
+            "SVMC" if (base, page) == ("https://host", "217") else "wrong"
+        ),
+    ) == ("https://host", "SVMC", "217")
 
 
 @pytest.mark.parametrize("resolved", (None, object(), "", "space", "A-B"))
