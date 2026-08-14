@@ -8,12 +8,14 @@ Confluence permissions into public access.  Published chunks therefore retain
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import io
 import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Callable, Mapping
 from urllib.parse import parse_qsl, unquote, urlsplit
@@ -40,6 +42,9 @@ _VIEW_PAGE_PATH = re.compile(
     re.IGNORECASE,
 )
 _VIEW_PAGE_QUERY_FIELDS = frozenset({"pageId", "spaceKey", "title"})
+_SHORT_PAGE_PATH = re.compile(
+    r"\A(?P<context>(?:/[^/?#]+)*)/x/(?P<token>[A-Za-z0-9_-]{1,11})\Z"
+)
 _RUN_ID = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
@@ -53,7 +58,28 @@ class TextSnapshotOperatorError(Exception):
         self.category = category
 
 
-def parse_canonical_page_url(value: object) -> tuple[str, str, str]:
+def _decode_short_page_id(token: str) -> str:
+    try:
+        padding = "=" * ((4 - len(token) % 4) % 4)
+        raw = base64.b64decode(token + padding, altchars=b"-_", validate=True)
+    except (ValueError, TypeError):
+        raise TextSnapshotOperatorError("url") from None
+    if not raw or len(raw) > 8:
+        raise TextSnapshotOperatorError("url")
+    page_number = int.from_bytes(raw, byteorder="little", signed=False)
+    if page_number <= 0:
+        raise TextSnapshotOperatorError("url")
+    minimal = page_number.to_bytes((page_number.bit_length() + 7) // 8, "little")
+    canonical = base64.urlsafe_b64encode(minimal).rstrip(b"=").decode("ascii")
+    if canonical != token:
+        raise TextSnapshotOperatorError("url")
+    return str(page_number)
+
+
+def parse_canonical_page_url(
+    value: object, *,
+    short_space_resolver: Callable[[str, str], object] | None = None,
+) -> tuple[str, str, str]:
     """Return ``(base_url, space_key, page_id)`` from a canonical page URL."""
 
     if type(value) is not str or not value or any(char.isspace() for char in value):
@@ -75,6 +101,8 @@ def parse_canonical_page_url(value: object) -> tuple[str, str, str]:
     except ValueError:
         raise TextSnapshotOperatorError("url") from None
     decoded_path = unquote(parsed.path)
+    host = parsed.hostname.lower()
+    authority = f"{host}:{port}" if port is not None and port != 443 else host
     match = _CANONICAL_PAGE_PATH.fullmatch(decoded_path)
     if match is not None:
         if parsed.query:
@@ -83,6 +111,22 @@ def parse_canonical_page_url(value: object) -> tuple[str, str, str]:
         space_key, page_id = match.group("space"), match.group("page")
     else:
         view_match = _VIEW_PAGE_PATH.fullmatch(decoded_path)
+        short_match = _SHORT_PAGE_PATH.fullmatch(decoded_path)
+        if short_match is not None:
+            if parsed.query or short_space_resolver is None:
+                raise TextSnapshotOperatorError("url_requires_resolution")
+            page_id = _decode_short_page_id(short_match.group("token"))
+            context = short_match.group("context").rstrip("/")
+            base_url = f"https://{authority}{context}"
+            try:
+                space_key = short_space_resolver(base_url, page_id)
+            except TextSnapshotOperatorError:
+                raise
+            except Exception:
+                raise TextSnapshotOperatorError("short_url_resolution") from None
+            if type(space_key) is not str or re.fullmatch(r"[A-Z0-9]+", space_key) is None:
+                raise TextSnapshotOperatorError("short_url_resolution")
+            return base_url, space_key, page_id
         if view_match is None or not parsed.query:
             raise TextSnapshotOperatorError("url_shape")
         try:
@@ -109,9 +153,48 @@ def parse_canonical_page_url(value: object) -> tuple[str, str, str]:
         ):
             raise TextSnapshotOperatorError("url")
         context = view_match.group("context").rstrip("/")
-    host = parsed.hostname.lower()
-    authority = f"{host}:{port}" if port is not None and port != 443 else host
     return f"https://{authority}{context}", space_key, page_id
+
+
+def _resolve_short_space_key(base_url: str, page_id: str) -> str:
+    try:
+        from knowledgenexus.foundation.cli.confluence_subtree_corpus import (
+            _load_reliability_profile,
+        )
+        from knowledgenexus.foundation.infrastructure.confluence.confluence_http_transport import (
+            UrllibConfluenceHttpTransport,
+        )
+        from knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport import (
+            ConfluenceRetryExecutorProfile,
+            RetryingConfluenceHttpTransport,
+        )
+
+        profile_mapping = _load_reliability_profile(str(_DEFAULT_RELIABILITY_PROFILE))
+        profile = ConfluenceRetryExecutorProfile.from_mapping(profile_mapping)
+        inner = UrllibConfluenceHttpTransport(
+            base_url=base_url,
+            personal_access_token=os.environ.get("CONFLUENCE_PAT"),
+            max_response_bytes=profile_mapping["max_response_bytes_per_request"],
+        )
+        transport = RetryingConfluenceHttpTransport(
+            inner=inner, profile=profile,
+            monotonic_clock=time.monotonic, sleeper=time.sleep,
+        )
+        payload = transport.get_json(
+            path=f"/rest/api/content/{page_id}", query={"expand": "space"},
+        )
+    except Exception:
+        raise TextSnapshotOperatorError("short_url_resolution") from None
+    space = payload.get("space") if type(payload) is dict else None
+    key = space.get("key") if type(space) is dict else None
+    if (
+        payload.get("id") != page_id
+        or payload.get("type") != "page"
+        or type(key) is not str
+        or re.fullmatch(r"[A-Z0-9]+", key) is None
+    ):
+        raise TextSnapshotOperatorError("short_url_resolution")
+    return key
 
 
 def _canonical_json_bytes(payload: Mapping[str, object]) -> bytes:
@@ -308,12 +391,16 @@ def run(
     *, url: object, output_root: object, tokenizer_assets_dir: object,
     max_pages: object = 5_000,
     phase_main: Callable[[list[str] | None], int] | None = None,
+    short_space_resolver: Callable[[str, str], object] | None = None,
 ) -> dict[str, object]:
     if type(max_pages) is not int or max_pages <= 0 or max_pages > 5_000:
         raise TextSnapshotOperatorError("page_bound")
-    base_url, space_key, root_page_id = parse_canonical_page_url(url)
-    root = _safe_root(output_root)
     tokenizer = _require_operator_inputs(tokenizer_assets_dir)
+    resolver = _resolve_short_space_key if short_space_resolver is None else short_space_resolver
+    base_url, space_key, root_page_id = parse_canonical_page_url(
+        url, short_space_resolver=resolver,
+    )
+    root = _safe_root(output_root)
     state, raw, versions = root / ".state", root / ".raw", root / "versions"
     context_path = root / _CONTEXT_FILE
     if not context_path.exists() and any(root.iterdir()):

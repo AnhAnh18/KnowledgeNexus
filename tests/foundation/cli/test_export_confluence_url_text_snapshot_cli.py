@@ -96,6 +96,8 @@ class _PhaseMain:
         "https://host/pages/viewpage.action?pageId=1&pageId=2&spaceKey=SPACE",
         "https://host/pages/viewpage.action?pageId=x&spaceKey=SPACE",
         "https://host/pages/viewpage.action?pageId=1&spaceKey=space",
+        "https://host/x/",
+        "https://host/x/AA",
     ),
 )
 def test_url_boundary_rejects_unsupported_and_malformed_values(value: object) -> None:
@@ -114,6 +116,36 @@ def test_viewpage_url_resolves_explicit_space_and_page_without_network() -> None
         "https://confluence-mx.sec.samsung.net/pages/viewpage.action?"
         "pageId=938880621&spaceKey=SVMC&title=1.%2BS%2BPen%2BSDK"
     ) == ("https://confluence-mx.sec.samsung.net", "SVMC", "938880621")
+
+
+def test_short_url_decodes_page_and_resolves_only_missing_space() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def resolve(base_url: str, page_id: str) -> str:
+        calls.append((base_url, page_id))
+        return "SVMC"
+
+    assert cli.parse_canonical_page_url(
+        "https://confluence-mx.sec.samsung.net/x/bS72Nw",
+        short_space_resolver=resolve,
+    ) == ("https://confluence-mx.sec.samsung.net", "SVMC", "938880621")
+    assert calls == [("https://confluence-mx.sec.samsung.net", "938880621")]
+
+
+def test_short_url_without_resolver_fails_before_network() -> None:
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli.parse_canonical_page_url("https://host/x/bS72Nw")
+    assert raised.value.category == "url_requires_resolution"
+
+
+@pytest.mark.parametrize("resolved", (None, object(), "", "space", "A-B"))
+def test_short_url_rejects_malformed_resolver_results(resolved: object) -> None:
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli.parse_canonical_page_url(
+            "https://host/x/bS72Nw",
+            short_space_resolver=lambda _base, _page: resolved,
+        )
+    assert raised.value.category == "short_url_resolution"
 
 
 def test_run_composes_bounded_phases_and_publishes_latest(
