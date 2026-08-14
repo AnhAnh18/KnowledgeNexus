@@ -248,6 +248,31 @@ function Wait-LiveProcessBoundary {
 }
 
 function Assert-InventoryResult([object]$Value, [string]$Stage) {
+    if ($null -eq $Value -or $Value -is [System.Array] -or
+        $Value.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
+        Fail-Gate "configuration"
+    }
+    $actualFields = @($Value.PSObject.Properties.Name | Sort-Object)
+    $failureFields = @("failure_category", "status")
+    if (($actualFields -join "`n") -eq ($failureFields -join "`n")) {
+        Assert-ExactObject $Value @("status", "failure_category") "configuration"
+        Assert-ExactString $Value.status "configuration"
+        Assert-ExactString $Value.failure_category "configuration"
+        if ($Value.status -ne "failed") { Fail-Gate "configuration" }
+        $allowed = @(
+            "raw_generation_activation_run_operation_invalid",
+            "raw_generation_activation_run_not_found",
+            "raw_generation_activation_run_not_resumable",
+            "raw_generation_activation_run_match_ambiguous",
+            "raw_generation_activation_incomplete_run_conflict",
+            "inventory_stream",
+            "selection_publication"
+        )
+        if ($allowed -notcontains $Value.failure_category) {
+            Fail-Gate "configuration"
+        }
+        Fail-Gate $Value.failure_category
+    }
     Assert-ExactObject $Value @("status", "phase", "selected_pages", "run_id") $Stage
     Assert-ExactString $Value.status $Stage
     Assert-ExactString $Value.phase $Stage

@@ -24,10 +24,21 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import Foundati
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId, InventoryRootCommit
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
 from knowledgenexus.foundation.domain.models.confluence_page_set import ConfluencePageSetResult, ConfluencePageWorkItem
+from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
+    CheckpointRunInventoryComplete,
+    CheckpointRunSelectionFailure,
+)
 from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain, require_plain_file
 
 
 _SELECTION_FORMAT = "confluence-subtree-selection-v1"
+_ACTIVATION_FAILURE_CATEGORIES = {
+    "run_operation_invalid": "raw_generation_activation_run_operation_invalid",
+    "run_not_found": "raw_generation_activation_run_not_found",
+    "run_not_resumable": "raw_generation_activation_run_not_resumable",
+    "run_match_ambiguous": "raw_generation_activation_run_match_ambiguous",
+    "incomplete_run_conflict": "raw_generation_activation_incomplete_run_conflict",
+}
 _PROCESSING_FORMAT = "confluence-subtree-processing-state-v1"
 _STATE_NAMES = frozenset({"inventory-selection.json", "processing-state.json", "drawio-state.json", "delta-inventory.json"})
 _MAX_STATE_BYTES = 64 * 1024 * 1024
@@ -478,6 +489,31 @@ def _selection_file(args: argparse.Namespace, state: Path, run_id: CrawlRunId) -
     return Path(args.selection_path) if args.selection_path else _state_path(state, str(run_id), "inventory-selection.json")
 
 
+def _activation_failure(outcome: object) -> dict[str, object] | None:
+    if isinstance(outcome, CheckpointRunSelectionFailure):
+        category = _ACTIVATION_FAILURE_CATEGORIES.get(outcome.category)
+        if category is None:
+            category = "raw_generation_activation_run_operation_invalid"
+        return {"status": "failed", "failure_category": category}
+    if isinstance(outcome, CheckpointRunInventoryComplete):
+        return {
+            "status": "failed",
+            "failure_category": "raw_generation_activation_run_operation_invalid",
+        }
+    return None
+
+
+def _activation_methods(outcome: object):
+    try:
+        stream = getattr(outcome, "stream_inventory_occurrences")
+        pause = getattr(outcome, "pause_session")
+    except Exception:
+        return None
+    if not callable(stream) or not callable(pause):
+        return None
+    return stream, pause
+
+
 def _compose_page_processor(args: argparse.Namespace, *, run_id: CrawlRunId, items: tuple[ConfluencePageWorkItem, ...]):
     if not args.raw_root or not args.chunking_profile_path or not args.tokenizer_assets_dir:
         raise ValueError("page processing inputs are required")
@@ -530,29 +566,74 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
     if snapshot.inventory_phase.value != "complete":
         return {"status": result.status, "phase": "inventory", "selected_pages": 0}
     activation_request = ActivateRawGenerationRequest(run_id=snapshot.run_id, **common)
+    activation_failure = None
+    stream_failed = False
+    facts = None
     with composition.checkpoint_run_port.activate_raw_generation(activation_request) as session:
-        if not callable(getattr(session, "stream_inventory_occurrences", None)):
-            raise ValueError("raw generation activation failed")
-        # Stop reading the durable stream one item past the operator's cap
-        # instead of draining a larger approved-profile inventory in full;
-        # the identical overflow is still rejected below.
-        facts = tuple(islice(session.stream_inventory_occurrences(batch_size=args.batch_size), args.max_pages + 1))
-        session.pause_session()
-    selection_path = _state_path(state, str(snapshot.run_id), "inventory-selection.json")
-    if selection_path.exists():
-        existing, existing_items = _load_selection_payload(selection_path, run_id=snapshot.run_id, max_pages=args.max_pages)
-        candidate = _selection_payload_from_inventory(
-            run_id=snapshot.run_id, facts=facts, max_pages=args.max_pages,
-            crawled_at=existing_items[0].crawled_at,
-        )
-        if candidate != existing:
-            raise ValueError("selection replay conflict")
-        selection = existing
-    else:
-        crawled_at = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
-        selection = _selection_payload_from_inventory(run_id=snapshot.run_id, facts=facts, max_pages=args.max_pages, crawled_at=crawled_at)
-        _atomic_json(selection_path, selection)
-    _assert_root_page_in_selection(args.root_page_id, selection)
+        activation_failure = _activation_failure(session)
+        if activation_failure is None:
+            methods = _activation_methods(session)
+            if methods is None:
+                activation_failure = {
+                    "status": "failed",
+                    "failure_category": "raw_generation_activation_run_operation_invalid",
+                }
+            else:
+                stream, pause = methods
+                try:
+                    # Read at most one item beyond the operator's page cap.
+                    facts = tuple(
+                        islice(
+                            stream(batch_size=args.batch_size),
+                            args.max_pages + 1,
+                        )
+                    )
+                except Exception:
+                    stream_failed = True
+                finally:
+                    pause()
+    if activation_failure is not None:
+        return activation_failure
+    if stream_failed:
+        return {"status": "failed", "failure_category": "inventory_stream"}
+    if facts is None:
+        return {
+            "status": "failed",
+            "failure_category": "raw_generation_activation_run_operation_invalid",
+        }
+    try:
+        selection_path = _state_path(state, str(snapshot.run_id), "inventory-selection.json")
+        if selection_path.exists():
+            existing, existing_items = _load_selection_payload(
+                selection_path,
+                run_id=snapshot.run_id,
+                max_pages=args.max_pages,
+            )
+            candidate = _selection_payload_from_inventory(
+                run_id=snapshot.run_id,
+                facts=facts,
+                max_pages=args.max_pages,
+                crawled_at=existing_items[0].crawled_at,
+            )
+            if candidate != existing:
+                raise ValueError("selection replay conflict")
+            selection = existing
+        else:
+            crawled_at = (
+                datetime.now(timezone.utc)
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z")
+            )
+            selection = _selection_payload_from_inventory(
+                run_id=snapshot.run_id,
+                facts=facts,
+                max_pages=args.max_pages,
+                crawled_at=crawled_at,
+            )
+            _atomic_json(selection_path, selection)
+        _assert_root_page_in_selection(args.root_page_id, selection)
+    except (OSError, TypeError, ValueError):
+        return {"status": "failed", "failure_category": "selection_publication"}
     return {"status": "complete", "phase": "inventory", "selected_pages": len(selection["items"]), "run_id": str(snapshot.run_id)}
 
 
@@ -575,30 +656,67 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
     from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ActivateRawGenerationRequest
     composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=profile["max_inventory_windows_per_root"])
     request = ActivateRawGenerationRequest(workspace=state, run_id=run_id, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+    activation_failure = None
+    stream_failed = False
+    captured = None
     with composition.checkpoint_run_port.activate_raw_generation(request) as session:
-        if not callable(getattr(session, "stream_inventory_occurrences", None)):
-            raise ValueError("raw generation activation failed")
-        facts = tuple(islice(session.stream_inventory_occurrences(batch_size=args.batch_size), args.max_pages + 1))
-        candidate = _selection_payload_from_inventory(run_id=run_id, facts=facts, max_pages=args.max_pages, crawled_at=selection_items[0].crawled_at)
-        if candidate != selection_payload:
-            raise ValueError("selection binding mismatch")
-        transport = RetryingConfluenceHttpTransport(inner=composition.http_inner, profile=composition.retry_profile, monotonic_clock=time.monotonic, sleeper=time.sleep, attempt_reserver=session)
-        use_case = CaptureConfluenceSubtreePages(
-            state_session=session,
-            orphan_inspector=ConfluenceRawPageOrphanInspector(raw_root=Path(args.raw_root)),
-            page_fetcher=ConfluenceDataCenterPageAdapter(transport=transport),
-            raw_page_store=composition.guarded_raw_page_store(activation=session),
-            max_pages=config.max_pages,
-        )
-        captured = use_case.run(
-            run_id=run_id,
-            occurrences=facts,
-            stop_after_batches=getattr(args, "stop_after_batches", None),
-        )
-        if captured.complete:
-            session.complete_session()
-        else:
-            session.pause_session()
+        activation_failure = _activation_failure(session)
+        if activation_failure is None:
+            methods = _activation_methods(session)
+            if methods is None:
+                activation_failure = {
+                    "status": "failed",
+                    "failure_category": "raw_generation_activation_run_operation_invalid",
+                }
+            else:
+                stream, pause = methods
+                try:
+                    facts = tuple(
+                        islice(
+                            stream(batch_size=args.batch_size),
+                            args.max_pages + 1,
+                        )
+                    )
+                except Exception:
+                    stream_failed = True
+                    pause()
+                else:
+                    try:
+                        candidate = _selection_payload_from_inventory(run_id=run_id, facts=facts, max_pages=args.max_pages, crawled_at=selection_items[0].crawled_at)
+                        if candidate != selection_payload:
+                            raise ValueError("selection binding mismatch")
+                        transport = RetryingConfluenceHttpTransport(inner=composition.http_inner, profile=composition.retry_profile, monotonic_clock=time.monotonic, sleeper=time.sleep, attempt_reserver=session)
+                        use_case = CaptureConfluenceSubtreePages(
+                            state_session=session,
+                            orphan_inspector=ConfluenceRawPageOrphanInspector(raw_root=Path(args.raw_root)),
+                            page_fetcher=ConfluenceDataCenterPageAdapter(transport=transport),
+                            raw_page_store=composition.guarded_raw_page_store(activation=session),
+                            max_pages=config.max_pages,
+                        )
+                        captured = use_case.run(
+                            run_id=run_id,
+                            occurrences=facts,
+                            stop_after_batches=getattr(args, "stop_after_batches", None),
+                        )
+                    except Exception:
+                        try:
+                            pause()
+                        except Exception:
+                            pass
+                        raise
+                    if captured.complete:
+                        session.complete_session()
+                    else:
+                        pause()
+    if activation_failure is not None:
+        return activation_failure
+    if stream_failed:
+        return {"status": "failed", "failure_category": "inventory_stream"}
+    if captured is None:
+        return {
+            "status": "failed",
+            "failure_category": "raw_generation_activation_run_operation_invalid",
+        }
     return {
         "status": "complete" if captured.complete else "stopped",
         "phase": "capture-pages", "captured": captured.captured,
