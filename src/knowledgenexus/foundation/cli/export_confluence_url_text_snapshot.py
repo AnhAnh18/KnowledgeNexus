@@ -434,9 +434,28 @@ def run(
             _save_context(context_path, context)
         inventory = _require_phase_result(
             _invoke_phase(inventory_args, phase_main=phase_main),
-            phase="inventory", statuses=frozenset({"complete"}),
+            phase="inventory", statuses=frozenset({"complete", "completed"}),
             counters=("selected_pages",),
         )
+        # The durable inventory use case intentionally returns the activation
+        # snapshot captured before its final commit.  A newly completed crawl
+        # therefore reports ``completed`` with zero selected pages; one
+        # bounded resume observes the committed COMPLETE snapshot and
+        # publishes the immutable selection.  This is a read-after-commit
+        # handoff, not a second crawl.
+        if inventory["status"] == "completed":
+            if inventory["selected_pages"] != 0:
+                raise TextSnapshotOperatorError("inventory")
+            inventory = _require_phase_result(
+                _invoke_phase(
+                    ["inventory", *common, "--resume-unique"],
+                    phase_main=phase_main,
+                ),
+                phase="inventory", statuses=frozenset({"complete"}),
+                counters=("selected_pages",),
+            )
+        if inventory["status"] != "complete" or inventory["selected_pages"] <= 0:
+            raise TextSnapshotOperatorError("inventory")
         run_id = inventory.get("run_id")
         if type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None:
             raise TextSnapshotOperatorError("inventory")

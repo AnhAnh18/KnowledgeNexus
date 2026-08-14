@@ -26,20 +26,32 @@ def _operator_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class _PhaseMain:
-    def __init__(self, *, fail_capture: bool = False) -> None:
+    def __init__(
+        self, *, fail_capture: bool = False,
+        inventory_requires_poll: bool = False,
+    ) -> None:
         self.calls: list[tuple[str, ...]] = []
         self.capture_calls = 0
         self.fail_capture = fail_capture
+        self.inventory_requires_poll = inventory_requires_poll
+        self.inventory_calls = 0
 
     def __call__(self, argv: list[str] | None) -> int:
         assert type(argv) is list
         self.calls.append(tuple(argv))
         phase = argv[0]
         if phase == "inventory":
-            payload = {
-                "status": "complete", "phase": "inventory",
-                "selected_pages": 2, "run_id": _RUN_ID,
-            }
+            self.inventory_calls += 1
+            if self.inventory_requires_poll and self.inventory_calls == 1:
+                payload = {
+                    "status": "completed", "phase": "inventory",
+                    "selected_pages": 0,
+                }
+            else:
+                payload = {
+                    "status": "complete", "phase": "inventory",
+                    "selected_pages": 2, "run_id": _RUN_ID,
+                }
         elif phase == "capture-pages":
             self.capture_calls += 1
             if self.fail_capture:
@@ -204,6 +216,26 @@ def test_failed_capture_stops_before_processing_and_remains_resumable(
     context = json.loads((output / cli._CONTEXT_FILE).read_text(encoding="utf-8"))
     assert context["run_id"] == _RUN_ID
     assert not (output / "LATEST.txt").exists()
+
+
+def test_new_inventory_polls_committed_snapshot_once_before_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = _operator_files(tmp_path, monkeypatch)
+    phases = _PhaseMain(inventory_requires_poll=True)
+
+    result = cli.run(
+        url="https://confluence.example/spaces/SPACE/pages/12345/Root",
+        output_root=str(tmp_path / "operator-output"),
+        tokenizer_assets_dir=str(tokenizer), max_pages=200,
+        phase_main=phases,
+    )
+
+    assert result["status"] == "complete"
+    inventory_calls = [call for call in phases.calls if call[0] == "inventory"]
+    assert len(inventory_calls) == 2
+    assert "--resume-unique" not in inventory_calls[0]
+    assert "--resume-unique" in inventory_calls[1]
 
 
 def test_existing_unowned_output_directory_fails_closed(
