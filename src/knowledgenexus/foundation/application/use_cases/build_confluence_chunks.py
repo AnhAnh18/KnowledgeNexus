@@ -108,6 +108,43 @@ def _fail(category: ConfluenceChunkingFailureCategory) -> None:
     raise ConfluenceChunkingError(category) from None
 
 
+def _split_markdown_row_cells(line: str) -> list[str]:
+    text = line.strip()
+    if text.startswith("|"):
+        text = text[1:]
+    if text.endswith("|") and not text.endswith("\\|"):
+        text = text[:-1]
+    cells: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == "\\" and index + 1 < len(text):
+            current.extend((character, text[index + 1]))
+            index += 2
+        elif character == "|":
+            cells.append("".join(current))
+            current = []
+            index += 1
+        else:
+            current.append(character)
+            index += 1
+    cells.append("".join(current))
+    return cells
+
+
+def _continuation_fence(text: str) -> str:
+    longest = 0
+    run = 0
+    for character in text:
+        if character == "`":
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    return "`" * max(3, longest + 1)
+
+
 class BuildConfluenceChunks:
     """Build deterministic Confluence ChunkRecords from approved M6D-C input."""
 
@@ -800,7 +837,16 @@ class BuildConfluenceChunks:
             if self._count_exact(candidate.breadcrumb, one_row) > (
                 self._profile.hard_maximum_tokens
             ):
-                _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW)
+                windows.extend(
+                    self._split_oversized_table_row(
+                        candidate=candidate,
+                        block=block,
+                        row_ordinal=cursor,
+                        row_line=block.row_lines[cursor],
+                    )
+                )
+                cursor += 1
+                continue
             best_end: int | None = None
             for end_index in range(cursor + 1, len(block.row_lines) + 1):
                 body = self._table_body(block, block.row_lines[cursor:end_index])
@@ -818,6 +864,74 @@ class BuildConfluenceChunks:
             windows.append(body)
             cursor = best_end
         return windows
+
+    def _split_oversized_table_row(
+        self,
+        *,
+        candidate: _Candidate,
+        block: WikiTableBlock,
+        row_ordinal: int,
+        row_line: str,
+    ) -> list[str]:
+        """Emit deterministic opaque continuations for each cell in an oversized row."""
+        cells = _split_markdown_row_cells(row_line)
+        headers = _split_markdown_row_cells(block.header_line)
+        if len(cells) != block.column_count or len(headers) != block.column_count:
+            _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW)
+
+        table_ordinal_match = re.search(r"#table(\d+)$", candidate.unit_key)
+        if table_ordinal_match is None:
+            _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW)
+        table_ordinal = int(table_ordinal_match.group(1))
+        emitted: list[str] = []
+        for column_ordinal, cell in enumerate(cells):
+            fence = _continuation_fence(cell)
+            prefix = (
+                f"[table-continuation v1 table={table_ordinal} row={row_ordinal} "
+                f"column={column_ordinal} header_ordinal={column_ordinal} part="
+            )
+
+            def render(fragment: str, index: int, total: int) -> str:
+                marker = f"{prefix}{index + 1}/{total}]"
+                return "\n".join(
+                    [
+                        block.header_line,
+                        block.separator_line,
+                        marker,
+                        fence,
+                        fragment,
+                        fence,
+                    ]
+                )
+
+            # Part count appears in the marker, so converge deterministically.
+            total = 1
+            for _ in range(4):
+                fragments = []
+                offset = 0
+                while offset < len(cell) or (not cell and not fragments):
+                    remaining = cell[offset:]
+                    best = 0
+                    for end in range(1, len(remaining) + 1):
+                        trial = render(remaining[:end], 0, total)
+                        if self._count_exact(candidate.breadcrumb, trial) <= self._profile.hard_maximum_tokens:
+                            best = end
+                        else:
+                            break
+                    if best == 0:
+                        _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW)
+                    fragments.append(remaining[:best])
+                    offset += best
+                next_total = len(fragments)
+                if next_total == total:
+                    break
+                total = next_total
+            for index, fragment in enumerate(fragments):
+                body = render(fragment, index, total)
+                if self._count_exact(candidate.breadcrumb, body) > self._profile.hard_maximum_tokens:
+                    _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW)
+                emitted.append(body)
+        return emitted
 
     @staticmethod
     def _table_body(block: WikiTableBlock, rows: Sequence[str]) -> str:

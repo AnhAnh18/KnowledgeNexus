@@ -591,6 +591,35 @@ def test_unsplittable_table_row_fails_closed() -> None:
     assert "SECRET" not in str(captured.value)
 
 
+def test_oversized_table_row_splits_cells_losslessly_and_deterministically() -> None:
+    long_cell = "trace-" + ("x" * 400) + " PIPE `tick`<br>UNICODE ![img](attachment:foo.png)"
+    rows = [
+        f"| r{i}a | r{i}b | {long_cell if i == 3 else f'r{i}c'} | r{i}d |"
+        for i in range(7)
+    ]
+    body = chr(10).join(["## Table", "", "| A | B | Details | D |", "| --- | --- | --- | --- |", *rows])
+    profile = _profile(minimum=2, target=220, hard=300, overlap=4, code_target=220)
+    first = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+    second = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+
+    assert len(first.records) > 1
+    assert all(record["token_count"] <= profile.hard_maximum_tokens for record in first.records)
+    assert [record["chunk_id"] for record in first.records] == [record["chunk_id"] for record in second.records]
+    continuations = [
+        _body(record)
+        for record in first.records
+        if "[table-continuation v1" in _body(record)
+    ]
+    assert any(record["content_kind"] == "table" for record in first.records)
+    assert continuations, [record["content_kind"] for record in first.records]
+    assert all("row=3" in text for text in continuations)
+    target_parts = [text for text in continuations if "column=2" in text]
+    reconstructed = "".join(
+        text.split("\n", 4)[4].rsplit("\n", 1)[0] for text in target_parts
+    )
+    assert reconstructed == " " + long_cell
+
+
 def test_exact_duplicate_preimage_receives_stable_suffix() -> None:
     table = WikiTableBlock("| H |\n| --- |", "| H |", "| --- |", (), 1, 2)
     section = WikiSection(
