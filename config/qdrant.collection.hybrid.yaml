@@ -1,4 +1,4 @@
-collection_name: knowledgenexus_hybrid_test
+collection_name: Confluence
 vectors:
   dense:
     size: 1024

@@ -27,11 +27,11 @@ class Settings(BaseSettings):
 
     # Qdrant
     qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "knowledgenexus"
+    qdrant_collection: str = "Confluence"
     qdrant_api_key: str | None = None
 
     # Retrieval mode: "dense" (default) or "hybrid" (dense + sparse + RRF)
-    retrieval_mode: RetrievalMode = RetrievalMode.DENSE
+    retrieval_mode: RetrievalMode = RetrievalMode.HYBRID
 
     # CORS (comma-separated origins, or "*" for all)
     cors_origins: str = "*"

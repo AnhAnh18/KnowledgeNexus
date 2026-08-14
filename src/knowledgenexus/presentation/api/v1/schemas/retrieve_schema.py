@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RetrieveRequestSchema(BaseModel):
@@ -33,6 +33,14 @@ class CitationSchema(BaseModel):
     content_kind: str | None = None
     language: str | None = None
     source_version: str | None = None
+
+    @field_validator("heading_path", mode="before")
+    @classmethod
+    def normalize_heading_path(cls, v: Any) -> str | None:
+        """Convert list heading_path to string (take first element or join)."""
+        if isinstance(v, list):
+            return v[0] if v else None
+        return v
 
 
 class RetrievedChunkSchema(BaseModel):
