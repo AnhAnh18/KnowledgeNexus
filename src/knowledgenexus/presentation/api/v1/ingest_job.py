@@ -1,8 +1,10 @@
+import asyncio
 import logging
+from dataclasses import dataclass
 from uuid import uuid4
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from knowledgenexus.foundation.domain.rules.confluence_url import (
     ConfluenceUrlParseError,
@@ -55,6 +57,22 @@ async def create_ingest_job(
     return _to_response(job)
 
 
+@dataclass(frozen=True)
+class ConfluenceIngestTask:
+    """One queued unit of work for `confluence_ingest_worker`."""
+
+    job_id: str
+    url: str
+
+
+# Number of jobs processed concurrently by the queue worker(s). Kept at 1
+# by default: BgeM3Embedder is a single shared model instance, so running
+# more than one heavy embedding job at a time buys little real throughput
+# while making memory/CPU contention harder to reason about. Raise this if
+# ingestion needs to scale beyond one job at a time.
+CONFLUENCE_INGEST_WORKER_COUNT = 1
+
+
 @router.post(
     "/confluence-pages",
     response_model=IngestJobResponse,
@@ -62,7 +80,6 @@ async def create_ingest_job(
 )
 async def create_confluence_page_ingest_job(
     body: IngestConfluenceUrlRequest,
-    background_tasks: BackgroundTasks,
     container: AppContainer = Depends(_container),
 ) -> IngestJobResponse:
     try:
@@ -78,12 +95,37 @@ async def create_confluence_page_ingest_job(
         stats={"url": body.url, "page_id": page_id},
     )
     await container.ingest_job_repo.create(job)
-    background_tasks.add_task(_run_confluence_page_ingest_job, job.id, body.url, container)
+    # Enqueue instead of firing a bare BackgroundTask: this lets many jobs be
+    # submitted back-to-back — they stay PENDING and wait their turn in the
+    # queue — instead of each request racing to run its own ingest
+    # immediately. The request returns right away regardless of queue depth.
+    await container.get_confluence_ingest_queue().put(
+        ConfluenceIngestTask(job_id=job.id, url=body.url)
+    )
     return _to_response(job)
 
 
+async def confluence_ingest_worker(container: AppContainer) -> None:
+    """Long-running consumer: pulls one queued job at a time and runs it.
+
+    Started as a background asyncio task per FastAPI app lifespan (see
+    `presentation/api/app.py`), so it lives for the whole process lifetime
+    and keeps consuming `container.get_confluence_ingest_queue()` without
+    blocking request handlers.
+    """
+    queue = container.get_confluence_ingest_queue()
+    while True:
+        task = await queue.get()
+        try:
+            await _run_confluence_page_ingest_job(task.job_id, task.url, container)
+        except Exception:
+            logger.exception("Unhandled error processing ingest job %s", task.job_id)
+        finally:
+            queue.task_done()
+
+
 async def _run_confluence_page_ingest_job(job_id: str, url: str, container: AppContainer) -> None:
-    """Background job: fetch the page live, chunk it, embed it, and store it."""
+    """Fetch the page live, chunk it, embed it, and store it."""
     job = await container.ingest_job_repo.get_by_id(job_id)
     if job is None:
         logger.warning("Ingest job %s disappeared before it could run", job_id)
@@ -93,7 +135,11 @@ async def _run_confluence_page_ingest_job(job_id: str, url: str, container: AppC
     await container.ingest_job_repo.update(job)
 
     try:
-        ingestor = container.get_confluence_page_ingestor()
+        # First call lazily builds the tokenizer + BGE-M3 embedder (loading
+        # a multi-GB model from disk) — genuinely blocking, synchronous work.
+        # Run it off the event loop so other requests (and other queued
+        # jobs' status polling) stay responsive while it loads.
+        ingestor = await asyncio.to_thread(container.get_confluence_page_ingestor)
         result = await ingestor.execute(url=url)
         job.status = IngestJobStatus.COMPLETED
         job.stats = {

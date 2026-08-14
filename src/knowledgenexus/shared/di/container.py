@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -48,6 +49,9 @@ class AppContainer:
     confluence_page_ingestor: IngestConfluencePageFromUrl | None = field(
         default=None, repr=False, compare=False
     )
+    confluence_ingest_queue: asyncio.Queue | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def get_embedder(self) -> BgeM3Embedder:
         if self.embedder is None:
@@ -96,6 +100,11 @@ class AppContainer:
                 page_ingestor=page_ingestor,
             )
         return self.confluence_page_ingestor
+
+    def get_confluence_ingest_queue(self) -> asyncio.Queue:
+        if self.confluence_ingest_queue is None:
+            self.confluence_ingest_queue = asyncio.Queue()
+        return self.confluence_ingest_queue
 
     async def shutdown(self) -> None:
         if self.embedder is not None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,11 +16,28 @@ from knowledgenexus.presentation.api.v1 import documents_router, health_router, 
 async def lifespan(app: FastAPI):
     from knowledgenexus.shared.config.settings import get_settings
     from knowledgenexus.shared.di.container import init_container, shutdown_container
+    from knowledgenexus.presentation.api.v1.ingest_job import (
+        CONFLUENCE_INGEST_WORKER_COUNT,
+        confluence_ingest_worker,
+    )
 
     settings = get_settings()
-    await init_container(settings)
-    yield
-    await shutdown_container()
+    container = await init_container(settings)
+
+    # Long-running consumers for the Confluence ingest queue — live for the
+    # whole process, so submitted jobs keep draining even across many
+    # requests without blocking request handlers.
+    workers = [
+        asyncio.create_task(confluence_ingest_worker(container))
+        for _ in range(CONFLUENCE_INGEST_WORKER_COUNT)
+    ]
+    try:
+        yield
+    finally:
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+        await shutdown_container()
 
 
 app = FastAPI(
