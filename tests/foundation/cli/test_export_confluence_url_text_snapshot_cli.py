@@ -555,4 +555,23 @@ def test_powershell_entrypoint_exposes_two_required_operator_parameters() -> Non
     assert "--pat" not in text.lower()
 
 
+def test_demo_runbook_documents_partial_resume_and_url_identity() -> None:
+    text = (_REPO_ROOT / "docs" / "runbooks" / "CONFLUENCE_TEXT_DEMO.md").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        "-AllowPartialProcessing",
+        "processing_status: partial",
+        "restricted:unresolved",
+        "documents.jsonl",
+        "chunks.jsonl",
+        "LATEST.txt",
+        "(base_url, space_key, root_page_id, max_pages)",
+        "context_binding",
+        "url_shape",
+        "unsplittable_table_row",
+    ):
+        assert required in text
+
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
