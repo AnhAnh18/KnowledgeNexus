@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     embedding_cache_dir: str = "./data/index/models"
     embedding_batch_size: int = 32
 
+    # Confluence (live single-page ingestion)
+    confluence_base_url: str | None = None
+    confluence_pat: str | None = None
+    confluence_raw_root: str = "./data/confluence-raw"
+    confluence_chunking_profile_path: str = "./contracts/foundation/embedding_profile.yaml"
+
     # Reranker (cross-encoder, post-retrieval stage)
     reranker_enabled: bool = False
     reranker_model: str = "BAAI/bge-reranker-v2-m3"

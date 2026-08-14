@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -46,26 +45,16 @@ except Exception:
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-# Đọc CONFLUENCE_BASE_URL/CONFLUENCE_PAT từ .env (không commit, đã trong
-# .gitignore) thay vì bắt điền vào biến môi trường mỗi lần chạy.
-from dotenv import load_dotenv  # noqa: E402
-
-load_dotenv(_REPO_ROOT / ".env")
-
-from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
-from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
-    ConfluenceRawPageEnvelope,
+from knowledgenexus.foundation.application.use_cases.fetch_confluence_page_live import (
+    fetch_confluence_page_live,
 )
+from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 from knowledgenexus.foundation.domain.rules.confluence_url import (
     ConfluenceUrlParseError,
     parse_confluence_page_id,
 )
 from knowledgenexus.foundation.infrastructure.config.chunking_profile_loader import (
     load_chunking_profile,
-)
-from knowledgenexus.foundation.infrastructure.confluence import (
-    ConfluenceDataCenterPageAdapter,
-    UrllibConfluenceHttpTransport,
 )
 from knowledgenexus.foundation.infrastructure.processors import (
     ConfluenceDataCenterRawPageMapper,
@@ -83,10 +72,6 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
     FoundationSchemaValidator,
 )
 from knowledgenexus.shared.di.container import build_container
-
-BASE_URL_ENV = "CONFLUENCE_BASE_URL"
-PAT_ENV = "CONFLUENCE_PAT"
-
 
 # Đường dẫn mặc định đã xác nhận có sẵn trên máy dev hiện tại — vẫn có thể
 # ghi đè bằng flag tương ứng nếu chạy trên máy khác.
@@ -123,27 +108,6 @@ def _parse_args(*, default_tokenizer_assets_dir: str | None) -> argparse.Namespa
     return parser.parse_args()
 
 
-def _fetch_page_live(
-    *, base_url: str, pat: str, run_id: CrawlRunId, page_id: str, raw_root: Path
-) -> None:
-    """Gọi Confluence thật để lấy 1 trang, publish vào raw_root."""
-    transport = UrllibConfluenceHttpTransport(base_url=base_url, personal_access_token=pat)
-    page_fetcher = ConfluenceDataCenterPageAdapter(transport=transport)
-    page_mapper = ConfluenceDataCenterRawPageMapper()
-    generation_store = ConfluenceRawPageGenerationStore(raw_root=raw_root)
-
-    response = page_fetcher.fetch_page_response_raw(page_id=page_id)
-    source = page_mapper.map_page(raw_bytes=response.body, expected_page_id=page_id)
-    envelope = ConfluenceRawPageEnvelope.capture(
-        run_id=run_id,
-        page_id=page_id,
-        source_version=source.source_version,
-        http_status=response.status_code,
-        body_bytes=response.body,
-    )
-    generation_store.publish_page(envelope=envelope)
-
-
 async def main() -> int:
     settings = Settings()
     args = _parse_args(default_tokenizer_assets_dir=settings.embedding_model_path)
@@ -152,10 +116,10 @@ async def main() -> int:
     print("Fetch LIVE 1 trang Confluence -> chunk -> embed -> Qdrant + SQLite")
     print("=" * 70)
 
-    base_url = os.environ.get(BASE_URL_ENV)
-    pat = os.environ.get(PAT_ENV)
+    base_url = settings.confluence_base_url
+    pat = settings.confluence_pat
     if not base_url or not pat:
-        print(f"[ERROR] Cần đặt {BASE_URL_ENV} và {PAT_ENV} trước khi chạy.")
+        print("[ERROR] Cần đặt CONFLUENCE_BASE_URL và CONFLUENCE_PAT trong .env trước khi chạy.")
         return 1
 
     try:
@@ -172,7 +136,7 @@ async def main() -> int:
 
     print(f"\n[1/4] Fetch live từ {base_url} ...")
     try:
-        _fetch_page_live(
+        fetch_confluence_page_live(
             base_url=base_url, pat=pat, run_id=run_id, page_id=page_id, raw_root=raw_root
         )
     except Exception as exc:

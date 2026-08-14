@@ -12,6 +12,10 @@ class CreateIngestJobRequest(BaseModel):
     stats: dict[str, Any] = Field(default_factory=dict)
 
 
+class IngestConfluenceUrlRequest(BaseModel):
+    url: str
+
+
 class UpdateIngestJobRequest(BaseModel):
     status: IngestJobStatus | None = None
     completed_at: datetime | None = None

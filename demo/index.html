@@ -244,6 +244,18 @@
             <button class="btn btn-primary" onclick="getStoreStats()">Xem thống kê</button>
             <div id="statsResult" style="margin-top:16px;"></div>
         </div>
+
+        <!-- Ingest from URL -->
+        <div class="card">
+            <h2>5️⃣ Ingest 1 trang Confluence từ URL</h2>
+            <div class="form-group">
+                <label>URL trang Confluence</label>
+                <input type="text" id="ingestUrlInput"
+                    placeholder="https://confluence.example.com/pages/viewpage.action?pageId=12345" />
+            </div>
+            <button class="btn btn-success" id="ingestBtn" onclick="startIngest()">🚀 Bắt đầu Ingest</button>
+            <div id="ingestStatus" style="margin-top:16px;"></div>
+        </div>
     </div>
 
     <div class="toast" id="toast"></div>
@@ -506,6 +518,94 @@
             } catch (e) {
                 container.innerHTML = '';
                 showToast('Lỗi: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Ingest từ URL (Confluence) ============
+        let ingestPollTimer = null;
+
+        function ingestStatusClass(status) {
+            if (status === 'completed') return 'ok';
+            if (status === 'failed') return 'error';
+            return 'pending';
+        }
+
+        function renderIngestStatus(job) {
+            const container = document.getElementById('ingestStatus');
+            const cls = ingestStatusClass(job.status);
+            const stats = job.stats || {};
+            container.innerHTML = `
+                <div class="result-item">
+                    <div class="result-header">
+                        <div class="result-title">Job ${escapeHtml(job.id.substring(0, 8))}...</div>
+                        <span class="badge ${cls}"><span class="dot ${cls}"></span> ${escapeHtml(job.status.toUpperCase())}</span>
+                    </div>
+                    <div class="result-meta">
+                        ${stats.url ? `<span>🔗 ${escapeHtml(stats.url)}</span>` : ''}
+                        ${stats.page_id ? `<span>🆔 ${escapeHtml(String(stats.page_id))}</span>` : ''}
+                        ${stats.chunks_ingested !== undefined ? `<span>✅ chunks_ingested: ${stats.chunks_ingested}</span>` : ''}
+                        ${stats.chunks_failed !== undefined ? `<span>⚠️ chunks_failed: ${stats.chunks_failed}</span>` : ''}
+                        ${stats.embedding_model ? `<span>🧠 ${escapeHtml(stats.embedding_model)}</span>` : ''}
+                    </div>
+                    ${job.error ? `<div class="result-content" style="color:#c0392b;">❌ ${escapeHtml(job.error)}</div>` : ''}
+                </div>
+            `;
+        }
+
+        function stopIngestPolling() {
+            if (ingestPollTimer) {
+                clearInterval(ingestPollTimer);
+                ingestPollTimer = null;
+            }
+            const btn = document.getElementById('ingestBtn');
+            btn.disabled = false;
+            btn.textContent = '🚀 Bắt đầu Ingest';
+        }
+
+        function pollIngestJob(jobId) {
+            stopIngestPolling();
+            const btn = document.getElementById('ingestBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Đang ingest...';
+            ingestPollTimer = setInterval(async () => {
+                try {
+                    const res = await fetch(getApiBase() + `/api/v1/ingest-jobs/${jobId}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const job = await res.json();
+                    renderIngestStatus(job);
+                    if (job.status === 'completed' || job.status === 'failed') {
+                        stopIngestPolling();
+                        showToast(
+                            job.status === 'completed' ? 'Ingest hoàn tất!' : 'Ingest thất bại: ' + (job.error || ''),
+                            job.status === 'completed' ? 'success' : 'error'
+                        );
+                    }
+                } catch (e) {
+                    stopIngestPolling();
+                    showToast('Lỗi khi kiểm tra trạng thái job: ' + e.message, 'error');
+                }
+            }, 2000);
+        }
+
+        async function startIngest() {
+            const url = document.getElementById('ingestUrlInput').value.trim();
+            if (!url) { showToast('Vui lòng nhập URL', 'error'); return; }
+
+            const btn = document.getElementById('ingestBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Đang gửi...';
+            document.getElementById('ingestStatus').innerHTML = '<div class="loading">⏳ Đang tạo ingest job...</div>';
+
+            try {
+                const res = await apiCall('POST', '/api/v1/ingest-jobs/confluence-pages', { url });
+                const job = await res.json();
+                renderIngestStatus(job);
+                pollIngestJob(job.id);
+            } catch (e) {
+                document.getElementById('ingestStatus').innerHTML = '';
+                showToast('Lỗi: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '🚀 Bắt đầu Ingest';
             }
         }
 

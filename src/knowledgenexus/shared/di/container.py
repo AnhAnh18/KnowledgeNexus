@@ -1,12 +1,31 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from knowledgenexus.foundation.infrastructure.config.chunking_profile_loader import (
+    load_chunking_profile,
+)
+from knowledgenexus.foundation.infrastructure.processors import (
+    ConfluenceDataCenterRawPageMapper,
+    ConfluenceStorageXhtmlNormalizer,
+)
+from knowledgenexus.foundation.infrastructure.raw_store import ConfluenceRawPageGenerationStore
+from knowledgenexus.foundation.infrastructure.tokenization import BgeM3LocalTokenizer
 from knowledgenexus.indexing.application.use_cases.chunk_storage_service import ChunkStorageService
+from knowledgenexus.indexing.application.use_cases.ingest_confluence_page import (
+    IngestConfluencePage,
+)
+from knowledgenexus.indexing.application.use_cases.ingest_confluence_page_from_url import (
+    IngestConfluencePageFromUrl,
+)
 from knowledgenexus.indexing.infrastructure.embedding.bge_m3_embedder import BgeM3Embedder
 from knowledgenexus.retrieval.domain.ports.reranker_port import RerankerPort
 from knowledgenexus.retrieval.infrastructure.reranking.bge_reranker import BgeReranker
 from knowledgenexus.shared.config.settings import Settings
+from knowledgenexus.shared.contracts.foundation.schema_validator import (
+    FoundationSchemaValidator,
+)
 from knowledgenexus.indexing.infrastructure.database.engine import create_engine, create_session_factory, init_database
 from knowledgenexus.indexing.infrastructure.repositories.sqlite_chunk_repo import SqliteChunkRepository
 from knowledgenexus.indexing.infrastructure.repositories.sqlite_document_repo import SqliteDocumentRepository
@@ -26,6 +45,9 @@ class AppContainer:
     chunk_storage: ChunkStorageService
     embedder: BgeM3Embedder | None = field(default=None, repr=False, compare=False)
     reranker: RerankerPort | None = field(default=None, repr=False, compare=False)
+    confluence_page_ingestor: IngestConfluencePageFromUrl | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def get_embedder(self) -> BgeM3Embedder:
         if self.embedder is None:
@@ -36,6 +58,44 @@ class AppContainer:
         if self.reranker is None and self.settings.reranker_enabled:
             self.reranker = BgeReranker.from_settings(self.settings)
         return self.reranker
+
+    def get_confluence_page_ingestor(self) -> IngestConfluencePageFromUrl:
+        if self.confluence_page_ingestor is None:
+            if not self.settings.confluence_base_url or not self.settings.confluence_pat:
+                raise RuntimeError(
+                    "CONFLUENCE_BASE_URL and CONFLUENCE_PAT must be set in .env "
+                    "to ingest a Confluence page from a URL"
+                )
+            if not self.settings.embedding_model_path:
+                raise RuntimeError(
+                    "EMBEDDING_MODEL_PATH must be set in .env (BGE-M3 tokenizer assets dir)"
+                )
+            profile = load_chunking_profile(
+                Path(self.settings.confluence_chunking_profile_path).resolve()
+            )
+            tokenizer = BgeM3LocalTokenizer(
+                profile=profile,
+                tokenizer_assets_dir=Path(self.settings.embedding_model_path),
+            )
+            raw_root = Path(self.settings.confluence_raw_root).resolve()
+            raw_root.mkdir(parents=True, exist_ok=True)
+            page_ingestor = IngestConfluencePage(
+                chunking_profile=profile,
+                tokenizer=tokenizer,
+                raw_page_store=ConfluenceRawPageGenerationStore(raw_root=raw_root),
+                raw_page_mapper=ConfluenceDataCenterRawPageMapper(),
+                storage_normalizer=ConfluenceStorageXhtmlNormalizer(),
+                schema_validator=FoundationSchemaValidator(),
+                embedder=self.get_embedder(),
+                chunk_storage_service=self.chunk_storage,
+            )
+            self.confluence_page_ingestor = IngestConfluencePageFromUrl(
+                base_url=self.settings.confluence_base_url,
+                pat=self.settings.confluence_pat,
+                raw_root=raw_root,
+                page_ingestor=page_ingestor,
+            )
+        return self.confluence_page_ingestor
 
     async def shutdown(self) -> None:
         if self.embedder is not None:
