@@ -750,12 +750,23 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
             "status": "failed",
             "failure_category": "raw_generation_activation_run_operation_invalid",
         }
-    return {
+    return _capture_pages_result_payload(captured)
+
+
+def _capture_pages_result_payload(captured: object) -> dict[str, object]:
+    from knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages import PageCaptureResult
+
+    if type(captured) is not PageCaptureResult:
+        raise TypeError("capture result is invalid")
+    result: dict[str, object] = {
         "status": "complete" if captured.complete else "stopped",
         "phase": "capture-pages", "captured": captured.captured,
         "replayed": captured.replayed, "skipped": captured.skipped,
         "failed": captured.failed,
     }
+    if captured.failure_categories:
+        result["failure_categories"] = dict(captured.failure_categories)
+    return result
 
 
 def _process_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:

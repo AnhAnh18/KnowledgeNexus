@@ -13,6 +13,9 @@ import knowledgenexus.foundation.application.use_cases.capture_confluence_subtre
 from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_inventory import (
     ExecuteDurableConfluenceInventory,
 )
+from knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages import (
+    PageCaptureResult,
+)
 from knowledgenexus.foundation.cli import confluence_subtree_corpus as cli
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CanonicalIncludeRoots,
@@ -161,6 +164,37 @@ def test_capture_pages_main_forwards_controlled_batch_stop(monkeypatch, tmp_path
     ]) == 0
     assert observed == {"stop_after_batches": 2, "state": state}
     assert json.loads(capsys.readouterr().out)["status"] == "stopped"
+
+
+def test_capture_result_payload_exposes_only_aggregate_failure_categories() -> None:
+    captured = PageCaptureResult(
+        94,
+        0,
+        0,
+        6,
+        True,
+        100,
+        (("fetch_http", 4), ("fetch_response_size_limit", 2)),
+    )
+
+    assert cli._capture_pages_result_payload(captured) == {
+        "status": "stopped",
+        "phase": "capture-pages",
+        "captured": 94,
+        "replayed": 0,
+        "skipped": 0,
+        "failed": 6,
+        "failure_categories": {
+            "fetch_http": 4,
+            "fetch_response_size_limit": 2,
+        },
+    }
+
+
+@pytest.mark.parametrize("malformed", [None, object(), {}, []])
+def test_capture_result_payload_rejects_wrong_runtime_types(malformed) -> None:
+    with pytest.raises(TypeError, match="capture result"):
+        cli._capture_pages_result_payload(malformed)
 
 
 def test_drawio_phase_fails_closed_without_production_adapters(capsys, tmp_path):
@@ -1129,17 +1163,14 @@ def test_capture_result_closes_checkpoint_session_by_result(
     expected_completions,
 ):
     session = _CapturePhaseSession((_capture_inventory_fact(),))
-    capture_result = type(
-        "CaptureResult",
-        (),
-        {
-            "complete": complete,
-            "captured": 1 if complete else 0,
-            "replayed": 0,
-            "skipped": 0,
-            "failed": 0,
-        },
-    )()
+    capture_result = PageCaptureResult(
+        captured=1 if complete else 0,
+        replayed=0,
+        skipped=0,
+        failed=0,
+        stopped=not complete,
+        expected_total=1,
+    )
     args, state, calls = _capture_phase_fixture(
         monkeypatch, tmp_path, session, capture_result=capture_result
     )
