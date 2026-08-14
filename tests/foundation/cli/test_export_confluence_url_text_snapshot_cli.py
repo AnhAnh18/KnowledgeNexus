@@ -91,6 +91,11 @@ class _PhaseMain:
         "https://host/x/abc", "https://host/display/SPACE/Title",
         "https://host/spaces/space/pages/1/Title",
         "https://user:secret@host/spaces/SPACE/pages/1/Title",
+        "https://host/pages/viewpage.action?pageId=1",
+        "https://host/pages/viewpage.action?pageId=1&spaceKey=SPACE&unknown=1",
+        "https://host/pages/viewpage.action?pageId=1&pageId=2&spaceKey=SPACE",
+        "https://host/pages/viewpage.action?pageId=x&spaceKey=SPACE",
+        "https://host/pages/viewpage.action?pageId=1&spaceKey=space",
     ),
 )
 def test_url_boundary_rejects_unsupported_and_malformed_values(value: object) -> None:
@@ -102,6 +107,13 @@ def test_canonical_url_resolves_context_base_scope_and_page() -> None:
     assert cli.parse_canonical_page_url(
         "https://Confluence.Example:443/wiki/spaces/SPACE/pages/12345/Page-Title"
     ) == ("https://confluence.example/wiki", "SPACE", "12345")
+
+
+def test_viewpage_url_resolves_explicit_space_and_page_without_network() -> None:
+    assert cli.parse_canonical_page_url(
+        "https://confluence-mx.sec.samsung.net/pages/viewpage.action?"
+        "pageId=938880621&spaceKey=SVMC&title=1.%2BS%2BPen%2BSDK"
+    ) == ("https://confluence-mx.sec.samsung.net", "SVMC", "938880621")
 
 
 def test_run_composes_bounded_phases_and_publishes_latest(

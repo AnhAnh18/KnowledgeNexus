@@ -16,7 +16,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Callable, Mapping
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from knowledgenexus.foundation.ports.path_safety import (
     require_plain_directory_chain,
@@ -35,6 +35,11 @@ _PACKET_FILES = frozenset(
 _CANONICAL_PAGE_PATH = re.compile(
     r"\A(?P<context>(?:/[^/?#]+)*)/spaces/(?P<space>[A-Z0-9]+)/pages/(?P<page>[0-9]+)(?:/[^?#]*)?\Z"
 )
+_VIEW_PAGE_PATH = re.compile(
+    r"\A(?P<context>(?:/[^/?#]+)*)/pages/viewpage\.action\Z",
+    re.IGNORECASE,
+)
+_VIEW_PAGE_QUERY_FIELDS = frozenset({"pageId", "spaceKey", "title"})
 _RUN_ID = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
@@ -62,7 +67,6 @@ def parse_canonical_page_url(value: object) -> tuple[str, str, str]:
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.query
         or parsed.fragment
     ):
         raise TextSnapshotOperatorError("url")
@@ -70,13 +74,44 @@ def parse_canonical_page_url(value: object) -> tuple[str, str, str]:
         port = parsed.port
     except ValueError:
         raise TextSnapshotOperatorError("url") from None
-    match = _CANONICAL_PAGE_PATH.fullmatch(unquote(parsed.path))
-    if match is None:
-        raise TextSnapshotOperatorError("url_shape")
+    decoded_path = unquote(parsed.path)
+    match = _CANONICAL_PAGE_PATH.fullmatch(decoded_path)
+    if match is not None:
+        if parsed.query:
+            raise TextSnapshotOperatorError("url")
+        context = match.group("context").rstrip("/")
+        space_key, page_id = match.group("space"), match.group("page")
+    else:
+        view_match = _VIEW_PAGE_PATH.fullmatch(decoded_path)
+        if view_match is None or not parsed.query:
+            raise TextSnapshotOperatorError("url_shape")
+        try:
+            pairs = parse_qsl(
+                parsed.query, keep_blank_values=True, strict_parsing=True,
+                encoding="utf-8", errors="strict",
+            )
+        except (UnicodeDecodeError, ValueError):
+            raise TextSnapshotOperatorError("url") from None
+        query: dict[str, str] = {}
+        for key, item in pairs:
+            if key in query or key not in _VIEW_PAGE_QUERY_FIELDS:
+                raise TextSnapshotOperatorError("url")
+            query[key] = item
+        if set(query) not in ({"pageId", "spaceKey"}, _VIEW_PAGE_QUERY_FIELDS):
+            raise TextSnapshotOperatorError("url")
+        page_id, space_key = query["pageId"], query["spaceKey"]
+        if (
+            not page_id
+            or not page_id.isascii()
+            or not page_id.isdecimal()
+            or re.fullmatch(r"[A-Z0-9]+", space_key) is None
+            or ("title" in query and not query["title"])
+        ):
+            raise TextSnapshotOperatorError("url")
+        context = view_match.group("context").rstrip("/")
     host = parsed.hostname.lower()
     authority = f"{host}:{port}" if port is not None and port != 443 else host
-    context = match.group("context").rstrip("/")
-    return f"https://{authority}{context}", match.group("space"), match.group("page")
+    return f"https://{authority}{context}", space_key, page_id
 
 
 def _canonical_json_bytes(payload: Mapping[str, object]) -> bytes:
