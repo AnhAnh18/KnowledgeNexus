@@ -30,12 +30,14 @@ class _PhaseMain:
     def __init__(
         self, *, fail_capture: bool = False,
         inventory_requires_poll: bool = False,
+        capture_complete_after: int = 2,
     ) -> None:
         self.calls: list[tuple[str, ...]] = []
         self.capture_calls = 0
         self.fail_capture = fail_capture
         self.inventory_requires_poll = inventory_requires_poll
         self.inventory_calls = 0
+        self.capture_complete_after = capture_complete_after
 
     def __call__(self, argv: list[str] | None) -> int:
         assert type(argv) is list
@@ -62,7 +64,11 @@ class _PhaseMain:
                 }
             else:
                 payload = {
-                    "status": "stopped" if self.capture_calls == 1 else "complete",
+                    "status": (
+                        "complete"
+                        if self.capture_calls >= self.capture_complete_after
+                        else "stopped"
+                    ),
                     "phase": "capture-pages", "captured": 1,
                     "replayed": 0, "skipped": 0, "failed": 0,
                 }
@@ -295,6 +301,24 @@ def test_failed_capture_stops_before_processing_and_remains_resumable(
     context = json.loads((output / cli._CONTEXT_FILE).read_text(encoding="utf-8"))
     assert context["run_id"] == _RUN_ID
     assert not (output / "LATEST.txt").exists()
+
+
+def test_capture_allows_one_terminal_confirmation_after_final_committed_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokenizer = _operator_files(tmp_path, monkeypatch)
+    phases = _PhaseMain(capture_complete_after=4)
+
+    result = cli.run(
+        url="https://confluence.example/spaces/SPACE/pages/12345/Root",
+        output_root=str(tmp_path / "operator-output"),
+        tokenizer_assets_dir=str(tokenizer), max_pages=300,
+        phase_main=phases,
+    )
+
+    assert result["status"] == "complete"
+    capture_calls = [call for call in phases.calls if call[0] == "capture-pages"]
+    assert len(capture_calls) == 4
 
 
 def test_new_inventory_polls_committed_snapshot_once_before_capture(

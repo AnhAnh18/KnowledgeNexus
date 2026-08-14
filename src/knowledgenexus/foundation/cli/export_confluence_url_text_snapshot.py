@@ -594,7 +594,13 @@ def run(
 
     capture_args = ["capture-pages", *common, "--run-id", run_id, "--stop-after-batches", "1"]
     maximum_batches = (max_pages + 99) // 100
-    for _ in range(maximum_batches):
+    # A bounded capture invocation deliberately stops immediately after it
+    # commits a batch.  When that batch is the final one, a subsequent
+    # activation is required to observe the exhausted inventory stream and
+    # report ``complete``.  This confirmation activation replays committed
+    # state and does not expand the page/request budget.
+    maximum_capture_invocations = maximum_batches + 1
+    for _ in range(maximum_capture_invocations):
         captured = _require_phase_result(
             _invoke_phase(capture_args, phase_main=phase_main),
             phase="capture-pages", statuses=frozenset({"complete", "stopped"}),
