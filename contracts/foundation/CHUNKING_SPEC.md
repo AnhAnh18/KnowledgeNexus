@@ -146,6 +146,7 @@ If a section body exceeds `hard_maximum_tokens`, split it into windows at **para
 
 - A Markdown table that fits within `hard_maximum_tokens` is emitted atomically as one `content_kind: table` chunk (breadcrumb prefixed).
 - A larger table is split into **row-groups**, each group repeating the header row and the alignment row so every chunk is a valid, self-describing table. `part_index`/`part_total` set; `content_kind: table`. A table row is never split across chunks. A single row that cannot fit with breadcrumb and repeated header/alignment fails closed as `unsplittable_table_row`.
+- **Oversized-row fallback (continuation envelope `v1`).** When an individual row exceeds the hard maximum, the row is represented as deterministic cell continuations rather than truncated or dropped. Each continuation repeats the exact header/alignment shell and carries a marker of the form `[table-continuation v1 table=T row=R column=C header_ordinal=C part=P/N]`, followed by a dynamically sized backtick fence containing the exact normalized cell text fragment. Cells are emitted in row-major order and fragments in source order; concatenating fragments for `(T,R,C)` reconstructs the original cell text exactly. Header/marker/fence text is context and is excluded from reconstruction. `content_kind`, schema, and ordinary-table output remain unchanged. A fragment is selected only when the complete breadcrumb-prefixed continuation is within `hard_maximum_tokens`; if no character can fit, the existing `unsplittable_table_row` category is retained.
 
 ---
 

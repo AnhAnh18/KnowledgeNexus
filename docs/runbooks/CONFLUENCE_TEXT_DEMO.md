@@ -66,9 +66,9 @@ the discovered number of pages and cannot exceed 5,000.
 
 ## Explicit partial text demo
 
-The approved chunker intentionally rejects a table row that cannot fit under
-the 1,000-token hard maximum. For a time-critical text demo, explicitly enable
-best-effort processing:
+The approved chunker losslessly emits representable oversized table cells using
+the versioned continuation envelope. For a time-critical text demo, explicitly
+enable best-effort processing for genuinely unrepresentable rows:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
@@ -85,7 +85,7 @@ This mode:
 - records only aggregate failure categories and counts;
 - publishes `processing_status: partial` even when all text pages succeed;
 - writes an empty `media_assets.jsonl` and does not capture Draw.io;
-- never truncates or rewrites an oversized table row;
+- never truncates or silently drops an oversized table row;
 - never calls the result a complete/full snapshot.
 
 Inspect `packet_summary.json` before handing the packet to Indexing. The
@@ -138,8 +138,8 @@ packet status. A partial packet remains partial on replay.
   raw artifacts.
 - `capture_incomplete` means capture did not reach its terminal checkpoint.
 - `chunking_failed` in strict mode requires offline diagnosis.
-- `unsplittable_table_row` may use explicit partial mode for a demo only; its
-  production, lossless, versioned remediation remains open.
+- `unsplittable_table_row` may use explicit partial mode for a demo only; it is
+  reserved for rows whose continuation shell cannot fit even one cell fragment.
 - No `LATEST.txt` means no packet has been published.
 - Do not run two operators against the same output root concurrently.
 
