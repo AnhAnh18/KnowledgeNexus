@@ -298,3 +298,192 @@ async def test_resume_re_enqueues_failed_job(monkeypatch, api_client, container,
     task = queue.get_nowait()
     assert task.kind == "subtree"
     assert task.job_id == "job-resume"
+
+
+async def test_failure_keeps_the_phase_it_died_in(monkeypatch, container, ingest_module):
+    """A failed job must say where it stopped, without needing server logs.
+
+    `stats` used to be replaced wholesale on failure, discarding the phase and
+    every counter -- so the only way to learn where a job broke was a
+    traceback on whatever machine ran the server.
+    """
+    from knowledgenexus.indexing.domain.models.ingest_job import IngestJob
+
+    job = IngestJob(
+        id="job-fail",
+        source_type=SourceType.CONFLUENCE,
+        status=IngestJobStatus.RUNNING,
+        started_at=datetime(2026, 7, 15, 10, 0, 0, tzinfo=UTC),
+        stats={"phase": "queued", "resumable": False},
+    )
+    container.ingest_job_repo.get_by_id.return_value = job
+
+    async def fake_resolve(url, resolve_container):
+        return ("https://confluence.example.test", "ENG", "123")
+
+    monkeypatch.setattr(ingest_module, "_resolve_canonical_url", fake_resolve)
+
+    class _FailsAtDrawio:
+        """Gets as far as capturing draw.io diagrams, then dies -- like the real one."""
+
+        async def execute(self, *, job_id, canonical_url, report_progress):
+            await report_progress({"phase": "inventory", "requested_pages": 12})
+            await report_progress({"phase": "capture_pages", "captured_pages": 12})
+            await report_progress({"phase": "capture_drawio"})
+            raise ingest_module.ConfluenceSubtreeIngestError("foundation", resumable=True)
+
+    container.get_confluence_subtree_ingestor = lambda: _FailsAtDrawio()
+
+    await ingest_module._run_confluence_subtree_ingest_job(
+        "job-fail", SUBTREE_URL, container
+    )
+
+    assert job.status is IngestJobStatus.FAILED
+    assert job.error == "foundation"
+    assert job.stats["phase"] == "failed"
+    assert job.stats["failed_phase"] == "capture_drawio"
+    # Counters earned before the failure survive too.
+    assert job.stats["captured_pages"] == 12
+    assert job.stats["resumable"] is True
+
+
+class TestCancel:
+    """Cancelling a queued job is immediate; a running job stops cooperatively."""
+
+    def _job(self, status: IngestJobStatus, **stats) -> IngestJob:
+        return IngestJob(
+            id="job-cancel",
+            source_type=SourceType.CONFLUENCE,
+            status=status,
+            started_at=datetime(2026, 7, 15, 10, 0, 0, tzinfo=UTC),
+            stats=stats or {"phase": "queued", "resumable": False},
+        )
+
+    async def test_queued_job_is_cancelled_outright(self, api_client, container, ingest_module):
+        job = self._job(IngestJobStatus.PENDING)
+        container.ingest_job_repo.get_by_id.return_value = job
+
+        response = await api_client.post("/api/v1/ingest-jobs/job-cancel/cancel")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+        assert job.status is IngestJobStatus.CANCELLED
+        assert job.active_key is None
+        # Cancelling is not an error.
+        assert job.error is None
+        assert job.stats["resumable"] is False
+        ingest_module._CANCEL_REQUESTED.discard("job-cancel")
+
+    async def test_running_job_that_owns_a_workspace_is_paused_and_resumable(
+        self, container, ingest_module
+    ):
+        """Stopping mid-crawl leaves the same half-built workspace a resumable
+        failure does, so it must be resumable rather than thrown away."""
+        job = self._job(IngestJobStatus.RUNNING, phase="capture_pages", captured_pages=40)
+
+        ingest_module._mark_stopped(job)
+
+        assert job.status is IngestJobStatus.PAUSED
+        assert job.stats["resumable"] is True
+        assert job.stats["failed_phase"] == "capture_pages"
+        assert job.stats["captured_pages"] == 40
+        assert job.error is None
+
+    async def test_stopping_before_any_crawl_is_cancelled_not_paused(
+        self, container, ingest_module
+    ):
+        """No workspace exists yet, so pretending it can resume would lie."""
+        job = self._job(IngestJobStatus.RUNNING, phase="resolving_url")
+
+        ingest_module._mark_stopped(job)
+
+        assert job.status is IngestJobStatus.CANCELLED
+        assert job.stats["resumable"] is False
+
+    async def test_paused_job_can_be_resumed(
+        self, monkeypatch, api_client, container, ingest_module
+    ):
+        job = self._job(IngestJobStatus.PAUSED, phase="paused", resumable=True)
+        job.stats["resumable"] = True
+        container.ingest_job_repo.get_by_id.return_value = job
+        container.confluence_subtree_ingestor = MagicMock(
+            resume_url=MagicMock(return_value=SUBTREE_URL)
+        )
+
+        async def fake_resolve(url, resolve_container):
+            return ("https://confluence.example.test", "ENG", "123")
+
+        monkeypatch.setattr(ingest_module, "_resolve_canonical_url", fake_resolve)
+
+        response = await api_client.post("/api/v1/ingest-jobs/job-cancel/resume")
+
+        assert response.status_code == 202
+        assert response.json()["status"] == "pending"
+        assert container.get_confluence_ingest_queue().qsize() == 1
+
+    async def test_cancelled_job_cannot_be_resumed(self, api_client, container):
+        """Nothing was crawled, so there is genuinely nothing to continue."""
+        job = self._job(IngestJobStatus.CANCELLED, phase="cancelled", resumable=False)
+        job.stats["resumable"] = False
+        container.ingest_job_repo.get_by_id.return_value = job
+
+        response = await api_client.post("/api/v1/ingest-jobs/job-cancel/resume")
+
+        assert response.status_code == 409
+
+    async def test_running_job_is_flagged_and_stays_running_until_it_yields(
+        self, api_client, container, ingest_module
+    ):
+        job = self._job(IngestJobStatus.RUNNING, phase="capture_pages", captured_pages=40)
+        container.ingest_job_repo.get_by_id.return_value = job
+
+        response = await api_client.post("/api/v1/ingest-jobs/job-cancel/cancel")
+
+        assert response.status_code == 200
+        # A blocking crawl cannot be killed, so it is still running for now.
+        assert response.json()["status"] == "running"
+        assert "job-cancel" in ingest_module._CANCEL_REQUESTED
+        ingest_module._CANCEL_REQUESTED.discard("job-cancel")
+
+    async def test_progress_callback_unwinds_a_cancelled_run(self, container, ingest_module):
+        job = self._job(IngestJobStatus.RUNNING, phase="capture_pages")
+        ingest_module._CANCEL_REQUESTED.add("job-cancel")
+        try:
+            with pytest.raises(ingest_module._IngestJobCancelled):
+                await ingest_module._set_progress(
+                    job, container, {"phase": "process_pages"}
+                )
+        finally:
+            ingest_module._CANCEL_REQUESTED.discard("job-cancel")
+
+    async def test_cancelled_queued_job_is_skipped_by_the_worker(
+        self, monkeypatch, container, ingest_module
+    ):
+        job = self._job(IngestJobStatus.CANCELLED)
+        container.ingest_job_repo.get_by_id.return_value = job
+        monkeypatch.setattr(
+            ingest_module, "_resolve_canonical_url",
+            lambda *a, **k: pytest.fail("a cancelled job must not start work"),
+        )
+
+        await ingest_module._run_confluence_subtree_ingest_job(
+            "job-cancel", SUBTREE_URL, container
+        )
+
+        assert job.status is IngestJobStatus.CANCELLED
+
+    async def test_finished_job_cannot_be_cancelled(self, api_client, container):
+        job = self._job(IngestJobStatus.COMPLETED)
+        container.ingest_job_repo.get_by_id.return_value = job
+
+        response = await api_client.post("/api/v1/ingest-jobs/job-cancel/cancel")
+
+        assert response.status_code == 409
+        assert "completed" in response.json()["detail"]
+
+    async def test_cancel_of_unknown_job_is_404(self, api_client, container):
+        container.ingest_job_repo.get_by_id.return_value = None
+
+        response = await api_client.post("/api/v1/ingest-jobs/nope/cancel")
+
+        assert response.status_code == 404

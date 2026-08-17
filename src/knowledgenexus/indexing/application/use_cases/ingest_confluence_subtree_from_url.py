@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from threading import Lock
@@ -29,6 +30,8 @@ class ConfluenceSubtreeIngestError(Exception):
         self.category = category
         self.resumable = resumable
 
+
+logger = logging.getLogger(__name__)
 
 ProgressReporter = Callable[[Mapping[str, object]], Awaitable[None]]
 
@@ -120,6 +123,14 @@ class IngestConfluenceSubtreeFromUrl:
                             os.environ["CONFLUENCE_PAT"] = prior_pat
             except Exception as exc:
                 category = getattr(exc, "category", "foundation")
+                # `from None` keeps the operator-facing category clean, but it
+                # also threw the only description of what actually broke -- a
+                # phase failure surfaced as a bare category with no trace
+                # anywhere. Log the cause before dropping it.
+                logger.exception(
+                    "Foundation phase failed for ingest job %s (category=%s)",
+                    job_id, category,
+                )
                 raise ConfluenceSubtreeIngestError(
                     category if type(category) is str else "foundation", resumable=True
                 ) from None

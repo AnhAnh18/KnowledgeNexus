@@ -10,6 +10,12 @@ class IngestJobStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    # Stopped on request before any crawling happened, so there is no
+    # workspace to pick up from. Distinct from FAILED: nothing went wrong.
+    CANCELLED = "cancelled"
+    # Stopped on request after the crawl had begun. The Foundation workspace
+    # survives, so this one can be resumed exactly like a resumable failure.
+    PAUSED = "paused"
 
 
 @dataclass

@@ -12,6 +12,7 @@ import base64
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -58,7 +59,12 @@ _SHORT_PAGE_PATH = re.compile(
 _RUN_ID = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
+logger = logging.getLogger(__name__)
+
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+# /x/TOKEN -> /pages/tinyurl.action?urlIdentifier=TOKEN -> /spaces/KEY/pages/ID
+# is the observed Data Center chain; allow a little slack, never an open walk.
+_MAX_SHORT_LINK_HOPS = 4
 
 
 class TextSnapshotOperatorError(Exception):
@@ -260,10 +266,17 @@ def _read_short_redirect_location(
         or _SHORT_PAGE_PATH.fullmatch(f"/x/{token}") is None
     ):
         raise TextSnapshotOperatorError("short_url_resolution")
+    request_url = f"{base_url.rstrip('/')}/x/{quote(token, safe='')}"
+    return _read_redirect_hop(request_url, base_url, opener=opener)
+
+
+def _read_redirect_hop(
+    request_url: str, base_url: str, *, opener: object | None = None,
+) -> str:
+    """Read exactly one redirect, and only within the configured origin."""
     pat = os.environ.get("CONFLUENCE_PAT")
     if type(pat) is not str or not pat or "\r" in pat or "\n" in pat:
         raise TextSnapshotOperatorError("credentials")
-    request_url = f"{base_url.rstrip('/')}/x/{quote(token, safe='')}"
     request = urllib.request.Request(
         request_url,
         headers={"Accept": "text/html", "Authorization": f"Bearer {pat}"},
@@ -311,14 +324,34 @@ def _read_short_redirect_location(
     return resolved
 
 
-def _resolve_short_link(base_url: str, token: str) -> tuple[str, str]:
-    location = _read_short_redirect_location(base_url, token)
-    resolved_base, space_key, page_id = parse_canonical_page_url(
-        location, short_space_resolver=_resolve_short_space_key,
-    )
-    if resolved_base != base_url:
-        raise TextSnapshotOperatorError("short_url_resolution")
-    return space_key, page_id
+def _resolve_short_link(
+    base_url: str, token: str, *, opener: object | None = None,
+) -> tuple[str, str]:
+    """Follow a short link to the page it names.
+
+    Confluence Data Center does not redirect ``/x/TOKEN`` straight to the
+    page: it goes via ``/pages/tinyurl.action?urlIdentifier=TOKEN`` first.
+    Reading a single hop therefore lands on a path no pattern matches and the
+    whole short link fails as "url_shape".  Follow the chain, but keep the two
+    guarantees the single-hop read gave us: every hop stays inside the
+    configured origin, and the chain is bounded.
+    """
+    location = _read_short_redirect_location(base_url, token, opener=opener)
+    last_error: TextSnapshotOperatorError | None = None
+    for _ in range(_MAX_SHORT_LINK_HOPS):
+        try:
+            resolved_base, space_key, page_id = parse_canonical_page_url(
+                location, short_space_resolver=_resolve_short_space_key,
+            )
+        except TextSnapshotOperatorError as exc:
+            # Not a page URL yet -- follow one more hop and try again.
+            last_error = exc
+            location = _read_redirect_hop(location, base_url, opener=opener)
+            continue
+        if resolved_base != base_url:
+            raise TextSnapshotOperatorError("short_url_resolution")
+        return space_key, page_id
+    raise last_error or TextSnapshotOperatorError("short_url_resolution")
 
 
 def _resolve_short_space_key(base_url: str, page_id: str) -> str:
@@ -477,22 +510,45 @@ def _save_context(path: Path, payload: Mapping[str, object]) -> None:
 def _invoke_phase(
     argv: list[str], *, phase_main: Callable[[list[str] | None], int]
 ) -> dict[str, object]:
+    # Five different problems all surface as the single category "phase", and
+    # `from None` drops the cause, so an operator saw only that word with no
+    # way to tell an exception apart from stray output. The category stays as
+    # it is (callers depend on it) but the reason is logged before it is lost.
+    phase_name = argv[0] if argv else "?"
     output = io.StringIO()
     try:
         with contextlib.redirect_stdout(output):
             exit_code = phase_main(argv)
     except Exception:
+        logger.exception("Phase %s raised", phase_name)
         raise TextSnapshotOperatorError("phase") from None
     lines = output.getvalue().splitlines()
     if type(exit_code) is not int or len(lines) != 1:
+        logger.error(
+            "Phase %s returned exit_code=%r and %d line(s) of output, expected"
+            " exactly one JSON line. First 500 chars: %s",
+            phase_name, exit_code, len(lines), output.getvalue()[:500],
+        )
         raise TextSnapshotOperatorError("phase")
     try:
         payload = json.loads(lines[0])
     except json.JSONDecodeError:
+        logger.error("Phase %s printed non-JSON: %s", phase_name, lines[0][:500])
         raise TextSnapshotOperatorError("phase") from None
     if type(payload) is not dict or type(payload.get("status")) is not str:
+        logger.error("Phase %s printed JSON without a string status: %s", phase_name, lines[0][:500])
         raise TextSnapshotOperatorError("phase")
     if exit_code != 0 or payload["status"] == "failed":
+        # This is the branch a real phase failure takes -- the phase catches its
+        # own exception and prints a well-formed failure line -- so it is the
+        # one that most needs a trace. `failure_category` is also never present
+        # in practice: the phase CLI writes the reason under "error", so the
+        # category has always collapsed to "phase". Log the whole payload
+        # rather than guess at a mapping between two disagreeing contracts.
+        logger.error(
+            "Phase %s reported failure: exit_code=%r payload=%s",
+            phase_name, exit_code, lines[0][:500],
+        )
         category = payload.get("failure_category")
         raise TextSnapshotOperatorError(category if type(category) is str and category else "phase")
     return dict(payload)

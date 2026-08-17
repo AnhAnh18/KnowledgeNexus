@@ -594,6 +594,8 @@
         function ingestStatusLabel(job) {
             const phase = (job.stats || {}).phase;
             if (job.status === 'pending') return phase === 'queued' ? 'WAITING' : 'PENDING';
+            if (job.status === 'cancelled') return 'ĐÃ HUỶ';
+            if (job.status === 'paused') return 'TẠM DỪNG';
             return String(job.status).toUpperCase();
         }
 
@@ -617,7 +619,14 @@
 
         function ingestPhaseText(stats) {
             if (!stats.phase) return '';
-            if (stats.phase === 'failed') return 'Thất bại';
+            if (['failed', 'cancelled', 'paused'].includes(stats.phase)) {
+                // Nói rõ dừng ở bước nào — nếu không thì phải vào máy chạy
+                // server đọc traceback mới biết.
+                const nhan = {cancelled: 'Đã huỷ ở bước', paused: 'Tạm dừng ở bước'}[stats.phase]
+                    || 'Thất bại ở bước';
+                const at = INGEST_PHASES.find(entry => entry[0] === stats.failed_phase);
+                return at ? `${nhan}: ${escapeHtml(at[1])}` : nhan.replace(' ở bước', '');
+            }
             const index = INGEST_PHASES.findIndex(entry => entry[0] === stats.phase);
             if (index < 0) return escapeHtml(stats.phase);
             return `Bước ${index + 1}/${INGEST_PHASES.length} — ${escapeHtml(INGEST_PHASES[index][1])}`;
@@ -661,7 +670,13 @@
         function renderIngestJobCard(job) {
             const cls = ingestStatusClass(job.status);
             const stats = job.stats || {};
-            const resumable = job.status === 'failed' && stats.resumable === true;
+            // Job tam dung resume duoc y het job loi resume duoc: cung mot
+            // workspace do dang tren dia.
+            const resumable = ['failed', 'paused'].includes(job.status) && stats.resumable === true;
+            const dangChay = job.status === 'pending' || job.status === 'running';
+            // Dang xep hang thi chua lam gi -> "Huy". Dang chay thi da co
+            // workspace -> "Tam dung", va chay tiep duoc.
+            const nhanDung = job.status === 'running' ? '⏸ Tạm dừng job này' : '✖ Huỷ job này';
             return `
                 <div class="result-item">
                     <div class="result-header">
@@ -674,6 +689,7 @@
                     </div>
                     ${job.error ? `<div class="result-content" style="color:#c0392b;">❌ ${escapeHtml(job.error)}</div>` : ''}
                     ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Tiếp tục job này</button>` : ''}
+                    ${dangChay ? `<button class="btn" onclick="cancelIngest('${escapeHtml(job.id)}')">${nhanDung}</button>` : ''}
                 </div>
             `;
         }
@@ -719,20 +735,21 @@
                     const job = await res.json();
                     state.failures = 0;
                     upsertIngestJobCard(job);
-                    if (job.status === 'completed' || job.status === 'failed') {
+                    if (['completed', 'failed', 'cancelled', 'paused'].includes(job.status)) {
                         const stats = job.stats || {};
                         // Job resumable vẫn giữ card (kèm nút "Tiếp tục job này") và
                         // giữ id trong localStorage; job kết thúc hẳn thì bỏ theo dõi.
-                        if (!(job.status === 'failed' && stats.resumable === true)) {
+                        if (!(['failed', 'paused'].includes(job.status) && stats.resumable === true)) {
                             untrackIngestJobId(jobId);
                         }
                         stopIngestPolling(jobId);
-                        showToast(
-                            job.status === 'completed'
-                                ? `Job ${job.id.substring(0, 8)}... hoàn tất!`
-                                : `Job ${job.id.substring(0, 8)}... thất bại: ${job.error || ''}`,
-                            job.status === 'completed' ? 'success' : 'error'
-                        );
+                        const ten = job.id.substring(0, 8);
+                        const thongBao = {
+                            completed: [`Job ${ten}... hoàn tất!`, 'success'],
+                            cancelled: [`Job ${ten}... đã huỷ`, 'success'],
+                            paused: [`Job ${ten}... đã tạm dừng, bấm Tiếp tục để chạy nốt`, 'success'],
+                        }[job.status] || [`Job ${ten}... thất bại: ${job.error || ''}`, 'error'];
+                        showToast(thongBao[0], thongBao[1]);
                     }
                 } catch (e) {
                     if (String(e.message).includes('HTTP 404')) {
@@ -790,6 +807,24 @@
                 showToast('Lỗi: ' + e.message, 'error');
             } finally {
                 btn.disabled = false;
+            }
+        }
+
+        async function cancelIngest(jobId) {
+            if (!jobId) return;
+            if (!confirm('Dừng job này? Job đang chạy sẽ dừng ở ranh giới bước tiếp theo (không tức thì) và có thể chạy tiếp sau đó. Job còn đang xếp hàng sẽ bị huỷ hẳn.')) return;
+            try {
+                const res = await apiCall('POST', `/api/v1/ingest-jobs/${jobId}/cancel`, {});
+                const job = await res.json();
+                upsertIngestJobCard(job);
+                showToast(
+                    job.status === 'cancelled'
+                        ? `Đã huỷ job ${job.id.substring(0, 8)}...`
+                        : `Đã gửi yêu cầu huỷ job ${job.id.substring(0, 8)}..., đang dừng`,
+                    'success'
+                );
+            } catch (e) {
+                showToast('Không huỷ được job: ' + e.message, 'error');
             }
         }
 

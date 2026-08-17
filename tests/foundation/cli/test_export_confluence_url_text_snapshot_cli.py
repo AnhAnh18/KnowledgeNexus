@@ -590,3 +590,82 @@ def test_demo_runbook_documents_partial_resume_and_url_identity() -> None:
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+class _ChainOpener:
+    """Replays a fixed redirect chain, one hop per request."""
+
+    def __init__(self, hops: list[str], *, status: int = 302) -> None:
+        self.hops = list(hops)
+        self.status = status
+        self.urls: list[str] = []
+
+    def open(self, request, timeout):
+        self.urls.append(request.full_url)
+        if not self.hops:
+            raise AssertionError(f"unexpected extra request to {request.full_url}")
+        raise urllib.error.HTTPError(
+            request.full_url, self.status, "redirect",
+            {"Location": self.hops.pop(0)}, None,
+        )
+
+
+def test_short_link_follows_the_data_center_tinyurl_hop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Data Center goes /x/TOKEN -> /pages/tinyurl.action -> the page.
+
+    Reading a single hop stopped on tinyurl.action, which matches no pattern,
+    so every real short link failed as "url_shape".
+    """
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener([
+        "/pages/tinyurl.action?urlIdentifier=dRCEr",
+        "/spaces/SVMC/pages/2894336117/2026+Design+wrapper+for+skia",
+    ])
+
+    space_key, page_id = cli._resolve_short_link(
+        "https://confluence.example", "dRCEr", opener=opener,
+    )
+
+    assert (space_key, page_id) == ("SVMC", "2894336117")
+    assert opener.urls == [
+        "https://confluence.example/x/dRCEr",
+        "https://confluence.example/pages/tinyurl.action?urlIdentifier=dRCEr",
+    ]
+
+
+def test_short_link_that_lands_on_the_page_immediately_makes_one_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener(["/spaces/SVMC/pages/217/Title"])
+
+    assert cli._resolve_short_link(
+        "https://confluence.example", "dRCEr", opener=opener,
+    ) == ("SVMC", "217")
+    assert len(opener.urls) == 1
+
+
+def test_short_link_chain_leaving_the_origin_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every hop stays origin-bound, not just the first."""
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener([
+        "/pages/tinyurl.action?urlIdentifier=dRCEr",
+        "https://evil.example/spaces/SVMC/pages/217/Title",
+    ])
+
+    with pytest.raises(cli.TextSnapshotOperatorError):
+        cli._resolve_short_link("https://confluence.example", "dRCEr", opener=opener)
+
+
+def test_short_link_chain_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A redirect loop must terminate rather than walk forever."""
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener(["/pages/tinyurl.action?urlIdentifier=dRCEr"] * 20)
+
+    with pytest.raises(cli.TextSnapshotOperatorError):
+        cli._resolve_short_link("https://confluence.example", "dRCEr", opener=opener)
+    assert len(opener.urls) <= cli._MAX_SHORT_LINK_HOPS + 1

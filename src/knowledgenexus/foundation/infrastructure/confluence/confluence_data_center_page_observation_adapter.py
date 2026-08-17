@@ -23,6 +23,9 @@ from knowledgenexus.foundation.ports.confluence_page_observation_port import (
 
 _RESTRICTION_PATH = "/rest/api/content/{page_id}/restriction/byOperation/view"
 _ATTACHMENT_PATH = "/rest/api/content/{page_id}/child/attachment"
+# The two fields the attachment parser needs and Data Center does not send
+# unless asked: `version.number` and `metadata.mediaType`.
+_ATTACHMENT_EXPAND = "version,metadata"
 
 
 class ConfluenceDataCenterPageObservationAdapter(
@@ -69,7 +72,16 @@ class ConfluenceDataCenterPageObservationAdapter(
         try:
             return self._transport.get_bytes(
                 path=path,
-                query={"start": str(request.start), "limit": str(request.limit)},
+                query={
+                    "start": str(request.start),
+                    "limit": str(request.limit),
+                    # Data Center returns `extensions.fileSize` by default but
+                    # omits `version` and `metadata` unless they are expanded.
+                    # Without the version the body materializer rejects every
+                    # attachment as an invalid observation, so no draw.io
+                    # diagram could ever be downloaded.
+                    "expand": _ATTACHMENT_EXPAND,
+                },
             )
         except ConfluenceHttpResponseTooLargeError as exc:
             raise ConfluenceObservationTooLargeError(

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -855,7 +856,15 @@ def _capture_drawio_phase(args: argparse.Namespace, state: Path) -> dict[str, ob
             else:
                 session.pause_session()
     if captured["drawio_assets_failed"] != 0 or captured["drawio_references_resolved"] != captured["drawio_references_observed"]:
-        raise ValueError("Draw.io capture incomplete")
+        # Naming the counts distinguishes "some downloads failed" from "some
+        # references were never even observed" -- two different problems that
+        # both used to read as the same four words.
+        raise ValueError(
+            "Draw.io capture incomplete: "
+            f"observed={captured['drawio_references_observed']} "
+            f"resolved={captured['drawio_references_resolved']} "
+            f"failed={captured['drawio_assets_failed']}"
+        )
     return {"status": "complete", "phase": "capture-drawio", "drawio_references_observed": captured["drawio_references_observed"], "drawio_references_resolved": captured["drawio_references_resolved"], "drawio_assets_failed": captured["drawio_assets_failed"]}
 
 
@@ -1015,6 +1024,9 @@ def _capture_delta_inventory_phase(args: argparse.Namespace, state: Path) -> dic
     return {"status": "complete", "phase": "capture-delta-inventory", "present_count": result.metrics.present_count, "source_deleted_count": result.metrics.source_deleted_count, "access_revoked_count": result.metrics.access_revoked_count, "moved_out_of_scope_count": result.metrics.moved_out_of_scope_count}
 
 
+logger = logging.getLogger(__name__)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
@@ -1035,6 +1047,13 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code)
     except Exception:
+        # stdout is a machine-read contract (exactly one JSON line), so the
+        # payload stays byte-for-byte as it was -- but it collapses every
+        # possible failure into one hardcoded word and drops the cause, which
+        # left phase failures undiagnosable. Log the traceback before it goes.
+        logger.exception(
+            "Phase %s failed", getattr(locals().get("args", None), "phase", "?")
+        )
         sys.stdout.write('{"status":"failed","error":"configuration"}\n')
         return 2
 

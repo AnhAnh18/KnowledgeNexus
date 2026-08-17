@@ -1205,3 +1205,27 @@ def test_capture_failure_is_not_mislabeled_and_pauses_for_resume(
     assert session.paused == 1
     assert session.completed == 0
     assert calls == {"capture_constructed": 1, "capture_run": 1}
+
+
+def test_phase_failure_is_logged_even_though_stdout_stays_a_fixed_contract(
+    capsys, caplog, tmp_path
+):
+    """The one-line stdout contract hides *why* a phase failed.
+
+    Every exception is collapsed into the same hardcoded payload, and the
+    wrapper reads a `failure_category` key this CLI never writes, so a real
+    failure reached operators as the single word "phase" with no trace
+    anywhere. stdout must stay byte-for-byte identical, but the cause has to
+    survive somewhere.
+    """
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="knowledgenexus.foundation.cli.confluence_subtree_corpus"):
+        result = main(["capture-drawio", "--state-dir", str(tmp_path), "--max-pages", "5000"])
+
+    assert result == 2
+    # The machine-read contract is unchanged.
+    assert capsys.readouterr().out == '{"status":"failed","error":"configuration"}\n'
+    # ...but the cause is now recoverable.
+    assert any(record.exc_info for record in caplog.records), "traceback was not logged"
+    assert "capture-drawio" in caplog.text

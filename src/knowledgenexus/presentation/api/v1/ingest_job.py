@@ -124,7 +124,23 @@ def _canonical_key(base_url: str, space_key: str, page_id: str) -> str:
     ).hexdigest()
 
 
+class _IngestJobCancelled(Exception):
+    """Raised inside the progress callback to unwind a job an operator stopped."""
+
+
+# Job ids an operator asked to stop. A running job cannot be killed outright:
+# the crawl is a blocking call in a worker thread, and Python cannot interrupt
+# one. Instead the progress callback -- which Foundation invokes at every phase
+# boundary and every capture batch -- raises, which unwinds the run. The set is
+# per-process and deliberately not persisted: a restart already ends the run.
+_CANCEL_REQUESTED: set[str] = set()
+
+
 async def _set_progress(job: IngestJob, container: AppContainer, payload: object) -> None:
+    # Checked here because this is the one place the crawl hands control back
+    # to us often enough to stop it promptly.
+    if job.id in _CANCEL_REQUESTED:
+        raise _IngestJobCancelled(job.id)
     if type(payload) is not dict or type(payload.get("phase")) is not str:
         raise ValueError("progress")
     allowed = {
@@ -160,6 +176,60 @@ def _require_configured_ingest(container: AppContainer) -> None:
                 + ". Set these in your .env (see .env.example) and restart the server."
             ),
         )
+
+
+# Phases reached only once Foundation has created the workspace on disk.
+# Stopping at or after one of these leaves something to resume from; stopping
+# before it does not, so those jobs are cancelled outright rather than paused.
+_RESUMABLE_FROM_PHASES = frozenset({
+    "inventory", "capture_pages", "process_pages", "capture_drawio",
+    "export_packet", "publish_packet", "indexing_validate", "indexing_embed",
+    "indexing_store",
+})
+
+
+def _mark_stopped(job: IngestJob) -> None:
+    """Stop the job on request, keeping the progress it had already made.
+
+    Whether it can be resumed is not a preference but a fact about the disk:
+    a job stopped while still resolving its URL has no Foundation workspace,
+    and `resume_url` would fail on it. Only jobs that got far enough to own a
+    workspace are paused; the rest are simply cancelled.
+    """
+    previous = dict(job.stats) if isinstance(job.stats, dict) else {}
+    stopped_at = previous.get("phase")
+    resumable = isinstance(stopped_at, str) and stopped_at in _RESUMABLE_FROM_PHASES
+    job.status = IngestJobStatus.PAUSED if resumable else IngestJobStatus.CANCELLED
+    job.active_key = None
+    job.completed_at = datetime.now(UTC)
+    job.error = None
+    previous.update({
+        "phase": "paused" if resumable else "cancelled",
+        "resumable": resumable,
+    })
+    if isinstance(stopped_at, str) and stopped_at not in {"cancelled", "paused", "queued"}:
+        previous["failed_phase"] = stopped_at
+    job.stats = previous
+
+
+def _mark_failed(job: IngestJob, *, category: str, resumable: bool) -> None:
+    """Fail the job while keeping what it had already achieved.
+
+    Overwriting `stats` wholesale threw away the phase the job died in and
+    every counter it had reported, so the only way to find out where a job
+    broke was a server-side traceback -- unavailable to anyone driving the UI
+    from another machine. Keep the progress and record where it stopped.
+    """
+    previous = dict(job.stats) if isinstance(job.stats, dict) else {}
+    failed_phase = previous.get("phase")
+    job.status = IngestJobStatus.FAILED
+    job.active_key = None
+    job.completed_at = datetime.now(UTC)
+    job.error = category
+    previous.update({"phase": "failed", "resumable": resumable})
+    if isinstance(failed_phase, str) and failed_phase not in {"failed", "queued"}:
+        previous["failed_phase"] = failed_phase
+    job.stats = previous
 
 
 async def _resolve_canonical_url(url: str, container: AppContainer) -> tuple[str, str, str]:
@@ -347,6 +417,12 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
     job = await container.ingest_job_repo.get_by_id(job_id)
     if job is None:
         return
+    # A job cancelled while it sat in the queue must never start.
+    if job.status in (IngestJobStatus.CANCELLED, IngestJobStatus.PAUSED) or job.id in _CANCEL_REQUESTED:
+        _CANCEL_REQUESTED.discard(job.id)
+        _mark_stopped(job)
+        await container.ingest_job_repo.update(job)
+        return
     job.status = IngestJobStatus.RUNNING
     await container.ingest_job_repo.update(job)
     try:
@@ -385,32 +461,64 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
             "chunks_ingested": result.chunks_ingested,
             "chunks_failed": result.chunks_failed,
         }
+    except _IngestJobCancelled:
+        _mark_stopped(job)
     except ConfluenceSubtreeIngestError as exc:
-        job.status = IngestJobStatus.FAILED
-        job.active_key = None
-        job.completed_at = datetime.now(UTC)
-        job.error = exc.category
-        job.stats = {"phase": "failed", "resumable": exc.resumable}
+        # Foundation turns any progress-callback exception into its own
+        # category, so a cancellation arrives here disguised as a phase
+        # failure. The flag is the only reliable way to tell them apart.
+        if job.id in _CANCEL_REQUESTED:
+            _mark_stopped(job)
+        else:
+            _mark_failed(job, category=exc.category, resumable=exc.resumable)
     except RuntimeError:
         # Misconfiguration (credentials, tokenizer assets, snapshot root).
         # Retrying cannot help until an operator changes the settings, so say
         # so rather than reporting an "unexpected" resumable failure.
         logger.exception("Confluence subtree ingest job %s is misconfigured", job_id)
-        job.status = IngestJobStatus.FAILED
-        job.active_key = None
-        job.completed_at = datetime.now(UTC)
-        job.error = "configuration"
-        job.stats = {"phase": "failed", "resumable": False}
+        _mark_failed(job, category="configuration", resumable=False)
     except Exception:
         # Never swallow the cause silently: without this the only trace of a
         # genuine crash was the bare string "unexpected" on the job.
         logger.exception("Confluence subtree ingest job %s failed unexpectedly", job_id)
-        job.status = IngestJobStatus.FAILED
-        job.active_key = None
-        job.completed_at = datetime.now(UTC)
-        job.error = "unexpected"
-        job.stats = {"phase": "failed", "resumable": True}
+        _mark_failed(job, category="unexpected", resumable=True)
+    finally:
+        _CANCEL_REQUESTED.discard(job.id)
     await container.ingest_job_repo.update(job)
+
+
+@router.post("/{job_id}/cancel", response_model=IngestJobResponse)
+async def cancel_confluence_subtree_ingest_job(
+    job_id: str,
+    container: AppContainer = Depends(_container),
+) -> IngestJobResponse:
+    """Stop a queued or running ingest job.
+
+    A queued job settles immediately as CANCELLED -- it never started, so it
+    has no workspace and nothing to resume from.
+
+    A running job cannot be killed: the crawl is a blocking call in a worker
+    thread. It is flagged instead and unwinds at the next phase boundary (or
+    the next capture batch), so expect a short delay rather than an instant
+    halt; it stays RUNNING until then. Once it stops it becomes PAUSED and can
+    be resumed, because the Foundation workspace it built is still on disk.
+    """
+    job = await container.ingest_job_repo.get_by_id(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ingest job not found")
+    if job.status not in (IngestJobStatus.PENDING, IngestJobStatus.RUNNING):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"ingest job is already {job.status.value}",
+        )
+
+    _CANCEL_REQUESTED.add(job.id)
+    if job.status is IngestJobStatus.PENDING:
+        # Still in the queue: settle it now. The worker checks the status when
+        # it dequeues, so it will skip this job rather than start it.
+        _mark_stopped(job)
+        await container.ingest_job_repo.update(job)
+    return _to_response(job)
 
 
 @router.post("/{job_id}/resume", response_model=IngestJobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -422,7 +530,12 @@ async def resume_confluence_subtree_ingest_job(
     job = await container.ingest_job_repo.get_by_id(job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ingest job not found")
-    if job.status is not IngestJobStatus.FAILED or job.stats.get("resumable") is not True:
+    # PAUSED joins FAILED here: an operator stopping a crawl leaves exactly the
+    # same half-built workspace a resumable failure does.
+    if (
+        job.status not in (IngestJobStatus.FAILED, IngestJobStatus.PAUSED)
+        or job.stats.get("resumable") is not True
+    ):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ingest job is not resumable")
     try:
         ingestor = container.get_confluence_subtree_ingestor()

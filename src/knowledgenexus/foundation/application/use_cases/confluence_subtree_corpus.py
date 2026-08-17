@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -24,6 +25,8 @@ PACKET_FORMAT_VERSION = "confluence-subtree-indexing-packet-v1"
 DEFAULT_BATCH_SIZE = 100
 MAX_PAGES = 5000
 DEFAULT_ACL_TAGS = ["restricted:unresolved"]
+logger = logging.getLogger(__name__)
+
 _FILES = ("documents.jsonl", "chunks.jsonl", "media_assets.jsonl", "packet_summary.json")
 _SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
 _DRAWIO_STATE_FORMAT_VERSION = "confluence-subtree-drawio-state-v1"
@@ -102,6 +105,26 @@ class AttachmentMetadata:
             raise TypeError("attachment mime type is invalid")
 
 
+def is_drawio_attachment_name(filename: object) -> bool:
+    """Whether `filename` can name a draw.io diagram source.
+
+    Confluence Data Center stores the diagram source with **no extension at
+    all**: a page carrying "Untitled Diagram-1786592716372" also carries
+    "Untitled Diagram-1786592716372.png" (the rendered preview) and
+    "~Untitled Diagram-1786592716372.tmp" (an editor draft). An extension
+    whitelist on its own therefore rejected every real diagram while happily
+    admitting the preview, so no draw.io capture could ever complete.
+
+    A name that does carry an extension still has to be one of the known ones,
+    which keeps the preview and the drafts out.
+    """
+    if type(filename) is not str or not filename:
+        return False
+    if filename.lower().endswith((".drawio", ".drawio.xml", ".xml")):
+        return True
+    return "." not in filename
+
+
 def match_drawio_attachment(reference: DrawioReference, attachments: Iterable[AttachmentMetadata]) -> AttachmentMetadata | None:
     """Return one exact parent/name/version match; ambiguity fails closed."""
     if type(reference) is not DrawioReference:
@@ -111,7 +134,7 @@ def match_drawio_attachment(reference: DrawioReference, attachments: Iterable[At
     for item in attachments:
         if type(item) is not AttachmentMetadata:
             raise TypeError("attachment metadata is invalid")
-    candidates = tuple(a for a in attachments if type(a) is AttachmentMetadata and a.parent_page_id == reference.parent_page_id and a.filename == reference.filename and a.filename.lower().endswith((".drawio", ".drawio.xml", ".xml")))
+    candidates = tuple(a for a in attachments if type(a) is AttachmentMetadata and a.parent_page_id == reference.parent_page_id and a.filename == reference.filename and is_drawio_attachment_name(a.filename))
     if len(candidates) > 1:
         raise ValueError("ambiguous drawio attachment")
     return candidates[0] if candidates else None
@@ -329,6 +352,7 @@ def capture_drawio_with_production_components(
         key = _drawio_reference_key(ref)
         if key in resolved_keys:
             continue
+        observation = None
         try:
             metadata = tuple(list_attachments(ref.parent_page_id))
             candidates = tuple(
@@ -336,9 +360,20 @@ def capture_drawio_with_production_components(
                 if type(item) is ConfluenceAttachmentObservation
                 and item.parent_page_id == ref.parent_page_id
                 and item.filename == ref.filename
-                and item.filename.lower().endswith((".drawio", ".drawio.xml", ".xml"))
+                and is_drawio_attachment_name(item.filename)
             )
             if len(candidates) != 1:
+                # Not an exception, so this counted as a failure without ever
+                # reaching the handler below -- the quietest of the paths that
+                # produce "capture incomplete". Name what was wanted and what
+                # the page actually carries, since a mismatch here is usually
+                # a naming difference rather than a fetch problem.
+                logger.error(
+                    "Draw.io reference unmatched on page %s: wanted filename %r, "
+                    "matched %d candidate(s) out of %d attachment(s); attachments seen: %s",
+                    ref.parent_page_id, ref.filename, len(candidates), len(metadata),
+                    [getattr(item, "filename", "?") for item in metadata][:20],
+                )
                 failures += 1
                 continue
             observation = candidates[0]
@@ -384,6 +419,22 @@ def capture_drawio_with_production_components(
             if acknowledge is not None:
                 acknowledge(observation.attachment_id)
         except Exception:
+            # Counting the failure and dropping the reason is why a draw.io
+            # problem could only ever surface as "capture incomplete": the
+            # count survives, the cause does not. Keep swallowing it so one
+            # bad attachment cannot abort the whole capture, but say what
+            # went wrong first.
+            logger.exception(
+                "Draw.io capture failed for page %s attachment %r; observation: %s",
+                getattr(ref, "parent_page_id", "?"), getattr(ref, "filename", "?"),
+                "not reached" if observation is None else (
+                    f"attachment_id={observation.attachment_id!r} "
+                    f"source_version={observation.source_version!r} "
+                    f"mime_type={observation.mime_type!r} "
+                    f"size_bytes={observation.size_bytes!r} "
+                    f"updated_at={observation.updated_at!r}"
+                ),
+            )
             failures += 1
     final_state = snapshot()
     if persist_state is not None:
