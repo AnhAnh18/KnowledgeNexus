@@ -144,7 +144,18 @@ class IngestConfluenceSubtreeFromUrl:
         await report_progress({"phase": "indexing_validate"})
         try:
             await report_progress({"phase": "indexing_embed"})
-            ingestion = await self._packet_ingestor.execute(packet_dir)
+
+            async def report_embedding(*, embedded_chunks: int, total_chunks: int) -> None:
+                # Embedding a packet is typically the longest stretch of the job
+                # and used to report nothing between "indexing_embed" and the
+                # final count, so the UI looked stalled for the whole of it.
+                await report_progress({
+                    "phase": "indexing_embed",
+                    "embedded_chunks": embedded_chunks,
+                    "total_chunks": total_chunks,
+                })
+
+            ingestion = await self._packet_ingestor.execute(packet_dir, report_embedding)
         except Exception as exc:
             category = "indexing"
             raise ConfluenceSubtreeIngestError(category, resumable=True) from None

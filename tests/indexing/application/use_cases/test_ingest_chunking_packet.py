@@ -82,11 +82,17 @@ class _MockChunkStorageService:
 
     def __init__(self):
         self.saved_chunks: list[Chunk] = []
+        self.saved_documents: list = []
 
     async def save(self, chunks: list[Chunk]) -> None:
         self.saved_chunks.extend(chunks)
 
     async def save_document_and_chunks(self, document, chunks):
+        self.saved_documents.append(document)
+        self.saved_chunks.extend(chunks)
+
+    async def save_documents_and_chunks(self, documents, chunks):
+        self.saved_documents.extend(documents)
         self.saved_chunks.extend(chunks)
 
     async def search(self, dense_vector, top_k, filters=None):
@@ -433,3 +439,95 @@ class TestIngestChunkingPacketExecuteRecords:
 
         assert result.chunks_ingested == 1
         assert result.source_id == "333"
+
+
+class TestPacketDocumentsAndEmbedProgress:
+    """The packet path must persist documents and report embedding progress.
+
+    Both were silently missing: `_execute_records_strict` called `save()`,
+    which drops document records entirely, and embedding -- the longest part
+    of a subtree ingest -- reported nothing between start and completion.
+    """
+
+    def _record(self, index: int, doc_id: str) -> dict:
+        return {
+            "chunk_id": f"chunk-{index}",
+            "document_id": doc_id,
+            "text": f"content {index}",
+            "source_system": "confluence",
+            "source_type": "wiki_page",
+            "title": "Test Page",
+            "heading_path": ["Section"],
+            "content_kind": "prose",
+            "language": "en",
+            "page_id": "12345",
+            "space_key": "TEST",
+        }
+
+    async def test_packet_documents_are_persisted(self, mock_embedder, mock_storage_service):
+        doc_id = "confluence:page:12345"
+        documents = [{
+            "document_id": doc_id,
+            "title": "Golden Page",
+            "url": "https://confluence.example.test/spaces/TEST/pages/12345",
+            "page_id": "12345",
+            "space_key": "TEST",
+            "metadata": {"fixture": "yes"},
+        }]
+
+        use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
+        await use_case._execute_records_strict([self._record(1, doc_id)], documents)
+
+        assert len(mock_storage_service.saved_documents) == 1
+        saved = mock_storage_service.saved_documents[0]
+        assert saved.title == "Golden Page"
+        assert saved.url == "https://confluence.example.test/spaces/TEST/pages/12345"
+        # Same source_id rule the chunks use, so both agree on what they belong to.
+        assert saved.source_id == "12345"
+        assert saved.source_type is SourceType.CONFLUENCE
+        # Deterministic id => re-ingesting updates instead of duplicating.
+        assert saved.id == uuid5(_DOCUMENT_ID_NAMESPACE, doc_id)
+        assert saved.metadata["foundation_document_id"] == doc_id
+        assert saved.metadata["space_key"] == "TEST"
+
+    async def test_documents_without_a_usable_id_are_skipped(
+        self, mock_embedder, mock_storage_service
+    ):
+        doc_id = "confluence:page:12345"
+        documents = [
+            {"document_id": doc_id, "title": "Kept"},
+            {"title": "No id at all"},
+        ]
+
+        use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
+        await use_case._execute_records_strict([self._record(1, doc_id)], documents)
+
+        assert [doc.title for doc in mock_storage_service.saved_documents] == ["Kept"]
+
+    async def test_embedding_progress_is_reported_and_throttled(
+        self, mock_embedder, mock_storage_service
+    ):
+        doc_id = "confluence:page:12345"
+        records = [self._record(i, doc_id) for i in range(60)]
+        documents = [{"document_id": doc_id, "title": "Test Page", "page_id": "12345"}]
+        seen: list[tuple[int, int]] = []
+
+        async def report(*, embedded_chunks: int, total_chunks: int) -> None:
+            seen.append((embedded_chunks, total_chunks))
+
+        use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
+        await use_case._execute_records_strict(records, documents, report)
+
+        # Every 25 chunks plus a final report, not once per chunk: a big packet
+        # must not turn one job-status row into thousands of writes.
+        assert seen == [(25, 60), (50, 60), (60, 60)]
+
+    async def test_progress_is_optional(self, mock_embedder, mock_storage_service):
+        doc_id = "confluence:page:12345"
+        use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
+
+        result = await use_case._execute_records_strict(
+            [self._record(1, doc_id)], [{"document_id": doc_id, "title": "T"}]
+        )
+
+        assert result.chunks_ingested == 1

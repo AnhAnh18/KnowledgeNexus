@@ -108,6 +108,59 @@ class AppContainer:
             )
         return self.confluence_page_ingestor
 
+    def _validated_snapshot_root(self) -> Path:
+        """Reject an unusable snapshot root now, not midway through a crawl.
+
+        The foundation workspace guard refuses any root that is not absolute
+        or that lives inside the repository tree, and reports it only as the
+        opaque category "output" after a job has already started.  Reuse that
+        very guard so the rule cannot drift, and turn its refusal into
+        configuration guidance the operator can act on.
+        """
+        from knowledgenexus.foundation.cli.export_confluence_url_text_snapshot import (
+            TextSnapshotOperatorError, _safe_root,
+        )
+
+        configured = self.settings.confluence_snapshot_root
+        try:
+            # A relative value resolves against the server's working directory,
+            # which is why the shipped default lands inside the checkout.
+            return _safe_root(str(Path(configured).expanduser().resolve()))
+        except (TextSnapshotOperatorError, OSError):
+            # OSError as well: the guard walks the parent chain with lstat, so a
+            # root whose parent directory does not exist escapes as a raw
+            # FileNotFoundError rather than the "output" category.
+            raise RuntimeError(
+                "CONFLUENCE_SNAPSHOT_ROOT must be an absolute path outside the "
+                f"repository checkout, with an existing parent directory (got "
+                f"{configured!r}). Snapshot workspaces are written outside "
+                "version control by design, so the shipped default "
+                "'./data/confluence-snapshots' cannot be used as-is; set it to "
+                "something like 'D:/kn-data/confluence-snapshots'."
+            ) from None
+
+    def confluence_ingest_config_problems(self) -> list[str]:
+        """List every setting the subtree ingest needs but does not have.
+
+        The PAT and the rest are read from the process environment / .env, so
+        the only thing a caller can do about a gap is edit that file.  Report
+        the variable names -- never their values -- so the API can refuse a
+        submission up front and /health can show the gap before anyone waits
+        in the queue for a job that cannot possibly run.
+        """
+        problems: list[str] = []
+        if not self.settings.confluence_base_url:
+            problems.append("CONFLUENCE_BASE_URL is not set")
+        if not self.settings.confluence_pat:
+            problems.append("CONFLUENCE_PAT is not set")
+        if not self.settings.embedding_model_path:
+            problems.append("EMBEDDING_MODEL_PATH is not set")
+        try:
+            self._validated_snapshot_root()
+        except RuntimeError as exc:
+            problems.append(str(exc))
+        return problems
+
     def get_confluence_subtree_ingestor(self) -> IngestConfluenceSubtreeFromUrl:
         if self.confluence_subtree_ingestor is None:
             if not self.settings.confluence_base_url or not self.settings.confluence_pat:
@@ -115,7 +168,7 @@ class AppContainer:
             if not self.settings.embedding_model_path:
                 raise RuntimeError("BGE-M3 tokenizer assets are not configured")
             self.confluence_subtree_ingestor = IngestConfluenceSubtreeFromUrl(
-                snapshot_root=Path(self.settings.confluence_snapshot_root).resolve(),
+                snapshot_root=self._validated_snapshot_root(),
                 tokenizer_assets_dir=Path(self.settings.embedding_model_path).resolve(),
                 max_pages=self.settings.confluence_max_pages,
                 confluence_pat=self.settings.confluence_pat,

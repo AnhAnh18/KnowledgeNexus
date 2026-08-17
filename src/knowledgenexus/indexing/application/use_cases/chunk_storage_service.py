@@ -29,6 +29,23 @@ class ChunkStorageService:
         await self._chunk_repo.save_batch(chunks)
         await self._vector_store.upsert_slim(chunks)
 
+    async def save_documents_and_chunks(
+        self, documents: list[Document], chunks: list[Chunk]
+    ) -> None:
+        """Persist a whole packet: many documents plus their chunks.
+
+        `save_document_and_chunks` takes a single document, which is why the
+        packet path used to call `save` instead and silently dropped every
+        document record -- leaving the documents table empty even after a
+        successful subtree ingest. Documents are written first so a chunk
+        never lands before the row it belongs to.
+        """
+        if self._document_repo is not None:
+            for document in documents:
+                await self._document_repo.save(document)
+        await self._chunk_repo.save_batch(chunks)
+        await self._vector_store.upsert_slim(chunks)
+
     async def save(self, chunks: list[Chunk]) -> None:
         await self._chunk_repo.save_batch(chunks)
         await self._vector_store.upsert_slim(chunks)

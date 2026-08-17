@@ -865,6 +865,10 @@ def run(
         _invoke_phase(["capture-drawio", *common, "--run-id", run_id], phase_main=phase_main),
         phase="capture-drawio", statuses=frozenset({"complete"}),
     )
+    # Export is a long phase that reported nothing of its own, so the last
+    # thing an observer saw was "capture_drawio" -- a stale, wrong label for
+    # the entire time the packet is being built.
+    report("export_packet")
     exported = _require_phase_result(_invoke_phase(
         [
             "export", *common, "--run-id", run_id,

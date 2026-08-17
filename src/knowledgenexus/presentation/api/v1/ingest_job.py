@@ -2,6 +2,7 @@ import logging
 import asyncio
 import hashlib
 import ipaddress
+import os
 from dataclasses import dataclass
 from uuid import uuid4
 from datetime import UTC, datetime
@@ -128,8 +129,8 @@ async def _set_progress(job: IngestJob, container: AppContainer, payload: object
         raise ValueError("progress")
     allowed = {
         "resolving_url", "inventory", "capture_pages", "process_pages",
-        "capture_drawio", "publish_packet", "indexing_validate", "indexing_embed",
-        "indexing_store", "completed",
+        "capture_drawio", "export_packet", "publish_packet", "indexing_validate",
+        "indexing_embed", "indexing_store", "completed",
     }
     if payload["phase"] not in allowed:
         raise ValueError("progress")
@@ -142,10 +143,36 @@ async def _set_progress(job: IngestJob, container: AppContainer, payload: object
     await container.ingest_job_repo.update(job)
 
 
+def _require_configured_ingest(container: AppContainer) -> None:
+    """Refuse a submission the server cannot possibly run.
+
+    Without this the job is accepted, queued, and only discovered to be
+    unrunnable when a worker reaches it -- the operator waits, then gets a
+    bare "configuration" with no clue which setting is missing.
+    """
+    problems = container.confluence_ingest_config_problems()
+    if problems:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Confluence ingest is not configured: "
+                + "; ".join(problems)
+                + ". Set these in your .env (see .env.example) and restart the server."
+            ),
+        )
+
+
 async def _resolve_canonical_url(url: str, container: AppContainer) -> tuple[str, str, str]:
     """Resolve a submitted URL in the worker, before any subtree crawl."""
     from knowledgenexus.foundation.cli.export_confluence_url_text_snapshot import (
         TextSnapshotOperatorError, parse_canonical_page_url,
+        # The same two resolvers the CLI `run()` boundary installs; without
+        # them an opaque short link (/x/TOKEN, or /pages/ID with no space)
+        # can only fail as "url_requires_resolution".
+        _resolve_short_link, _resolve_short_space_key,
+    )
+    from knowledgenexus.indexing.application.use_cases.ingest_confluence_subtree_from_url import (
+        _FOUNDATION_ENVIRONMENT_LOCK,
     )
     # Short-link resolution performs an authenticated redirect read.  Bind the
     # submitted origin to the configured Confluence origin *before* invoking
@@ -165,8 +192,30 @@ async def _resolve_canonical_url(url: str, container: AppContainer) -> tuple[str
             raise ConfluenceSubtreeIngestError("url_origin", resumable=False)
     except ValueError:
         raise ConfluenceSubtreeIngestError("url_origin", resumable=False) from None
+    def resolve() -> tuple[str, str, str]:
+        # The resolvers read the PAT from the process environment, which is the
+        # contract the CLI relies on -- but Settings loads it from .env without
+        # exporting it.  Publish it only for the duration of the call, under the
+        # same lock the subtree ingestor takes when it does this for the crawl.
+        pat = container.settings.confluence_pat
+        with _FOUNDATION_ENVIRONMENT_LOCK:
+            prior_pat = os.environ.get("CONFLUENCE_PAT")
+            if type(pat) is str and pat:
+                os.environ["CONFLUENCE_PAT"] = pat
+            try:
+                return parse_canonical_page_url(
+                    url,
+                    short_space_resolver=_resolve_short_space_key,
+                    short_link_resolver=_resolve_short_link,
+                )
+            finally:
+                if prior_pat is None:
+                    os.environ.pop("CONFLUENCE_PAT", None)
+                else:
+                    os.environ["CONFLUENCE_PAT"] = prior_pat
+
     try:
-        resolved = await asyncio.to_thread(parse_canonical_page_url, url)
+        resolved = await asyncio.to_thread(resolve)
     except TextSnapshotOperatorError as exc:
         raise ConfluenceSubtreeIngestError(exc.category, resumable=False) from None
     actual = urlsplit(resolved[0])
@@ -238,6 +287,7 @@ async def create_confluence_subtree_ingest_job(
     body: IngestConfluenceUrlRequest,
     container: AppContainer = Depends(_container),
 ) -> IngestJobResponse:
+    _require_configured_ingest(container)
     try:
         submission_key = _submission_key(body.url)
     except ValueError:
@@ -341,7 +391,20 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
         job.completed_at = datetime.now(UTC)
         job.error = exc.category
         job.stats = {"phase": "failed", "resumable": exc.resumable}
+    except RuntimeError:
+        # Misconfiguration (credentials, tokenizer assets, snapshot root).
+        # Retrying cannot help until an operator changes the settings, so say
+        # so rather than reporting an "unexpected" resumable failure.
+        logger.exception("Confluence subtree ingest job %s is misconfigured", job_id)
+        job.status = IngestJobStatus.FAILED
+        job.active_key = None
+        job.completed_at = datetime.now(UTC)
+        job.error = "configuration"
+        job.stats = {"phase": "failed", "resumable": False}
     except Exception:
+        # Never swallow the cause silently: without this the only trace of a
+        # genuine crash was the bare string "unexpected" on the job.
+        logger.exception("Confluence subtree ingest job %s failed unexpectedly", job_id)
         job.status = IngestJobStatus.FAILED
         job.active_key = None
         job.completed_at = datetime.now(UTC)
@@ -355,6 +418,7 @@ async def resume_confluence_subtree_ingest_job(
     job_id: str,
     container: AppContainer = Depends(_container),
 ) -> IngestJobResponse:
+    _require_configured_ingest(container)
     job = await container.ingest_job_repo.get_by_id(job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ingest job not found")

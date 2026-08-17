@@ -38,6 +38,8 @@ async def api_client(monkeypatch):
         vector_store=vector_store,
         chunk_storage=MagicMock(),
     )
+    # Let the ingest preflight pass; configuration refusal has its own tests.
+    container.confluence_ingest_config_problems = lambda: []
 
     async def fake_init_container(settings):
         return container

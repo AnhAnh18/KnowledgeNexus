@@ -273,7 +273,8 @@ def test_run_composes_bounded_phases_and_publishes_latest(
     assert {path.name for path in version.iterdir()} == cli._PACKET_FILES
     assert [item["phase"] for item in progress] == [
         "resolving_url", "inventory", "inventory", "capture_pages",
-        "capture_pages", "process_pages", "capture_drawio", "publish_packet",
+        "capture_pages", "process_pages", "capture_drawio", "export_packet",
+        "publish_packet",
     ]
     assert progress[-1] == {
         "phase": "publish_packet", "document_count": 2, "chunk_count": 3,

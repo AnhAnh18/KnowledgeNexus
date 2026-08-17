@@ -104,6 +104,39 @@ async def test_health_qdrant_error(api_client):
 
 
 @pytest.mark.asyncio
+async def test_health_reports_unconfigured_confluence_ingest_without_going_degraded(api_client):
+    """Confluence ingest is optional, so a gap is reported but not fatal.
+
+    The fixture's placeholder settings have no usable snapshot root, which is
+    exactly the state an operator is in before editing .env.
+    """
+    client, _, _, _ = api_client
+
+    response = await client.get("/api/v1/health")
+
+    payload = response.json()
+    assert payload["confluence_ingest"] == "not_configured"
+    assert payload["confluence_ingest_problems"]
+    # Retrieval-only deployments stay healthy.
+    assert payload["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_health_reports_configured_confluence_ingest(api_client, tmp_path):
+    client, _, _, settings = api_client
+    settings.confluence_base_url = "https://confluence.example.test"
+    settings.confluence_pat = "pat"
+    settings.embedding_model_path = str(tmp_path / "assets")
+    settings.confluence_snapshot_root = str(tmp_path / "snapshots")
+
+    response = await client.get("/api/v1/health")
+
+    payload = response.json()
+    assert payload["confluence_ingest"] == "ok"
+    assert payload["confluence_ingest_problems"] == []
+
+
+@pytest.mark.asyncio
 async def test_health_qdrant_returns_false(api_client):
     client, engine, vector_store, _ = api_client
     vector_store.health_check.return_value = False

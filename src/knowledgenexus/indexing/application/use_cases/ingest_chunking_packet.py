@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from knowledgenexus.indexing.domain.enums.source_type import SourceType
 from knowledgenexus.indexing.domain.models.chunk import Chunk, ChunkPayload, CoreChunkMetadata
+from knowledgenexus.indexing.domain.models.document import Document
 from knowledgenexus.indexing.domain.ports.embedder_port import EmbedderPort
 from knowledgenexus.indexing.application.use_cases.chunk_storage_service import ChunkStorageService
 from knowledgenexus.shared.errors import StorageError
@@ -41,6 +43,12 @@ _PACKET_FORMAT = "confluence-subtree-indexing-packet-v1"
 # preserved in ChunkPayload.extra for traceability.
 _CHUNK_ID_NAMESPACE = uuid5(NAMESPACE_URL, "knowledgenexus.indexing.chunk_id")
 _DOCUMENT_ID_NAMESPACE = uuid5(NAMESPACE_URL, "knowledgenexus.indexing.document_id")
+
+# How often embedding progress is reported, in chunks.
+_EMBED_PROGRESS_EVERY = 25
+
+# Called as ``await report(embedded_chunks=..., total_chunks=...)``.
+EmbedProgressReporter = Callable[..., Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -91,11 +99,15 @@ class IngestChunkingPacket:
         self._embedder = embedder
         self._storage_service = chunk_storage_service
 
-    async def execute(self, packet_path: Path) -> IngestionResult:
+    async def execute(
+        self, packet_path: Path, report_progress: EmbedProgressReporter | None = None
+    ) -> IngestionResult:
         """Execute packet ingestion.
 
         Args:
             packet_path: Path to Foundation packet directory
+            report_progress: Optional async callback invoked periodically while
+                chunks are embedded, as ``report(embedded_chunks=, total_chunks=)``.
 
         Returns:
             IngestionResult with ingestion metrics
@@ -112,7 +124,7 @@ class IngestChunkingPacket:
         media_assets = self._load_media_assets(packet_path / _MEDIA_FILE)
         self._validate_published_packet(summary, documents, chunk_records, media_assets)
         logger.info("Loaded %d chunk records from packet", len(chunk_records))
-        return await self._execute_records_strict(chunk_records, documents)
+        return await self._execute_records_strict(chunk_records, documents, report_progress)
 
     async def execute_records(
         self,
@@ -344,20 +356,40 @@ class IngestChunkingPacket:
             raise PacketFormatError("Packet schema validation failed") from exc
 
     async def _execute_records_strict(
-        self, chunk_records: list[dict[str, Any]], documents: list[dict[str, Any]],
+        self,
+        chunk_records: list[dict[str, Any]],
+        documents: list[dict[str, Any]],
+        report_progress: EmbedProgressReporter | None = None,
     ) -> IngestionResult:
-        doc_by_id = {document["document_id"]: document for document in documents}
+        # Same validity rule as `_to_documents`, so the lookup and the rows
+        # written agree on which records count. A bare `document["document_id"]`
+        # here raised KeyError on any record missing the field.
+        doc_by_id = {
+            document["document_id"]: document
+            for document in documents
+            if isinstance(document.get("document_id"), str) and document["document_id"]
+        }
         chunks: list[Chunk] = []
         source_ids: set[str] = set()
-        for record in chunk_records:
+        total = len(chunk_records)
+        for position, record in enumerate(chunk_records, start=1):
             try:
                 chunk = await self._transform_and_embed_chunk(record, document=doc_by_id[record["document_id"]])
             except Exception as exc:
                 raise ChunkTransformationError("Strict packet transformation failed") from exc
             chunks.append(chunk)
             source_ids.add(chunk.payload.core.source_id)
+            # Embedding every chunk is the longest stretch of the whole job and
+            # used to report nothing at all. Throttle so a large packet does not
+            # turn one job-status row into thousands of writes.
+            if report_progress is not None and (
+                position == total or position % _EMBED_PROGRESS_EVERY == 0
+            ):
+                await report_progress(embedded_chunks=position, total_chunks=total)
         try:
-            await self._storage_service.save(chunks)
+            await self._storage_service.save_documents_and_chunks(
+                self._to_documents(documents), chunks
+            )
         except Exception as exc:
             raise StorageError("Strict packet storage failed") from exc
         return IngestionResult(
@@ -365,6 +397,42 @@ class IngestChunkingPacket:
             source_id=",".join(sorted(source_ids)),
             embedding_model=self._embedder.model_name, status="success",
         )
+
+    @staticmethod
+    def _to_documents(documents: list[dict[str, Any]]) -> list[Document]:
+        """Map packet document records onto the domain model.
+
+        `source_id` follows the same rule `_transform_and_embed_chunk` uses for
+        chunks, so a document and its chunks agree on what they belong to. The
+        id is a stable UUID5 of the Foundation document_id, and the repository
+        upserts on (source_type, source_id), so re-ingesting a subtree updates
+        rows instead of duplicating them.
+        """
+        mapped: list[Document] = []
+        for record in documents:
+            document_id = record.get("document_id")
+            if not isinstance(document_id, str) or not document_id:
+                continue
+            page_id, space_key = record.get("page_id"), record.get("space_key")
+            source_id = str(page_id) if page_id else str(space_key or document_id)
+            metadata = record.get("metadata")
+            mapped.append(Document(
+                id=uuid5(_DOCUMENT_ID_NAMESPACE, document_id),
+                title=str(record.get("title") or document_id),
+                # The documents table has no content column -- the text lives in
+                # the chunks -- so nothing is lost by not rebuilding it here.
+                content="",
+                source_type=SourceType.CONFLUENCE,
+                source_id=source_id,
+                url=record.get("url") if isinstance(record.get("url"), str) else None,
+                metadata={
+                    **(metadata if isinstance(metadata, dict) else {}),
+                    "foundation_document_id": document_id,
+                    **({"space_key": space_key} if isinstance(space_key, str) else {}),
+                    **({"page_id": str(page_id)} if page_id else {}),
+                },
+            ))
+        return mapped
 
     async def _transform_and_embed_chunk(
         self,

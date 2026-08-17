@@ -46,7 +46,7 @@ def _make_container() -> AppContainer:
         qdrant_url="http://localhost:6333",
     )
 
-    return AppContainer(
+    container = AppContainer(
         settings=settings,
         engine=engine,
         session_factory=MagicMock(),
@@ -56,6 +56,10 @@ def _make_container() -> AppContainer:
         vector_store=vector_store,
         chunk_storage=MagicMock(),
     )
+    # These tests are about queueing, not configuration: let the ingest
+    # preflight pass so it does not reject every submission with 503.
+    container.confluence_ingest_config_problems = lambda: []
+    return container
 
 
 @pytest.fixture
@@ -165,6 +169,36 @@ async def test_confluence_subtree_submission_is_queued_not_run_inline(
     # Both submissions are waiting in the queue, and neither ran during the request.
     assert container.get_confluence_ingest_queue().qsize() == 2
     assert ran == []
+
+
+async def test_submission_is_refused_when_confluence_is_not_configured(api_client, container):
+    """Refuse up front, naming the setting, instead of queueing a doomed job.
+
+    Before the preflight the job was accepted and only failed once a worker
+    reached it, reporting a bare "configuration" that named nothing.
+    """
+    container.confluence_ingest_config_problems = lambda: ["CONFLUENCE_PAT is not set"]
+
+    response = await api_client.post(
+        "/api/v1/ingest-jobs/confluence-subtrees", json={"url": SUBTREE_URL}
+    )
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "CONFLUENCE_PAT" in detail
+    assert ".env" in detail
+    # No job was created and nothing was queued.
+    container.ingest_job_repo.create_or_get_active.assert_not_called()
+    assert container.get_confluence_ingest_queue().qsize() == 0
+
+
+async def test_resume_is_refused_when_confluence_is_not_configured(api_client, container):
+    container.confluence_ingest_config_problems = lambda: ["CONFLUENCE_BASE_URL is not set"]
+
+    response = await api_client.post("/api/v1/ingest-jobs/job-x/resume")
+
+    assert response.status_code == 503
+    assert "CONFLUENCE_BASE_URL" in response.json()["detail"]
 
 
 async def test_confluence_page_submission_is_queued(api_client, container):

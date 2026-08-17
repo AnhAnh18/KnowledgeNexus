@@ -190,7 +190,11 @@
             <span class="badge pending" id="badgeQdrant">
                 <span class="dot pending"></span> Qdrant: --
             </span>
+            <span class="badge pending" id="badgeConfluence" title="Cấu hình ingest Confluence">
+                <span class="dot pending"></span> Confluence: --
+            </span>
         </div>
+        <div id="confluenceConfigHint" style="margin-top:8px;color:#c0392b;font-size:13px;"></div>
 
         <!-- Health Check -->
         <div class="card">
@@ -365,11 +369,26 @@
                 setBadge('badgeHealth', overall, `Server: ${data.status.toUpperCase()}`);
                 setBadge('badgeSqlite', data.sqlite === 'ok' ? 'ok' : 'error', `SQLite: ${data.sqlite.toUpperCase()}`);
                 setBadge('badgeQdrant', data.qdrant === 'ok' ? 'ok' : 'error', `Qdrant: ${data.qdrant.toUpperCase()}`);
+
+                // Ingest Confluence là tuỳ chọn nên không kéo status chung xuống,
+                // nhưng phải nhìn thấy được: thiếu cấu hình thì mọi submit sẽ bị
+                // từ chối 503, biết trước vẫn hơn là gửi rồi mới biết.
+                const confluenceOk = data.confluence_ingest === 'ok';
+                setBadge('badgeConfluence', confluenceOk ? 'ok' : 'error',
+                    `Confluence: ${confluenceOk ? 'OK' : 'CHƯA CẤU HÌNH'}`);
+                const hint = document.getElementById('confluenceConfigHint');
+                const problems = Array.isArray(data.confluence_ingest_problems)
+                    ? data.confluence_ingest_problems : [];
+                hint.innerHTML = confluenceOk ? '' :
+                    'Ingest Confluence chưa dùng được — sửa trong <code>.env</code> (xem <code>.env.example</code>) rồi khởi động lại server:<ul>'
+                    + problems.map(p => `<li>${escapeHtml(p)}</li>`).join('') + '</ul>';
+
                 showToast('Health check thành công!', 'success');
             } catch (e) {
                 setBadge('badgeHealth', 'error', 'Server: ERROR');
                 setBadge('badgeSqlite', 'error', 'SQLite: --');
                 setBadge('badgeQdrant', 'error', 'Qdrant: --');
+                setBadge('badgeConfluence', 'error', 'Confluence: --');
                 showToast('Không kết nối được server: ' + e.message, 'error');
             }
         }
@@ -578,6 +597,67 @@
             return String(job.status).toUpperCase();
         }
 
+        // Thứ tự phase mà backend thực sự phát ra, dùng để hiện "bước k/n".
+        // Foundation chỉ báo ở ranh giới phase (khoảng 11 lần cho cả job), nên
+        // số bước là thứ duy nhất cho thấy job đang tiến, không phải treo.
+        const INGEST_PHASES = [
+            ['queued', 'Đang chờ trong hàng đợi'],
+            ['resolving_url', 'Phân giải URL'],
+            ['inventory', 'Kiểm kê cây trang'],
+            ['capture_pages', 'Tải trang về'],
+            ['process_pages', 'Xử lý nội dung'],
+            ['capture_drawio', 'Tải sơ đồ draw.io'],
+            ['export_packet', 'Dựng gói dữ liệu'],
+            ['publish_packet', 'Công bố gói'],
+            ['indexing_validate', 'Kiểm tra gói'],
+            ['indexing_embed', 'Sinh embedding'],
+            ['indexing_store', 'Ghi vào kho vector'],
+            ['completed', 'Hoàn tất'],
+        ];
+
+        function ingestPhaseText(stats) {
+            if (!stats.phase) return '';
+            if (stats.phase === 'failed') return 'Thất bại';
+            const index = INGEST_PHASES.findIndex(entry => entry[0] === stats.phase);
+            if (index < 0) return escapeHtml(stats.phase);
+            return `Bước ${index + 1}/${INGEST_PHASES.length} — ${escapeHtml(INGEST_PHASES[index][1])}`;
+        }
+
+        function ingestCounters(stats) {
+            // captured_pages là số của riêng lượt capture vừa xong (mỗi lượt 1
+            // batch), còn replayed_pages là số đã commit từ các lượt trước —
+            // cộng lại mới ra tiến độ thật, hiện riêng captured_pages sẽ tụt số.
+            // PATCH /ingest-jobs/{id} cho phép ghi stats tuỳ ý, nên mọi giá trị
+            // hiển thị đều phải escape kể cả khi bình thường chúng là số.
+            const num = value => escapeHtml(String(value));
+            const parts = [];
+            if (stats.requested_pages !== undefined) {
+                parts.push(`Cần lấy: ${num(stats.requested_pages)}`);
+            }
+            if (stats.captured_pages !== undefined) {
+                const captured = Number(stats.captured_pages) || 0;
+                const replayed = Number(stats.replayed_pages) || 0;
+                const total = stats.requested_pages;
+                parts.push(
+                    `Đã lấy: ${num(captured + replayed)}`
+                    + (total !== undefined ? `/${num(total)}` : '')
+                );
+            }
+            if (stats.capture_failed_pages) {
+                parts.push(`⚠️ Trang lỗi: ${num(stats.capture_failed_pages)}`);
+            }
+            if (stats.embedded_chunks !== undefined) {
+                const total = stats.total_chunks;
+                parts.push(`Embedding: ${num(stats.embedded_chunks)}${total !== undefined ? '/' + num(total) : ''}`);
+            }
+            if (stats.document_count !== undefined) parts.push(`Tài liệu: ${num(stats.document_count)}`);
+            if (stats.chunk_count !== undefined) parts.push(`Chunk: ${num(stats.chunk_count)}`);
+            if (stats.chunks_ingested !== undefined) parts.push(`✅ Đã nạp: ${num(stats.chunks_ingested)}`);
+            if (stats.chunks_failed) parts.push(`⚠️ Nạp lỗi: ${num(stats.chunks_failed)}`);
+            if (stats.embedding_model) parts.push(`🧠 ${escapeHtml(String(stats.embedding_model))}`);
+            return parts;
+        }
+
         function renderIngestJobCard(job) {
             const cls = ingestStatusClass(job.status);
             const stats = job.stats || {};
@@ -589,13 +669,8 @@
                         <span class="badge ${cls}"><span class="dot ${cls}"></span> ${escapeHtml(ingestStatusLabel(job))}</span>
                     </div>
                     <div class="result-meta">
-                        ${stats.phase ? `<span>Phase: ${escapeHtml(stats.phase)}</span>` : ''}
-                        ${stats.requested_pages !== undefined ? `<span>Pages: ${stats.requested_pages}</span>` : ''}
-                        ${stats.captured_pages !== undefined ? `<span>Captured: ${stats.captured_pages}</span>` : ''}
-                        ${stats.processed_pages !== undefined ? `<span>Processed: ${stats.processed_pages}</span>` : ''}
-                        ${stats.chunks_ingested !== undefined ? `<span>✅ chunks_ingested: ${stats.chunks_ingested}</span>` : ''}
-                        ${stats.chunks_failed !== undefined ? `<span>⚠️ chunks_failed: ${stats.chunks_failed}</span>` : ''}
-                        ${stats.embedding_model ? `<span>🧠 ${escapeHtml(stats.embedding_model)}</span>` : ''}
+                        ${stats.phase ? `<span>${ingestPhaseText(stats)}</span>` : ''}
+                        ${ingestCounters(stats).map(text => `<span>${text}</span>`).join('')}
                     </div>
                     ${job.error ? `<div class="result-content" style="color:#c0392b;">❌ ${escapeHtml(job.error)}</div>` : ''}
                     ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Tiếp tục job này</button>` : ''}
@@ -734,12 +809,16 @@
 
         // ============ Utils ============
         function escapeHtml(str) {
-            if (!str) return '';
+            // Bốn phép thay thế đầu trước đây thay ký tự bằng chính nó, nên hàm
+            // này thực chất không escape gì ngoài dấu nháy đơn — nội dung
+            // Confluence và stats do client PATCH vào đều đi thẳng vào DOM.
+            // Dấu & phải thay trước, nếu không sẽ escape chồng lên các thực thể vừa tạo.
+            if (str === null || str === undefined) return '';
             return String(str)
-                .replace(/&/g, '&')
-                .replace(/</g, '<')
-                .replace(/>/g, '>')
-                .replace(/"/g, '"')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
         }
 

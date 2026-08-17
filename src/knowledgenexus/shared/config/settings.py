@@ -50,8 +50,11 @@ class Settings(BaseSettings):
     confluence_raw_root: str = "./data/confluence-raw"
     confluence_chunking_profile_path: str = "./contracts/foundation/embedding_profile.yaml"
     # External durable workspaces for URL-rooted Foundation packets.  This is
-    # server policy, never an API parameter supplied by a browser.
-    confluence_snapshot_root: str = "./data/confluence-snapshots"
+    # server policy, never an API parameter supplied by a browser.  No usable
+    # default: the workspace guard rejects any path inside the repository, so
+    # the old "./data/confluence-snapshots" could never work and merely made
+    # the setting look configured.  Empty means the operator must set it.
+    confluence_snapshot_root: str = ""
     confluence_max_pages: int = 200
 
     # Reranker (cross-encoder, post-retrieval stage)

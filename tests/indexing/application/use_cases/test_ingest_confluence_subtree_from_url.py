@@ -18,8 +18,10 @@ class _PacketIngestor:
     def __init__(self) -> None:
         self.paths: list[Path] = []
 
-    async def execute(self, packet_path: Path) -> IngestionResult:
+    async def execute(self, packet_path: Path, report_progress=None) -> IngestionResult:
         self.paths.append(packet_path)
+        if report_progress is not None:
+            await report_progress(embedded_chunks=3, total_chunks=3)
         return IngestionResult(
             chunks_ingested=3, chunks_failed=0, source_id="a,b",
             embedding_model="test", status="success",
@@ -67,8 +69,15 @@ async def test_reads_only_the_packet_published_by_foundation(
     assert calls[0]["allow_partial_processing"] is False
     assert packet_ingestor.paths == [root / "job-1" / "versions" / "confluence-test"]
     assert [item["phase"] for item in progress] == [
-        "inventory", "indexing_validate", "indexing_embed", "indexing_store",
+        # The second "indexing_embed" carries the packet ingestor's periodic
+        # counters; embedding is the longest stretch of the job and used to
+        # report nothing at all between its start and the final chunk count.
+        "inventory", "indexing_validate", "indexing_embed", "indexing_embed",
+        "indexing_store",
     ]
+    assert progress[3] == {
+        "phase": "indexing_embed", "embedded_chunks": 3, "total_chunks": 3,
+    }
     assert "CONFLUENCE_PAT" not in os.environ
 
 
