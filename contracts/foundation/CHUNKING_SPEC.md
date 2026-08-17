@@ -146,6 +146,11 @@ If a section body exceeds `hard_maximum_tokens`, split it into windows at **para
 
 - A Markdown table that fits within `hard_maximum_tokens` is emitted atomically as one `content_kind: table` chunk (breadcrumb prefixed).
 - A larger table is split into **row-groups**, each group repeating the header row and the alignment row so every chunk is a valid, self-describing table. `part_index`/`part_total` set; `content_kind: table`. A table row is never split across chunks. A single row that cannot fit with breadcrumb and repeated header/alignment fails closed as `unsplittable_table_row`.
+- **Oversized-row fallback (continuation envelope `v1`).** When an individual row exceeds the hard maximum, the row is represented as deterministic cell continuations rather than truncated or dropped. A continuation chunk repeats the exact header/alignment shell and then carries one or more entries, each of which is a marker of the form `[table-continuation v1 table=T row=R column=C header_ordinal=C part=P/N]` followed by a dynamically sized backtick fence wrapping one fragment of that cell's exact normalized text. Cells are emitted in row-major order and fragments in source order.
+  - **Fragment terminator.** Every fragment line ends with the literal terminator `[/]`. Normalization (§3) right-strips each line, so without it a fragment ending in whitespace would lose that whitespace and glue the surrounding words together. Readers strip exactly one trailing `[/]` per fragment line; concatenating the stripped fragments for `(T,R,C)` reconstructs the original cell text exactly. Header, marker, fence, and terminator are context and are excluded from reconstruction.
+  - **Packing.** Cells that fit alongside the header shell are packed into as few continuation chunks as possible, so a wide row with one oversized cell does not turn each narrow neighbour into its own near-empty chunk. Only a cell that cannot fit in a chunk of its own is fragmented across parts.
+  - **Budget.** A fragment is selected only when the complete breadcrumb-prefixed continuation is within `hard_maximum_tokens`, measured against the **widest** part number `N` can produce (`part=N/N`), so later parts cannot overflow the budget the earlier parts were cut for. Because `N` appears in the marker it is resolved as a fixed point over the fragment count; the count is monotonic in marker width, so it converges. If no character fits, the existing `unsplittable_table_row` category is retained.
+  - `content_kind`, schema, and ordinary-table output remain unchanged.
 
 ---
 
@@ -232,6 +237,7 @@ The chunking stage contributes the following to `quality_report.md`:
 | `oversize_splits` | Units force-split for exceeding `hard_maximum_tokens` (§4.4, §4.5, §4.6, §5.3). |
 | `fallback_window_files` | Files chunked by the symbol-less fallback (§5.4). |
 | `empty_sections_skipped` | Heading sections whose normalized body was empty. |
+| `table_row_continuation_units` | Table rows that needed the §4.6 oversized-row continuation fallback. A persistently non-zero count on ordinary content is the signal to revisit `hard_maximum_tokens` in the round-1 budget sweep. |
 | `token_count_p50` / `token_count_p95` | Chunk token-count distribution, for tuning against `target_tokens`. |
 
 For `chunker_version` 1.2.0, p50 and p95 use deterministic ascending

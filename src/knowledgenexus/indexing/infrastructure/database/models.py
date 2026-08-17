@@ -48,5 +48,8 @@ class IngestJobModel(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     stats: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Nullable so a completed/failed job releases its submission identity.
+    # SQLite permits many NULLs while enforcing uniqueness for active jobs.
+    active_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
 
 

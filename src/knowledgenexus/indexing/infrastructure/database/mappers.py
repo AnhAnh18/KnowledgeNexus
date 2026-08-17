@@ -96,6 +96,7 @@ def ingest_job_to_model(job: IngestJob) -> IngestJobModel:
         completed_at=job.completed_at,
         error=job.error,
         stats=job.stats,
+        active_key=job.active_key,
     )
 
 
@@ -108,4 +109,5 @@ def ingest_job_from_model(model: IngestJobModel) -> IngestJob:
         completed_at=model.completed_at,
         error=model.error,
         stats=model.stats or {},
+        active_key=model.active_key,
     )

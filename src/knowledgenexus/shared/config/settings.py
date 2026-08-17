@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     confluence_pat: str | None = None
     confluence_raw_root: str = "./data/confluence-raw"
     confluence_chunking_profile_path: str = "./contracts/foundation/embedding_profile.yaml"
+    # External durable workspaces for URL-rooted Foundation packets.  This is
+    # server policy, never an API parameter supplied by a browser.
+    confluence_snapshot_root: str = "./data/confluence-snapshots"
+    confluence_max_pages: int = 200
 
     # Reranker (cross-encoder, post-retrieval stage)
     reranker_enabled: bool = False

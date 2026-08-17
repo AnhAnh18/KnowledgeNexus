@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text
 
 from knowledgenexus.indexing.infrastructure.database.models import Base
 
@@ -43,6 +44,16 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
 async def init_database(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # The demo has already been run against SQLite databases created before
+        # active_key existed.  Create-all deliberately does not alter an
+        # existing table, so make this narrow additive migration explicit.
+        if engine.url.get_backend_name() == "sqlite":
+            columns = (await conn.execute(text("PRAGMA table_info(ingest_jobs)"))).mappings().all()
+            if "active_key" not in {row["name"] for row in columns}:
+                await conn.execute(text("ALTER TABLE ingest_jobs ADD COLUMN active_key VARCHAR(64)"))
+            await conn.execute(
+                text("CREATE UNIQUE INDEX IF NOT EXISTS uq_ingest_jobs_active_key ON ingest_jobs(active_key)")
+            )
 
 
 @asynccontextmanager

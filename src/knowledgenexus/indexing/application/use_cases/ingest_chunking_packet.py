@@ -22,11 +22,17 @@ from knowledgenexus.indexing.domain.models.chunk import Chunk, ChunkPayload, Cor
 from knowledgenexus.indexing.domain.ports.embedder_port import EmbedderPort
 from knowledgenexus.indexing.application.use_cases.chunk_storage_service import ChunkStorageService
 from knowledgenexus.shared.errors import StorageError
+from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
+from knowledgenexus.foundation.ports.path_safety import require_plain_directory_chain, require_plain_file
 
 logger = logging.getLogger(__name__)
 
 _CHUNKS_FILE = "chunks.jsonl"
 _DOCUMENTS_FILE = "documents.jsonl"
+_MEDIA_FILE = "media_assets.jsonl"
+_SUMMARY_FILE = "packet_summary.json"
+_PACKET_FILES = frozenset({_CHUNKS_FILE, _DOCUMENTS_FILE, _MEDIA_FILE, _SUMMARY_FILE})
+_PACKET_FORMAT = "confluence-subtree-indexing-packet-v1"
 
 # Foundation chunk_id/document_id values (e.g. "chunk:confluence:<hash>",
 # "confluence:page:<id>") are not valid UUIDs, but CoreChunkMetadata.document_id
@@ -100,16 +106,13 @@ class IngestChunkingPacket:
             StorageError: If storage operations fail
         """
         packet_path = Path(packet_path)
-        self._validate_packet_structure(packet_path)
-
-        # Load and parse documents (for source_id mapping)
+        summary = self._validate_packet_structure(packet_path)
         documents = self._load_documents(packet_path / _DOCUMENTS_FILE)
-
-        # Load chunks
         chunk_records = self._load_chunks(packet_path / _CHUNKS_FILE)
+        media_assets = self._load_media_assets(packet_path / _MEDIA_FILE)
+        self._validate_published_packet(summary, documents, chunk_records, media_assets)
         logger.info("Loaded %d chunk records from packet", len(chunk_records))
-
-        return await self.execute_records(chunk_records, documents)
+        return await self._execute_records_strict(chunk_records, documents)
 
     async def execute_records(
         self,
@@ -194,16 +197,32 @@ class IngestChunkingPacket:
             status=status,
         )
 
-    def _validate_packet_structure(self, packet_path: Path) -> None:
+    def _validate_packet_structure(self, packet_path: Path) -> dict[str, Any]:
         """Validate packet directory structure."""
-        if not packet_path.is_dir():
+        if not packet_path.is_dir() or packet_path.is_symlink():
             raise PacketFormatError(f"Packet path is not a directory: {packet_path}")
-
-        chunks_file = packet_path / _CHUNKS_FILE
-        if not chunks_file.is_file():
-            raise PacketFormatError(f"Missing {_CHUNKS_FILE} in packet")
+        try:
+            require_plain_directory_chain(packet_path)
+        except Exception as exc:
+            raise PacketFormatError("Packet path is unsafe") from exc
+        names = {path.name for path in packet_path.iterdir()}
+        if names != _PACKET_FILES:
+            raise PacketFormatError("Packet file set is invalid")
+        for name in _PACKET_FILES:
+            path = packet_path / name
+            try:
+                require_plain_file(path)
+            except Exception as exc:
+                raise PacketFormatError("Packet artifact is unsafe") from exc
+        try:
+            summary = json.loads((packet_path / _SUMMARY_FILE).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PacketFormatError("Packet completion marker is invalid") from exc
+        if type(summary) is not dict:
+            raise PacketFormatError("Packet completion marker is invalid")
 
         logger.info("Packet structure validated: %s", packet_path)
+        return summary
 
     def _load_documents(self, documents_file: Path) -> list[dict[str, Any]]:
         """Load documents from JSONL file."""
@@ -221,14 +240,12 @@ class IngestChunkingPacket:
                         doc = json.loads(line)
                         documents.append(doc)
                     except json.JSONDecodeError as exc:
-                        logger.warning(
-                            "Failed to parse document at line %d: %s",
-                            line_num,
-                            exc,
-                        )
+                        raise PacketFormatError(f"Invalid document JSONL at line {line_num}") from exc
             logger.info("Loaded %d documents from packet", len(documents))
+        except PacketFormatError:
+            raise
         except Exception as exc:
-            logger.warning("Error loading documents file: %s", exc)
+            raise PacketFormatError("Error reading documents file") from exc
 
         return documents
 
@@ -247,15 +264,107 @@ class IngestChunkingPacket:
                         chunk = json.loads(line)
                         chunks.append(chunk)
                     except json.JSONDecodeError as exc:
-                        logger.warning(
-                            "Failed to parse chunk at line %d: %s",
-                            line_num,
-                            exc,
-                        )
+                        raise PacketFormatError(f"Invalid chunk JSONL at line {line_num}") from exc
+        except PacketFormatError:
+            raise
         except Exception as exc:
-            raise PacketFormatError(f"Error reading chunks file: {exc}") from exc
+            raise PacketFormatError("Error reading chunks file") from exc
 
         return chunks
+
+    def _load_media_assets(self, media_file: Path) -> list[dict[str, Any]]:
+        assets: list[dict[str, Any]] = []
+        try:
+            with open(media_file, "r", encoding="utf-8") as stream:
+                for line_number, line in enumerate(stream, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise PacketFormatError(
+                            f"Invalid media JSONL at line {line_number}"
+                        ) from exc
+                    if type(row) is not dict:
+                        raise PacketFormatError("Media record is invalid")
+                    assets.append(row)
+        except PacketFormatError:
+            raise
+        except Exception as exc:
+            raise PacketFormatError("Error reading media assets file") from exc
+        return assets
+
+    def _validate_published_packet(
+        self, summary: dict[str, Any], documents: list[dict[str, Any]],
+        chunks: list[dict[str, Any]], media_assets: list[dict[str, Any]],
+    ) -> None:
+        if (
+            summary.get("format_version") != _PACKET_FORMAT
+            or summary.get("acl_mode") != "restricted_unresolved"
+            or summary.get("processing_status", "complete") != "complete"
+            or summary.get("document_count") != len(documents)
+            or summary.get("chunk_count") != len(chunks)
+            or summary.get("media_asset_count") != len(media_assets)
+        ):
+            raise PacketFormatError("Packet summary is inconsistent or not strict-complete")
+        validator = FoundationSchemaValidator()
+        document_ids: set[str] = set()
+        try:
+            for document in documents:
+                validator.validate_record("CanonicalDocument", document)
+                document_id = document.get("document_id")
+                if type(document_id) is not str or document_id in document_ids:
+                    raise PacketFormatError("Document closure is invalid")
+                document_ids.add(document_id)
+            chunk_ids: set[str] = set()
+            for chunk in chunks:
+                validator.validate_record("ChunkRecord", chunk)
+                chunk_id = chunk.get("chunk_id")
+                if (
+                    type(chunk_id) is not str
+                    or chunk_id in chunk_ids
+                    or chunk.get("document_id") not in document_ids
+                    or chunk.get("acl_tags") != ["restricted:unresolved"]
+                ):
+                    raise PacketFormatError("Chunk closure is invalid")
+                chunk_ids.add(chunk_id)
+            media_ids: set[str] = set()
+            for asset in media_assets:
+                validator.validate_record("MediaAsset", asset)
+                media_id = asset.get("media_id")
+                if (
+                    type(media_id) is not str or media_id in media_ids
+                    or asset.get("parent_document_id") not in document_ids
+                ):
+                    raise PacketFormatError("Media closure is invalid")
+                media_ids.add(media_id)
+        except PacketFormatError:
+            raise
+        except Exception as exc:
+            raise PacketFormatError("Packet schema validation failed") from exc
+
+    async def _execute_records_strict(
+        self, chunk_records: list[dict[str, Any]], documents: list[dict[str, Any]],
+    ) -> IngestionResult:
+        doc_by_id = {document["document_id"]: document for document in documents}
+        chunks: list[Chunk] = []
+        source_ids: set[str] = set()
+        for record in chunk_records:
+            try:
+                chunk = await self._transform_and_embed_chunk(record, document=doc_by_id[record["document_id"]])
+            except Exception as exc:
+                raise ChunkTransformationError("Strict packet transformation failed") from exc
+            chunks.append(chunk)
+            source_ids.add(chunk.payload.core.source_id)
+        try:
+            await self._storage_service.save(chunks)
+        except Exception as exc:
+            raise StorageError("Strict packet storage failed") from exc
+        return IngestionResult(
+            chunks_ingested=len(chunks), chunks_failed=0,
+            source_id=",".join(sorted(source_ids)),
+            embedding_model=self._embedder.model_name, status="success",
+        )
 
     async def _transform_and_embed_chunk(
         self,
@@ -337,6 +446,7 @@ class IngestChunkingPacket:
             "content_kind": content_kind,
             "language": language,
             "heading_path": heading_path,
+            "acl_tags": chunk_record.get("acl_tags"),
         }
         if space_key is not None:
             extra["space_key"] = space_key

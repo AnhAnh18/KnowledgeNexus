@@ -591,6 +591,107 @@ def test_unsplittable_table_row_fails_closed() -> None:
     assert "SECRET" not in str(captured.value)
 
 
+def _continuation_profile():
+    return _profile(minimum=2, target=220, hard=300, overlap=4, code_target=220)
+
+
+def _reconstruct_cell(records, column: int) -> str:
+    """Concatenate the continuation fragments recorded for one column."""
+    fragments: list[str] = []
+    for record in records:
+        lines = _body(record).split("\n")
+        for index, line in enumerate(lines):
+            if not line.startswith("[table-continuation v1"):
+                continue
+            if f"column={column} " not in line:
+                continue
+            fragment = lines[index + 2]
+            assert fragment.endswith("[/]"), fragment
+            fragments.append(fragment[: -len("[/]")])
+    return "".join(fragments)
+
+
+def test_oversized_table_row_splits_cells_losslessly_and_deterministically() -> None:
+    long_cell = "trace-" + ("x" * 400) + " PIPE `tick`<br>UNICODE ![img](attachment:foo.png)"
+    rows = [
+        f"| r{i}a | r{i}b | {long_cell if i == 3 else f'r{i}c'} | r{i}d |"
+        for i in range(7)
+    ]
+    body = chr(10).join(["## Table", "", "| A | B | Details | D |", "| --- | --- | --- | --- |", *rows])
+    profile = _continuation_profile()
+    first = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+    second = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+
+    assert len(first.records) > 1
+    assert all(record["token_count"] <= profile.hard_maximum_tokens for record in first.records)
+    assert [record["chunk_id"] for record in first.records] == [record["chunk_id"] for record in second.records]
+    continuations = [
+        _body(record)
+        for record in first.records
+        if "[table-continuation v1" in _body(record)
+    ]
+    assert any(record["content_kind"] == "table" for record in first.records)
+    assert continuations, [record["content_kind"] for record in first.records]
+    assert all("row=3" in text for text in continuations)
+    assert _reconstruct_cell(first.records, 2) == f" {long_cell} "
+
+
+def test_oversized_cell_preserves_whitespace_at_fragment_boundaries() -> None:
+    # Normalization right-strips every line, so a fragment that happens to end on
+    # a space must not silently glue the neighbouring words together.
+    cell = " ".join(f"w{index:03d}" for index in range(150))
+    body = chr(10).join(
+        ["## Table", "", "| A | Details |", "| --- | --- |", f"| r0a | {cell} |"]
+    )
+    result = _execute(body, tokenizer=_CharacterTokenizer(), profile=_continuation_profile())
+
+    assert _reconstruct_cell(result.records, 1) == f" {cell} "
+
+
+def test_oversized_cell_needing_two_digit_part_numbers_stays_within_budget() -> None:
+    # The widest part number ("part=17/17") is longer than the first ("part=1/17"),
+    # so fragments sized against the narrow marker would overflow once the count
+    # reaches double digits.
+    cell = "x" * 3200
+    body = chr(10).join(["## Table", "", "| A |", "| --- |", f"| {cell} |"])
+    profile = _continuation_profile()
+    result = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+
+    assert len(result.records) > 10
+    assert all(
+        record["token_count"] <= profile.hard_maximum_tokens
+        for record in result.records
+    )
+    assert result.metrics["table_row_continuation_units"] == 1
+    assert _reconstruct_cell(result.records, 0) == f" {cell} "
+
+
+def test_oversized_row_packs_cells_that_fit_into_shared_continuations() -> None:
+    body = chr(10).join(
+        [
+            "## Table",
+            "",
+            "| A | B | C | D | E | F |",
+            "| --- | --- | --- | --- | --- | --- |",
+            f"| a1 | b1 | {'q' * 800} | d1 | e1 | f1 |",
+        ]
+    )
+    result = _execute(body, tokenizer=_CharacterTokenizer(), profile=_continuation_profile())
+
+    columns_per_chunk = [
+        [
+            line.split("column=")[1].split(" ")[0]
+            for line in _body(record).split("\n")
+            if line.startswith("[table-continuation v1")
+        ]
+        for record in result.records
+    ]
+    assert any(len(columns) > 1 for columns in columns_per_chunk), columns_per_chunk
+    for column in range(6):
+        expected = f" {'q' * 800} " if column == 2 else f" {'abcdef'[column]}1 "
+        assert _reconstruct_cell(result.records, column) == expected
+
+
 def test_exact_duplicate_preimage_receives_stable_suffix() -> None:
     table = WikiTableBlock("| H |\n| --- |", "| H |", "| --- |", (), 1, 2)
     section = WikiSection(

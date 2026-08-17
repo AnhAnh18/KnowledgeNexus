@@ -25,6 +25,7 @@ def _make_job(
     completed_at: datetime | None = None,
     error: str | None = None,
     stats: dict | None = None,
+    active_key: str | None = None,
 ) -> IngestJob:
     return IngestJob(
         id=job_id,
@@ -34,6 +35,7 @@ def _make_job(
         completed_at=completed_at,
         error=error,
         stats=stats or {},
+        active_key=active_key,
     )
 
 
@@ -166,3 +168,34 @@ async def test_create_multiple_jobs_distinct(session_factory):
     assert loaded_b.id == "job-b"
     assert loaded_a.status == IngestJobStatus.PENDING
     assert loaded_b.status == IngestJobStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_create_or_get_active_is_deduplicated_by_durable_key(session_factory):
+    repo = SqliteIngestJobRepository(session_factory)
+    key = "a" * 64
+    first, created_first = await repo.create_or_get_active(
+        _make_job(job_id="job-a", stats={"phase": "resolving_url"}, active_key=key)
+    )
+    second, created_second = await repo.create_or_get_active(
+        _make_job(job_id="job-b", stats={"phase": "resolving_url"}, active_key=key)
+    )
+
+    assert created_first is True
+    assert first.id == "job-a"
+    assert created_second is False
+    assert second.id == "job-a"
+
+
+@pytest.mark.asyncio
+async def test_terminal_update_releases_active_key(session_factory):
+    repo = SqliteIngestJobRepository(session_factory)
+    key = "b" * 64
+    job, _ = await repo.create_or_get_active(_make_job(job_id="job-a", active_key=key))
+    job.status = IngestJobStatus.FAILED
+    job.active_key = None
+    await repo.update(job)
+
+    next_job, created = await repo.create_or_get_active(_make_job(job_id="job-b", active_key=key))
+    assert created is True
+    assert next_job.id == "job-b"

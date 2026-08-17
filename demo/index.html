@@ -101,9 +101,6 @@
 
         /* Results */
         .results-container { margin-top: 16px; }
-        /* Danh sách job ingest: khung chỉ đủ cao cho ~3 item, cuộn để xem thêm.
-           Job vẫn được theo dõi/poll bình thường dù không nằm trong khung nhìn. */
-        .scroll-list-3 { max-height: 420px; overflow-y: auto; padding-right: 4px; }
         .result-item {
             border: 1px solid #e0e0e0;
             border-radius: 8px;
@@ -250,14 +247,14 @@
 
         <!-- Ingest from URL -->
         <div class="card">
-            <h2>5️⃣ Ingest 1 trang Confluence từ URL</h2>
+            <h2>5️⃣ Ingest cây trang Confluence từ URL</h2>
             <div class="form-group">
                 <label>URL trang Confluence</label>
-                <input type="text" id="ingestUrlInput"
+                <input type="text" id="ingestUrlInput" onkeydown="handleIngestKey(event)"
                     placeholder="https://confluence.example.com/pages/viewpage.action?pageId=12345" />
             </div>
             <button class="btn btn-success" id="ingestBtn" onclick="startIngest()">🚀 Bắt đầu Ingest</button>
-            <div id="ingestStatus" class="scroll-list-3" style="margin-top:16px;"></div>
+            <div id="ingestStatus" style="margin-top:16px;"></div>
         </div>
     </div>
 
@@ -524,12 +521,12 @@
             }
         }
 
-        // ============ Ingest từ URL (Confluence) — hỗ trợ nhiều job cùng lúc ============
-        // Mỗi job có card riêng + interval poll riêng, khoá theo jobId — nút
-        // "Bắt đầu Ingest" không bao giờ bị disable lâu dài, để có thể gửi
-        // liên tiếp nhiều URL trong khi các job trước vẫn đang chạy nền
-        // (backend đã xử lý qua hàng đợi, xử lý tuần tự).
-        const ingestPollTimers = new Map(); // jobId -> intervalId
+        // ============ Ingest từ URL (Confluence) ============
+        let ingestPollTimer = null;
+        let ingestPollInFlight = false;
+        let ingestPollFailures = 0;
+        let resumableIngestJobId = null;
+        const ACTIVE_INGEST_JOB_KEY = 'kn_confluence_subtree_job';
 
         function ingestStatusClass(status) {
             if (status === 'completed') return 'ok';
@@ -537,18 +534,21 @@
             return 'pending';
         }
 
-        function renderIngestJobCard(job) {
+        function renderIngestStatus(job) {
+            const container = document.getElementById('ingestStatus');
             const cls = ingestStatusClass(job.status);
             const stats = job.stats || {};
-            return `
+            container.innerHTML = `
                 <div class="result-item">
                     <div class="result-header">
                         <div class="result-title">Job ${escapeHtml(job.id.substring(0, 8))}...</div>
                         <span class="badge ${cls}"><span class="dot ${cls}"></span> ${escapeHtml(job.status.toUpperCase())}</span>
                     </div>
                     <div class="result-meta">
-                        ${stats.url ? `<span>🔗 ${escapeHtml(stats.url)}</span>` : ''}
-                        ${stats.page_id ? `<span>🆔 ${escapeHtml(String(stats.page_id))}</span>` : ''}
+                        ${stats.phase ? `<span>Phase: ${escapeHtml(stats.phase)}</span>` : ''}
+                        ${stats.requested_pages !== undefined ? `<span>Pages: ${stats.requested_pages}</span>` : ''}
+                        ${stats.captured_pages !== undefined ? `<span>Captured: ${stats.captured_pages}</span>` : ''}
+                        ${stats.processed_pages !== undefined ? `<span>Processed: ${stats.processed_pages}</span>` : ''}
                         ${stats.chunks_ingested !== undefined ? `<span>✅ chunks_ingested: ${stats.chunks_ingested}</span>` : ''}
                         ${stats.chunks_failed !== undefined ? `<span>⚠️ chunks_failed: ${stats.chunks_failed}</span>` : ''}
                         ${stats.embedding_model ? `<span>🧠 ${escapeHtml(stats.embedding_model)}</span>` : ''}
@@ -558,72 +558,112 @@
             `;
         }
 
-        function upsertIngestJobCard(job) {
-            const container = document.getElementById('ingestStatus');
-            const empty = container.querySelector('.empty');
-            if (empty) empty.remove();
-
-            const cardId = `ingest-job-${job.id}`;
-            const existing = document.getElementById(cardId);
-            const html = `<div id="${cardId}">${renderIngestJobCard(job)}</div>`;
-            if (existing) {
-                existing.outerHTML = html;
-            } else {
-                container.insertAdjacentHTML('afterbegin', html); // job mới nhất lên đầu
-            }
+        function setIngestControlsLocked(locked, label) {
+            const btn = document.getElementById('ingestBtn');
+            const input = document.getElementById('ingestUrlInput');
+            btn.disabled = locked;
+            input.readOnly = locked;
+            btn.textContent = label;
         }
 
-        function stopIngestPolling(jobId) {
-            const timerId = ingestPollTimers.get(jobId);
-            if (timerId) {
-                clearInterval(timerId);
-                ingestPollTimers.delete(jobId);
+        function stopIngestPolling(resumable = false) {
+            if (ingestPollTimer) {
+                clearTimeout(ingestPollTimer);
+                ingestPollTimer = null;
             }
+            ingestPollInFlight = false;
+            ingestPollFailures = 0;
+            setIngestControlsLocked(false, resumable ? '↻ Tiếp tục ingest' : '🚀 Bắt đầu Ingest');
+            document.getElementById('ingestUrlInput').readOnly = resumable;
         }
 
         function pollIngestJob(jobId) {
-            stopIngestPolling(jobId); // tránh tạo trùng interval nếu gọi lại
-            const timerId = setInterval(async () => {
+            stopIngestPolling();
+            setIngestControlsLocked(true, '⏳ Đang ingest...');
+            const poll = async () => {
+                if (ingestPollInFlight) return;
+                ingestPollInFlight = true;
                 try {
                     const res = await fetch(getApiBase() + `/api/v1/ingest-jobs/${jobId}`);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const job = await res.json();
-                    upsertIngestJobCard(job);
+                    ingestPollFailures = 0;
+                    renderIngestStatus(job);
                     if (job.status === 'completed' || job.status === 'failed') {
-                        stopIngestPolling(jobId);
+                        const stats = job.stats || {};
+                        resumableIngestJobId = job.status === 'failed' && stats.resumable === true ? job.id : null;
+                        stopIngestPolling(resumableIngestJobId !== null);
+                        if (resumableIngestJobId === null) localStorage.removeItem(ACTIVE_INGEST_JOB_KEY);
                         showToast(
-                            job.status === 'completed'
-                                ? `Job ${job.id.substring(0, 8)}... hoàn tất!`
-                                : `Job ${job.id.substring(0, 8)}... thất bại: ${job.error || ''}`,
+                            job.status === 'completed' ? 'Ingest hoàn tất!' : 'Ingest thất bại: ' + (job.error || ''),
                             job.status === 'completed' ? 'success' : 'error'
                         );
                     }
                 } catch (e) {
-                    stopIngestPolling(jobId);
-                    showToast('Lỗi khi kiểm tra trạng thái job: ' + e.message, 'error');
+                    if (String(e.message).includes('HTTP 404')) {
+                        localStorage.removeItem(ACTIVE_INGEST_JOB_KEY);
+                        resumableIngestJobId = null;
+                        stopIngestPolling();
+                        showToast('Không tìm thấy job đã lưu. Bạn có thể tạo job mới.', 'error');
+                        return;
+                    }
+                    ingestPollFailures += 1;
+                    showToast('Không thể cập nhật trạng thái job; sẽ thử lại.', 'error');
+                } finally {
+                    ingestPollInFlight = false;
+                    if (ingestPollTimer !== null) {
+                        const delay = Math.min(30000, 2000 * (2 ** Math.min(ingestPollFailures, 4)));
+                        ingestPollTimer = setTimeout(poll, delay);
+                    }
                 }
-            }, 2000);
-            ingestPollTimers.set(jobId, timerId);
+            };
+            ingestPollTimer = 0;
+            poll();
+        }
+
+        function handleIngestKey(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                startIngest();
+            }
         }
 
         async function startIngest() {
-            const input = document.getElementById('ingestUrlInput');
-            const url = input.value.trim();
+            if (resumableIngestJobId) { await resumeIngest(); return; }
+            const url = document.getElementById('ingestUrlInput').value.trim();
             if (!url) { showToast('Vui lòng nhập URL', 'error'); return; }
 
-            const btn = document.getElementById('ingestBtn');
-            btn.disabled = true; // chỉ khoá trong lúc gửi request POST (rất nhanh)
+            if (document.getElementById('ingestBtn').disabled) return;
+            setIngestControlsLocked(true, '⏳ Đang gửi...');
+            document.getElementById('ingestStatus').innerHTML = '<div class="loading">⏳ Đang tạo ingest job...</div>';
+
             try {
-                const res = await apiCall('POST', '/api/v1/ingest-jobs/confluence-pages', { url });
+                const res = await apiCall('POST', '/api/v1/ingest-jobs/confluence-subtrees', { url });
                 const job = await res.json();
-                upsertIngestJobCard(job);
+                localStorage.setItem(ACTIVE_INGEST_JOB_KEY, job.id);
+                renderIngestStatus(job);
                 pollIngestJob(job.id);
-                input.value = ''; // sẵn sàng gõ URL tiếp theo ngay
-                showToast(`Đã tạo job ${job.id.substring(0, 8)}..., đang xếp hàng xử lý`, 'success');
             } catch (e) {
+                document.getElementById('ingestStatus').innerHTML = '';
                 showToast('Lỗi: ' + e.message, 'error');
-            } finally {
-                btn.disabled = false;
+                setIngestControlsLocked(false, '🚀 Bắt đầu Ingest');
+            }
+        }
+
+        async function resumeIngest() {
+            const jobId = resumableIngestJobId;
+            if (!jobId || document.getElementById('ingestBtn').disabled) return;
+            setIngestControlsLocked(true, '⏳ Đang tiếp tục...');
+            try {
+                const res = await apiCall('POST', `/api/v1/ingest-jobs/${jobId}/resume`, {});
+                const job = await res.json();
+                resumableIngestJobId = null;
+                localStorage.setItem(ACTIVE_INGEST_JOB_KEY, job.id);
+                renderIngestStatus(job);
+                pollIngestJob(job.id);
+            } catch (e) {
+                setIngestControlsLocked(false, '↻ Tiếp tục ingest');
+                showToast('Không thể tiếp tục job: ' + e.message, 'error');
             }
         }
 
@@ -641,6 +681,8 @@
         // Auto check health on load
         window.addEventListener('load', () => {
             checkHealth();
+            const jobId = localStorage.getItem(ACTIVE_INGEST_JOB_KEY);
+            if (jobId) pollIngestJob(jobId);
         });
     </script>
 </body>

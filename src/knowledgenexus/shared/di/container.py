@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +19,10 @@ from knowledgenexus.indexing.application.use_cases.ingest_confluence_page import
 from knowledgenexus.indexing.application.use_cases.ingest_confluence_page_from_url import (
     IngestConfluencePageFromUrl,
 )
+from knowledgenexus.indexing.application.use_cases.ingest_confluence_subtree_from_url import (
+    IngestConfluenceSubtreeFromUrl,
+)
+from knowledgenexus.indexing.application.use_cases.ingest_chunking_packet import IngestChunkingPacket
 from knowledgenexus.indexing.infrastructure.embedding.bge_m3_embedder import BgeM3Embedder
 from knowledgenexus.retrieval.domain.ports.reranker_port import RerankerPort
 from knowledgenexus.retrieval.infrastructure.reranking.bge_reranker import BgeReranker
@@ -49,7 +52,7 @@ class AppContainer:
     confluence_page_ingestor: IngestConfluencePageFromUrl | None = field(
         default=None, repr=False, compare=False
     )
-    confluence_ingest_queue: asyncio.Queue | None = field(
+    confluence_subtree_ingestor: IngestConfluenceSubtreeFromUrl | None = field(
         default=None, repr=False, compare=False
     )
 
@@ -101,10 +104,22 @@ class AppContainer:
             )
         return self.confluence_page_ingestor
 
-    def get_confluence_ingest_queue(self) -> asyncio.Queue:
-        if self.confluence_ingest_queue is None:
-            self.confluence_ingest_queue = asyncio.Queue()
-        return self.confluence_ingest_queue
+    def get_confluence_subtree_ingestor(self) -> IngestConfluenceSubtreeFromUrl:
+        if self.confluence_subtree_ingestor is None:
+            if not self.settings.confluence_base_url or not self.settings.confluence_pat:
+                raise RuntimeError("Confluence credentials are not configured")
+            if not self.settings.embedding_model_path:
+                raise RuntimeError("BGE-M3 tokenizer assets are not configured")
+            self.confluence_subtree_ingestor = IngestConfluenceSubtreeFromUrl(
+                snapshot_root=Path(self.settings.confluence_snapshot_root).resolve(),
+                tokenizer_assets_dir=Path(self.settings.embedding_model_path).resolve(),
+                max_pages=self.settings.confluence_max_pages,
+                confluence_pat=self.settings.confluence_pat,
+                packet_ingestor=IngestChunkingPacket(
+                    embedder=self.get_embedder(), chunk_storage_service=self.chunk_storage,
+                ),
+            )
+        return self.confluence_subtree_ingestor
 
     async def shutdown(self) -> None:
         if self.embedder is not None:

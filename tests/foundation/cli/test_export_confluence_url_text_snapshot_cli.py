@@ -251,11 +251,12 @@ def test_run_composes_bounded_phases_and_publishes_latest(
     tokenizer = _operator_files(tmp_path, monkeypatch)
     phases = _PhaseMain()
     output = tmp_path / "operator-output"
+    progress: list[dict[str, object]] = []
 
     result = cli.run(
         url="https://confluence.example/spaces/SPACE/pages/12345/Root",
         output_root=str(output), tokenizer_assets_dir=str(tokenizer),
-        max_pages=200, phase_main=phases,
+        max_pages=200, phase_main=phases, progress_callback=progress.append,
     )
 
     assert result == {
@@ -270,16 +271,29 @@ def test_run_composes_bounded_phases_and_publishes_latest(
     assert (output / "LATEST.txt").read_text(encoding="ascii") == f"confluence-{_RUN_ID}\n"
     version = output / "versions" / f"confluence-{_RUN_ID}"
     assert {path.name for path in version.iterdir()} == cli._PACKET_FILES
+    assert [item["phase"] for item in progress] == [
+        "resolving_url", "inventory", "inventory", "capture_pages",
+        "capture_pages", "process_pages", "capture_drawio", "publish_packet",
+    ]
+    assert progress[-1] == {
+        "phase": "publish_packet", "document_count": 2, "chunk_count": 3,
+    }
 
+    replay_progress: list[dict[str, object]] = []
     replay = cli.run(
         url="https://confluence.example/spaces/SPACE/pages/12345/Root",
         output_root=str(output), tokenizer_assets_dir=str(tokenizer),
         max_pages=200, phase_main=lambda _argv: pytest.fail("published replay called a phase"),
+        progress_callback=replay_progress.append,
     )
     assert replay == {
         "status": "complete", "already_published": True,
         "acl_mode": "restricted_unresolved",
     }
+    assert replay_progress == [
+        {"phase": "resolving_url"},
+        {"phase": "completed", "document_count": 2, "chunk_count": 3},
+    ]
 
 
 def test_failed_capture_stops_before_processing_and_remains_resumable(

@@ -183,3 +183,37 @@ async def test_update_ingest_job_not_found(api_client):
 
     assert response.status_code == 404
     ingest_job_repo.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_confluence_subtree_duplicate_returns_existing_active_job(api_client):
+    client, ingest_job_repo = api_client
+    existing = _make_job(job_id="existing", status=IngestJobStatus.RUNNING)
+    existing.active_key = "a" * 64
+    existing.stats = {"phase": "capture_pages", "captured_pages": 12}
+    ingest_job_repo.create_or_get_active.return_value = (existing, False)
+
+    response = await client.post(
+        "/api/v1/ingest-jobs/confluence-subtrees",
+        json={"url": "https://confluence.example.test/spaces/ENG/pages/123"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["id"] == "existing"
+    ingest_job_repo.create_or_get_active.assert_awaited_once()
+    submitted = ingest_job_repo.create_or_get_active.await_args.args[0]
+    assert submitted.active_key is not None
+    assert "url" not in submitted.stats
+
+
+@pytest.mark.asyncio
+async def test_confluence_subtree_rejects_ip_literal_before_job_creation(api_client):
+    client, ingest_job_repo = api_client
+
+    response = await client.post(
+        "/api/v1/ingest-jobs/confluence-subtrees",
+        json={"url": "https://127.0.0.1/spaces/ENG/pages/123"},
+    )
+
+    assert response.status_code == 400
+    ingest_job_repo.create_or_get_active.assert_not_called()

@@ -15,3 +15,12 @@ class IngestJobRepositoryPort(ABC):
     @abstractmethod
     async def get_by_id(self, job_id: str) -> IngestJob | None:
         ...
+
+    @abstractmethod
+    async def create_or_get_active(self, job: IngestJob) -> tuple[IngestJob, bool]:
+        """Atomically create an active job, or return its existing owner."""
+        ...
+
+    @abstractmethod
+    async def get_by_active_key(self, active_key: str) -> IngestJob | None:
+        ...

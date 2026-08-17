@@ -21,3 +21,7 @@ class IngestJob:
     completed_at: datetime | None = None
     error: str | None = None
     stats: dict[str, object] = field(default_factory=dict)
+    # Present only while this job owns an active Confluence subtree submission.
+    # It is a database-unique, sanitized digest rather than a URL so duplicate
+    # browser submissions cannot start concurrent crawls of the same root.
+    active_key: str | None = None

@@ -139,19 +139,13 @@ class TestIngestChunkingPacketValidation:
 
     async def test_missing_chunks_file(self, temp_packet_dir, mock_embedder, mock_storage_service):
         use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
-        with pytest.raises(PacketFormatError, match="chunks.jsonl"):
+        with pytest.raises(PacketFormatError, match="file set"):
             await use_case.execute(temp_packet_dir)
 
     async def test_empty_chunks_file(self, temp_packet_dir, mock_embedder, mock_storage_service):
-        chunks_file = temp_packet_dir / "chunks.jsonl"
-        chunks_file.write_text("")
-
         use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
-        result = await use_case.execute(temp_packet_dir)
-
-        assert result.chunks_ingested == 0
-        assert result.chunks_failed == 0
-        assert result.status == "success"
+        with pytest.raises(PacketFormatError, match="file set"):
+            await use_case.execute(temp_packet_dir)
 
 
 class TestIngestChunkingPacketTransformation:
@@ -177,14 +171,8 @@ class TestIngestChunkingPacketTransformation:
             "acl_tags": ["restricted:unresolved"],
         }
 
-        chunks_file = temp_packet_dir / "chunks.jsonl"
-        _write_jsonl(chunks_file, [chunk_record])
-
-        documents_file = temp_packet_dir / "documents.jsonl"
-        _write_jsonl(documents_file, [{"document_id": doc_id, "title": "Test Page"}])
-
         use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
-        result = await use_case.execute(temp_packet_dir)
+        result = await use_case.execute_records([chunk_record], [{"document_id": doc_id, "title": "Test Page"}])
 
         assert result.chunks_ingested == 1
         assert result.chunks_failed == 0
@@ -222,11 +210,8 @@ class TestIngestChunkingPacketTransformation:
             for i in range(5)
         ]
 
-        chunks_file = temp_packet_dir / "chunks.jsonl"
-        _write_jsonl(chunks_file, chunks)
-
         use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
-        result = await use_case.execute(temp_packet_dir)
+        result = await use_case.execute_records(chunks)
 
         assert result.chunks_ingested == 5
         assert result.chunks_failed == 0
@@ -243,11 +228,8 @@ class TestIngestChunkingPacketTransformation:
             "text": "Content",
         }
 
-        chunks_file = temp_packet_dir / "chunks.jsonl"
-        _write_jsonl(chunks_file, [chunk_record])
-
         use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
-        result = await use_case.execute(temp_packet_dir)
+        result = await use_case.execute_records([chunk_record])
 
         assert result.chunks_ingested == 0
         assert result.chunks_failed == 1
@@ -287,11 +269,8 @@ class TestIngestChunkingPacketTransformation:
             },
         ]
 
-        chunks_file = temp_packet_dir / "chunks.jsonl"
-        _write_jsonl(chunks_file, chunks)
-
         use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
-        result = await use_case.execute(temp_packet_dir)
+        result = await use_case.execute_records(chunks)
 
         assert result.chunks_ingested == 2
         assert result.chunks_failed == 1
@@ -313,11 +292,8 @@ class TestIngestChunkingPacketTransformation:
             "page_id": "456",
         }
 
-        chunks_file = temp_packet_dir / "chunks.jsonl"
-        _write_jsonl(chunks_file, [chunk_record])
-
         use_case = IngestChunkingPacket(embedder, mock_storage_service)
-        result = await use_case.execute(temp_packet_dir)
+        result = await use_case.execute_records([chunk_record])
 
         assert result.chunks_ingested == 1
         saved_chunk = mock_storage_service.saved_chunks[0]
@@ -342,11 +318,8 @@ class TestIngestChunkingPacketTransformation:
             "part_total": 5,
         }
 
-        chunks_file = temp_packet_dir / "chunks.jsonl"
-        _write_jsonl(chunks_file, [chunk_record])
-
         use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
-        result = await use_case.execute(temp_packet_dir)
+        result = await use_case.execute_records([chunk_record])
 
         assert result.chunks_ingested == 1
         saved_chunk = mock_storage_service.saved_chunks[0]

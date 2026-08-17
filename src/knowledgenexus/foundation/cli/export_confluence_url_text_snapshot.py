@@ -665,6 +665,7 @@ def run(
     phase_main: Callable[[list[str] | None], int] | None = None,
     short_space_resolver: Callable[[str, str], object] | None = None,
     partial_processor: Callable[..., _PartialProcessingResult] | None = None,
+    progress_callback: Callable[[Mapping[str, object]], object] | None = None,
 ) -> dict[str, object]:
     if type(max_pages) is not int or max_pages <= 0 or max_pages > 5_000:
         raise TextSnapshotOperatorError("page_bound")
@@ -674,6 +675,20 @@ def run(
         raise TextSnapshotOperatorError("partial_mode")
     if partial_processor is not None and not allow_partial_processing:
         raise TextSnapshotOperatorError("partial_mode")
+    if progress_callback is not None and not callable(progress_callback):
+        raise TextSnapshotOperatorError("progress")
+
+    def report(phase: str, **values: object) -> None:
+        if progress_callback is None:
+            return
+        payload: dict[str, object] = {"phase": phase}
+        payload.update(values)
+        try:
+            progress_callback(payload)
+        except Exception:
+            raise TextSnapshotOperatorError("progress") from None
+
+    report("resolving_url")
     tokenizer = _require_operator_inputs(tokenizer_assets_dir)
     resolver = _resolve_short_space_key if short_space_resolver is None else short_space_resolver
     base_url, space_key, root_page_id = parse_canonical_page_url(
@@ -706,6 +721,7 @@ def run(
     )
     run_id = context["run_id"]
     if run_id is None:
+        report("inventory")
         inventory_args = ["inventory", *common]
         if context["inventory_started"]:
             inventory_args.append("--resume-unique")
@@ -741,6 +757,7 @@ def run(
             raise TextSnapshotOperatorError("inventory")
         context["run_id"] = run_id
         _save_context(context_path, context)
+        report("inventory", requested_pages=inventory["selected_pages"])
 
     version_name = f"confluence-{run_id}"
     version = versions / version_name
@@ -753,11 +770,13 @@ def run(
                 raise TextSnapshotOperatorError("publication")
         else:
             _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
-        return {
+        result = {
             "status": existing_summary.get("processing_status", "complete"),
             "already_published": True,
             "acl_mode": "restricted_unresolved",
         }
+        report("completed", document_count=existing_summary["document_count"], chunk_count=existing_summary["chunk_count"])
+        return result
 
     capture_args = ["capture-pages", *common, "--run-id", run_id, "--stop-after-batches", "1"]
     maximum_batches = (max_pages + 99) // 100
@@ -772,6 +791,10 @@ def run(
             _invoke_phase(capture_args, phase_main=phase_main),
             phase="capture-pages", statuses=frozenset({"complete", "stopped"}),
             counters=("captured", "replayed", "skipped", "failed"),
+        )
+        report(
+            "capture_pages", captured_pages=captured["captured"], replayed_pages=captured["replayed"],
+            capture_failed_pages=captured["failed"],
         )
         if captured["status"] == "complete":
             break
@@ -832,10 +855,12 @@ def run(
         "--chunking-profile-path", str(_DEFAULT_CHUNKING_PROFILE),
         "--tokenizer-assets-dir", str(tokenizer),
     ]
+    report("process_pages")
     _require_phase_result(
         _invoke_phase(processing, phase_main=phase_main),
         phase="process-pages", statuses=frozenset({"complete"}),
     )
+    report("capture_drawio")
     _require_phase_result(
         _invoke_phase(["capture-drawio", *common, "--run-id", run_id], phase_main=phase_main),
         phase="capture-drawio", statuses=frozenset({"complete"}),
@@ -856,13 +881,15 @@ def run(
         raise TextSnapshotOperatorError("publication")
     _verify_existing_packet(version)
     _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
-    return {
+    result = {
         "status": "complete", "already_published": False,
         "document_count": exported.get("document_count"),
         "chunk_count": exported.get("chunk_count"),
         "media_asset_count": exported.get("media_asset_count"),
         "acl_mode": "restricted_unresolved",
     }
+    report("publish_packet", document_count=exported["document_count"], chunk_count=exported["chunk_count"])
+    return result
 
 
 def _parser() -> argparse.ArgumentParser:
