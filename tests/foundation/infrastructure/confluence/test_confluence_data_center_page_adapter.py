@@ -7,6 +7,7 @@ import pytest
 from knowledgenexus.foundation.infrastructure.confluence import (
     ConfluenceDataCenterPageAdapter,
     ConfluenceHttpError,
+    ConfluenceHttpResponse,
     ConfluenceHttpResponseTooLargeError,
 )
 from knowledgenexus.foundation.ports.confluence_page_fetch_port import (
@@ -25,6 +26,7 @@ class RecordingByteTransport:
         self.body = body
         self.get_bytes_calls: list[dict[str, object]] = []
         self.get_json_calls = 0
+        self.get_response_bytes_calls: list[dict[str, object]] = []
 
     def get_bytes(self, *, path: str, query: Mapping[str, str]) -> bytes:
         self.get_bytes_calls.append({"path": path, "query": dict(query)})
@@ -33,6 +35,12 @@ class RecordingByteTransport:
     def get_json(self, *, path: str, query: Mapping[str, str]) -> Mapping[str, object]:
         self.get_json_calls += 1
         raise AssertionError("page fetch must use get_bytes, not get_json")
+
+    def get_response_bytes(
+        self, *, path: str, query: Mapping[str, str]
+    ) -> ConfluenceHttpResponse:
+        self.get_response_bytes_calls.append({"path": path, "query": dict(query)})
+        return ConfluenceHttpResponse(status_code=200, body=self.body)
 
 
 def test_fetch_issues_exactly_one_page_get_with_confirmed_expand() -> None:
@@ -53,6 +61,34 @@ def test_fetch_returns_bytes_verbatim() -> None:
     adapter = ConfluenceDataCenterPageAdapter(transport=RecordingByteTransport(body))
 
     assert adapter.fetch_page_raw(page_id=PAGE_ID) == body
+
+
+def test_status_aware_fetch_preserves_observed_status_and_exact_bytes() -> None:
+    body = b'{"id":"1000"}'
+    transport = RecordingByteTransport(body)
+
+    response = ConfluenceDataCenterPageAdapter(
+        transport=transport
+    ).fetch_page_response_raw(page_id=PAGE_ID)
+
+    assert response.status_code == 200
+    assert response.body == body
+    assert transport.get_response_bytes_calls == [
+        {"path": EXPECTED_PATH, "query": {"expand": EXPECTED_EXPAND}}
+    ]
+
+
+def test_status_aware_fetch_rejects_non_success_observation() -> None:
+    class NotFound(RecordingByteTransport):
+        def get_response_bytes(
+            self, *, path: str, query: Mapping[str, str]
+        ) -> ConfluenceHttpResponse:
+            return ConfluenceHttpResponse(status_code=404, body=b"not found")
+
+    with pytest.raises(ConfluencePageFetchError, match="page fetch failed"):
+        ConfluenceDataCenterPageAdapter(
+            transport=NotFound()
+        ).fetch_page_response_raw(page_id=PAGE_ID)
 
 
 def test_no_restriction_attachment_or_inventory_path_is_called() -> None:
