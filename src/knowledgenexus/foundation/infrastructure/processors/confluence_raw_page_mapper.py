@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from urllib.parse import urljoin, urlsplit
 
 from knowledgenexus.foundation.domain.models.confluence_page_content import (
     ConfluencePageSource,
@@ -82,6 +83,7 @@ class ConfluenceDataCenterRawPageMapper(ConfluenceRawPageMapperPort):
             source_version=str(version_number),
             updated_at=updated_at,
             storage_xhtml=storage_xhtml,
+            url=_optional_page_url(payload),
         )
 
 
@@ -145,3 +147,19 @@ def _require_non_empty_string(
     if value.strip() == "":
         raise ConfluenceRawPageMappingError(f"{field_path} must not be empty")
     return value
+
+
+def _optional_page_url(payload: Mapping[str, object]) -> str | None:
+    """Return a page URL when the Confluence response provides valid links."""
+    links = payload.get("_links")
+    if not isinstance(links, Mapping):
+        return None
+    base, webui = links.get("base"), links.get("webui")
+    if not isinstance(base, str) or not isinstance(webui, str):
+        return None
+    parsed_base = urlsplit(base)
+    if parsed_base.scheme not in {"http", "https"} or not parsed_base.netloc:
+        return None
+    if not webui.startswith("/") or any(char.isspace() or ord(char) < 32 for char in webui):
+        return None
+    return urljoin(base.rstrip("/") + "/", webui.lstrip("/"))

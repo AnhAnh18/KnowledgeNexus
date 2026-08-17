@@ -38,6 +38,26 @@ def test_format_search_text_includes_title_and_score():
     assert "score: 0.8900" in text
     assert "docs/Table.md:10-20" in text
 
+def test_format_search_text_prefers_url_over_internal_source_id():
+    text = format_search_text(
+        "action",
+        {
+            "total": 1,
+            "results": [
+                {
+                    "citation": {
+                        "source_type": "CONFLUENCE",
+                        "source_id": "2571872679",
+                        "url": "https://wiki.example/spaces/SPen/pages/2571872679",
+                    }
+                }
+            ],
+        },
+    )
+
+    assert "Source: CONFLUENCE / https://wiki.example/spaces/SPen/pages/2571872679" in text
+    assert "Source: CONFLUENCE / 2571872679" not in text
+
 
 def test_format_documents_text():
     text = format_documents_text(

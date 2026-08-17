@@ -17,9 +17,11 @@ def format_search_text(query: str, result: dict[str, Any]) -> str:
 
         lines.append(f"--- Result {idx + 1} (score: {score:.4f}) ---")
         lines.append(f"Title: {citation.get('title', 'N/A')}")
+        # Prefer an actionable source URL. Old or non-web records retain
+        # their stable internal source ID as a fallback.
+        source_reference = citation.get("url") or citation.get("source_id", "N/A")
         lines.append(
-            f"Source: {citation.get('source_type', 'N/A')} / "
-            f"{citation.get('source_id', 'N/A')}"
+            f"Source: {citation.get('source_type', 'N/A')} / {source_reference}"
         )
 
         file_path = citation.get("file_path")

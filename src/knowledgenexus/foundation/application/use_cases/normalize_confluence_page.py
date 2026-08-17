@@ -114,6 +114,7 @@ class NormalizeConfluencePage:
                 title=source.title,
                 space_key=source.space_key,
                 page_id=source.page_id,
+                url=source.url,
                 source_version=source.source_version,
                 jira_keys=[],
                 relation_ids=[],

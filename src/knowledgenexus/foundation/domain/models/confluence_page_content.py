@@ -114,6 +114,7 @@ class ConfluencePageSource:
     source_version: str
     updated_at: str
     storage_xhtml: str
+    url: str | None = None
 
 
 @dataclass(frozen=True, repr=False)

@@ -499,7 +499,14 @@ class IngestChunkingPacket:
             source_type=source_type,
             source_id=source_id,
             title=title,
-            url=None,  # Will be populated by retrieval layer if needed
+            # Retrieval hydrates chunks (rather than documents) before it
+            # builds citations, so the page URL must be present on the chunk.
+            url=(
+                document.get("url")
+                if isinstance(document, dict)
+                and isinstance(document.get("url"), str)
+                else None
+            ),
             chunk_index=chunk_index,
             total_chunks=1,  # Set by retrieval layer
             indexed_at=datetime.utcnow(),

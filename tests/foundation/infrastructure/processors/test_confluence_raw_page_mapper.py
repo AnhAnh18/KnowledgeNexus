@@ -49,6 +49,21 @@ def test_maps_trusted_page_fields_without_mutating_storage() -> None:
     assert result.storage_xhtml == "<p>Fixture body</p>"
     assert "Fixture body" not in repr(result)
 
+def test_maps_optional_canonical_page_url() -> None:
+    result = ConfluenceDataCenterRawPageMapper().map_page(
+        raw_bytes=_raw(
+            _payload(
+                _links={
+                    "base": "https://wiki.example/confluence",
+                    "webui": "/pages/viewpage.action?pageId=1000",
+                }
+            )
+        ),
+        expected_page_id=PAGE_ID,
+    )
+
+    assert result.url == "https://wiki.example/confluence/pages/viewpage.action?pageId=1000"
+
 
 def test_accepts_numeric_json_page_id_but_returns_canonical_string() -> None:
     result = ConfluenceDataCenterRawPageMapper().map_page(

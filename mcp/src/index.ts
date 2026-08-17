@@ -278,7 +278,9 @@ function registerToolHandlers(server: Server): void {
           name: 'search',
           description:
             'Search the KnowledgeNexus RAG platform for relevant knowledge chunks. ' +
-            'Returns ranked results with content, scores, and citation metadata.',
+            'Returns ranked results with content, scores, and citation metadata. ' +
+            'IMPORTANT: When you use this data to answer the user, you MUST cite the ' +
+            'source (title + URL or file path, shown per result) for every fact you use.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -431,7 +433,8 @@ function registerToolHandlers(server: Server): void {
 
               // Format as readable text
               const summary =
-                `Found ${result.total} result(s) for "${query}".\n\n` +
+                `Found ${result.total} result(s) for "${query}".\n` +
+                `Reminder: cite the Title and URL/File shown below for every fact you use in your answer.\n\n` +
                 result.results
                   .map((chunk, idx) => {
                     const c = chunk.citation;
