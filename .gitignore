@@ -20,6 +20,7 @@ akp_context_bundle_*.zip
 # Environment
 .env
 .env.local
+.env.docker
 
 # Runtime data
 data/raw/
@@ -42,3 +43,10 @@ data/eval/results/*.json
 # MCP server (Node.js)
 mcp/node_modules/
 mcp/build/
+
+# Docker — model weights staged for image build (see docker/models/README.md)
+docker/models/**/*
+!docker/models/**/.gitkeep
+
+# Docker — exported offline image bundles (see docker/vendor/README.md)
+docker/vendor/*.tar

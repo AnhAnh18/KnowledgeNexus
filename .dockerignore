@@ -1,0 +1,42 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+mcp/node_modules/
+mcp/build/
+
+# Runtime data / local state (must not leak into image layers)
+data/
+storage/
+*.db
+*.log
+ingest_output.log
+uvicorn_err.log
+uvicorn_out.log
+
+# Secrets — never bake real env values into an image
+.env
+.env.local
+.env.docker
+
+# Exported offline image bundles (never needed inside a build context)
+docker/vendor/*.tar
+
+# IDE / misc
+.idea/
+.vscode/
+.claude/
+.gemini/
+*.zip
+.local_ai/
+.codex-workflow/
