@@ -2,11 +2,12 @@ import logging
 import asyncio
 import hashlib
 import ipaddress
+from dataclasses import dataclass
 from uuid import uuid4
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from knowledgenexus.foundation.domain.rules.confluence_url import (
     ConfluenceUrlParseError,
@@ -44,6 +45,51 @@ def _to_response(job: IngestJob) -> IngestJobResponse:
         error=job.error,
         stats=job.stats,
     )
+
+
+@dataclass(frozen=True)
+class ConfluenceIngestTask:
+    """One queued unit of work for `confluence_ingest_worker`.
+
+    `kind` selects the runner: a single page (`"page"`) or a whole subtree
+    (`"subtree"`).  Both kinds share one queue so submissions are drained in
+    arrival order regardless of which endpoint created them.
+    """
+
+    kind: str
+    job_id: str
+    url: str
+
+
+# Number of jobs processed concurrently by the queue worker(s). Kept at 1
+# by default: BgeM3Embedder is a single shared model instance, so running
+# more than one heavy embedding job at a time buys little real throughput
+# while making memory/CPU contention harder to reason about. Raise this if
+# ingestion needs to scale beyond one job at a time.
+CONFLUENCE_INGEST_WORKER_COUNT = 1
+
+
+async def confluence_ingest_worker(container: AppContainer) -> None:
+    """Long-running consumer: pulls one queued job at a time and runs it.
+
+    Started as a background asyncio task per FastAPI app lifespan (see
+    `presentation/api/app.py`), so it lives for the whole process lifetime
+    and keeps consuming `container.get_confluence_ingest_queue()` without
+    blocking request handlers.  Jobs sit in the queue as PENDING ("waiting"
+    in the UI) and only flip to RUNNING when a worker picks them up.
+    """
+    queue = container.get_confluence_ingest_queue()
+    while True:
+        task = await queue.get()
+        try:
+            if task.kind == "subtree":
+                await _run_confluence_subtree_ingest_job(task.job_id, task.url, container)
+            else:
+                await _run_confluence_page_ingest_job(task.job_id, task.url, container)
+        except Exception:
+            logger.exception("Unhandled error processing ingest job %s", task.job_id)
+        finally:
+            queue.task_done()
 
 
 def _submission_key(url: object) -> str:
@@ -158,7 +204,6 @@ async def create_ingest_job(
 )
 async def create_confluence_page_ingest_job(
     body: IngestConfluenceUrlRequest,
-    background_tasks: BackgroundTasks,
     container: AppContainer = Depends(_container),
 ) -> IngestJobResponse:
     try:
@@ -174,7 +219,13 @@ async def create_confluence_page_ingest_job(
         stats={"url": body.url, "page_id": page_id},
     )
     await container.ingest_job_repo.create(job)
-    background_tasks.add_task(_run_confluence_page_ingest_job, job.id, body.url, container)
+    # Enqueue instead of firing a bare BackgroundTask: this lets many jobs be
+    # submitted back-to-back — they stay PENDING and wait their turn in the
+    # queue — instead of each request racing to run its own ingest
+    # immediately. The request returns right away regardless of queue depth.
+    await container.get_confluence_ingest_queue().put(
+        ConfluenceIngestTask(kind="page", job_id=job.id, url=body.url)
+    )
     return _to_response(job)
 
 
@@ -185,7 +236,6 @@ async def create_confluence_page_ingest_job(
 )
 async def create_confluence_subtree_ingest_job(
     body: IngestConfluenceUrlRequest,
-    background_tasks: BackgroundTasks,
     container: AppContainer = Depends(_container),
 ) -> IngestJobResponse:
     try:
@@ -196,7 +246,8 @@ async def create_confluence_subtree_ingest_job(
         id=str(uuid4()), source_type=SourceType.CONFLUENCE,
         status=IngestJobStatus.PENDING, started_at=datetime.now(UTC),
         # Never persist the submitted URL or filesystem workspace in public job stats.
-        stats={"phase": "resolving_url", "resumable": False}, active_key=submission_key,
+        # "queued" is the waiting state the UI shows until a worker picks the job up.
+        stats={"phase": "queued", "resumable": False}, active_key=submission_key,
     )
     try:
         owner, created = await container.ingest_job_repo.create_or_get_active(job)
@@ -204,7 +255,9 @@ async def create_confluence_subtree_ingest_job(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="ingest job unavailable")
     if not created:
         return _to_response(owner)
-    background_tasks.add_task(_run_confluence_subtree_ingest_job, job.id, body.url, container)
+    await container.get_confluence_ingest_queue().put(
+        ConfluenceIngestTask(kind="subtree", job_id=job.id, url=body.url)
+    )
     return _to_response(job)
 
 
@@ -218,7 +271,11 @@ async def _run_confluence_page_ingest_job(job_id: str, url: str, container: AppC
     job.status = IngestJobStatus.RUNNING
     await container.ingest_job_repo.update(job)
     try:
-        ingestor = container.get_confluence_page_ingestor()
+        # First call lazily builds the tokenizer + BGE-M3 embedder (loading
+        # a multi-GB model from disk) — genuinely blocking, synchronous work.
+        # Run it off the event loop so other requests (and other queued
+        # jobs' status polling) stay responsive while it loads.
+        ingestor = await asyncio.to_thread(container.get_confluence_page_ingestor)
         result = await ingestor.execute(url=url)
         job.status = IngestJobStatus.COMPLETED
         job.stats = {
@@ -260,7 +317,9 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
                 await container.ingest_job_repo.update(job)
                 return
         canonical_url = f"{base_url}/spaces/{space_key}/pages/{page_id}"
-        ingestor = container.get_confluence_subtree_ingestor()
+        # Same reason as the single-page runner: the first call loads BGE-M3
+        # from disk, so keep that off the event loop.
+        ingestor = await asyncio.to_thread(container.get_confluence_subtree_ingestor)
 
         async def report(payload: object) -> None:
             await _set_progress(job, container, payload)
@@ -294,7 +353,6 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
 @router.post("/{job_id}/resume", response_model=IngestJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def resume_confluence_subtree_ingest_job(
     job_id: str,
-    background_tasks: BackgroundTasks,
     container: AppContainer = Depends(_container),
 ) -> IngestJobResponse:
     job = await container.ingest_job_repo.get_by_id(job_id)
@@ -310,13 +368,15 @@ async def resume_confluence_subtree_ingest_job(
         job.status = IngestJobStatus.PENDING
         job.completed_at = None
         job.error = None
-        job.stats = {"phase": "resolving_url", "resumable": False}
+        job.stats = {"phase": "queued", "resumable": False}
         await container.ingest_job_repo.update(job)
     except ConfluenceSubtreeIngestError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.category)
     except Exception:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="resume unavailable")
-    background_tasks.add_task(_run_confluence_subtree_ingest_job, job.id, canonical_url, container)
+    await container.get_confluence_ingest_queue().put(
+        ConfluenceIngestTask(kind="subtree", job_id=job.id, url=canonical_url)
+    )
     return _to_response(job)
 
 
@@ -353,7 +413,12 @@ async def update_ingest_job(
         job.completed_at = body.completed_at
     if body.error is not None:
         job.error = body.error
-    job.stats = body.stats
+    # Same omitted-means-unchanged rule as the fields above: `stats` is
+    # optional on the request, so an unconditional assignment wiped it to
+    # None on any PATCH that did not send it — and `IngestJobResponse.stats`
+    # is a required dict, so the endpoint then failed on its own response.
+    if body.stats is not None:
+        job.stats = body.stats
 
     await container.ingest_job_repo.update(job)
     return _to_response(job)

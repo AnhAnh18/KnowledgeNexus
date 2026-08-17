@@ -172,6 +172,27 @@ async def test_update_ingest_job_failed_status(api_client):
 
 
 @pytest.mark.asyncio
+async def test_update_ingest_job_keeps_stats_when_omitted(api_client):
+    """Omitting `stats` must leave the stored progress alone, not erase it.
+
+    `stats` carries the subtree ingest phase/counters, so an unconditional
+    assignment dropped live progress on any partial PATCH.
+    """
+    client, ingest_job_repo = api_client
+    existing = _make_job(status=IngestJobStatus.RUNNING)
+    existing.stats = {"phase": "capture_pages", "captured_pages": 12}
+    ingest_job_repo.get_by_id.return_value = existing
+
+    response = await client.patch(
+        "/api/v1/ingest-jobs/job-001",
+        json={"status": "failed", "error": "Connection timeout"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["stats"] == {"phase": "capture_pages", "captured_pages": 12}
+
+
+@pytest.mark.asyncio
 async def test_update_ingest_job_not_found(api_client):
     client, ingest_job_repo = api_client
     ingest_job_repo.get_by_id.return_value = None

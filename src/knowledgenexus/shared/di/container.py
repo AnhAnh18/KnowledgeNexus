@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -53,6 +54,9 @@ class AppContainer:
         default=None, repr=False, compare=False
     )
     confluence_subtree_ingestor: IngestConfluenceSubtreeFromUrl | None = field(
+        default=None, repr=False, compare=False
+    )
+    confluence_ingest_queue: asyncio.Queue | None = field(
         default=None, repr=False, compare=False
     )
 
@@ -120,6 +124,11 @@ class AppContainer:
                 ),
             )
         return self.confluence_subtree_ingestor
+
+    def get_confluence_ingest_queue(self) -> asyncio.Queue:
+        if self.confluence_ingest_queue is None:
+            self.confluence_ingest_queue = asyncio.Queue()
+        return self.confluence_ingest_queue
 
     async def shutdown(self) -> None:
         if self.embedder is not None:
