@@ -44,9 +44,10 @@ data/eval/results/*.json
 mcp/node_modules/
 mcp/build/
 
-# Docker — model weights staged for image build (see docker/models/README.md)
-docker/models/**/*
-!docker/models/**/.gitkeep
+# External models (mounted via docker-compose.yml, not stored in repo)
+# Models are stored at D:/KnowledgeNexus_Models/ or other external location
+/KnowledgeNexus_Models/
+**/KnowledgeNexus_Models/
 
 # Docker — exported offline image bundles (see docker/vendor/README.md)
 docker/vendor/*.tar

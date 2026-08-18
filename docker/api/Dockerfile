@@ -20,10 +20,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN uv pip install --index-url https://download.pytorch.org/whl/cpu torch \
     && uv pip install -e ".[embedding]"
 
-# Model weights must be staged locally before build — see docker/models/README.md.
-# Baked into the image so the container needs no network access at runtime.
-COPY docker/models/bge-m3 /app/models/bge-m3
-COPY docker/models/bge-reranker-v2-m3 /app/models/bge-reranker-v2-m3
+# Model weights are mounted from external location via docker-compose.yml volume mount.
+# See docker/models/README.md for model setup instructions.
 
 
 FROM python:3.11-slim AS runtime

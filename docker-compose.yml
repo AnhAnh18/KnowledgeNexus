@@ -30,6 +30,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # Mount models from external location (D:/KnowledgeNexus_Models)
+      - D:/KnowledgeNexus_Models:/app/models:ro
       - sqlite_db:/app/data/index
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health').read()"]
