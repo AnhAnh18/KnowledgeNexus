@@ -22,17 +22,7 @@ $script:SummaryFileName = "w5-b-sanitized-summary.json"
 $script:OriginalAuthorizationConsumed = $false
 $script:OriginalLiveInvocationCount = 0
 $script:ExporterInvocationCount = 0
-$script:CaptureFailureCategories = $null
-$script:PostInventoryFailureCategories = @(
-    "raw_generation_activation_run_operation_invalid",
-    "raw_generation_activation_run_not_found",
-    "raw_generation_activation_run_not_resumable",
-    "raw_generation_activation_run_match_ambiguous",
-    "raw_generation_activation_incomplete_run_conflict",
-    "inventory_stream",
-    "inventory_selection_invalid",
-    "selection_publication"
-)
+$script:TransferEquivalent = $false
 
 function Fail-Gate([string]$Stage) {
     $script:FailureStage = $Stage
@@ -258,32 +248,33 @@ function Wait-LiveProcessBoundary {
     }
 }
 
-function Assert-PhaseResultEnvelope(
-    [object]$Value,
-    [string[]]$SuccessFields,
-    [string]$Stage
-) {
+function Assert-InventoryResult([object]$Value, [string]$Stage) {
     if ($null -eq $Value -or $Value -is [System.Array] -or
         $Value.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
-        Fail-Gate $Stage
+        Fail-Gate "configuration"
     }
     $actualFields = @($Value.PSObject.Properties.Name | Sort-Object)
     $failureFields = @("failure_category", "status")
     if (($actualFields -join "`n") -eq ($failureFields -join "`n")) {
-        Assert-ExactObject $Value @("status", "failure_category") $Stage
-        Assert-ExactString $Value.status $Stage
-        Assert-ExactString $Value.failure_category $Stage
-        if ($Value.status -ne "failed") { Fail-Gate $Stage }
-        if ($script:PostInventoryFailureCategories -notcontains $Value.failure_category) {
-            Fail-Gate $Stage
+        Assert-ExactObject $Value @("status", "failure_category") "configuration"
+        Assert-ExactString $Value.status "configuration"
+        Assert-ExactString $Value.failure_category "configuration"
+        if ($Value.status -ne "failed") { Fail-Gate "configuration" }
+        $allowed = @(
+            "raw_generation_activation_run_operation_invalid",
+            "raw_generation_activation_run_not_found",
+            "raw_generation_activation_run_not_resumable",
+            "raw_generation_activation_run_match_ambiguous",
+            "raw_generation_activation_incomplete_run_conflict",
+            "inventory_stream",
+            "selection_publication"
+        )
+        if ($allowed -notcontains $Value.failure_category) {
+            Fail-Gate "configuration"
         }
         Fail-Gate $Value.failure_category
     }
-    Assert-ExactObject $Value $SuccessFields $Stage
-}
-
-function Assert-InventoryResult([object]$Value, [string]$Stage) {
-    Assert-PhaseResultEnvelope $Value @("status", "phase", "selected_pages", "run_id") $Stage
+    Assert-ExactObject $Value @("status", "phase", "selected_pages", "run_id") $Stage
     Assert-ExactString $Value.status $Stage
     Assert-ExactString $Value.phase $Stage
     Assert-ExactString $Value.run_id $Stage '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -292,61 +283,14 @@ function Assert-InventoryResult([object]$Value, [string]$Stage) {
 }
 
 function Assert-CaptureResult([object]$Value, [string]$ExpectedStatus, [string]$Stage) {
-    if ($null -eq $Value -or $Value -is [System.Array] -or
-        $Value.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
-        Fail-Gate $Stage
-    }
-    $baseFields = @("status", "phase", "captured", "replayed", "skipped", "failed") | Sort-Object
-    $failureFields = @($baseFields + "failure_categories") | Sort-Object
-    $actualFields = @($Value.PSObject.Properties.Name | Sort-Object)
-    $hasFailureCategories = (($actualFields -join "`n") -eq ($failureFields -join "`n"))
-    $expectedFields = $(if ($hasFailureCategories) { $failureFields } else { $baseFields })
-    Assert-PhaseResultEnvelope $Value $expectedFields $Stage
+    Assert-ExactObject $Value @("status", "phase", "captured", "replayed", "skipped", "failed") $Stage
     Assert-ExactString $Value.status $Stage
     Assert-ExactString $Value.phase $Stage
     foreach ($field in @("captured", "replayed", "skipped", "failed")) {
         Assert-ExactInteger $Value.$field $Stage 0
     }
     if ($Value.status -ne $ExpectedStatus -or $Value.phase -ne "capture-pages" -or
-        [int64]$Value.skipped -ne 0) { Fail-Gate $Stage }
-    if ([int64]$Value.failed -eq 0) {
-        if ($hasFailureCategories) { Fail-Gate $Stage }
-    } else {
-        if (-not $hasFailureCategories -or $null -eq $Value.failure_categories -or
-            $Value.failure_categories -is [System.Array] -or
-            $Value.failure_categories.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
-            Fail-Gate $Stage
-        }
-        $allowed = @(
-            "acknowledgement_conflict", "acknowledgement_identity_conflict",
-            "acknowledgement_inspection_failed", "acknowledgement_invalid",
-            "acknowledgement_invalid_request", "acknowledgement_missing",
-            "acknowledgement_result_invalid", "acknowledgement_schema_incompatible",
-            "acknowledgement_unknown_inventory", "acknowledgement_unsafe_target",
-            "fetch_failure_invalid", "fetch_http", "fetch_identity_mismatch",
-            "fetch_invalid_page_id", "fetch_invalid_run_id", "fetch_malformed_json",
-            "fetch_non_object_json", "fetch_response_size_limit",
-            "fetch_source_version_invalid", "fetch_store", "replay_conflict",
-            "replay_identity_conflict", "replay_inspection_failed", "replay_invalid",
-            "replay_invalid_request", "replay_result_invalid",
-            "replay_schema_incompatible", "replay_unknown_inventory",
-            "replay_unsafe_target"
-        )
-        $categoryNames = @($Value.failure_categories.PSObject.Properties.Name | Sort-Object)
-        if ($categoryNames.Count -eq 0) { Fail-Gate $Stage }
-        $sum = [int64]0
-        $sanitized = [ordered]@{}
-        foreach ($name in $categoryNames) {
-            if ($allowed -notcontains $name) { Fail-Gate $Stage }
-            Assert-ExactInteger $Value.failure_categories.$name $Stage 1
-            $count = [int64]$Value.failure_categories.$name
-            $sum += $count
-            $sanitized[$name] = $count
-        }
-        if ($sum -ne [int64]$Value.failed) { Fail-Gate $Stage }
-        $script:CaptureFailureCategories = $sanitized
-        Fail-Gate $Stage
-    }
+        [int64]$Value.failed -ne 0 -or [int64]$Value.skipped -ne 0) { Fail-Gate $Stage }
     if ($ExpectedStatus -eq "stopped" -and
         ([int64]$Value.captured -ne 200 -or [int64]$Value.replayed -ne 0)) { Fail-Gate $Stage }
     if ($ExpectedStatus -eq "complete" -and [int64]$Value.replayed -ne 200) { Fail-Gate $Stage }
@@ -526,17 +470,13 @@ function Invoke-ExporterModuleJson([string[]]$Arguments, [string]$Stage) {
 }
 
 function New-FailurePayload([bool]$AuthorizationConsumed) {
-    $payload = [ordered]@{
+    return [ordered]@{
         all_gates_passed = $false
         authorization_consumed = $AuthorizationConsumed
         exporter_invocations = $script:ExporterInvocationCount
         failure_category = $script:FailureStage
         status = "failed"
     }
-    if ($null -ne $script:CaptureFailureCategories) {
-        $payload["capture_failure_categories"] = $script:CaptureFailureCategories
-    }
-    return $payload
 }
 
 function Get-TreeDigest([string[]]$Roots) {
@@ -672,7 +612,7 @@ function Write-SanitizedSummary(
         schema = "w5-b-sanitized-v1"
         operator_mode = $script:OperatorMode
         authorization_consumed = $AuthorizationConsumed
-        transfer_equivalent = [bool]$script:Config.transfer_equivalent
+        transfer_equivalent = $script:TransferEquivalent
         invocation_count = $InvocationCount
         recovery_exporter_invocations = 0
         controlled_stop_resume = $Succeeded
@@ -715,37 +655,70 @@ try {
     $lexicalFields = @(Get-StrictTopLevelJsonPropertyNames $configText | Sort-Object)
     try { $script:Config = $configText | ConvertFrom-Json }
     catch { Fail-Gate "configuration" }
-    $requiredFields = @(
-        "format_version", "owner_authorized", "transfer_equivalent", "expected_execution_head",
-        "repo_root", "python_executable", "state_dir", "max_pages", "raw_root",
-        "reliability_profile_path", "chunking_profile_path", "jira_relation_profile_path",
-        "tokenizer_assets_dir", "space_key", "root_page_id", "dataset_root_a",
-        "dataset_root_b", "evidence_dir", "git_repository", "git_branch", "git_commit",
-        "live_phase_timeout_seconds", "offline_phase_timeout_seconds",
-        "max_child_working_set_bytes"
-    ) | Sort-Object
+    if ($null -eq $script:Config -or $script:Config -is [System.Array] -or
+        $script:Config.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
+        Fail-Gate "configuration"
+    }
+    $initialFields = @($script:Config.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($initialFields -notcontains "format_version" -or
+        $script:Config.format_version -isnot [string]) {
+        Fail-Gate "configuration"
+    }
+    $isSimpleProfile = $script:Config.format_version -eq "w5-b-root1-operator-v2"
+    $requiredFields = $(if ($isSimpleProfile) {
+        @(
+            "format_version", "owner_authorized", "reviewed_code_confirmed",
+            "python_executable", "output_root", "max_pages",
+            "tokenizer_assets_dir", "space_key", "root_page_id"
+        )
+    } else {
+        @(
+            "format_version", "owner_authorized", "transfer_equivalent", "expected_execution_head",
+            "repo_root", "python_executable", "state_dir", "max_pages", "raw_root",
+            "reliability_profile_path", "chunking_profile_path", "jira_relation_profile_path",
+            "tokenizer_assets_dir", "space_key", "root_page_id", "dataset_root_a",
+            "dataset_root_b", "evidence_dir", "git_repository", "git_branch", "git_commit",
+            "live_phase_timeout_seconds", "offline_phase_timeout_seconds",
+            "max_child_working_set_bytes"
+        )
+    }) | Sort-Object
     $observedFields = @($script:Config.PSObject.Properties.Name | Sort-Object)
     if (($requiredFields -join "`n") -ne ($observedFields -join "`n") -or
         ($requiredFields -join "`n") -ne ($lexicalFields -join "`n")) {
         Fail-Gate "configuration"
     }
     Assert-ExactObject $script:Config $requiredFields "configuration"
-    foreach ($field in @(
-        "format_version", "expected_execution_head", "repo_root", "python_executable",
-        "state_dir", "raw_root", "reliability_profile_path", "chunking_profile_path",
-        "jira_relation_profile_path", "tokenizer_assets_dir", "space_key", "root_page_id",
-        "dataset_root_a", "dataset_root_b", "evidence_dir", "git_repository",
-        "git_branch", "git_commit"
-    )) { Assert-ExactString $script:Config.$field "configuration" }
+    $stringFields = $(if ($isSimpleProfile) {
+        @("format_version", "python_executable", "output_root", "tokenizer_assets_dir", "space_key", "root_page_id")
+    } else {
+        @(
+            "format_version", "expected_execution_head", "repo_root", "python_executable",
+            "state_dir", "raw_root", "reliability_profile_path", "chunking_profile_path",
+            "jira_relation_profile_path", "tokenizer_assets_dir", "space_key", "root_page_id",
+            "dataset_root_a", "dataset_root_b", "evidence_dir", "git_repository",
+            "git_branch", "git_commit"
+        )
+    })
+    foreach ($field in $stringFields) { Assert-ExactString $script:Config.$field "configuration" }
     Assert-ExactBoolean $script:Config.owner_authorized "configuration"
-    Assert-ExactBoolean $script:Config.transfer_equivalent "configuration"
-    foreach ($field in @(
-        "max_pages", "live_phase_timeout_seconds", "offline_phase_timeout_seconds",
-        "max_child_working_set_bytes"
-    )) { Assert-ExactInteger $script:Config.$field "configuration" 1 }
-    if ($script:Config.format_version -ne "w5-b-root1-one-shot-v1" -or
+    if ($isSimpleProfile) {
+        Assert-ExactBoolean $script:Config.reviewed_code_confirmed "configuration"
+        Assert-ExactInteger $script:Config.max_pages "configuration" 1
+        $script:TransferEquivalent = [bool]$script:Config.reviewed_code_confirmed
+        $script:Config | Add-Member -NotePropertyName live_phase_timeout_seconds -NotePropertyValue ([int64]43200)
+        $script:Config | Add-Member -NotePropertyName offline_phase_timeout_seconds -NotePropertyValue ([int64]21600)
+        $script:Config | Add-Member -NotePropertyName max_child_working_set_bytes -NotePropertyValue ([int64]4294967296)
+    } else {
+        Assert-ExactBoolean $script:Config.transfer_equivalent "configuration"
+        foreach ($field in @(
+            "max_pages", "live_phase_timeout_seconds", "offline_phase_timeout_seconds",
+            "max_child_working_set_bytes"
+        )) { Assert-ExactInteger $script:Config.$field "configuration" 1 }
+        $script:TransferEquivalent = [bool]$script:Config.transfer_equivalent
+    }
+    if ((-not $isSimpleProfile -and $script:Config.format_version -ne "w5-b-root1-one-shot-v1") -or
         ((-not $PreflightOnly -and -not $RecoveryOnly) -and $script:Config.owner_authorized -ne $true) -or
-        $script:Config.transfer_equivalent -ne $true) {
+        -not $script:TransferEquivalent) {
         Fail-Gate "authorization"
     }
     if ([int64]$script:Config.live_phase_timeout_seconds -lt 60 -or
@@ -767,7 +740,8 @@ try {
         }
     }
 
-    $script:RepoRoot = Assert-PlainExistingPath (Full-Path $script:Config.repo_root) $true
+    $derivedRepoRoot = Split-Path -Parent $PSScriptRoot
+    $script:RepoRoot = Assert-PlainExistingPath (Full-Path $(if ($isSimpleProfile) { $derivedRepoRoot } else { $script:Config.repo_root })) $true
     if (Is-Within $script:RepoRoot $configPath) { Fail-Gate "configuration" }
     if ($RecoveryOnly) {
         $script:PythonExecutable = Full-Path $script:Config.python_executable
@@ -775,7 +749,8 @@ try {
         $script:PythonExecutable = Assert-PlainExistingPath (Full-Path $script:Config.python_executable) $false
     }
     $head = (& git -C $script:RepoRoot rev-parse HEAD 2>$null).Trim()
-    if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$' -or $head -ne $script:Config.expected_execution_head) {
+    if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$' -or
+        (-not $isSimpleProfile -and $head -ne $script:Config.expected_execution_head)) {
         Fail-Gate "execution_head"
     }
     & git -C $script:RepoRoot diff --quiet
@@ -788,18 +763,28 @@ try {
     if ([string]$script:Config.root_page_id -notmatch '^[0-9]+$' -or [string]$script:Config.space_key -notmatch '^[A-Z0-9]+$') {
         Fail-Gate "scope"
     }
-    if ([string]$script:Config.git_commit -notmatch '^[0-9a-f]{40}$' -or
-        [string]$script:Config.git_repository -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or
-        [string]$script:Config.git_branch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$') {
+    if ($isSimpleProfile) {
+        $gitRepository = Split-Path -Leaf $script:RepoRoot
+        $gitBranch = (& git -C $script:RepoRoot symbolic-ref --quiet --short HEAD 2>$null).Trim()
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gitBranch)) { $gitBranch = "detached" }
+        $gitCommit = $head
+    } else {
+        $gitRepository = [string]$script:Config.git_repository
+        $gitBranch = [string]$script:Config.git_branch
+        $gitCommit = [string]$script:Config.git_commit
+    }
+    if ($gitCommit -notmatch '^[0-9a-f]{40}$' -or
+        $gitRepository -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or
+        $gitBranch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$') {
         Fail-Gate "configuration"
     }
 
     $approvedReliability = Join-Path $script:RepoRoot "contracts/foundation/crawl_reliability_profile.yaml"
     $approvedChunking = Join-Path $script:RepoRoot "contracts/foundation/embedding_profile.yaml"
     $approvedJira = Join-Path $script:RepoRoot "contracts/foundation/jira_relation_profile.yaml"
-    $reliability = Assert-PlainExistingPath (Full-Path $script:Config.reliability_profile_path) $false
-    $chunking = Assert-PlainExistingPath (Full-Path $script:Config.chunking_profile_path) $false
-    $jira = Assert-PlainExistingPath (Full-Path $script:Config.jira_relation_profile_path) $false
+    $reliability = Assert-PlainExistingPath (Full-Path $(if ($isSimpleProfile) { $approvedReliability } else { $script:Config.reliability_profile_path })) $false
+    $chunking = Assert-PlainExistingPath (Full-Path $(if ($isSimpleProfile) { $approvedChunking } else { $script:Config.chunking_profile_path })) $false
+    $jira = Assert-PlainExistingPath (Full-Path $(if ($isSimpleProfile) { $approvedJira } else { $script:Config.jira_relation_profile_path })) $false
     if ($reliability -ne (Full-Path $approvedReliability) -or $chunking -ne (Full-Path $approvedChunking) -or $jira -ne (Full-Path $approvedJira)) {
         Fail-Gate "profile_binding"
     }
@@ -818,26 +803,49 @@ try {
     }
     if (Is-Within $script:RepoRoot $tokenizer) { Fail-Gate "tokenizer_boundary" }
 
+    if ($isSimpleProfile) {
+        $outputRoot = Full-Path $script:Config.output_root
+        if (Is-Within $script:RepoRoot $outputRoot) { Fail-Gate "path_preflight" }
+        if ($RecoveryOnly) {
+            [void](Assert-PlainExistingPath $outputRoot $true)
+        } else {
+            if (Test-Path -LiteralPath $outputRoot) { Fail-Gate "fresh_path_preflight" }
+            [void](Assert-PlainExistingPath (Split-Path -Parent $outputRoot) $true)
+        }
+        $derivedRuntimeTargets = @(
+            (Join-Path $outputRoot "state"),
+            (Join-Path $outputRoot "raw"),
+            (Join-Path $outputRoot "snapshot-a"),
+            (Join-Path $outputRoot "snapshot-b"),
+            (Join-Path $outputRoot "evidence")
+        )
+    }
     if ($RecoveryOnly) {
         $runtimeTargets = @(
-            (Assert-PlainExistingPath (Full-Path $script:Config.state_dir) $true),
-            (Assert-PlainExistingPath (Full-Path $script:Config.raw_root) $true),
-            (Assert-PlainExistingPath (Full-Path $script:Config.dataset_root_a) $true),
-            (Assert-PlainExistingPath (Full-Path $script:Config.dataset_root_b) $true),
-            (Assert-PlainExistingPath (Full-Path $script:Config.evidence_dir) $true)
+            $(if ($isSimpleProfile) { $derivedRuntimeTargets | ForEach-Object { Assert-PlainExistingPath $_ $true } } else {
+                (Assert-PlainExistingPath (Full-Path $script:Config.state_dir) $true),
+                (Assert-PlainExistingPath (Full-Path $script:Config.raw_root) $true),
+                (Assert-PlainExistingPath (Full-Path $script:Config.dataset_root_a) $true),
+                (Assert-PlainExistingPath (Full-Path $script:Config.dataset_root_b) $true),
+                (Assert-PlainExistingPath (Full-Path $script:Config.evidence_dir) $true)
+            })
         )
         if (@($runtimeTargets | Where-Object { Is-Within $script:RepoRoot $_ }).Count -ne 0) {
             Fail-Gate "path_preflight"
         }
     }
     else {
-        $runtimeTargets = @(
-            (Assert-FreshExternalDirectory $script:Config.state_dir $script:RepoRoot),
-            (Assert-FreshExternalDirectory $script:Config.raw_root $script:RepoRoot),
-            (Assert-FreshExternalDirectory $script:Config.dataset_root_a $script:RepoRoot),
-            (Assert-FreshExternalDirectory $script:Config.dataset_root_b $script:RepoRoot),
-            (Assert-FreshExternalDirectory $script:Config.evidence_dir $script:RepoRoot)
-        )
+        $runtimeTargets = $(if ($isSimpleProfile) {
+            $derivedRuntimeTargets
+        } else {
+            @(
+                (Assert-FreshExternalDirectory $script:Config.state_dir $script:RepoRoot),
+                (Assert-FreshExternalDirectory $script:Config.raw_root $script:RepoRoot),
+                (Assert-FreshExternalDirectory $script:Config.dataset_root_a $script:RepoRoot),
+                (Assert-FreshExternalDirectory $script:Config.dataset_root_b $script:RepoRoot),
+                (Assert-FreshExternalDirectory $script:Config.evidence_dir $script:RepoRoot)
+            )
+        })
     }
     if (@($runtimeTargets | Sort-Object -Unique).Count -ne 5) { Fail-Gate "fresh_path_preflight" }
     if (-not $RecoveryOnly) {
@@ -901,6 +909,7 @@ try {
         Fail-Gate "live_credentials"
     }
 
+    if ($isSimpleProfile) { [void](New-Item -ItemType Directory -Path $outputRoot) }
     foreach ($target in $runtimeTargets) { [void](New-Item -ItemType Directory -Path $target) }
     foreach ($target in $runtimeTargets) { Assert-EmptyPlainDirectory $target }
     $stateDir, $rawRoot, $datasetA, $datasetB, $script:EvidenceDirectory = $runtimeTargets
@@ -966,9 +975,9 @@ try {
             "--processing-state", $processing, "--drawio-state", $drawioState,
             "--space-key", [string]$script:Config.space_key,
             "--root-page-id", [string]$script:Config.root_page_id,
-            "--media-policy", "required", "--git-repository", [string]$script:Config.git_repository,
-            "--git-branch", [string]$script:Config.git_branch,
-            "--git-commit", [string]$script:Config.git_commit,
+            "--media-policy", "required", "--git-repository", $gitRepository,
+            "--git-branch", $gitBranch,
+            "--git-commit", $gitCommit,
             "--generated-at", $generatedAt
         )
         $result = Invoke-ExporterModuleJson $arguments $Stage

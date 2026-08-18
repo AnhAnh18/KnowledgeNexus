@@ -6,11 +6,14 @@ the main machine only; never commit or transmit them.
 
 ## Required controls
 
-- Freeze and record the approved execution head; require a clean tracked tree.
-- All five configured runtime roots must be absent before the preferred live
-  invocation. Their parents must be existing plain external directories. The
-  operator creates the roots itself and rejects symlink/reparse components,
-  insufficient free disk, or pre-existing publication state.
+- Run from reviewed code and a clean tracked tree. The script derives the
+  execution head, branch, and repository identity from its own checkout; the
+  operator must not copy Git SHAs between repositories.
+- The single configured `output_root` must be absent before the preferred live
+  invocation. Its parent must be an existing plain external directory. The
+  script creates `state`, `raw`, `snapshot-a`, `snapshot-b`, and `evidence`
+  beneath it and rejects symlink/reparse components, insufficient free disk,
+  or pre-existing publication state.
 - Keep credentials in the live process environment only and clear them before
   offline processing/export.
 - Use the active reliability profile and explicit BGE-M3 tokenizer directory.
@@ -19,12 +22,11 @@ the main machine only; never commit or transmit them.
 - No automatic operator retry. Preserve valid raw/checkpoint artifacts after
   failure and report aggregate counters only.
 - Every child process has a finite time and working-set limit from the private
-  config. The raw-page store enforces the active total-byte and disk-reserve
+  defaults. The raw-page store enforces the active total-byte and disk-reserve
   budgets before each immutable publication.
-- The template uses a conservative 4-GiB child working-set ceiling. The owner
-  may raise it only within the script's finite 64-GiB ceiling and at least
-  2 GiB below detected physical memory; resource exhaustion fails closed and
-  is not an authorization to retry.
+- The script uses a conservative 4-GiB child working-set ceiling, a 12-hour
+  live timeout, and a 6-hour offline timeout. Resource exhaustion fails closed
+  and is not an authorization to retry.
 - The operator waits at least the active three-second interval after one live
   child exits before starting another, preserving the 20-request/minute bound
   across process boundaries.
@@ -36,7 +38,7 @@ the main machine only; never commit or transmit them.
 
 For the preferred guarded one-command execution, copy
 `W5_B_ONE_SHOT_CONFIG.template.json` to an external private directory, replace
-its placeholders, set both authorization booleans explicitly, and run in a
+its placeholders, set both booleans explicitly, and run in a
 fresh PowerShell process:
 
 ```powershell
@@ -53,6 +55,14 @@ commands below are a diagnostic phase reference, not authorization to retry.
 Before authorization, the same private config can be checked without creating
 the configured runtime roots, pytest cache, or Python bytecode, and without
 starting a live process by adding `-PreflightOnly`.
+
+The v2 profile intentionally contains no Git fields and no individual profile
+paths. The script locates the three approved profiles relative to itself,
+requires a clean checkout, derives the current execution head, and uses that
+local checkout identity for M10's required empty Git handoff. Those values are
+reproducibility metadata; they are not required to crawl or chunk Confluence.
+The legacy `w5-b-root1-one-shot-v1` schema remains readable for recovery and
+transfer compatibility.
 
 If the live process has started, never invoke the preferred command a second
 time. If post-run PowerShell/readback fails after publication, run the same
@@ -156,8 +166,9 @@ python -m knowledgenexus.foundation.cli.export_m10_snapshot `
   --state-dir "<ABS-STATE-DIR>" --processing-state "<ABS-PROCESSING-STATE>" `
   --drawio-state "<ABS-DRAWIO-STATE>" --space-key "<SPACE-KEY>" `
   --root-page-id "<ROOT-PAGE-ID>" --media-policy required `
-  --git-repository "<PINNED-GIT-NAME>" --git-branch "<PINNED-GIT-BRANCH>" `
-  --git-commit "<PINNED-GIT-COMMIT>" --generated-at "<RFC3339>" `
+  --git-repository "<AUTO-DERIVED-LOCAL-REPOSITORY>" `
+  --git-branch "<AUTO-DERIVED-LOCAL-BRANCH>" `
+  --git-commit "<AUTO-DERIVED-LOCAL-HEAD>" --generated-at "<RFC3339>" `
   --profile-identity "<PROFILE-IDENTITY>"
 ```
 

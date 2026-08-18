@@ -20,6 +20,23 @@ The delta dataset root must already exist as an empty plain directory outside
 the repository; its generated version/staging directories and `LATEST.txt`
 must be absent before publication.
 
+Git identity is not a W5-C operator input. Before the sequence, derive it from
+the clean local checkout that contains this runbook. Never copy a SHA from the
+source-review repository into a main-machine checkout:
+
+```powershell
+$repoRoot = (& git rev-parse --show-toplevel).Trim()
+$gitCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+$gitBranch = (& git -C $repoRoot symbolic-ref --quiet --short HEAD).Trim()
+if (-not $gitBranch) { $gitBranch = "detached" }
+$gitRepository = Split-Path -Leaf $repoRoot
+```
+
+These values only satisfy the current M10 empty-Git-handoff provenance shape;
+they are not used to crawl, normalize, or chunk Confluence. The W5-C operator
+still supplies the accepted W5-B base dataset version and fresh second-sync
+paths because those cannot be inferred safely.
+
 ## Authorized sequence
 
 The frozen subtree CLI uses a positional phase and requires `--state-dir` and
@@ -80,8 +97,8 @@ python -m knowledgenexus.foundation.cli.export_m10_snapshot `
   --state-dir "<ABS-STATE-DIR>" --processing-state "<ABS-SECOND-PROCESSING-STATE>" `
   --drawio-state "<ABS-SECOND-DRAWIO-STATE>" --space-key "<SPACE-KEY>" `
   --root-page-id "<ROOT-PAGE-ID>" --media-policy required `
-  --git-repository "<PINNED-GIT-NAME>" --git-branch "<PINNED-GIT-BRANCH>" `
-  --git-commit "<PINNED-GIT-COMMIT>" --generated-at "<RFC3339>" `
+  --git-repository $gitRepository --git-branch $gitBranch `
+  --git-commit $gitCommit --generated-at "<RFC3339>" `
   --profile-identity "<PROFILE-IDENTITY>"
 ```
 

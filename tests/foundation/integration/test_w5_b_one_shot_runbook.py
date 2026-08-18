@@ -17,17 +17,39 @@ TEMPLATE = ROOT / "docs" / "runbooks" / "W5_B_ONE_SHOT_CONFIG.template.json"
 
 def test_one_shot_config_is_private_input_template_without_credentials() -> None:
     payload = json.loads(TEMPLATE.read_text(encoding="utf-8"))
-    assert payload["format_version"] == "w5-b-root1-one-shot-v1"
+    assert payload["format_version"] == "w5-b-root1-operator-v2"
     assert payload["owner_authorized"] is False
-    assert payload["transfer_equivalent"] is False
+    assert payload["reviewed_code_confirmed"] is False
     assert payload["max_pages"] == 5000
-    assert payload["live_phase_timeout_seconds"] == 43200
-    assert payload["offline_phase_timeout_seconds"] == 21600
-    assert payload["max_child_working_set_bytes"] == 4294967296
+    assert set(payload) == {
+        "format_version",
+        "owner_authorized",
+        "reviewed_code_confirmed",
+        "python_executable",
+        "output_root",
+        "max_pages",
+        "tokenizer_assets_dir",
+        "space_key",
+        "root_page_id",
+    }
     serialized = json.dumps(payload).lower()
     assert "confluence_pat" not in serialized
     assert "password" not in serialized
     assert "http://" not in serialized and "https://" not in serialized
+    assert "git_commit" not in serialized
+    assert "expected_execution_head" not in serialized
+
+
+def test_simple_profile_derives_git_and_approved_profiles_from_checkout() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert 'Split-Path -Parent $PSScriptRoot' in text
+    assert 'rev-parse HEAD' in text
+    assert 'symbolic-ref --quiet --short HEAD' in text
+    assert 'Join-Path $script:RepoRoot "contracts/foundation/embedding_profile.yaml"' in text
+    assert 'Join-Path $outputRoot "state"' in text
+    assert 'Join-Path $outputRoot "snapshot-a"' in text
+    assert 'Join-Path $outputRoot "snapshot-b"' in text
+    assert 'Join-Path $outputRoot "evidence"' in text
 
 
 def test_one_shot_script_locks_phase_order_resume_and_text_first_scope() -> None:
@@ -204,6 +226,96 @@ def test_one_shot_rejects_duplicate_config_keys(tmp_path: Path) -> None:
     assert payload["authorization_consumed"] is False
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        None,
+        [],
+        {},
+        {"format_version": None},
+        {"format_version": "unknown"},
+    ),
+)
+def test_one_shot_rejects_malformed_top_level_profiles(
+    tmp_path: Path, payload: object
+) -> None:
+    target = tmp_path / "private-config.json"
+    target.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _run_config(target)
+
+    assert result.returncode == 1
+    assert result.stderr == ""
+    assert json.loads(result.stdout)["failure_category"] == "configuration"
+
+
+def test_simple_profile_reaches_offline_preflight_without_manual_git_fields(
+    tmp_path: Path,
+) -> None:
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    git = shutil.which("git")
+    if powershell is None or git is None:
+        pytest.skip("PowerShell or Git is unavailable")
+    repo = tmp_path / "repo" / "KnowledgeNexus"
+    scripts = repo / "scripts"
+    contracts = repo / "contracts" / "foundation"
+    scripts.mkdir(parents=True)
+    contracts.mkdir(parents=True)
+    shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+    (contracts / "crawl_reliability_profile.yaml").write_text(
+        "minimum_request_interval_seconds: 3.0\n"
+        "max_total_requests_per_run: 50000\n"
+        "minimum_free_disk_reserve_bytes: 1\n",
+        encoding="utf-8",
+    )
+    (contracts / "embedding_profile.yaml").write_text("profile: test\n", encoding="utf-8")
+    (contracts / "jira_relation_profile.yaml").write_text("profile: test\n", encoding="utf-8")
+    subprocess.run([git, "init", "-q", str(repo)], check=True)
+    subprocess.run([git, "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run([git, "-C", str(repo), "config", "user.name", "Test"], check=True)
+    subprocess.run([git, "-C", str(repo), "add", "."], check=True)
+    subprocess.run([git, "-C", str(repo), "commit", "-qm", "fixture"], check=True)
+    tokenizer = tmp_path / "tokenizer"
+    tokenizer.mkdir()
+    config = {
+        "format_version": "w5-b-root1-operator-v2",
+        "owner_authorized": False,
+        "reviewed_code_confirmed": True,
+        "python_executable": sys.executable,
+        "output_root": str(tmp_path / "fresh-output"),
+        "max_pages": 201,
+        "tokenizer_assets_dir": str(tokenizer),
+        "space_key": "SPACE",
+        "root_page_id": "1000",
+    }
+    config_path = tmp_path / "private-config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(scripts / SCRIPT.name),
+            "-OperatorConfig",
+            str(config_path),
+            "-PreflightOnly",
+        ],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert result.stderr == ""
+    assert json.loads(result.stdout)["failure_category"] == "offline_preflight_tests"
+    assert not (tmp_path / "fresh-output").exists()
+
+
 def test_child_result_validators_reject_coercible_and_extra_state(tmp_path: Path) -> None:
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
     if powershell is None:
@@ -218,9 +330,6 @@ $cases = @(
   @("capture", '{"status":"stopped","phase":"capture-pages","captured":"200","replayed":0,"skipped":0,"failed":0}'),
   @("capture", '{"status":"stopped","phase":"capture-pages","captured":199,"replayed":0,"skipped":1,"failed":0}'),
   @("capture", '{"status":"complete","phase":"capture-pages","captured":1,"replayed":199,"skipped":0,"failed":0}'),
-  @("capture", '{"status":"stopped","phase":"capture-pages","captured":94,"replayed":0,"skipped":0,"failed":6,"failure_categories":{"fetch_http":6}}'),
-  @("capture", '{"status":"stopped","phase":"capture-pages","captured":94,"replayed":0,"skipped":0,"failed":6,"failure_categories":{"fetch_http":5}}'),
-  @("capture", '{"status":"stopped","phase":"capture-pages","captured":94,"replayed":0,"skipped":0,"failed":6,"failure_categories":{"not_allowed":6}}'),
   @("processing", '{"status":"complete","phase":"process-pages","page_count":10,"document_count":9,"chunk_count":20}'),
   @("drawio", '{"status":"complete","phase":"capture-drawio","drawio_references_observed":2,"drawio_references_resolved":1,"drawio_assets_failed":0}'),
   @("export", '{"status":"success","dataset_version":"v1","counts":{"documents":1,"chunks":1,"relations":0,"acl":1,"media_assets":0,"symbols":0,"sync_state":1,"tombstones":0},"network_used":"false","credentials_used":false}'),
@@ -247,8 +356,6 @@ try {
   [void]@(Get-StrictTopLevelJsonPropertyNames '{"status":"success","counts":{"documents":1,"docu\u006dents":2}}')
 } catch { $rejected += 1 }
 if ($rejected -ne ($cases.Count + 3)) { exit 2 }
-$failurePayload = New-FailurePayload $true
-if ($failurePayload.capture_failure_categories.fetch_http -ne 6) { exit 3 }
 Write-Output "ALL_REJECTED"
 '''
     target = tmp_path / "validator-probe.ps1"
@@ -291,8 +398,11 @@ def test_recovery_only_audits_existing_snapshots_without_exporter_invocation(
         pytest.skip("PowerShell or Git is unavailable")
     repo = tmp_path / "repo"
     contracts = repo / "contracts" / "foundation"
+    scripts = repo / "scripts"
     contracts.mkdir(parents=True)
+    scripts.mkdir(parents=True)
     shutil.copytree(ROOT / "src", repo / "src")
+    shutil.copy2(SCRIPT, scripts / SCRIPT.name)
     shutil.copytree(ROOT / "contracts" / "foundation" / "schemas", contracts / "schemas")
     (contracts / "crawl_reliability_profile.yaml").write_text(
         "minimum_request_interval_seconds: 3.0\n"
@@ -394,3 +504,49 @@ def test_recovery_only_audits_existing_snapshots_without_exporter_invocation(
     assert summary["operator_mode"] == "recovery"
     assert summary["authorization_consumed"] is True
     assert summary["recovery_exporter_invocations"] == 0
+
+    simple_root = tmp_path / "simple-runtime"
+    simple_root.mkdir()
+    for source, name in (
+        (state, "state"),
+        (raw, "raw"),
+        (dataset_a, "snapshot-a"),
+        (dataset_b, "snapshot-b"),
+        (evidence, "evidence"),
+    ):
+        shutil.copytree(source, simple_root / name)
+    simple_config = {
+        "format_version": "w5-b-root1-operator-v2",
+        "owner_authorized": False,
+        "reviewed_code_confirmed": True,
+        "python_executable": sys.executable,
+        "output_root": str(simple_root),
+        "max_pages": 5000,
+        "tokenizer_assets_dir": str(tmp_path / "not-used-tokenizer"),
+        "space_key": "SPACE",
+        "root_page_id": "1000",
+    }
+    simple_config_path = tmp_path / "simple-private-config.json"
+    simple_config_path.write_text(json.dumps(simple_config), encoding="utf-8")
+
+    simple_result = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(scripts / SCRIPT.name),
+            "-OperatorConfig",
+            str(simple_config_path),
+            "-RecoveryOnly",
+        ],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert simple_result.returncode == 0, simple_result.stdout + simple_result.stderr
+    assert json.loads(simple_result.stdout)["status"] == "recovery_complete"
