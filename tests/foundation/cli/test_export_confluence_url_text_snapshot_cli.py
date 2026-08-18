@@ -96,6 +96,7 @@ class _PhaseMain:
                 "status": "complete", "phase": "export",
                 "packet_published": True, "document_count": 2,
                 "chunk_count": 3, "media_asset_count": 0,
+                "mermaid_diagrams_exported": 0,
             }
         else:
             raise AssertionError(phase)
@@ -295,6 +296,92 @@ def test_run_composes_bounded_phases_and_publishes_latest(
         {"phase": "resolving_url"},
         {"phase": "completed", "document_count": 2, "chunk_count": 3},
     ]
+
+
+def _write_verifiable_packet(path: Path, *, processing_status: str = "complete") -> None:
+    path.mkdir()
+    (path / "documents.jsonl").write_text("{}\n", encoding="utf-8")
+    (path / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
+    (path / "media_assets.jsonl").write_text("", encoding="utf-8")
+    summary: dict[str, object] = {
+        "format_version": "confluence-subtree-indexing-packet-v1",
+        "acl_mode": "restricted_unresolved",
+        "document_count": 1,
+        "chunk_count": 1,
+        "media_asset_count": 0,
+        "processing_status": processing_status,
+    }
+    if processing_status == "partial":
+        summary.update({
+            "processing_mode": "best_effort_text_demo",
+            "drawio_status": "not_captured_in_best_effort_mode",
+            "requested_pages": 1,
+            "succeeded_pages": 1,
+            "failed_pages": 0,
+            "failure_categories": {},
+        })
+    (path / "packet_summary.json").write_text(
+        json.dumps(summary) + "\n", encoding="utf-8",
+    )
+
+
+def test_packet_verifier_accepts_counted_mermaid_directory(tmp_path: Path) -> None:
+    version = (tmp_path / "version").resolve()
+    _write_verifiable_packet(version)
+    diagrams = version / "diagrams"
+    diagrams.mkdir()
+    (diagrams / "architecture--123.mmd").write_text(
+        'flowchart TD\n    A["Node"]\n', encoding="utf-8",
+    )
+
+    summary = cli._verify_existing_packet(
+        version, expected_mermaid_diagrams=1,
+    )
+
+    assert summary["processing_status"] == "complete"
+
+
+@pytest.mark.parametrize("expected", (True, -1, "1", object()))
+def test_packet_verifier_rejects_invalid_mermaid_count_before_io(
+    tmp_path: Path, expected: object,
+) -> None:
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli._verify_existing_packet(
+            (tmp_path / "missing").resolve(),
+            expected_mermaid_diagrams=expected,
+        )
+
+    assert raised.value.category == "publication"
+
+
+def test_packet_verifier_rejects_mermaid_count_mismatch(tmp_path: Path) -> None:
+    version = (tmp_path / "version").resolve()
+    _write_verifiable_packet(version)
+    diagrams = version / "diagrams"
+    diagrams.mkdir()
+    (diagrams / "architecture.mmd").write_text(
+        "flowchart TD\n    A\n", encoding="utf-8",
+    )
+
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli._verify_existing_packet(version, expected_mermaid_diagrams=2)
+
+    assert raised.value.category == "publication"
+
+
+def test_partial_packet_rejects_mermaid_directory(tmp_path: Path) -> None:
+    version = (tmp_path / "version").resolve()
+    _write_verifiable_packet(version, processing_status="partial")
+    diagrams = version / "diagrams"
+    diagrams.mkdir()
+    (diagrams / "unexpected.mmd").write_text(
+        "flowchart TD\n    A\n", encoding="utf-8",
+    )
+
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli._verify_existing_packet(version)
+
+    assert raised.value.category == "publication"
 
 
 def test_failed_capture_stops_before_processing_and_remains_resumable(

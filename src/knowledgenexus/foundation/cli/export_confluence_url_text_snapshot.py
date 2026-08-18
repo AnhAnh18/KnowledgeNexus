@@ -45,6 +45,8 @@ _CONTEXT_FORMAT = "confluence-url-text-snapshot-context-v1"
 _PACKET_FILES = frozenset(
     {"documents.jsonl", "chunks.jsonl", "media_assets.jsonl", "packet_summary.json"}
 )
+_MERMAID_DIRECTORY = "diagrams"
+_MAX_MERMAID_BYTES = 1 * 1024 * 1024
 _CANONICAL_PAGE_PATH = re.compile(
     r"\A(?P<context>(?:/[^/?#]+)*)/spaces/(?P<space>[A-Z0-9]+)/pages/(?P<page>[0-9]+)(?:/[^?#]*)?\Z"
 )
@@ -585,14 +587,46 @@ def _common_phase_args(
     ]
 
 
-def _verify_existing_packet(version: Path) -> dict[str, object]:
+def _verify_existing_packet(
+    version: Path, *, expected_mermaid_diagrams: object | None = None,
+) -> dict[str, object]:
+    if (
+        expected_mermaid_diagrams is not None
+        and (
+            type(expected_mermaid_diagrams) is not int
+            or expected_mermaid_diagrams < 0
+        )
+    ):
+        raise TextSnapshotOperatorError("publication")
     try:
         require_plain_directory_chain(version)
         names = {item.name for item in version.iterdir()}
-        if names != _PACKET_FILES:
+        allowed_names = _PACKET_FILES | {_MERMAID_DIRECTORY}
+        if not _PACKET_FILES <= names or not names <= allowed_names:
             raise ValueError
         for name in _PACKET_FILES:
             require_plain_file(version / name)
+        diagram_count = 0
+        diagrams = version / _MERMAID_DIRECTORY
+        if _MERMAID_DIRECTORY in names:
+            require_plain_directory_chain(diagrams)
+            entries = tuple(diagrams.iterdir())
+            if not entries:
+                raise ValueError
+            for entry in entries:
+                if entry.suffix != ".mmd":
+                    raise ValueError
+                require_plain_file(entry)
+                body = entry.read_bytes()
+                if not body or len(body) > _MAX_MERMAID_BYTES:
+                    raise ValueError
+                body.decode("utf-8")
+            diagram_count = len(entries)
+        if (
+            expected_mermaid_diagrams is not None
+            and diagram_count != expected_mermaid_diagrams
+        ):
+            raise ValueError
         summary = json.loads((version / "packet_summary.json").read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         raise TextSnapshotOperatorError("publication") from None
@@ -619,6 +653,7 @@ def _verify_existing_packet(version: Path) -> dict[str, object]:
             or summary.get("drawio_status")
             != "not_captured_in_best_effort_mode"
             or summary.get("media_asset_count") != 0
+            or diagram_count != 0
             or any(type(value) is not int or value < 0 for value in (
                 requested, succeeded, failed,
             ))
@@ -934,12 +969,18 @@ def run(
         ],
         phase_main=phase_main,
     ), phase="export", statuses=frozenset({"complete"}),
-        counters=("document_count", "chunk_count", "media_asset_count"),
+        counters=(
+            "document_count", "chunk_count", "media_asset_count",
+            "mermaid_diagrams_exported",
+        ),
         booleans=("packet_published",),
     )
     if exported["packet_published"] is not True:
         raise TextSnapshotOperatorError("publication")
-    _verify_existing_packet(version)
+    _verify_existing_packet(
+        version,
+        expected_mermaid_diagrams=exported["mermaid_diagrams_exported"],
+    )
     _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
     result = {
         "status": "complete", "already_published": False,

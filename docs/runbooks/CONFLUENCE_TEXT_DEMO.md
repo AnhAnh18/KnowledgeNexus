@@ -16,12 +16,22 @@ evidence, normalizes and chunks text, and atomically publishes:
     |-- documents.jsonl
     |-- chunks.jsonl
     |-- media_assets.jsonl
-    `-- packet_summary.json
+    |-- packet_summary.json
+    `-- diagrams/                         # optional; strict Draw.io runs only
+        `-- <attachment>--<identity>.mmd
 ```
 
 Indexing consumes `documents.jsonl` and `chunks.jsonl`. All chunks retain the
 deny-safe `restricted:unresolved` ACL tag. This demo does not make content
 public and does not write directly to Qdrant or SQLite.
+
+When strict processing successfully parses a Draw.io attachment, its extracted
+graph text is emitted as searchable `content_kind: diagram` chunks. Export also
+attempts to write a bounded Mermaid file under `diagrams/`, preserving node and
+edge labels plus container subgraphs. Mermaid conversion is best-effort and is
+reported by the `mermaid_diagrams_exported` counter; the packet verifier rejects
+unexpected file types, oversized/invalid UTF-8 files, or a counter mismatch.
+Explicit partial text mode never captures or exports Draw.io diagrams.
 
 ## Prerequisites
 
