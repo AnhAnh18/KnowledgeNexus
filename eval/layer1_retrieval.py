@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from knowledgenexus.eval.config import EvalConfig
-from knowledgenexus.eval.metrics import aggregate, score_case
-from knowledgenexus.eval.models import CaseLayerResult, GoldenCase, LayerMetrics
-from knowledgenexus.eval.retrieve import extract_ids, retrieve
+from eval.config import EvalConfig
+from eval.metrics import aggregate, score_case
+from eval.models import CaseLayerResult, GoldenCase, LayerMetrics
+from eval.retrieve import extract_ids, retrieve
 
 
 def run_layer1(

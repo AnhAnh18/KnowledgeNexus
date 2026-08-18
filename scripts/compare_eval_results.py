@@ -12,10 +12,10 @@ import json
 import sys
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+# Add eval to path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "eval"))
 
-from knowledgenexus.eval.compare import load_all_runs
+from compare import load_all_runs
 
 
 def find_run_by_label(runs: list[dict], label: str) -> dict | None:
@@ -245,7 +245,7 @@ def main() -> int:
 
 
     # Always update LEADERBOARD.md with A/B comparison appended
-    from knowledgenexus.eval.compare import update_leaderboard
+    from compare import update_leaderboard
     lb = update_leaderboard(results_dir)
     print(f"Leaderboard updated: {lb}")
 

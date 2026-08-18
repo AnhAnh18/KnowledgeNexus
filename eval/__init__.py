@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from knowledgenexus.eval.models import EvalRunResult, GoldenCase, LayerMetrics
+from eval.models import EvalRunResult, GoldenCase, LayerMetrics
 
 __all__ = [
     "GoldenCase",

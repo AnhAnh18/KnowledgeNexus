@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from knowledgenexus.eval.models import EvalRunResult
+from eval.models import EvalRunResult
 
 
 def save_run(result: EvalRunResult, results_dir: Path) -> Path:

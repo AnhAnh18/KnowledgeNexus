@@ -9,12 +9,12 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from knowledgenexus.eval.compare import save_run, update_leaderboard
-from knowledgenexus.eval.config import load_eval_config
-from knowledgenexus.eval.layer1_retrieval import run_layer1
-from knowledgenexus.eval.loader import GoldenLoadError, load_golden_cases
-from knowledgenexus.eval.metrics import compute_gap
-from knowledgenexus.eval.models import EvalRunResult
+from eval.compare import save_run, update_leaderboard
+from eval.config import load_eval_config
+from eval.layer1_retrieval import run_layer1
+from eval.loader import GoldenLoadError, load_golden_cases
+from eval.metrics import compute_gap
+from eval.models import EvalRunResult
 
 
 def _git_sha(repo_root: Path) -> str | None:
@@ -54,7 +54,7 @@ def run_eval(
     if layer in ("1", "all"):
         layer1_metrics, per1 = run_layer1(cases, config)
     if layer in ("2", "all"):
-        from knowledgenexus.eval.layer2_agent import run_layer2
+        from eval.layer2_agent import run_layer2
         layer2_metrics, per2 = run_layer2(cases, config)
 
     result = EvalRunResult(

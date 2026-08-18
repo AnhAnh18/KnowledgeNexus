@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from knowledgenexus.eval.models import MatchOn
+from eval.models import MatchOn
 
 
 @dataclass(frozen=True)

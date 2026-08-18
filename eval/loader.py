@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from knowledgenexus.eval.models import GoldenCase
+from eval.models import GoldenCase
 
 
 class GoldenLoadError(ValueError):

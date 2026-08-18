@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from knowledgenexus.eval.http_client import request_json
-from knowledgenexus.eval.models import MatchOn
+from eval.http_client import request_json
+from eval.models import MatchOn
 
 
 def retrieve(

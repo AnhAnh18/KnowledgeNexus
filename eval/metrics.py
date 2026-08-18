@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from knowledgenexus.eval.models import CaseLayerResult, LayerMetrics
+from eval.models import CaseLayerResult, LayerMetrics
 
 
 def hit_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> bool:
