@@ -259,6 +259,152 @@ def test_export_consumes_tuple_result_and_publishes_no_drawio_packet(monkeypatch
     assert outcome["packet_published"] is True
 
 
+def _drawio_state(*, media_asset: dict[str, object], selection: dict[str, object]) -> dict[str, object]:
+    """One resolved draw.io reference on page 1000, bound the way
+    `validate_drawio_capture_state` requires: `media_asset["parent_document_id"]`
+    must equal `DocumentIdGenerator.confluence_page_id(parent_page_id)`, and
+    `media_asset["filename"]` must equal the reference's filename.
+    """
+    reference = ["1000", "diagram.drawio", "7"]
+    return {
+        "format_version": "confluence-subtree-drawio-state-v1",
+        "run_id": str(RUN_ID),
+        "generation_id": str(RUN_ID),
+        "selection_identity": selection["selection_identity"],
+        "observed": [reference],
+        "resolutions": [{
+            "reference": reference, "media_id": media_asset["media_id"],
+            "body_byte_count": media_asset["size_bytes"],
+        }],
+        "failed": 0,
+        "downloaded_bytes": media_asset["size_bytes"],
+        "artifact_count": 1,
+        "media_assets": [media_asset],
+    }
+
+
+def _media_asset(*, media_id: str = "confluence:attachment:att1", processing_status: str = "parsed", extracted_text: str | None = "Node A -> Node B") -> dict[str, object]:
+    return {
+        "schema_version": "1.0", "media_id": media_id,
+        "parent_document_id": "confluence:page:1000", "source_system": "confluence",
+        "filename": "diagram.drawio", "mime_type": "application/vnd.jgraph.mxfile",
+        "size_bytes": 42, "download_status": "downloaded",
+        "processing_status": processing_status, "relevance": "high",
+        "extracted_text": extracted_text, "summary": None, "confidence": None,
+        "raw_uri": f"raw://confluence/attachments/{media_id}/deadbeef",
+        "content_hash": "deadbeef", "source_version": "7",
+        "updated_at": "2026-08-10T00:00:00Z", "crawled_at": "2026-08-10T00:00:00Z",
+    }
+
+
+class _FakeDiagramChunker:
+    """Stands in for the real BuildConfluenceChunks so this test proves the
+    _export_phase <-> _diagram_chunk_records wiring (right parent document
+    looked up, result folded into the published chunk list) without loading a
+    real chunking profile or tokenizer -- that token-level behaviour is
+    already covered by test_build_confluence_chunks.py."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def execute_media_diagram(self, *, canonical_document, media_asset):
+        self.calls.append((canonical_document["document_id"], media_asset["media_id"]))
+        return type("Result", (), {
+            "records": [{
+                "chunk_id": f"diagram-chunk-{media_asset['media_id']}",
+                "content_kind": "diagram",
+                "document_id": canonical_document["document_id"],
+            }]
+        })()
+
+
+def _export_with_drawio_state(monkeypatch, tmp_path, *, media_asset: dict[str, object], fake_chunker: _FakeDiagramChunker):
+    state = (tmp_path / "state").resolve()
+    output = (tmp_path / "packet").resolve()
+    selection = _selection()
+    cli._atomic_json(cli._state_path(state, str(RUN_ID), "inventory-selection.json"), selection)
+    result = _result(drawio=True)
+    cli._atomic_json(
+        cli._state_path(state, str(RUN_ID), "processing-state.json"),
+        cli._processing_payload(run_id=RUN_ID, selection=selection, result=result),
+    )
+    cli._atomic_json(
+        cli._state_path(state, str(RUN_ID), "drawio-state.json"),
+        _drawio_state(media_asset=media_asset, selection=selection),
+    )
+    monkeypatch.setattr(cli, "_compose_page_processor", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(cli, "_raw_page_bytes", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(cli, "_verify_drawio_media_assets_on_disk", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_compose_diagram_chunker", lambda _args: fake_chunker)
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _value: {
+        "inventory_page_size": 50, "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000, "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+
+    published: dict[str, object] = {}
+
+    class Exporter:
+        def __init__(self, *, validator):
+            assert validator is not None
+
+        def publish(self, **kwargs):
+            published.update(kwargs)
+            return {
+                "format_version": "confluence-subtree-indexing-packet-v1",
+                "document_count": len(kwargs["documents"]),
+                "chunk_count": len(kwargs["chunks"]),
+                "media_asset_count": len(kwargs["media_assets"]),
+            }
+
+    monkeypatch.setattr(cli, "SubtreePacketExporter", Exporter)
+    outcome = cli._export_phase(_args(output_dir=str(output)), state)
+    return outcome, published
+
+
+def test_export_folds_parsed_diagram_chunks_into_the_published_packet(monkeypatch, tmp_path):
+    fake_chunker = _FakeDiagramChunker()
+    outcome, published = _export_with_drawio_state(
+        monkeypatch, tmp_path, media_asset=_media_asset(), fake_chunker=fake_chunker,
+    )
+
+    assert outcome["packet_published"] is True
+    assert outcome["chunk_count"] == 2
+    # The chunker was called against the right parent page, not just any page.
+    assert fake_chunker.calls == [("confluence:page:1000", "confluence:attachment:att1")]
+    # Original page chunk plus the diagram chunk, both present -- nothing lost.
+    chunk_ids = [chunk["chunk_id"] for chunk in published["chunks"]]
+    assert chunk_ids == ["chunk-1", "diagram-chunk-confluence:attachment:att1"]
+    diagram_chunk = published["chunks"][1]
+    assert diagram_chunk["content_kind"] == "diagram"
+    assert diagram_chunk["document_id"] == "confluence:page:1000"
+
+
+@pytest.mark.parametrize(
+    "media_asset",
+    (
+        _media_asset(processing_status="download_failed", extracted_text=None),
+        _media_asset(processing_status="parsed", extracted_text=None),
+        _media_asset(processing_status="parsed", extracted_text=""),
+    ),
+)
+def test_export_skips_diagram_assets_that_are_not_successfully_parsed(monkeypatch, tmp_path, media_asset):
+    fake_chunker = _FakeDiagramChunker()
+    outcome, published = _export_with_drawio_state(
+        monkeypatch, tmp_path, media_asset=media_asset, fake_chunker=fake_chunker,
+    )
+
+    assert outcome["packet_published"] is True
+    assert outcome["chunk_count"] == 1
+    # No qualifying asset -> the chunker (which would load a real tokenizer in
+    # production) must never even be constructed, let alone called.
+    assert fake_chunker.calls == []
+    assert [chunk["chunk_id"] for chunk in published["chunks"]] == ["chunk-1"]
+
+
 def test_zero_drawio_phase_persists_generation_bound_state_without_network(monkeypatch, tmp_path):
     state = tmp_path.resolve()
     selection = _selection()

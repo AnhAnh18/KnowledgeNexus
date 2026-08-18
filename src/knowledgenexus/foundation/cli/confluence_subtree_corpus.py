@@ -9,7 +9,7 @@ import os
 import re
 import sys
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from itertools import islice
 from pathlib import Path
@@ -542,6 +542,63 @@ def _compose_page_processor(args: argparse.Namespace, *, run_id: CrawlRunId, ite
     ).execute(request=request)
 
 
+def _compose_diagram_chunker(args: argparse.Namespace):
+    """Build a chunker for draw.io diagram text (CHUNKING_SPEC §4.7).
+
+    Constructed the same way `_compose_page_processor` builds the chunker it
+    hands to `ProcessConfluencePageSet` internally -- same profile file, same
+    tokenizer assets, same default id generator/record builder/schema
+    validator -- so a diagram chunk and a page chunk from the same export are
+    governed by identical token rules and stay reproducible across re-ingests.
+    `ProcessConfluencePageSet` does not expose the instance it builds
+    internally, so this constructs an equivalent one rather than sharing it;
+    both are pure functions of the same on-disk profile and tokenizer assets.
+    """
+    if not args.chunking_profile_path or not args.tokenizer_assets_dir:
+        raise ValueError("diagram chunking inputs are required")
+    from knowledgenexus.foundation.application.use_cases.build_confluence_chunks import BuildConfluenceChunks
+    from knowledgenexus.foundation.domain.rules.chunk_id_generator import ChunkIdGenerator
+    from knowledgenexus.foundation.domain.records import ChunkRecordBuilder
+    from knowledgenexus.foundation.infrastructure.config.chunking_profile_loader import load_chunking_profile
+    from knowledgenexus.foundation.infrastructure.tokenization import BgeM3LocalTokenizer
+    profile = load_chunking_profile(Path(args.chunking_profile_path))
+    return BuildConfluenceChunks(
+        profile=profile,
+        tokenizer=BgeM3LocalTokenizer(profile=profile, tokenizer_assets_dir=Path(args.tokenizer_assets_dir)),
+        chunk_id_generator=ChunkIdGenerator,
+        chunk_record_builder=ChunkRecordBuilder,
+        schema_validator=FoundationSchemaValidator(),
+    )
+
+
+def _diagram_chunk_records(args: argparse.Namespace, *, documents: Sequence[Mapping[str, object]], media_assets: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    """Chunk every successfully parsed draw.io diagram in `media_assets`.
+
+    A diagram whose attachment failed to download or parse (`processing_status
+    != "parsed"`, or no text was extracted) contributes no chunk -- that
+    failure is already visible via the asset's own `processing_status` and the
+    phase's `drawio_assets_failed` count (CHUNKING_SPEC §4.7), so it is not
+    reported a second time here.
+    """
+    parsed = [
+        asset for asset in media_assets
+        if asset.get("processing_status") == "parsed" and asset.get("extracted_text")
+    ]
+    if not parsed:
+        return []
+    chunker = _compose_diagram_chunker(args)
+    documents_by_id = {document["document_id"]: document for document in documents}
+    records: list[dict[str, object]] = []
+    for asset in parsed:
+        parent = documents_by_id[asset["parent_document_id"]]
+        records.extend(
+            chunker.execute_media_diagram(
+                canonical_document=parent, media_asset=asset,
+            ).records
+        )
+    return records
+
+
 def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     if not args.raw_root:
         raise ValueError("raw root is required")
@@ -949,9 +1006,16 @@ def _export_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
         raw_root=Path(args.raw_root), media_assets=media_assets,
         profile=reliability, drawio_config=drawio_config,
     )
+    # CHUNKING_SPEC §4.7: a parsed draw.io diagram gets its own content_kind:
+    # "diagram" chunk here, folded into the same chunk list page chunking
+    # produced -- publish() derives chunk_count from len(chunks), so this is
+    # the only place that needs to know diagrams exist.
+    diagram_chunks = _diagram_chunk_records(
+        args, documents=processed.documents, media_assets=media_assets,
+    )
     packet = SubtreePacketExporter(validator=FoundationSchemaValidator()).publish(
         output_dir=Path(args.output_dir), documents=processed.documents,
-        chunks=processed.chunks, media_assets=media_assets,
+        chunks=list(processed.chunks) + diagram_chunks, media_assets=media_assets,
         summary={"page_corpus_complete": True, "drawio_references_observed": len(refs), "drawio_references_resolved": len(resolutions), "drawio_assets_failed": 0},
     )
     return {"status": "complete", "phase": "export", "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": packet["media_asset_count"]}

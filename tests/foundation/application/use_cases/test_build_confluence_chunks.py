@@ -809,3 +809,146 @@ def test_same_input_returns_exact_ordered_records_and_metrics() -> None:
 
     assert first.records == second.records
     assert first.metrics == second.metrics
+
+
+# ---------------------------------------------------------------------------
+# execute_media_diagram (CHUNKING_SPEC §4.7) -- a draw.io diagram's extracted
+# text, chunked by reusing the same §4.4 prose-windowing machinery rather than
+# new logic. These tests pin: content_kind is relabeled to "diagram" on output
+# without disturbing the split itself, the diagram links to its owning page's
+# document_id, unit_key follows the drawio:{media_id} scheme from the spec,
+# and the existing token-budget / fail-closed guarantees carry over unchanged.
+# ---------------------------------------------------------------------------
+
+
+def _media_asset(
+    *, media_id: str = "confluence:attachment:5001",
+    filename: str = "Untitled Diagram-123", extracted_text: str = "Node A -> Node B",
+) -> dict[str, object]:
+    return {
+        "media_id": media_id,
+        "filename": filename,
+        "extracted_text": extracted_text,
+    }
+
+
+def test_atomic_diagram_maps_content_kind_and_links_to_parent_document() -> None:
+    use_case = _use_case()
+    canonical = _canonical()
+
+    result = use_case.execute_media_diagram(
+        canonical_document=canonical, media_asset=_media_asset(),
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record["content_kind"] == "diagram"
+    assert record["document_id"] == canonical["document_id"]
+    assert record["heading_path"] == ["Diagram: Untitled Diagram-123"]
+    assert _body(record) == "Node A -> Node B"
+    assert record["space_key"] == canonical["space_key"]
+    assert record["page_id"] == canonical["page_id"]
+    for absent in ("part_index", "part_total"):
+        assert absent not in record
+
+
+def test_diagram_unit_key_uses_drawio_prefix_per_chunking_spec() -> None:
+    id_generator = _RecordingIdGenerator()
+    use_case = _use_case(id_generator=id_generator)
+
+    use_case.execute_media_diagram(
+        canonical_document=_canonical(),
+        media_asset=_media_asset(media_id="confluence:attachment:5001"),
+    )
+
+    assert len(id_generator.calls) == 1
+    _source_system, _document_key, unit_key, _text = id_generator.calls[0]
+    assert unit_key == "drawio:confluence:attachment:5001"
+
+
+def test_oversize_diagram_text_splits_and_respects_hard_maximum() -> None:
+    text = "a" * 20 + "\n\n" + "b" * 20
+    profile = _profile(minimum=5, target=25, hard=30, overlap=5, code_target=25)
+    id_generator = _RecordingIdGenerator()
+    use_case = _use_case(
+        tokenizer=_CharacterTokenizer(), profile=profile, id_generator=id_generator,
+    )
+
+    result = use_case.execute_media_diagram(
+        canonical_document=_canonical(),
+        # Short filename, like the equivalent prose test's short "## Long"
+        # heading: the breadcrumb (which embeds the filename) is counted
+        # against every window's hard-max, so a long name here would leave no
+        # room to isolate the body-splitting behaviour this test targets.
+        media_asset=_media_asset(media_id="m1", filename="d", extracted_text=text),
+    )
+
+    assert len(result.records) >= 2
+    assert result.metrics["oversize_splits"] == 1
+    assert result.metrics["prose_split_units"] == 1
+    assert all(record["content_kind"] == "diagram" for record in result.records)
+    assert all(
+        record["token_count"] <= profile.hard_maximum_tokens
+        for record in result.records
+    )
+    assert [record["part_index"] for record in result.records] == list(
+        range(len(result.records))
+    )
+    assert all(record["part_total"] == len(result.records) for record in result.records)
+    # unit_key follows the same drawio:{media_id}#w{n} scheme CHUNKING_SPEC §4.7
+    # documents for oversize splits -- the "prose" kind used for routing must
+    # never leak into the identity used for chunk_id/resumability.
+    unit_keys = [call[2] for call in id_generator.calls]
+    assert unit_keys == [f"drawio:m1#w{i}" for i in range(len(result.records))]
+
+
+def test_diagram_fragment_that_cannot_split_fails_closed() -> None:
+    # Routing a diagram through the prose splitter means an unsplittable
+    # fragment fails with the same category prose oversize failures use --
+    # there is no separate diagram-specific failure category, by design.
+    with pytest.raises(ConfluenceChunkingError) as captured:
+        BuildConfluenceChunks(
+            profile=_profile(minimum=2, target=20, hard=30, overlap=4, code_target=20),
+            tokenizer=_IndivisibleTokenizer(),
+            chunk_id_generator=ChunkIdGenerator,
+            chunk_record_builder=ChunkRecordBuilder,
+            schema_validator=FoundationSchemaValidator(),
+        ).execute_media_diagram(
+            canonical_document=_canonical(),
+            # Short filename: see comment on the oversize-split test above.
+            media_asset=_media_asset(filename="d", extracted_text="x" * 70),
+        )
+
+    assert captured.value.category is (
+        ConfluenceChunkingFailureCategory.UNSPLITTABLE_PROSE_FRAGMENT
+    )
+
+
+@pytest.mark.parametrize(
+    "asset",
+    (
+        {"media_id": "m1", "filename": "d", "extracted_text": ""},
+        {"media_id": "m1", "filename": "", "extracted_text": "text"},
+        {"media_id": "", "filename": "d", "extracted_text": "text"},
+        {"media_id": "m1", "filename": "d"},
+    ),
+)
+def test_diagram_missing_required_fields_fails_closed(asset: dict[str, object]) -> None:
+    with pytest.raises(ConfluenceChunkingError) as captured:
+        _use_case().execute_media_diagram(
+            canonical_document=_canonical(), media_asset=asset,
+        )
+
+    assert captured.value.category is ConfluenceChunkingFailureCategory.CHUNKING_FAILED
+
+
+def test_diagram_chunking_is_deterministic() -> None:
+    use_case = _use_case()
+    canonical = _canonical()
+    asset = _media_asset()
+
+    first = use_case.execute_media_diagram(canonical_document=canonical, media_asset=asset)
+    second = use_case.execute_media_diagram(canonical_document=canonical, media_asset=asset)
+
+    assert first.records == second.records
+    assert first.metrics == second.metrics
