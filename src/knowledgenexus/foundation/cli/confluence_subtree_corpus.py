@@ -599,6 +599,105 @@ def _diagram_chunk_records(args: argparse.Namespace, *, documents: Sequence[Mapp
     return records
 
 
+def _export_mermaid_diagrams(
+    args: argparse.Namespace,
+    *,
+    output_dir: Path,
+    media_assets: Sequence[Mapping[str, object]],
+) -> int:
+    """Write a ``.mmd`` file for each parsed draw.io diagram alongside the packet.
+
+    Best-effort: conversion failures are logged and skipped so a Mermaid
+    rendering problem never blocks an otherwise valid export.  Returns the
+    number of ``.mmd`` files successfully written.
+    """
+    if not isinstance(output_dir, Path) or not output_dir.is_absolute():
+        raise ValueError("Mermaid output directory is invalid")
+    if isinstance(media_assets, (str, bytes, bytearray)) or not isinstance(media_assets, Sequence):
+        raise TypeError("Mermaid media assets are invalid")
+    if any(type(asset) is not dict for asset in media_assets):
+        raise TypeError("Mermaid media asset is invalid")
+    parsed = [
+        asset for asset in media_assets
+        if asset.get("processing_status") == "parsed"
+        and type(asset.get("extracted_text")) is str
+        and bool(asset.get("extracted_text"))
+    ]
+    if not parsed:
+        return 0
+    if not output_dir.is_dir():
+        raise ValueError("Mermaid output directory is invalid")
+    candidates: list[tuple[Mapping[str, object], re.Match[str]]] = []
+    for asset in parsed:
+        raw_uri = asset.get("raw_uri")
+        content_hash = asset.get("content_hash")
+        media_id = asset.get("media_id")
+        filename = asset.get("filename")
+        if (
+            type(raw_uri) is not str
+            or type(content_hash) is not str
+            or type(media_id) is not str
+            or not media_id
+            or type(filename) is not str
+        ):
+            continue
+        match = _RAW_ATTACHMENT_URI.fullmatch(raw_uri)
+        if match is None or match.group("content_hash") != content_hash:
+            continue
+        candidates.append((asset, match))
+    if not candidates:
+        return 0
+    from knowledgenexus.foundation.domain.models.media_body_materialization import MediaBodyStoreBudget
+    from knowledgenexus.foundation.infrastructure.processors.drawio_mermaid_converter import (
+        DrawioMermaidConversionError,
+        convert_drawio_to_mermaid,
+    )
+    from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store import (
+        ConfluenceRawAttachmentStore,
+    )
+    from knowledgenexus.foundation.ports.confluence_raw_attachment_store_port import (
+        ConfluenceRawAttachmentStoreError,
+    )
+    reliability = _load_reliability_profile(args.reliability_profile_path)
+    config = _corpus_config(args, reliability)
+    max_body = min(reliability["max_response_bytes_per_request"], config.drawio_bytes)
+    budget = MediaBodyStoreBudget(
+        max_body_bytes=max_body, max_total_bytes=config.drawio_bytes,
+        minimum_free_disk_reserve_bytes=reliability["minimum_free_disk_reserve_bytes"],
+    )
+    store = ConfluenceRawAttachmentStore(
+        data_root=Path(args.raw_root) / "attachments", budget=budget,
+    )
+    diagrams_dir = output_dir / "diagrams"
+    written = 0
+    for asset, match in candidates:
+        content_hash = asset["content_hash"]
+        assert type(content_hash) is str
+        try:
+            envelope = store.read_attachment(
+                attachment_id=match.group("attachment_id"),
+                content_hash=content_hash,
+            )
+            mermaid_text = convert_drawio_to_mermaid(envelope.body_bytes)
+        except (ConfluenceRawAttachmentStoreError, DrawioMermaidConversionError):
+            logger.warning("Mermaid conversion skipped for one draw.io asset")
+            continue
+        media_id = asset["media_id"]
+        filename = asset["filename"]
+        assert type(media_id) is str and type(filename) is str
+        safe_name = re.sub(r"[^\w.-]", "_", filename).strip(" .")[:96] or "diagram"
+        identity_suffix = hashlib.sha256(media_id.encode("utf-8")).hexdigest()[:12]
+        target = diagrams_dir / f"{safe_name}--{identity_suffix}.mmd"
+        try:
+            diagrams_dir.mkdir(exist_ok=True)
+            target.write_text(mermaid_text, encoding="utf-8")
+        except OSError:
+            logger.warning("Mermaid output skipped for one draw.io asset")
+            continue
+        written += 1
+    return written
+
+
 def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     if not args.raw_root:
         raise ValueError("raw root is required")
@@ -1013,12 +1112,16 @@ def _export_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     diagram_chunks = _diagram_chunk_records(
         args, documents=processed.documents, media_assets=media_assets,
     )
+    output_path = Path(args.output_dir)
     packet = SubtreePacketExporter(validator=FoundationSchemaValidator()).publish(
-        output_dir=Path(args.output_dir), documents=processed.documents,
+        output_dir=output_path, documents=processed.documents,
         chunks=list(processed.chunks) + diagram_chunks, media_assets=media_assets,
         summary={"page_corpus_complete": True, "drawio_references_observed": len(refs), "drawio_references_resolved": len(resolutions), "drawio_assets_failed": 0},
     )
-    return {"status": "complete", "phase": "export", "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": packet["media_asset_count"]}
+    mermaid_count = _export_mermaid_diagrams(
+        args, output_dir=output_path, media_assets=media_assets,
+    )
+    return {"status": "complete", "phase": "export", "format_version": packet["format_version"], "packet_published": True, "document_count": packet["document_count"], "chunk_count": packet["chunk_count"], "media_asset_count": packet["media_asset_count"], "mermaid_diagrams_exported": mermaid_count}
 
 
 def _capture_delta_inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:

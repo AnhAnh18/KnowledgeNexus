@@ -361,6 +361,7 @@ def _export_with_drawio_state(monkeypatch, tmp_path, *, media_asset: dict[str, o
             }
 
     monkeypatch.setattr(cli, "SubtreePacketExporter", Exporter)
+    monkeypatch.setattr(cli, "_export_mermaid_diagrams", lambda *_a, **_kw: 0)
     outcome = cli._export_phase(_args(output_dir=str(output)), state)
     return outcome, published
 
@@ -373,6 +374,7 @@ def test_export_folds_parsed_diagram_chunks_into_the_published_packet(monkeypatc
 
     assert outcome["packet_published"] is True
     assert outcome["chunk_count"] == 2
+    assert outcome["mermaid_diagrams_exported"] == 0
     # The chunker was called against the right parent page, not just any page.
     assert fake_chunker.calls == [("confluence:page:1000", "confluence:attachment:att1")]
     # Original page chunk plus the diagram chunk, both present -- nothing lost.
@@ -403,6 +405,151 @@ def test_export_skips_diagram_assets_that_are_not_successfully_parsed(monkeypatc
     # production) must never even be constructed, let alone called.
     assert fake_chunker.calls == []
     assert [chunk["chunk_id"] for chunk in published["chunks"]] == ["chunk-1"]
+
+
+def test_export_mermaid_diagrams_writes_mmd_from_raw_xml(monkeypatch, tmp_path):
+    """_export_mermaid_diagrams reads raw XML from disk, converts it to
+    Mermaid, and writes .mmd files alongside the packet."""
+    import knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store as store_mod
+    import knowledgenexus.foundation.infrastructure.processors.drawio_mermaid_converter as conv_mod
+
+    xml_body = (
+        b'<mxfile><diagram id="d1"><mxGraphModel><root>'
+        b'<mxCell id="0" /><mxCell id="1" parent="0" />'
+        b'<mxCell id="A" value="Start" parent="1" vertex="1" />'
+        b'<mxCell id="B" value="End" parent="1" vertex="1" />'
+        b'<mxCell id="E" value="go" parent="1" edge="1" source="A" target="B" />'
+        b'</root></mxGraphModel></diagram></mxfile>'
+    )
+    content_hash = hashlib.sha256(xml_body).hexdigest()
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    asset = _media_asset()
+    asset["raw_uri"] = f"raw://confluence/attachments/att1/{content_hash}"
+    asset["content_hash"] = content_hash
+
+    class _FakeEnvelope:
+        body_bytes = xml_body
+
+    class _FakeStore:
+        def __init__(self, **_kw):
+            pass
+        def read_attachment(self, **_kw):
+            return _FakeEnvelope()
+
+    monkeypatch.setattr(store_mod, "ConfluenceRawAttachmentStore", _FakeStore)
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _v: {
+        "inventory_page_size": 50,
+        "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000,
+        "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[asset],
+    )
+
+    assert count == 1
+    mmd_files = list((output_dir / "diagrams").glob("*.mmd"))
+    assert len(mmd_files) == 1
+    content = mmd_files[0].read_text(encoding="utf-8")
+    assert "flowchart TD" in content
+    assert 'A["Start"]' in content
+    assert 'B["End"]' in content
+    assert '-->|"go"|' in content
+
+
+def test_export_mermaid_diagrams_skips_unparsed_assets(tmp_path):
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    asset = _media_asset(processing_status="download_failed", extracted_text=None)
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[asset],
+    )
+
+    assert count == 0
+    assert not (output_dir / "diagrams").exists()
+
+
+@pytest.mark.parametrize("media_assets", (None, object(), "not-assets", [object()]))
+def test_export_mermaid_diagrams_rejects_wrong_runtime_types_before_output(tmp_path, media_assets):
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+
+    with pytest.raises((TypeError, ValueError)):
+        cli._export_mermaid_diagrams(
+            _args(), output_dir=output_dir, media_assets=media_assets,
+        )
+
+    assert not (output_dir / "diagrams").exists()
+
+
+def test_export_mermaid_diagrams_skips_mismatched_raw_uri_hash(tmp_path):
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    asset = _media_asset()
+    asset["raw_uri"] = "raw://confluence/attachments/att1/" + "a" * 64
+    asset["content_hash"] = "b" * 64
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[asset],
+    )
+
+    assert count == 0
+    assert not (output_dir / "diagrams").exists()
+
+
+def test_export_mermaid_diagrams_does_not_overwrite_duplicate_filenames(monkeypatch, tmp_path):
+    import knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store as store_mod
+
+    xml_body = (
+        b'<mxfile><diagram id="d1"><mxGraphModel><root>'
+        b'<mxCell id="0" /><mxCell id="1" parent="0" />'
+        b'<mxCell id="A" value="Node" parent="1" vertex="1" />'
+        b'</root></mxGraphModel></diagram></mxfile>'
+    )
+    content_hash = hashlib.sha256(xml_body).hexdigest()
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    first = _media_asset(media_id="confluence:attachment:att1")
+    second = _media_asset(media_id="confluence:attachment:att2")
+    for attachment_id, asset in (("att1", first), ("att2", second)):
+        asset["raw_uri"] = f"raw://confluence/attachments/{attachment_id}/{content_hash}"
+        asset["content_hash"] = content_hash
+
+    class _FakeEnvelope:
+        body_bytes = xml_body
+
+    class _FakeStore:
+        def __init__(self, **_kwargs):
+            pass
+
+        def read_attachment(self, **_kwargs):
+            return _FakeEnvelope()
+
+    monkeypatch.setattr(store_mod, "ConfluenceRawAttachmentStore", _FakeStore)
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _value: {
+        "inventory_page_size": 50,
+        "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000,
+        "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[first, second],
+    )
+
+    assert count == 2
+    assert len(list((output_dir / "diagrams").glob("*.mmd"))) == 2
 
 
 def test_zero_drawio_phase_persists_generation_bound_state_without_network(monkeypatch, tmp_path):
