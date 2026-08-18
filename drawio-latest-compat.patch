@@ -1,0 +1,225 @@
+diff --git a/docs/runbooks/CONFLUENCE_TEXT_DEMO.md b/docs/runbooks/CONFLUENCE_TEXT_DEMO.md
+index b71e3e0..6c4613b 100644
+--- a/docs/runbooks/CONFLUENCE_TEXT_DEMO.md
++++ b/docs/runbooks/CONFLUENCE_TEXT_DEMO.md
+@@ -16,13 +16,23 @@ evidence, normalizes and chunks text, and atomically publishes:
+     |-- documents.jsonl
+     |-- chunks.jsonl
+     |-- media_assets.jsonl
+-    `-- packet_summary.json
++    |-- packet_summary.json
++    `-- diagrams/                         # optional; strict Draw.io runs only
++        `-- <attachment>--<identity>.mmd
+ ```
+ 
+ Indexing consumes `documents.jsonl` and `chunks.jsonl`. All chunks retain the
+ deny-safe `restricted:unresolved` ACL tag. This demo does not make content
+ public and does not write directly to Qdrant or SQLite.
+ 
++When strict processing successfully parses a Draw.io attachment, its extracted
++graph text is emitted as searchable `content_kind: diagram` chunks. Export also
++attempts to write a bounded Mermaid file under `diagrams/`, preserving node and
++edge labels plus container subgraphs. Mermaid conversion is best-effort and is
++reported by the `mermaid_diagrams_exported` counter; the packet verifier rejects
++unexpected file types, oversized/invalid UTF-8 files, or a counter mismatch.
++Explicit partial text mode never captures or exports Draw.io diagrams.
++
+ ## Prerequisites
+ 
+ Run from the repository root in PowerShell. Set credentials and the exact local
+diff --git a/src/knowledgenexus/foundation/cli/export_confluence_url_text_snapshot.py b/src/knowledgenexus/foundation/cli/export_confluence_url_text_snapshot.py
+index 79af1fe..a9d379e 100644
+--- a/src/knowledgenexus/foundation/cli/export_confluence_url_text_snapshot.py
++++ b/src/knowledgenexus/foundation/cli/export_confluence_url_text_snapshot.py
+@@ -45,6 +45,8 @@ _CONTEXT_FORMAT = "confluence-url-text-snapshot-context-v1"
+ _PACKET_FILES = frozenset(
+     {"documents.jsonl", "chunks.jsonl", "media_assets.jsonl", "packet_summary.json"}
+ )
++_MERMAID_DIRECTORY = "diagrams"
++_MAX_MERMAID_BYTES = 1 * 1024 * 1024
+ _CANONICAL_PAGE_PATH = re.compile(
+     r"\A(?P<context>(?:/[^/?#]+)*)/spaces/(?P<space>[A-Z0-9]+)/pages/(?P<page>[0-9]+)(?:/[^?#]*)?\Z"
+ )
+@@ -585,14 +587,46 @@ def _common_phase_args(
+     ]
+ 
+ 
+-def _verify_existing_packet(version: Path) -> dict[str, object]:
++def _verify_existing_packet(
++    version: Path, *, expected_mermaid_diagrams: object | None = None,
++) -> dict[str, object]:
++    if (
++        expected_mermaid_diagrams is not None
++        and (
++            type(expected_mermaid_diagrams) is not int
++            or expected_mermaid_diagrams < 0
++        )
++    ):
++        raise TextSnapshotOperatorError("publication")
+     try:
+         require_plain_directory_chain(version)
+         names = {item.name for item in version.iterdir()}
+-        if names != _PACKET_FILES:
++        allowed_names = _PACKET_FILES | {_MERMAID_DIRECTORY}
++        if not _PACKET_FILES <= names or not names <= allowed_names:
+             raise ValueError
+         for name in _PACKET_FILES:
+             require_plain_file(version / name)
++        diagram_count = 0
++        diagrams = version / _MERMAID_DIRECTORY
++        if _MERMAID_DIRECTORY in names:
++            require_plain_directory_chain(diagrams)
++            entries = tuple(diagrams.iterdir())
++            if not entries:
++                raise ValueError
++            for entry in entries:
++                if entry.suffix != ".mmd":
++                    raise ValueError
++                require_plain_file(entry)
++                body = entry.read_bytes()
++                if not body or len(body) > _MAX_MERMAID_BYTES:
++                    raise ValueError
++                body.decode("utf-8")
++            diagram_count = len(entries)
++        if (
++            expected_mermaid_diagrams is not None
++            and diagram_count != expected_mermaid_diagrams
++        ):
++            raise ValueError
+         summary = json.loads((version / "packet_summary.json").read_bytes().decode("utf-8"))
+     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+         raise TextSnapshotOperatorError("publication") from None
+@@ -619,6 +653,7 @@ def _verify_existing_packet(version: Path) -> dict[str, object]:
+             or summary.get("drawio_status")
+             != "not_captured_in_best_effort_mode"
+             or summary.get("media_asset_count") != 0
++            or diagram_count != 0
+             or any(type(value) is not int or value < 0 for value in (
+                 requested, succeeded, failed,
+             ))
+@@ -934,12 +969,18 @@ def run(
+         ],
+         phase_main=phase_main,
+     ), phase="export", statuses=frozenset({"complete"}),
+-        counters=("document_count", "chunk_count", "media_asset_count"),
++        counters=(
++            "document_count", "chunk_count", "media_asset_count",
++            "mermaid_diagrams_exported",
++        ),
+         booleans=("packet_published",),
+     )
+     if exported["packet_published"] is not True:
+         raise TextSnapshotOperatorError("publication")
+-    _verify_existing_packet(version)
++    _verify_existing_packet(
++        version,
++        expected_mermaid_diagrams=exported["mermaid_diagrams_exported"],
++    )
+     _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
+     result = {
+         "status": "complete", "already_published": False,
+diff --git a/tests/foundation/cli/test_export_confluence_url_text_snapshot_cli.py b/tests/foundation/cli/test_export_confluence_url_text_snapshot_cli.py
+index bfcf51b..430ef00 100644
+--- a/tests/foundation/cli/test_export_confluence_url_text_snapshot_cli.py
++++ b/tests/foundation/cli/test_export_confluence_url_text_snapshot_cli.py
+@@ -96,6 +96,7 @@ class _PhaseMain:
+                 "status": "complete", "phase": "export",
+                 "packet_published": True, "document_count": 2,
+                 "chunk_count": 3, "media_asset_count": 0,
++                "mermaid_diagrams_exported": 0,
+             }
+         else:
+             raise AssertionError(phase)
+@@ -297,6 +298,92 @@ def test_run_composes_bounded_phases_and_publishes_latest(
+     ]
+ 
+ 
++def _write_verifiable_packet(path: Path, *, processing_status: str = "complete") -> None:
++    path.mkdir()
++    (path / "documents.jsonl").write_text("{}\n", encoding="utf-8")
++    (path / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
++    (path / "media_assets.jsonl").write_text("", encoding="utf-8")
++    summary: dict[str, object] = {
++        "format_version": "confluence-subtree-indexing-packet-v1",
++        "acl_mode": "restricted_unresolved",
++        "document_count": 1,
++        "chunk_count": 1,
++        "media_asset_count": 0,
++        "processing_status": processing_status,
++    }
++    if processing_status == "partial":
++        summary.update({
++            "processing_mode": "best_effort_text_demo",
++            "drawio_status": "not_captured_in_best_effort_mode",
++            "requested_pages": 1,
++            "succeeded_pages": 1,
++            "failed_pages": 0,
++            "failure_categories": {},
++        })
++    (path / "packet_summary.json").write_text(
++        json.dumps(summary) + "\n", encoding="utf-8",
++    )
++
++
++def test_packet_verifier_accepts_counted_mermaid_directory(tmp_path: Path) -> None:
++    version = (tmp_path / "version").resolve()
++    _write_verifiable_packet(version)
++    diagrams = version / "diagrams"
++    diagrams.mkdir()
++    (diagrams / "architecture--123.mmd").write_text(
++        'flowchart TD\n    A["Node"]\n', encoding="utf-8",
++    )
++
++    summary = cli._verify_existing_packet(
++        version, expected_mermaid_diagrams=1,
++    )
++
++    assert summary["processing_status"] == "complete"
++
++
++@pytest.mark.parametrize("expected", (True, -1, "1", object()))
++def test_packet_verifier_rejects_invalid_mermaid_count_before_io(
++    tmp_path: Path, expected: object,
++) -> None:
++    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
++        cli._verify_existing_packet(
++            (tmp_path / "missing").resolve(),
++            expected_mermaid_diagrams=expected,
++        )
++
++    assert raised.value.category == "publication"
++
++
++def test_packet_verifier_rejects_mermaid_count_mismatch(tmp_path: Path) -> None:
++    version = (tmp_path / "version").resolve()
++    _write_verifiable_packet(version)
++    diagrams = version / "diagrams"
++    diagrams.mkdir()
++    (diagrams / "architecture.mmd").write_text(
++        "flowchart TD\n    A\n", encoding="utf-8",
++    )
++
++    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
++        cli._verify_existing_packet(version, expected_mermaid_diagrams=2)
++
++    assert raised.value.category == "publication"
++
++
++def test_partial_packet_rejects_mermaid_directory(tmp_path: Path) -> None:
++    version = (tmp_path / "version").resolve()
++    _write_verifiable_packet(version, processing_status="partial")
++    diagrams = version / "diagrams"
++    diagrams.mkdir()
++    (diagrams / "unexpected.mmd").write_text(
++        "flowchart TD\n    A\n", encoding="utf-8",
++    )
++
++    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
++        cli._verify_existing_packet(version)
++
++    assert raised.value.category == "publication"
++
++
+ def test_failed_capture_stops_before_processing_and_remains_resumable(
+     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
