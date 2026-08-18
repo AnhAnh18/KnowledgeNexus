@@ -2,8 +2,8 @@
 
 This file is local execution guidance, not a normative contract.
 
-Last workspace verification: 2026-08-13.
-Last roadmap planning update: 2026-08-13.
+Last workspace verification: 2026-08-18.
+Last roadmap planning update: 2026-08-18.
 
 Precedence:
 1. `contracts/foundation/schemas/`
@@ -98,7 +98,7 @@ current SHA mappings are kept only in the ignored `LOCAL_PROVENANCE.md`.
 | W4 - Evidence-bound second-sync sparse delta | complete; approved and merged | W4-A, W4-B, W4-C1, and W4-C2 are approved with no open P0/P1/P2 at source-review head `cec2a8c`; the production, contract, and test range is present in `main` | W4 proves the bounded offline delta publication path. It does not constitute real operator evidence or a deployed Indexing import. |
 | W5 - Real-input Foundation acceptance and closeout | active staged gate; no live PASS claimed | W5 plan and W5-A inspection/runbooks are merged; the guarded W5-B Root-1 one-shot packet is present at `5c79924` | W5-B and W5-C each require separate explicit owner authorization. W5-D and consolidated independent closeout follow only after sanitized evidence is accepted. |
 | Indexing I0-I5 - Snapshot consumption, activation, automation, and acceptance | I0 discovery complete; I1-I5 not authorized | The reviewed handoff plan assigns strict resolution to I1, idempotent import to I2, two-store activation to I3, SnapshotReady production/consumption to I4, and closed-loop acceptance to I5 | Freeze the current Indexing base after W5 closeout, then implement and independently review I1 through I5 in order. Foundation never writes directly to Qdrant. |
-| W6 - Foundation URL-driven crawl operation | planned; not authorized | Product-operability milestone for the Foundation half of the flow; it consumes existing M7/W4/W5 capabilities and hands published snapshots to Indexing I4 | One operator action accepts a full/short Confluence URL, resolves scope, starts or safely resumes crawl phases, and publishes an immutable snapshot. I1-I5 retain ownership of Indexing import, activation, SnapshotReady, and end-to-end acceptance. |
+| W6 - Foundation URL-driven crawl operation | bounded URL/demo implementation present; real completion gates pending | Full/short URL resolution, durable phase sequencing/resume, aggregate progress, strict/explicit-partial packet publication, UI/API wiring, diagram chunks, and optional Mermaid exports are implemented and locally verified | Recurring Root-1/HQ operation, bounded restart supervision, real full/delta acceptance, SnapshotReady, and end-to-end Indexing acknowledgement remain gated. I1-I5 retain ownership of Indexing import and activation. |
 | M11 - Structure-aware retrieval handoff and chunking improvements | planned; post-M10/W5 and Indexing baseline | Current chunks preserve `document_id`, `heading_path`, stable IDs, and deterministic export order; retrieval context and semantic chunking still lack benchmark evidence | Cross-boundary milestone only. Foundation may add an approved structure/order handoff; Indexing/Retrieval own context assembly, parent expansion, embedding, and search. |
 | M12 - PLM read-only ingestion | **hold** | No real PLM MCP response fixtures are available in this environment; no PLM crawler or adapter is authorized yet | Resume only after sanitized read-only MCP evidence proves the API contract. Confluence closeout and the approved Foundation-to-Indexing sequence remain the current priority. |
 
@@ -1176,10 +1176,14 @@ would not make the end-to-end system runnable and may require a post-W5 rebase.
 
 ## 12.0 W6 - Foundation URL-Driven Crawl Operation
 
-Status: planned, not authorized. W6 is only the missing Foundation-side
-operator layer between a user-supplied Confluence URL and an approved immutable
-snapshot. It reuses M7 checkpoint/replay, W4 delta, W5 acceptance, and M10
-export behavior rather than implementing another crawler.
+Status: bounded URL/demo implementation present; W6 completion and real-input
+acceptance are not claimed. The current operator resolves approved full/short
+URLs, sequences the durable Foundation phases, resumes a unique compatible
+run, reports aggregate progress, and publishes strict or explicitly partial
+text packets with `LATEST.txt` updated last. Strict Draw.io packets include
+diagram chunks and may include bounded Mermaid `.mmd` exports. This reuses M7
+checkpoint/replay and existing export behavior rather than implementing a
+second crawler.
 
 Indexing ownership is already defined by
 `docs/learning/FOUNDATION_INDEXING_SNAPSHOT_HANDOFF_PLAN.md`:
@@ -1456,11 +1460,12 @@ boundary:
 7. Implement I4 only after explicit-version import and activation work; close
    the complete automated Foundation-to-Indexing loop under I5.
 
-Today, resume exists at durable phase/page boundaries but still requires an
-operator to select the correct phase. URL/short-link resolution, automatic
-phase selection, bounded restart supervision, and the end-user UI are not yet
-implemented. SnapshotReady, Indexing acknowledgement, and closed-loop
-acceptance are owned by I4/I5 rather than W6.
+Today, URL/short-link resolution, automatic bounded phase sequencing, unique
+resume, aggregate progress, and the end-user UI/API boundary are implemented.
+W6 is still incomplete until bounded restart supervision, recurring isolated
+Root-1/HQ operation, real full/delta publication evidence, and the documented
+interruption/replay gates pass. SnapshotReady, Indexing acknowledgement, and
+closed-loop acceptance remain owned by I4/I5 rather than W6.
 
 The M9-A4 OCR productionization gate and other deferred media capabilities
 remain separate; W5 is explicitly text plus Draw.io only and does not grant an

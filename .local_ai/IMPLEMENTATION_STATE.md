@@ -2066,3 +2066,40 @@ performance gate remain deferred; no 100k scale PASS is claimed.
   tools, including representative success/error responses and enough repeated
   calls to establish pagination/truncation, identity, timestamp, attachment,
   authorization, permission, and retry semantics.
+
+## W6 URL Packet and Draw.io Mermaid Integration
+
+- Status: bounded implementation integrated and locally verified; real W6
+  completion gates remain pending.
+- The portable product tree from the main-machine snapshot was transferred by
+  an owner-approved exact-content overlay. The scoped tracked file set covered
+  configuration templates, product config/contracts, demo/docs/MCP, packaging,
+  scripts, source, and tests while excluding `.env`, `data`, raw/runtime
+  artifacts, `.local_ai` provenance, and patch-transfer material. Exact source
+  content equivalence passed for all 664 transferred files before local
+  integration corrections; local-only tracked files were retained.
+- The URL operator supports approved full and short Confluence URL forms,
+  bounded durable phase sequencing, unique compatible resume, aggregate
+  progress, strict publication, explicit partial text-demo publication, and
+  `LATEST.txt`-last replay semantics. Indexing, Presentation/API, demo UI,
+  retrieval, eval, and their required portable support files are present in the
+  unified tree.
+- Parsed Draw.io assets now produce searchable `content_kind: diagram` chunks.
+  Strict packet export can also read the verified raw XML and emit bounded
+  Mermaid `.mmd` files, including node labels, edge labels, and container
+  subgraphs. The URL packet verifier accepts only a counted optional
+  `diagrams/` directory of bounded UTF-8 `.mmd` files; explicit partial mode
+  rejects diagram output.
+- Adversarial coverage rejects wrong runtime types, unsafe/malformed XML,
+  duplicate IDs, parent cycles, impossible cell flags, inconsistent raw URI
+  hashes, Mermaid count mismatches, and partial packets carrying diagrams.
+- Validation on 2026-08-18: focused Foundation/Indexing integration `239
+  passed`; URL/packet/Draw.io focused regression after integration correction
+  `163 passed`; scoped tree-equivalence check passed. Presentation collection
+  requires the declared Qdrant runtime dependency set; the current local Python
+  environment lacks `grpc`, so that environment gate remains to be rerun after
+  dependency installation.
+- Remaining W6 boundary: controlled real Root-1/HQ runs, bounded automatic
+  restart supervision, recurring isolated scopes, real W4 full/delta evidence,
+  SnapshotReady delivery, Indexing activation/acknowledgement, and I5
+  end-to-end acceptance are not claimed by this integration.
