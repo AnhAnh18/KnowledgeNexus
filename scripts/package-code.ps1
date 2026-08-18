@@ -6,6 +6,7 @@
 # The script zips:
 # - 'src/' directory (Python source code - production code only)
 # - 'mcp/' directory (MCP server - TypeScript/Node.js)
+# - 'portal/' directory (Portal web client - HTML/CSS/JS)
 # - Essential project files (pyproject.toml, requirements.txt, README.md, .env.example, start.bat)
 #
 # Note: eval/ is NOT included - it's for development/testing only.
@@ -73,6 +74,19 @@ if (Test-Path $mcpDir) {
     Write-Host "MCP directory copied to staging (node_modules excluded)."
 } else {
     Write-Warning "MCP directory not found at $mcpDir; skipping."
+}
+
+# Copy portal code directory (HTML/CSS/JS web client)
+$portalDir = Join-Path $repoRoot "portal"
+if (Test-Path $portalDir) {
+    $portalStaging = Join-Path $staging "portal"
+    New-Item -ItemType Directory -Path $portalStaging | Out-Null
+    
+    # Copy all files
+    Get-ChildItem -Path $portalDir | Copy-Item -Destination $portalStaging -Recurse -Force
+    Write-Host "Portal directory copied to staging."
+} else {
+    Write-Warning "Portal directory not found at $portalDir; skipping."
 }
 
 # Copy update-code.ps1 script (for client updates)

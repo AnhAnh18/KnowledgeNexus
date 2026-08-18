@@ -56,9 +56,9 @@ app.include_router(documents_router)
 app.include_router(store_router)
 app.include_router(ingest_job_router)
 
-# Serve demo/ static files so LAN machines can access index.html via browser
-# Access: http://<server-lan-ip>:8000/demo → serves demo/index.html
-_DEMO_DIR = Path(__file__).resolve().parents[4] / "demo"
+# Serve portal/ static files so LAN machines can access index.html via browser
+# Access: http://<server-lan-ip>:8000/portal → serves portal/index.html
+_PORTAL_DIR = Path(__file__).resolve().parents[4] / "portal"
 
-if _DEMO_DIR.is_dir():
-    app.mount("/demo", StaticFiles(directory=str(_DEMO_DIR), html=True), name="demo")
+if _PORTAL_DIR.is_dir():
+    app.mount("/portal", StaticFiles(directory=str(_PORTAL_DIR), html=True), name="portal")

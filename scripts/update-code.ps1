@@ -45,6 +45,13 @@ if (Test-Path $mcpDir) {
     Remove-Item -Recurse -Force $mcpDir
 }
 
+# Remove old portal directory
+$portalDir = Join-Path $installDir "portal"
+if (Test-Path $portalDir) {
+    Write-Host "Removing old portal/..."
+    Remove-Item -Recurse -Force $portalDir
+}
+
 # Remove old configuration files
 $configFiles = @("pyproject.toml", "requirements.txt", "README.md", ".env.example", "start.bat")
 foreach ($cfg in $configFiles) {

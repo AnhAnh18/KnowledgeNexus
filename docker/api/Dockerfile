@@ -37,7 +37,7 @@ WORKDIR /app
 COPY src ./src
 COPY config ./config
 COPY contracts ./contracts
-COPY demo ./demo
+COPY portal ./portal
 COPY pyproject.toml ./
 COPY --from=builder /app/models /app/models
 
