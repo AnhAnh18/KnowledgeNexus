@@ -14,6 +14,12 @@ class EmbedderPort(ABC):
     def dimension(self) -> int:
         ...
 
+    @property
+    @abstractmethod
+    def supports_sparse(self) -> bool:
+        """Whether this embedder can produce sparse vectors."""
+        ...
+
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[EmbeddingVector]:
         ...

@@ -382,7 +382,7 @@ class _WriterLockLease:
     def _chain_matches(self, current, allow_lifecycle: bool) -> bool:
         del allow_lifecycle
         # Child and sibling entry lifecycles legitimately update directory
-        # size/timestamps/link counts. The chain therefore records only the
+        # size/timestamps/link counts.  The chain therefore records only the
         # entry identity and mode; _validate_workspace still performs fresh
         # no-symlink/no-reparse/type checks for every component on every pass.
         return current == self._workspace_chain

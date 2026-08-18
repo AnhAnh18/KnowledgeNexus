@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from knowledgenexus.foundation.domain.models.chunking_profile import ChunkingProfile
@@ -219,6 +219,95 @@ class BuildConfluenceChunks:
             records=tuple(records),
             metrics=self._metrics(records, token_counts, state),
         )
+
+    def execute_media_diagram(
+        self,
+        *,
+        canonical_document: Mapping[str, object],
+        media_asset: Mapping[str, object],
+    ) -> ChunkingResult:
+        """Chunk one parsed draw.io diagram's extracted text (CHUNKING_SPEC §4.7).
+
+        A diagram is captured as an attachment, not page structure, so there is
+        no `WikiDocumentStructure` to walk here -- unlike `execute()`. Instead
+        this builds a single free-text `_Candidate` and reuses the same
+        `_split_candidate` / `_build_records` machinery §4.4 prose windowing
+        already provides (target/hard-max/overlap, fail-closed on an
+        unsplittable fragment), so a diagram is bound by the exact token rules
+        as everything else -- nothing new to get wrong here.
+        """
+        try:
+            return self._execute_media_diagram(
+                canonical_document=canonical_document,
+                media_asset=media_asset,
+            )
+        except ConfluenceChunkingError:
+            raise
+        except Exception:
+            _fail(ConfluenceChunkingFailureCategory.CHUNKING_FAILED)
+
+    def _execute_media_diagram(
+        self,
+        *,
+        canonical_document: Mapping[str, object],
+        media_asset: Mapping[str, object],
+    ) -> ChunkingResult:
+        self._validate_media_diagram_inputs(canonical_document, media_asset)
+        state = _MetricState()
+        filename = media_asset["filename"]
+        heading_path = (f"Diagram: {filename}",)
+        candidate = _Candidate(
+            # Deliberately "prose": this selects the §4.4 windowing algorithm in
+            # `_split_candidate` below. The parts are relabeled to "diagram"
+            # afterward -- that label only ever affects the *output*
+            # `content_kind`, never how the text gets split.
+            kind="prose",
+            breadcrumb=self._breadcrumb(heading_path),
+            heading_path=heading_path,
+            body=media_asset["extracted_text"],
+            unit_key=f"drawio:{media_asset['media_id']}",
+        )
+        parts = [
+            replace(part, kind="diagram")
+            for part in self._split_candidate(candidate, state)
+        ]
+        records, token_counts = self._build_records(
+            canonical_document=canonical_document,
+            parts=parts,
+        )
+        return ChunkingResult(
+            records=tuple(records),
+            metrics=self._metrics(records, token_counts, state),
+        )
+
+    def _validate_media_diagram_inputs(
+        self,
+        canonical_document: Mapping[str, object],
+        media_asset: Mapping[str, object],
+    ) -> None:
+        if not isinstance(canonical_document, Mapping):
+            _fail(
+                ConfluenceChunkingFailureCategory.CANONICAL_DOCUMENT_VALIDATION_FAILED
+            )
+        try:
+            self._schema_validator.validate_record(
+                "CanonicalDocument",
+                canonical_document,
+            )
+        except (FoundationValidationError, TypeError, ValueError):
+            _fail(
+                ConfluenceChunkingFailureCategory.CANONICAL_DOCUMENT_VALIDATION_FAILED
+            )
+        if (
+            not isinstance(media_asset, Mapping)
+            or not isinstance(media_asset.get("filename"), str)
+            or not media_asset.get("filename")
+            or not isinstance(media_asset.get("media_id"), str)
+            or not media_asset.get("media_id")
+            or not isinstance(media_asset.get("extracted_text"), str)
+            or not media_asset.get("extracted_text")
+        ):
+            _fail(ConfluenceChunkingFailureCategory.CHUNKING_FAILED)
 
     def _validate_inputs(
         self,

@@ -96,6 +96,7 @@ class _PhaseMain:
                 "status": "complete", "phase": "export",
                 "packet_published": True, "document_count": 2,
                 "chunk_count": 3, "media_asset_count": 0,
+                "mermaid_diagrams_exported": 0,
             }
         else:
             raise AssertionError(phase)
@@ -251,11 +252,12 @@ def test_run_composes_bounded_phases_and_publishes_latest(
     tokenizer = _operator_files(tmp_path, monkeypatch)
     phases = _PhaseMain()
     output = tmp_path / "operator-output"
+    progress: list[dict[str, object]] = []
 
     result = cli.run(
         url="https://confluence.example/spaces/SPACE/pages/12345/Root",
         output_root=str(output), tokenizer_assets_dir=str(tokenizer),
-        max_pages=200, phase_main=phases,
+        max_pages=200, phase_main=phases, progress_callback=progress.append,
     )
 
     assert result == {
@@ -270,16 +272,116 @@ def test_run_composes_bounded_phases_and_publishes_latest(
     assert (output / "LATEST.txt").read_text(encoding="ascii") == f"confluence-{_RUN_ID}\n"
     version = output / "versions" / f"confluence-{_RUN_ID}"
     assert {path.name for path in version.iterdir()} == cli._PACKET_FILES
+    assert [item["phase"] for item in progress] == [
+        "resolving_url", "inventory", "inventory", "capture_pages",
+        "capture_pages", "process_pages", "capture_drawio", "export_packet",
+        "publish_packet",
+    ]
+    assert progress[-1] == {
+        "phase": "publish_packet", "document_count": 2, "chunk_count": 3,
+    }
 
+    replay_progress: list[dict[str, object]] = []
     replay = cli.run(
         url="https://confluence.example/spaces/SPACE/pages/12345/Root",
         output_root=str(output), tokenizer_assets_dir=str(tokenizer),
         max_pages=200, phase_main=lambda _argv: pytest.fail("published replay called a phase"),
+        progress_callback=replay_progress.append,
     )
     assert replay == {
         "status": "complete", "already_published": True,
         "acl_mode": "restricted_unresolved",
     }
+    assert replay_progress == [
+        {"phase": "resolving_url"},
+        {"phase": "completed", "document_count": 2, "chunk_count": 3},
+    ]
+
+
+def _write_verifiable_packet(path: Path, *, processing_status: str = "complete") -> None:
+    path.mkdir()
+    (path / "documents.jsonl").write_text("{}\n", encoding="utf-8")
+    (path / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
+    (path / "media_assets.jsonl").write_text("", encoding="utf-8")
+    summary: dict[str, object] = {
+        "format_version": "confluence-subtree-indexing-packet-v1",
+        "acl_mode": "restricted_unresolved",
+        "document_count": 1,
+        "chunk_count": 1,
+        "media_asset_count": 0,
+        "processing_status": processing_status,
+    }
+    if processing_status == "partial":
+        summary.update({
+            "processing_mode": "best_effort_text_demo",
+            "drawio_status": "not_captured_in_best_effort_mode",
+            "requested_pages": 1,
+            "succeeded_pages": 1,
+            "failed_pages": 0,
+            "failure_categories": {},
+        })
+    (path / "packet_summary.json").write_text(
+        json.dumps(summary) + "\n", encoding="utf-8",
+    )
+
+
+def test_packet_verifier_accepts_counted_mermaid_directory(tmp_path: Path) -> None:
+    version = (tmp_path / "version").resolve()
+    _write_verifiable_packet(version)
+    diagrams = version / "diagrams"
+    diagrams.mkdir()
+    (diagrams / "architecture--123.mmd").write_text(
+        'flowchart TD\n    A["Node"]\n', encoding="utf-8",
+    )
+
+    summary = cli._verify_existing_packet(
+        version, expected_mermaid_diagrams=1,
+    )
+
+    assert summary["processing_status"] == "complete"
+
+
+@pytest.mark.parametrize("expected", (True, -1, "1", object()))
+def test_packet_verifier_rejects_invalid_mermaid_count_before_io(
+    tmp_path: Path, expected: object,
+) -> None:
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli._verify_existing_packet(
+            (tmp_path / "missing").resolve(),
+            expected_mermaid_diagrams=expected,
+        )
+
+    assert raised.value.category == "publication"
+
+
+def test_packet_verifier_rejects_mermaid_count_mismatch(tmp_path: Path) -> None:
+    version = (tmp_path / "version").resolve()
+    _write_verifiable_packet(version)
+    diagrams = version / "diagrams"
+    diagrams.mkdir()
+    (diagrams / "architecture.mmd").write_text(
+        "flowchart TD\n    A\n", encoding="utf-8",
+    )
+
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli._verify_existing_packet(version, expected_mermaid_diagrams=2)
+
+    assert raised.value.category == "publication"
+
+
+def test_partial_packet_rejects_mermaid_directory(tmp_path: Path) -> None:
+    version = (tmp_path / "version").resolve()
+    _write_verifiable_packet(version, processing_status="partial")
+    diagrams = version / "diagrams"
+    diagrams.mkdir()
+    (diagrams / "unexpected.mmd").write_text(
+        "flowchart TD\n    A\n", encoding="utf-8",
+    )
+
+    with pytest.raises(cli.TextSnapshotOperatorError) as raised:
+        cli._verify_existing_packet(version)
+
+    assert raised.value.category == "publication"
 
 
 def test_failed_capture_stops_before_processing_and_remains_resumable(
@@ -575,3 +677,82 @@ def test_demo_runbook_documents_partial_resume_and_url_identity() -> None:
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+class _ChainOpener:
+    """Replays a fixed redirect chain, one hop per request."""
+
+    def __init__(self, hops: list[str], *, status: int = 302) -> None:
+        self.hops = list(hops)
+        self.status = status
+        self.urls: list[str] = []
+
+    def open(self, request, timeout):
+        self.urls.append(request.full_url)
+        if not self.hops:
+            raise AssertionError(f"unexpected extra request to {request.full_url}")
+        raise urllib.error.HTTPError(
+            request.full_url, self.status, "redirect",
+            {"Location": self.hops.pop(0)}, None,
+        )
+
+
+def test_short_link_follows_the_data_center_tinyurl_hop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Data Center goes /x/TOKEN -> /pages/tinyurl.action -> the page.
+
+    Reading a single hop stopped on tinyurl.action, which matches no pattern,
+    so every real short link failed as "url_shape".
+    """
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener([
+        "/pages/tinyurl.action?urlIdentifier=dRCEr",
+        "/spaces/SVMC/pages/2894336117/2026+Design+wrapper+for+skia",
+    ])
+
+    space_key, page_id = cli._resolve_short_link(
+        "https://confluence.example", "dRCEr", opener=opener,
+    )
+
+    assert (space_key, page_id) == ("SVMC", "2894336117")
+    assert opener.urls == [
+        "https://confluence.example/x/dRCEr",
+        "https://confluence.example/pages/tinyurl.action?urlIdentifier=dRCEr",
+    ]
+
+
+def test_short_link_that_lands_on_the_page_immediately_makes_one_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener(["/spaces/SVMC/pages/217/Title"])
+
+    assert cli._resolve_short_link(
+        "https://confluence.example", "dRCEr", opener=opener,
+    ) == ("SVMC", "217")
+    assert len(opener.urls) == 1
+
+
+def test_short_link_chain_leaving_the_origin_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every hop stays origin-bound, not just the first."""
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener([
+        "/pages/tinyurl.action?urlIdentifier=dRCEr",
+        "https://evil.example/spaces/SVMC/pages/217/Title",
+    ])
+
+    with pytest.raises(cli.TextSnapshotOperatorError):
+        cli._resolve_short_link("https://confluence.example", "dRCEr", opener=opener)
+
+
+def test_short_link_chain_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A redirect loop must terminate rather than walk forever."""
+    monkeypatch.setenv("CONFLUENCE_PAT", "fixture-secret")
+    opener = _ChainOpener(["/pages/tinyurl.action?urlIdentifier=dRCEr"] * 20)
+
+    with pytest.raises(cli.TextSnapshotOperatorError):
+        cli._resolve_short_link("https://confluence.example", "dRCEr", opener=opener)
+    assert len(opener.urls) <= cli._MAX_SHORT_LINK_HOPS + 1

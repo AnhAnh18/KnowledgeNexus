@@ -16,12 +16,22 @@ evidence, normalizes and chunks text, and atomically publishes:
     |-- documents.jsonl
     |-- chunks.jsonl
     |-- media_assets.jsonl
-    `-- packet_summary.json
+    |-- packet_summary.json
+    `-- diagrams/                         # optional; strict Draw.io runs only
+        `-- <attachment>--<identity>.mmd
 ```
 
 Indexing consumes `documents.jsonl` and `chunks.jsonl`. All chunks retain the
 deny-safe `restricted:unresolved` ACL tag. This demo does not make content
 public and does not write directly to Qdrant or SQLite.
+
+When strict processing successfully parses a Draw.io attachment, its extracted
+graph text is emitted as searchable `content_kind: diagram` chunks. Export also
+attempts to write a bounded Mermaid file under `diagrams/`, preserving node and
+edge labels plus container subgraphs. Mermaid conversion is best-effort and is
+reported by the `mermaid_diagrams_exported` counter; the packet verifier rejects
+unexpected file types, oversized/invalid UTF-8 files, or a counter mismatch.
+Explicit partial text mode never captures or exports Draw.io diagrams.
 
 ## Prerequisites
 
@@ -66,9 +76,9 @@ the discovered number of pages and cannot exceed 5,000.
 
 ## Explicit partial text demo
 
-The approved chunker losslessly emits representable oversized table cells using
-the versioned continuation envelope. For a time-critical text demo, explicitly
-enable best-effort processing for genuinely unrepresentable rows:
+The approved chunker intentionally rejects a table row that cannot fit under
+the 1,000-token hard maximum. For a time-critical text demo, explicitly enable
+best-effort processing:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
@@ -85,7 +95,7 @@ This mode:
 - records only aggregate failure categories and counts;
 - publishes `processing_status: partial` even when all text pages succeed;
 - writes an empty `media_assets.jsonl` and does not capture Draw.io;
-- never truncates or silently drops an oversized table row;
+- never truncates or rewrites an oversized table row;
 - never calls the result a complete/full snapshot.
 
 Inspect `packet_summary.json` before handing the packet to Indexing. The
@@ -138,8 +148,7 @@ packet status. A partial packet remains partial on replay.
   raw artifacts.
 - `capture_incomplete` means capture did not reach its terminal checkpoint.
 - `chunking_failed` in strict mode requires offline diagnosis.
-- `unsplittable_table_row` may use explicit partial mode for a demo only; it is
-  reserved for rows whose continuation shell cannot fit even one cell fragment.
+- `unsplittable_table_row` may use explicit partial mode for a demo only; its
+  production, lossless, versioned remediation remains open.
 - No `LATEST.txt` means no packet has been published.
 - Do not run two operators against the same output root concurrently.
-

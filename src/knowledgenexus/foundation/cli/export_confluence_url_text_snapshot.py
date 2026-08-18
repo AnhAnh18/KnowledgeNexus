@@ -12,6 +12,7 @@ import base64
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -44,6 +45,8 @@ _CONTEXT_FORMAT = "confluence-url-text-snapshot-context-v1"
 _PACKET_FILES = frozenset(
     {"documents.jsonl", "chunks.jsonl", "media_assets.jsonl", "packet_summary.json"}
 )
+_MERMAID_DIRECTORY = "diagrams"
+_MAX_MERMAID_BYTES = 1 * 1024 * 1024
 _CANONICAL_PAGE_PATH = re.compile(
     r"\A(?P<context>(?:/[^/?#]+)*)/spaces/(?P<space>[A-Z0-9]+)/pages/(?P<page>[0-9]+)(?:/[^?#]*)?\Z"
 )
@@ -58,7 +61,12 @@ _SHORT_PAGE_PATH = re.compile(
 _RUN_ID = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
+logger = logging.getLogger(__name__)
+
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+# /x/TOKEN -> /pages/tinyurl.action?urlIdentifier=TOKEN -> /spaces/KEY/pages/ID
+# is the observed Data Center chain; allow a little slack, never an open walk.
+_MAX_SHORT_LINK_HOPS = 4
 
 
 class TextSnapshotOperatorError(Exception):
@@ -260,10 +268,17 @@ def _read_short_redirect_location(
         or _SHORT_PAGE_PATH.fullmatch(f"/x/{token}") is None
     ):
         raise TextSnapshotOperatorError("short_url_resolution")
+    request_url = f"{base_url.rstrip('/')}/x/{quote(token, safe='')}"
+    return _read_redirect_hop(request_url, base_url, opener=opener)
+
+
+def _read_redirect_hop(
+    request_url: str, base_url: str, *, opener: object | None = None,
+) -> str:
+    """Read exactly one redirect, and only within the configured origin."""
     pat = os.environ.get("CONFLUENCE_PAT")
     if type(pat) is not str or not pat or "\r" in pat or "\n" in pat:
         raise TextSnapshotOperatorError("credentials")
-    request_url = f"{base_url.rstrip('/')}/x/{quote(token, safe='')}"
     request = urllib.request.Request(
         request_url,
         headers={"Accept": "text/html", "Authorization": f"Bearer {pat}"},
@@ -311,14 +326,34 @@ def _read_short_redirect_location(
     return resolved
 
 
-def _resolve_short_link(base_url: str, token: str) -> tuple[str, str]:
-    location = _read_short_redirect_location(base_url, token)
-    resolved_base, space_key, page_id = parse_canonical_page_url(
-        location, short_space_resolver=_resolve_short_space_key,
-    )
-    if resolved_base != base_url:
-        raise TextSnapshotOperatorError("short_url_resolution")
-    return space_key, page_id
+def _resolve_short_link(
+    base_url: str, token: str, *, opener: object | None = None,
+) -> tuple[str, str]:
+    """Follow a short link to the page it names.
+
+    Confluence Data Center does not redirect ``/x/TOKEN`` straight to the
+    page: it goes via ``/pages/tinyurl.action?urlIdentifier=TOKEN`` first.
+    Reading a single hop therefore lands on a path no pattern matches and the
+    whole short link fails as "url_shape".  Follow the chain, but keep the two
+    guarantees the single-hop read gave us: every hop stays inside the
+    configured origin, and the chain is bounded.
+    """
+    location = _read_short_redirect_location(base_url, token, opener=opener)
+    last_error: TextSnapshotOperatorError | None = None
+    for _ in range(_MAX_SHORT_LINK_HOPS):
+        try:
+            resolved_base, space_key, page_id = parse_canonical_page_url(
+                location, short_space_resolver=_resolve_short_space_key,
+            )
+        except TextSnapshotOperatorError as exc:
+            # Not a page URL yet -- follow one more hop and try again.
+            last_error = exc
+            location = _read_redirect_hop(location, base_url, opener=opener)
+            continue
+        if resolved_base != base_url:
+            raise TextSnapshotOperatorError("short_url_resolution")
+        return space_key, page_id
+    raise last_error or TextSnapshotOperatorError("short_url_resolution")
 
 
 def _resolve_short_space_key(base_url: str, page_id: str) -> str:
@@ -477,22 +512,45 @@ def _save_context(path: Path, payload: Mapping[str, object]) -> None:
 def _invoke_phase(
     argv: list[str], *, phase_main: Callable[[list[str] | None], int]
 ) -> dict[str, object]:
+    # Five different problems all surface as the single category "phase", and
+    # `from None` drops the cause, so an operator saw only that word with no
+    # way to tell an exception apart from stray output. The category stays as
+    # it is (callers depend on it) but the reason is logged before it is lost.
+    phase_name = argv[0] if argv else "?"
     output = io.StringIO()
     try:
         with contextlib.redirect_stdout(output):
             exit_code = phase_main(argv)
     except Exception:
+        logger.exception("Phase %s raised", phase_name)
         raise TextSnapshotOperatorError("phase") from None
     lines = output.getvalue().splitlines()
     if type(exit_code) is not int or len(lines) != 1:
+        logger.error(
+            "Phase %s returned exit_code=%r and %d line(s) of output, expected"
+            " exactly one JSON line. First 500 chars: %s",
+            phase_name, exit_code, len(lines), output.getvalue()[:500],
+        )
         raise TextSnapshotOperatorError("phase")
     try:
         payload = json.loads(lines[0])
     except json.JSONDecodeError:
+        logger.error("Phase %s printed non-JSON: %s", phase_name, lines[0][:500])
         raise TextSnapshotOperatorError("phase") from None
     if type(payload) is not dict or type(payload.get("status")) is not str:
+        logger.error("Phase %s printed JSON without a string status: %s", phase_name, lines[0][:500])
         raise TextSnapshotOperatorError("phase")
     if exit_code != 0 or payload["status"] == "failed":
+        # This is the branch a real phase failure takes -- the phase catches its
+        # own exception and prints a well-formed failure line -- so it is the
+        # one that most needs a trace. `failure_category` is also never present
+        # in practice: the phase CLI writes the reason under "error", so the
+        # category has always collapsed to "phase". Log the whole payload
+        # rather than guess at a mapping between two disagreeing contracts.
+        logger.error(
+            "Phase %s reported failure: exit_code=%r payload=%s",
+            phase_name, exit_code, lines[0][:500],
+        )
         category = payload.get("failure_category")
         raise TextSnapshotOperatorError(category if type(category) is str and category else "phase")
     return dict(payload)
@@ -529,14 +587,46 @@ def _common_phase_args(
     ]
 
 
-def _verify_existing_packet(version: Path) -> dict[str, object]:
+def _verify_existing_packet(
+    version: Path, *, expected_mermaid_diagrams: object | None = None,
+) -> dict[str, object]:
+    if (
+        expected_mermaid_diagrams is not None
+        and (
+            type(expected_mermaid_diagrams) is not int
+            or expected_mermaid_diagrams < 0
+        )
+    ):
+        raise TextSnapshotOperatorError("publication")
     try:
         require_plain_directory_chain(version)
         names = {item.name for item in version.iterdir()}
-        if names != _PACKET_FILES:
+        allowed_names = _PACKET_FILES | {_MERMAID_DIRECTORY}
+        if not _PACKET_FILES <= names or not names <= allowed_names:
             raise ValueError
         for name in _PACKET_FILES:
             require_plain_file(version / name)
+        diagram_count = 0
+        diagrams = version / _MERMAID_DIRECTORY
+        if _MERMAID_DIRECTORY in names:
+            require_plain_directory_chain(diagrams)
+            entries = tuple(diagrams.iterdir())
+            if not entries:
+                raise ValueError
+            for entry in entries:
+                if entry.suffix != ".mmd":
+                    raise ValueError
+                require_plain_file(entry)
+                body = entry.read_bytes()
+                if not body or len(body) > _MAX_MERMAID_BYTES:
+                    raise ValueError
+                body.decode("utf-8")
+            diagram_count = len(entries)
+        if (
+            expected_mermaid_diagrams is not None
+            and diagram_count != expected_mermaid_diagrams
+        ):
+            raise ValueError
         summary = json.loads((version / "packet_summary.json").read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         raise TextSnapshotOperatorError("publication") from None
@@ -563,6 +653,7 @@ def _verify_existing_packet(version: Path) -> dict[str, object]:
             or summary.get("drawio_status")
             != "not_captured_in_best_effort_mode"
             or summary.get("media_asset_count") != 0
+            or diagram_count != 0
             or any(type(value) is not int or value < 0 for value in (
                 requested, succeeded, failed,
             ))
@@ -665,6 +756,7 @@ def run(
     phase_main: Callable[[list[str] | None], int] | None = None,
     short_space_resolver: Callable[[str, str], object] | None = None,
     partial_processor: Callable[..., _PartialProcessingResult] | None = None,
+    progress_callback: Callable[[Mapping[str, object]], object] | None = None,
 ) -> dict[str, object]:
     if type(max_pages) is not int or max_pages <= 0 or max_pages > 5_000:
         raise TextSnapshotOperatorError("page_bound")
@@ -674,6 +766,20 @@ def run(
         raise TextSnapshotOperatorError("partial_mode")
     if partial_processor is not None and not allow_partial_processing:
         raise TextSnapshotOperatorError("partial_mode")
+    if progress_callback is not None and not callable(progress_callback):
+        raise TextSnapshotOperatorError("progress")
+
+    def report(phase: str, **values: object) -> None:
+        if progress_callback is None:
+            return
+        payload: dict[str, object] = {"phase": phase}
+        payload.update(values)
+        try:
+            progress_callback(payload)
+        except Exception:
+            raise TextSnapshotOperatorError("progress") from None
+
+    report("resolving_url")
     tokenizer = _require_operator_inputs(tokenizer_assets_dir)
     resolver = _resolve_short_space_key if short_space_resolver is None else short_space_resolver
     base_url, space_key, root_page_id = parse_canonical_page_url(
@@ -706,6 +812,7 @@ def run(
     )
     run_id = context["run_id"]
     if run_id is None:
+        report("inventory")
         inventory_args = ["inventory", *common]
         if context["inventory_started"]:
             inventory_args.append("--resume-unique")
@@ -741,6 +848,7 @@ def run(
             raise TextSnapshotOperatorError("inventory")
         context["run_id"] = run_id
         _save_context(context_path, context)
+        report("inventory", requested_pages=inventory["selected_pages"])
 
     version_name = f"confluence-{run_id}"
     version = versions / version_name
@@ -753,11 +861,13 @@ def run(
                 raise TextSnapshotOperatorError("publication")
         else:
             _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
-        return {
+        result = {
             "status": existing_summary.get("processing_status", "complete"),
             "already_published": True,
             "acl_mode": "restricted_unresolved",
         }
+        report("completed", document_count=existing_summary["document_count"], chunk_count=existing_summary["chunk_count"])
+        return result
 
     capture_args = ["capture-pages", *common, "--run-id", run_id, "--stop-after-batches", "1"]
     maximum_batches = (max_pages + 99) // 100
@@ -772,6 +882,10 @@ def run(
             _invoke_phase(capture_args, phase_main=phase_main),
             phase="capture-pages", statuses=frozenset({"complete", "stopped"}),
             counters=("captured", "replayed", "skipped", "failed"),
+        )
+        report(
+            "capture_pages", captured_pages=captured["captured"], replayed_pages=captured["replayed"],
+            capture_failed_pages=captured["failed"],
         )
         if captured["status"] == "complete":
             break
@@ -832,14 +946,20 @@ def run(
         "--chunking-profile-path", str(_DEFAULT_CHUNKING_PROFILE),
         "--tokenizer-assets-dir", str(tokenizer),
     ]
+    report("process_pages")
     _require_phase_result(
         _invoke_phase(processing, phase_main=phase_main),
         phase="process-pages", statuses=frozenset({"complete"}),
     )
+    report("capture_drawio")
     _require_phase_result(
         _invoke_phase(["capture-drawio", *common, "--run-id", run_id], phase_main=phase_main),
         phase="capture-drawio", statuses=frozenset({"complete"}),
     )
+    # Export is a long phase that reported nothing of its own, so the last
+    # thing an observer saw was "capture_drawio" -- a stale, wrong label for
+    # the entire time the packet is being built.
+    report("export_packet")
     exported = _require_phase_result(_invoke_phase(
         [
             "export", *common, "--run-id", run_id,
@@ -849,20 +969,28 @@ def run(
         ],
         phase_main=phase_main,
     ), phase="export", statuses=frozenset({"complete"}),
-        counters=("document_count", "chunk_count", "media_asset_count"),
+        counters=(
+            "document_count", "chunk_count", "media_asset_count",
+            "mermaid_diagrams_exported",
+        ),
         booleans=("packet_published",),
     )
     if exported["packet_published"] is not True:
         raise TextSnapshotOperatorError("publication")
-    _verify_existing_packet(version)
+    _verify_existing_packet(
+        version,
+        expected_mermaid_diagrams=exported["mermaid_diagrams_exported"],
+    )
     _atomic_write(latest, (version_name + "\n").encode("ascii"), replace=False)
-    return {
+    result = {
         "status": "complete", "already_published": False,
         "document_count": exported.get("document_count"),
         "chunk_count": exported.get("chunk_count"),
         "media_asset_count": exported.get("media_asset_count"),
         "acl_mode": "restricted_unresolved",
     }
+    report("publish_packet", document_count=exported["document_count"], chunk_count=exported["chunk_count"])
+    return result
 
 
 def _parser() -> argparse.ArgumentParser:

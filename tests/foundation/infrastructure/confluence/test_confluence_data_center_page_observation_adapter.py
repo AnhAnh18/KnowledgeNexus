@@ -90,7 +90,10 @@ def test_attachment_uses_exact_endpoint_and_actual_window() -> None:
         (
             "bytes",
             "/rest/api/content/1000/child/attachment",
-            {"start": "7", "limit": "3"},
+            # `expand` is not optional: Data Center omits version and metadata
+            # without it, and an attachment with no version is rejected
+            # downstream as an invalid observation.
+            {"start": "7", "limit": "3", "expand": "version,metadata"},
         )
     ]
 
@@ -129,3 +132,31 @@ def test_response_limit_has_distinct_port_error() -> None:
     )
     with pytest.raises(ConfluenceObservationTooLargeError):
         adapter.fetch_view_restriction(page_id="1000")
+
+
+def test_attachment_listing_expands_version_and_metadata():
+    """Data Center omits both unless asked, and the body materializer needs them.
+
+    Without `expand`, `version` never arrives, so `source_version` is None and
+    every attachment is rejected as an invalid observation -- which is why no
+    draw.io diagram could be downloaded. `extensions.fileSize` comes back
+    regardless, which is what made the gap look like a validation bug.
+    """
+    class _Transport:
+        def __init__(self):
+            self.query = None
+
+        def get_bytes(self, *, path, query):
+            self.query = query
+            return b"{}"
+
+    transport = _Transport()
+    adapter = ConfluenceDataCenterPageObservationAdapter(transport=transport)
+
+    adapter.fetch_attachment_metadata(
+        page_id="2894336117", request=AttachmentMetadataRequest(start=0, limit=50)
+    )
+
+    assert transport.query["expand"] == "version,metadata"
+    assert transport.query["start"] == "0"
+    assert transport.query["limit"] == "50"

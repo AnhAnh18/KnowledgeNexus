@@ -207,7 +207,10 @@ class _LiveAttachmentObserver:
                 version_number = item.get("version_number")
                 output.append(ConfluenceAttachmentObservation(
                     attachment_id=item["attachment_id"], parent_page_id=item["source_page_id"],
-                    filename=item["filename"], mime_type=item.get("mime_type"),
+                    # The parser publishes this under "media_type"; reading
+                    # "mime_type" here left it None for every attachment even
+                    # when Confluence did send it.
+                    filename=item["filename"], mime_type=item.get("media_type"),
                     size_bytes=item.get("file_size"),
                     source_version=str(version_number) if version_number is not None else None,
                     crawled_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

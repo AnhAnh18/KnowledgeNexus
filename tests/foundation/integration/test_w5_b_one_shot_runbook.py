@@ -218,6 +218,9 @@ $cases = @(
   @("capture", '{"status":"stopped","phase":"capture-pages","captured":"200","replayed":0,"skipped":0,"failed":0}'),
   @("capture", '{"status":"stopped","phase":"capture-pages","captured":199,"replayed":0,"skipped":1,"failed":0}'),
   @("capture", '{"status":"complete","phase":"capture-pages","captured":1,"replayed":199,"skipped":0,"failed":0}'),
+  @("capture", '{"status":"stopped","phase":"capture-pages","captured":94,"replayed":0,"skipped":0,"failed":6,"failure_categories":{"fetch_http":6}}'),
+  @("capture", '{"status":"stopped","phase":"capture-pages","captured":94,"replayed":0,"skipped":0,"failed":6,"failure_categories":{"fetch_http":5}}'),
+  @("capture", '{"status":"stopped","phase":"capture-pages","captured":94,"replayed":0,"skipped":0,"failed":6,"failure_categories":{"not_allowed":6}}'),
   @("processing", '{"status":"complete","phase":"process-pages","page_count":10,"document_count":9,"chunk_count":20}'),
   @("drawio", '{"status":"complete","phase":"capture-drawio","drawio_references_observed":2,"drawio_references_resolved":1,"drawio_assets_failed":0}'),
   @("export", '{"status":"success","dataset_version":"v1","counts":{"documents":1,"chunks":1,"relations":0,"acl":1,"media_assets":0,"symbols":0,"sync_state":1,"tombstones":0},"network_used":"false","credentials_used":false}'),
@@ -244,6 +247,8 @@ try {
   [void]@(Get-StrictTopLevelJsonPropertyNames '{"status":"success","counts":{"documents":1,"docu\u006dents":2}}')
 } catch { $rejected += 1 }
 if ($rejected -ne ($cases.Count + 3)) { exit 2 }
+$failurePayload = New-FailurePayload $true
+if ($failurePayload.capture_failure_categories.fetch_http -ne 6) { exit 3 }
 Write-Output "ALL_REJECTED"
 '''
     target = tmp_path / "validator-probe.ps1"

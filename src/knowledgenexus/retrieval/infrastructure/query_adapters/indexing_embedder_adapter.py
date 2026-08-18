@@ -18,5 +18,9 @@ class IndexingEmbedderAdapter(QueryEmbedderPort):
     def dimension(self) -> int:
         return self._embedder.dimension
 
+    @property
+    def supports_sparse(self) -> bool:
+        return self._embedder.supports_sparse
+
     async def embed_query(self, query: str) -> EmbeddingVector:
         return await self._embedder.embed_query(query)

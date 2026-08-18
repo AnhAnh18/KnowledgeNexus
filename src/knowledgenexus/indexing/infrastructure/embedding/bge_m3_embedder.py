@@ -5,17 +5,17 @@ import logging
 
 from knowledgenexus.indexing.domain.ports.embedder_port import EmbedderPort
 
-from knowledgenexus.indexing.domain.value_objects.embedding_vector import EmbeddingVector
+from knowledgenexus.indexing.domain.value_objects.embedding_vector import EmbeddingVector, SparseVector
 
 logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "BAAI/bge-m3"
-_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 _DEFAULT_DEVICE = "cpu"
 _DEFAULT_BATCH_SIZE = 32
 _VECTOR_DIMENSION = 1024
 _MAX_CONTEXT_LENGTH = 8192
 _DENSE_VECS_KEY = "dense_vecs"
+_SPARSE_VECS_KEY = "lexical_weights"
 
 
 class BgeM3Embedder(EmbedderPort):
@@ -26,6 +26,7 @@ class BgeM3Embedder(EmbedderPort):
         device: str = _DEFAULT_DEVICE,
         normalize_embeddings: bool = True,
         batch_size: int = _DEFAULT_BATCH_SIZE,
+        return_sparse: bool = False,
     ) -> None:
         try:
             from FlagEmbedding import BGEM3FlagModel
@@ -39,6 +40,7 @@ class BgeM3Embedder(EmbedderPort):
         self._dimension = _VECTOR_DIMENSION
         self._normalize = normalize_embeddings
         self._batch_size = batch_size
+        self._return_sparse = return_sparse
         self._model = BGEM3FlagModel(
             model_name,
             use_fp16=(device != _DEFAULT_DEVICE),
@@ -46,11 +48,29 @@ class BgeM3Embedder(EmbedderPort):
         )
 
         logger.info(
-            "BgeM3Embedder initialized: model=%s, device=%s, dim=%d",
+            "BgeM3Embedder initialized: model=%s, device=%s, dim=%d, sparse=%s",
             model_name,
             device,
             self._dimension,
+            return_sparse,
         )
+
+    @classmethod
+    def from_settings(cls, settings) -> BgeM3Embedder:
+        from knowledgenexus.indexing.infrastructure.embedding.model_path import resolve_embedding_model_path
+
+        model_name = resolve_embedding_model_path(settings)
+        return_sparse = getattr(settings, "retrieval_mode", "dense") == "hybrid"
+        return cls(
+            model_name=model_name,
+            device=settings.embedding_device,
+            batch_size=settings.embedding_batch_size,
+            return_sparse=return_sparse,
+        )
+
+    def close(self) -> None:
+        self._model = None
+        logger.info("BgeM3Embedder closed")
 
     @property
     def model_name(self) -> str:
@@ -60,60 +80,83 @@ class BgeM3Embedder(EmbedderPort):
     def dimension(self) -> int:
         return self._dimension
 
+    @property
+    def supports_sparse(self) -> bool:
+        return self._return_sparse
 
     async def embed(self, texts: list[str]) -> list[EmbeddingVector]:
         if not texts:
             return []
 
         logger.debug("Embedding %d document chunks (verbatim)", len(texts))
-        embeddings = await self._encode_batch(texts, is_query=False)
+        dense_vectors, sparse_vectors = await self._encode_batch(texts, is_query=False)
 
-        return [
-            EmbeddingVector(
-                values=emb,
-                model_name=self._model_name,
-                dimension=self._dimension,
+        results: list[EmbeddingVector] = []
+        for i, emb in enumerate(dense_vectors):
+            sparse = sparse_vectors[i] if sparse_vectors else None
+            results.append(
+                EmbeddingVector(
+                    values=emb,
+                    model_name=self._model_name,
+                    dimension=self._dimension,
+                    sparse=sparse,
+                )
             )
-            for emb in embeddings
-        ]
+        return results
 
     async def embed_query(self, query: str) -> EmbeddingVector:
         if not query or not query.strip():
             raise ValueError("Query must not be empty or whitespace-only")
 
-        prefixed_query = f"{_QUERY_PREFIX}{query}"
-        logger.debug("Embedding query (len=%d chars, with prefix)", len(query))
+        # BGE-M3 does not use an instruction prefix — embed query verbatim.
+        # Using a BGE v1.5 English prefix here would inject ~10 junk tokens
+        # into every sparse (lexical_weights) vector, diluting the weight mass
+        # of the real query terms and wrecking exact-entity matching.
+        logger.debug("Embedding query (len=%d chars, verbatim)", len(query))
 
-        embeddings = await self._encode_batch([prefixed_query], is_query=True)
+        dense_vectors, sparse_vectors = await self._encode_batch([query], is_query=True)
 
+        sparse = sparse_vectors[0] if sparse_vectors else None
         return EmbeddingVector(
-            values=embeddings[0],
+            values=dense_vectors[0],
             model_name=self._model_name,
             dimension=self._dimension,
+            sparse=sparse,
         )
 
     async def _encode_batch(
         self,
         texts: list[str],
         is_query: bool,
-    ) -> list[list[float]]:
-        def _encode() -> list[list[float]]:
+    ) -> tuple[list[list[float]], list[SparseVector | None]]:
+        def _encode() -> tuple[list[list[float]], list[SparseVector | None]]:
             output = self._model.encode(
                 texts,
                 batch_size=self._batch_size,
                 max_length=_MAX_CONTEXT_LENGTH,
                 return_dense=True,
-                return_sparse=False,
+                return_sparse=self._return_sparse,
                 return_colbert_vecs=False,
             )
             dense = output[_DENSE_VECS_KEY]
-
             vectors = [list(v) for v in dense]
-
             if self._normalize:
                 vectors = [self._l2_normalize(v) for v in vectors]
 
-            return vectors
+            sparse_results: list[SparseVector | None] = []
+            if self._return_sparse and _SPARSE_VECS_KEY in output:
+                for sparse_dict in output[_SPARSE_VECS_KEY]:
+                    # BGE-M3 returns {token_id: weight} dict per text
+                    if sparse_dict:
+                        indices = [int(k) for k in sparse_dict.keys()]
+                        values = [float(v) for v in sparse_dict.values()]
+                        sparse_results.append(SparseVector(indices=indices, values=values))
+                    else:
+                        sparse_results.append(None)
+            else:
+                sparse_results = [None] * len(vectors)
+
+            return vectors, sparse_results
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _encode)

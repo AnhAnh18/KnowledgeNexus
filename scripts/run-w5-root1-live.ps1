@@ -22,6 +22,17 @@ $script:SummaryFileName = "w5-b-sanitized-summary.json"
 $script:OriginalAuthorizationConsumed = $false
 $script:OriginalLiveInvocationCount = 0
 $script:ExporterInvocationCount = 0
+$script:CaptureFailureCategories = $null
+$script:PostInventoryFailureCategories = @(
+    "raw_generation_activation_run_operation_invalid",
+    "raw_generation_activation_run_not_found",
+    "raw_generation_activation_run_not_resumable",
+    "raw_generation_activation_run_match_ambiguous",
+    "raw_generation_activation_incomplete_run_conflict",
+    "inventory_stream",
+    "inventory_selection_invalid",
+    "selection_publication"
+)
 
 function Fail-Gate([string]$Stage) {
     $script:FailureStage = $Stage
@@ -247,33 +258,32 @@ function Wait-LiveProcessBoundary {
     }
 }
 
-function Assert-InventoryResult([object]$Value, [string]$Stage) {
+function Assert-PhaseResultEnvelope(
+    [object]$Value,
+    [string[]]$SuccessFields,
+    [string]$Stage
+) {
     if ($null -eq $Value -or $Value -is [System.Array] -or
         $Value.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
-        Fail-Gate "configuration"
+        Fail-Gate $Stage
     }
     $actualFields = @($Value.PSObject.Properties.Name | Sort-Object)
     $failureFields = @("failure_category", "status")
     if (($actualFields -join "`n") -eq ($failureFields -join "`n")) {
-        Assert-ExactObject $Value @("status", "failure_category") "configuration"
-        Assert-ExactString $Value.status "configuration"
-        Assert-ExactString $Value.failure_category "configuration"
-        if ($Value.status -ne "failed") { Fail-Gate "configuration" }
-        $allowed = @(
-            "raw_generation_activation_run_operation_invalid",
-            "raw_generation_activation_run_not_found",
-            "raw_generation_activation_run_not_resumable",
-            "raw_generation_activation_run_match_ambiguous",
-            "raw_generation_activation_incomplete_run_conflict",
-            "inventory_stream",
-            "selection_publication"
-        )
-        if ($allowed -notcontains $Value.failure_category) {
-            Fail-Gate "configuration"
+        Assert-ExactObject $Value @("status", "failure_category") $Stage
+        Assert-ExactString $Value.status $Stage
+        Assert-ExactString $Value.failure_category $Stage
+        if ($Value.status -ne "failed") { Fail-Gate $Stage }
+        if ($script:PostInventoryFailureCategories -notcontains $Value.failure_category) {
+            Fail-Gate $Stage
         }
         Fail-Gate $Value.failure_category
     }
-    Assert-ExactObject $Value @("status", "phase", "selected_pages", "run_id") $Stage
+    Assert-ExactObject $Value $SuccessFields $Stage
+}
+
+function Assert-InventoryResult([object]$Value, [string]$Stage) {
+    Assert-PhaseResultEnvelope $Value @("status", "phase", "selected_pages", "run_id") $Stage
     Assert-ExactString $Value.status $Stage
     Assert-ExactString $Value.phase $Stage
     Assert-ExactString $Value.run_id $Stage '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -282,14 +292,61 @@ function Assert-InventoryResult([object]$Value, [string]$Stage) {
 }
 
 function Assert-CaptureResult([object]$Value, [string]$ExpectedStatus, [string]$Stage) {
-    Assert-ExactObject $Value @("status", "phase", "captured", "replayed", "skipped", "failed") $Stage
+    if ($null -eq $Value -or $Value -is [System.Array] -or
+        $Value.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
+        Fail-Gate $Stage
+    }
+    $baseFields = @("status", "phase", "captured", "replayed", "skipped", "failed") | Sort-Object
+    $failureFields = @($baseFields + "failure_categories") | Sort-Object
+    $actualFields = @($Value.PSObject.Properties.Name | Sort-Object)
+    $hasFailureCategories = (($actualFields -join "`n") -eq ($failureFields -join "`n"))
+    $expectedFields = $(if ($hasFailureCategories) { $failureFields } else { $baseFields })
+    Assert-PhaseResultEnvelope $Value $expectedFields $Stage
     Assert-ExactString $Value.status $Stage
     Assert-ExactString $Value.phase $Stage
     foreach ($field in @("captured", "replayed", "skipped", "failed")) {
         Assert-ExactInteger $Value.$field $Stage 0
     }
     if ($Value.status -ne $ExpectedStatus -or $Value.phase -ne "capture-pages" -or
-        [int64]$Value.failed -ne 0 -or [int64]$Value.skipped -ne 0) { Fail-Gate $Stage }
+        [int64]$Value.skipped -ne 0) { Fail-Gate $Stage }
+    if ([int64]$Value.failed -eq 0) {
+        if ($hasFailureCategories) { Fail-Gate $Stage }
+    } else {
+        if (-not $hasFailureCategories -or $null -eq $Value.failure_categories -or
+            $Value.failure_categories -is [System.Array] -or
+            $Value.failure_categories.GetType().FullName -ne "System.Management.Automation.PSCustomObject") {
+            Fail-Gate $Stage
+        }
+        $allowed = @(
+            "acknowledgement_conflict", "acknowledgement_identity_conflict",
+            "acknowledgement_inspection_failed", "acknowledgement_invalid",
+            "acknowledgement_invalid_request", "acknowledgement_missing",
+            "acknowledgement_result_invalid", "acknowledgement_schema_incompatible",
+            "acknowledgement_unknown_inventory", "acknowledgement_unsafe_target",
+            "fetch_failure_invalid", "fetch_http", "fetch_identity_mismatch",
+            "fetch_invalid_page_id", "fetch_invalid_run_id", "fetch_malformed_json",
+            "fetch_non_object_json", "fetch_response_size_limit",
+            "fetch_source_version_invalid", "fetch_store", "replay_conflict",
+            "replay_identity_conflict", "replay_inspection_failed", "replay_invalid",
+            "replay_invalid_request", "replay_result_invalid",
+            "replay_schema_incompatible", "replay_unknown_inventory",
+            "replay_unsafe_target"
+        )
+        $categoryNames = @($Value.failure_categories.PSObject.Properties.Name | Sort-Object)
+        if ($categoryNames.Count -eq 0) { Fail-Gate $Stage }
+        $sum = [int64]0
+        $sanitized = [ordered]@{}
+        foreach ($name in $categoryNames) {
+            if ($allowed -notcontains $name) { Fail-Gate $Stage }
+            Assert-ExactInteger $Value.failure_categories.$name $Stage 1
+            $count = [int64]$Value.failure_categories.$name
+            $sum += $count
+            $sanitized[$name] = $count
+        }
+        if ($sum -ne [int64]$Value.failed) { Fail-Gate $Stage }
+        $script:CaptureFailureCategories = $sanitized
+        Fail-Gate $Stage
+    }
     if ($ExpectedStatus -eq "stopped" -and
         ([int64]$Value.captured -ne 200 -or [int64]$Value.replayed -ne 0)) { Fail-Gate $Stage }
     if ($ExpectedStatus -eq "complete" -and [int64]$Value.replayed -ne 200) { Fail-Gate $Stage }
@@ -469,13 +526,17 @@ function Invoke-ExporterModuleJson([string[]]$Arguments, [string]$Stage) {
 }
 
 function New-FailurePayload([bool]$AuthorizationConsumed) {
-    return [ordered]@{
+    $payload = [ordered]@{
         all_gates_passed = $false
         authorization_consumed = $AuthorizationConsumed
         exporter_invocations = $script:ExporterInvocationCount
         failure_category = $script:FailureStage
         status = "failed"
     }
+    if ($null -ne $script:CaptureFailureCategories) {
+        $payload["capture_failure_categories"] = $script:CaptureFailureCategories
+    }
+    return $payload
 }
 
 function Get-TreeDigest([string[]]$Roots) {

@@ -93,7 +93,8 @@
         "table",
         "code_block",
         "code_symbol",
-        "code_window"
+        "code_window",
+        "diagram"
       ]
     },
     "chunkSourceType": {

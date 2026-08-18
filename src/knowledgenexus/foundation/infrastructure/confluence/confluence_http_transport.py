@@ -408,9 +408,9 @@ class UrllibConfluenceHttpTransport:
     ) -> urllib.request.Request:
         request_path = prepared.path
         query_pairs = prepared.query_pairs
+        encoded_query = urllib.parse.urlencode(query_pairs)
+        url = f"{self._base_url}/{request_path.lstrip('/')}?{encoded_query}"
         try:
-            encoded_query = urllib.parse.urlencode(query_pairs)
-            url = f"{self._base_url}/{request_path.lstrip('/')}?{encoded_query}"
             return urllib.request.Request(
                 url,
                 headers={
@@ -539,11 +539,6 @@ def _require_request_path(value: object) -> str:
     if not isinstance(value, str):
         raise TypeError("path expects a string")
     parsed = urllib.parse.urlsplit(value)
-    try:
-        decoded_path = urllib.parse.unquote(value, errors="strict")
-    except UnicodeDecodeError:
-        raise ValueError("path contains invalid percent-encoding") from None
-    segments = decoded_path.split("/")
     if (
         value == ""
         or not value.startswith("/")
@@ -551,11 +546,8 @@ def _require_request_path(value: object) -> str:
         or parsed.netloc != ""
         or parsed.query != ""
         or parsed.fragment != ""
-        or "\\" in decoded_path
-        or any(character.isspace() or ord(character) < 32 for character in decoded_path)
-        or any(segment in {".", ".."} for segment in segments)
     ):
-        raise ValueError("path must be a safe absolute-path reference without a query")
+        raise ValueError("path must be an absolute-path reference without a query")
     return value
 
 

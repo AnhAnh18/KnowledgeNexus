@@ -1,0 +1,24 @@
+{
+  "name": "knowledgenexus-mcp",
+  "version": "0.1.0",
+  "description": "MCP server to search and retrieve knowledge from KnowledgeNexus RAG platform",
+  "type": "module",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "dev": "tsc --watch",
+    "start": "node build/index.js",
+    "start:http": "cross-env MCP_TRANSPORT=http node build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "axios": "^1.7.9",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.7.2"
+  }
+}

@@ -6,15 +6,28 @@ from pathlib import Path
 import pytest
 
 import knowledgenexus.foundation.infrastructure.confluence as confluence_pkg
+import knowledgenexus.foundation.infrastructure.confluence.confluence_data_center_page_adapter as page_adapter_module
 import knowledgenexus.foundation.infrastructure.confluence.confluence_retrying_http_transport as retry_transport_module
+import knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_page_orphan_inspector as orphan_inspector_module
+import knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages as capture_pages_module
 from knowledgenexus.foundation.application.use_cases.execute_durable_confluence_inventory import (
     ExecuteDurableConfluenceInventory,
+)
+from knowledgenexus.foundation.application.use_cases.capture_confluence_subtree_pages import (
+    PageCaptureResult,
 )
 from knowledgenexus.foundation.cli import confluence_subtree_corpus as cli
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import (
     CanonicalIncludeRoots,
+    CrawlRunSnapshot,
+    CrawlRunStatus,
     CrawlRunId,
+    IncludeRootProgress,
+    InventoryPhaseStatus,
     InventoryRootCommit,
+)
+from knowledgenexus.foundation.domain.models.confluence_crawl_fingerprint import (
+    ConfluenceCrawlFingerprint,
 )
 from knowledgenexus.foundation.domain.models.confluence_inventory_occurrence import InventoryOccurrence
 from knowledgenexus.foundation.domain.models.confluence_inventory_window import ConfluenceInventoryWindow
@@ -42,7 +55,9 @@ from knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachmen
 )
 from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
     ActivateRawGenerationRequest,
+    CheckpointRunInventoryComplete,
     CheckpointRunSelectionFailure,
+    CheckpointRunSelectionFailureCategory,
     ResumeExplicitRunRequest,
     ResumeUniqueIncompleteRunRequest,
     StartNewRunRequest,
@@ -151,6 +166,37 @@ def test_capture_pages_main_forwards_controlled_batch_stop(monkeypatch, tmp_path
     assert json.loads(capsys.readouterr().out)["status"] == "stopped"
 
 
+def test_capture_result_payload_exposes_only_aggregate_failure_categories() -> None:
+    captured = PageCaptureResult(
+        94,
+        0,
+        0,
+        6,
+        True,
+        100,
+        (("fetch_http", 4), ("fetch_response_size_limit", 2)),
+    )
+
+    assert cli._capture_pages_result_payload(captured) == {
+        "status": "stopped",
+        "phase": "capture-pages",
+        "captured": 94,
+        "replayed": 0,
+        "skipped": 0,
+        "failed": 6,
+        "failure_categories": {
+            "fetch_http": 4,
+            "fetch_response_size_limit": 2,
+        },
+    }
+
+
+@pytest.mark.parametrize("malformed", [None, object(), {}, []])
+def test_capture_result_payload_rejects_wrong_runtime_types(malformed) -> None:
+    with pytest.raises(TypeError, match="capture result"):
+        cli._capture_pages_result_payload(malformed)
+
+
 def test_drawio_phase_fails_closed_without_production_adapters(capsys, tmp_path):
     result = main(["capture-drawio", "--state-dir", str(tmp_path), "--max-pages", "5000"])
     assert result == 2
@@ -211,6 +257,299 @@ def test_export_consumes_tuple_result_and_publishes_no_drawio_packet(monkeypatch
     monkeypatch.setattr(cli, "SubtreePacketExporter", Exporter)
     outcome = cli._export_phase(_args(output_dir=str(output)), state)
     assert outcome["packet_published"] is True
+
+
+def _drawio_state(*, media_asset: dict[str, object], selection: dict[str, object]) -> dict[str, object]:
+    """One resolved draw.io reference on page 1000, bound the way
+    `validate_drawio_capture_state` requires: `media_asset["parent_document_id"]`
+    must equal `DocumentIdGenerator.confluence_page_id(parent_page_id)`, and
+    `media_asset["filename"]` must equal the reference's filename.
+    """
+    reference = ["1000", "diagram.drawio", "7"]
+    return {
+        "format_version": "confluence-subtree-drawio-state-v1",
+        "run_id": str(RUN_ID),
+        "generation_id": str(RUN_ID),
+        "selection_identity": selection["selection_identity"],
+        "observed": [reference],
+        "resolutions": [{
+            "reference": reference, "media_id": media_asset["media_id"],
+            "body_byte_count": media_asset["size_bytes"],
+        }],
+        "failed": 0,
+        "downloaded_bytes": media_asset["size_bytes"],
+        "artifact_count": 1,
+        "media_assets": [media_asset],
+    }
+
+
+def _media_asset(*, media_id: str = "confluence:attachment:att1", processing_status: str = "parsed", extracted_text: str | None = "Node A -> Node B") -> dict[str, object]:
+    return {
+        "schema_version": "1.0", "media_id": media_id,
+        "parent_document_id": "confluence:page:1000", "source_system": "confluence",
+        "filename": "diagram.drawio", "mime_type": "application/vnd.jgraph.mxfile",
+        "size_bytes": 42, "download_status": "downloaded",
+        "processing_status": processing_status, "relevance": "high",
+        "extracted_text": extracted_text, "summary": None, "confidence": None,
+        "raw_uri": f"raw://confluence/attachments/{media_id}/deadbeef",
+        "content_hash": "deadbeef", "source_version": "7",
+        "updated_at": "2026-08-10T00:00:00Z", "crawled_at": "2026-08-10T00:00:00Z",
+    }
+
+
+class _FakeDiagramChunker:
+    """Stands in for the real BuildConfluenceChunks so this test proves the
+    _export_phase <-> _diagram_chunk_records wiring (right parent document
+    looked up, result folded into the published chunk list) without loading a
+    real chunking profile or tokenizer -- that token-level behaviour is
+    already covered by test_build_confluence_chunks.py."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def execute_media_diagram(self, *, canonical_document, media_asset):
+        self.calls.append((canonical_document["document_id"], media_asset["media_id"]))
+        return type("Result", (), {
+            "records": [{
+                "chunk_id": f"diagram-chunk-{media_asset['media_id']}",
+                "content_kind": "diagram",
+                "document_id": canonical_document["document_id"],
+            }]
+        })()
+
+
+def _export_with_drawio_state(monkeypatch, tmp_path, *, media_asset: dict[str, object], fake_chunker: _FakeDiagramChunker):
+    state = (tmp_path / "state").resolve()
+    output = (tmp_path / "packet").resolve()
+    selection = _selection()
+    cli._atomic_json(cli._state_path(state, str(RUN_ID), "inventory-selection.json"), selection)
+    result = _result(drawio=True)
+    cli._atomic_json(
+        cli._state_path(state, str(RUN_ID), "processing-state.json"),
+        cli._processing_payload(run_id=RUN_ID, selection=selection, result=result),
+    )
+    cli._atomic_json(
+        cli._state_path(state, str(RUN_ID), "drawio-state.json"),
+        _drawio_state(media_asset=media_asset, selection=selection),
+    )
+    monkeypatch.setattr(cli, "_compose_page_processor", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(cli, "_raw_page_bytes", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(cli, "_verify_drawio_media_assets_on_disk", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_compose_diagram_chunker", lambda _args: fake_chunker)
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _value: {
+        "inventory_page_size": 50, "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000, "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+
+    published: dict[str, object] = {}
+
+    class Exporter:
+        def __init__(self, *, validator):
+            assert validator is not None
+
+        def publish(self, **kwargs):
+            published.update(kwargs)
+            return {
+                "format_version": "confluence-subtree-indexing-packet-v1",
+                "document_count": len(kwargs["documents"]),
+                "chunk_count": len(kwargs["chunks"]),
+                "media_asset_count": len(kwargs["media_assets"]),
+            }
+
+    monkeypatch.setattr(cli, "SubtreePacketExporter", Exporter)
+    monkeypatch.setattr(cli, "_export_mermaid_diagrams", lambda *_a, **_kw: 0)
+    outcome = cli._export_phase(_args(output_dir=str(output)), state)
+    return outcome, published
+
+
+def test_export_folds_parsed_diagram_chunks_into_the_published_packet(monkeypatch, tmp_path):
+    fake_chunker = _FakeDiagramChunker()
+    outcome, published = _export_with_drawio_state(
+        monkeypatch, tmp_path, media_asset=_media_asset(), fake_chunker=fake_chunker,
+    )
+
+    assert outcome["packet_published"] is True
+    assert outcome["chunk_count"] == 2
+    assert outcome["mermaid_diagrams_exported"] == 0
+    # The chunker was called against the right parent page, not just any page.
+    assert fake_chunker.calls == [("confluence:page:1000", "confluence:attachment:att1")]
+    # Original page chunk plus the diagram chunk, both present -- nothing lost.
+    chunk_ids = [chunk["chunk_id"] for chunk in published["chunks"]]
+    assert chunk_ids == ["chunk-1", "diagram-chunk-confluence:attachment:att1"]
+    diagram_chunk = published["chunks"][1]
+    assert diagram_chunk["content_kind"] == "diagram"
+    assert diagram_chunk["document_id"] == "confluence:page:1000"
+
+
+@pytest.mark.parametrize(
+    "media_asset",
+    (
+        _media_asset(processing_status="download_failed", extracted_text=None),
+        _media_asset(processing_status="parsed", extracted_text=None),
+        _media_asset(processing_status="parsed", extracted_text=""),
+    ),
+)
+def test_export_skips_diagram_assets_that_are_not_successfully_parsed(monkeypatch, tmp_path, media_asset):
+    fake_chunker = _FakeDiagramChunker()
+    outcome, published = _export_with_drawio_state(
+        monkeypatch, tmp_path, media_asset=media_asset, fake_chunker=fake_chunker,
+    )
+
+    assert outcome["packet_published"] is True
+    assert outcome["chunk_count"] == 1
+    # No qualifying asset -> the chunker (which would load a real tokenizer in
+    # production) must never even be constructed, let alone called.
+    assert fake_chunker.calls == []
+    assert [chunk["chunk_id"] for chunk in published["chunks"]] == ["chunk-1"]
+
+
+def test_export_mermaid_diagrams_writes_mmd_from_raw_xml(monkeypatch, tmp_path):
+    """_export_mermaid_diagrams reads raw XML from disk, converts it to
+    Mermaid, and writes .mmd files alongside the packet."""
+    import knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store as store_mod
+    import knowledgenexus.foundation.infrastructure.processors.drawio_mermaid_converter as conv_mod
+
+    xml_body = (
+        b'<mxfile><diagram id="d1"><mxGraphModel><root>'
+        b'<mxCell id="0" /><mxCell id="1" parent="0" />'
+        b'<mxCell id="A" value="Start" parent="1" vertex="1" />'
+        b'<mxCell id="B" value="End" parent="1" vertex="1" />'
+        b'<mxCell id="E" value="go" parent="1" edge="1" source="A" target="B" />'
+        b'</root></mxGraphModel></diagram></mxfile>'
+    )
+    content_hash = hashlib.sha256(xml_body).hexdigest()
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    asset = _media_asset()
+    asset["raw_uri"] = f"raw://confluence/attachments/att1/{content_hash}"
+    asset["content_hash"] = content_hash
+
+    class _FakeEnvelope:
+        body_bytes = xml_body
+
+    class _FakeStore:
+        def __init__(self, **_kw):
+            pass
+        def read_attachment(self, **_kw):
+            return _FakeEnvelope()
+
+    monkeypatch.setattr(store_mod, "ConfluenceRawAttachmentStore", _FakeStore)
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _v: {
+        "inventory_page_size": 50,
+        "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000,
+        "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[asset],
+    )
+
+    assert count == 1
+    mmd_files = list((output_dir / "diagrams").glob("*.mmd"))
+    assert len(mmd_files) == 1
+    content = mmd_files[0].read_text(encoding="utf-8")
+    assert "flowchart TD" in content
+    assert 'A["Start"]' in content
+    assert 'B["End"]' in content
+    assert '-->|"go"|' in content
+
+
+def test_export_mermaid_diagrams_skips_unparsed_assets(tmp_path):
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    asset = _media_asset(processing_status="download_failed", extracted_text=None)
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[asset],
+    )
+
+    assert count == 0
+    assert not (output_dir / "diagrams").exists()
+
+
+@pytest.mark.parametrize("media_assets", (None, object(), "not-assets", [object()]))
+def test_export_mermaid_diagrams_rejects_wrong_runtime_types_before_output(tmp_path, media_assets):
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+
+    with pytest.raises((TypeError, ValueError)):
+        cli._export_mermaid_diagrams(
+            _args(), output_dir=output_dir, media_assets=media_assets,
+        )
+
+    assert not (output_dir / "diagrams").exists()
+
+
+def test_export_mermaid_diagrams_skips_mismatched_raw_uri_hash(tmp_path):
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    asset = _media_asset()
+    asset["raw_uri"] = "raw://confluence/attachments/att1/" + "a" * 64
+    asset["content_hash"] = "b" * 64
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[asset],
+    )
+
+    assert count == 0
+    assert not (output_dir / "diagrams").exists()
+
+
+def test_export_mermaid_diagrams_does_not_overwrite_duplicate_filenames(monkeypatch, tmp_path):
+    import knowledgenexus.foundation.infrastructure.raw_store.confluence_raw_attachment_store as store_mod
+
+    xml_body = (
+        b'<mxfile><diagram id="d1"><mxGraphModel><root>'
+        b'<mxCell id="0" /><mxCell id="1" parent="0" />'
+        b'<mxCell id="A" value="Node" parent="1" vertex="1" />'
+        b'</root></mxGraphModel></diagram></mxfile>'
+    )
+    content_hash = hashlib.sha256(xml_body).hexdigest()
+    output_dir = (tmp_path / "packet").resolve()
+    output_dir.mkdir()
+    first = _media_asset(media_id="confluence:attachment:att1")
+    second = _media_asset(media_id="confluence:attachment:att2")
+    for attachment_id, asset in (("att1", first), ("att2", second)):
+        asset["raw_uri"] = f"raw://confluence/attachments/{attachment_id}/{content_hash}"
+        asset["content_hash"] = content_hash
+
+    class _FakeEnvelope:
+        body_bytes = xml_body
+
+    class _FakeStore:
+        def __init__(self, **_kwargs):
+            pass
+
+        def read_attachment(self, **_kwargs):
+            return _FakeEnvelope()
+
+    monkeypatch.setattr(store_mod, "ConfluenceRawAttachmentStore", _FakeStore)
+    monkeypatch.setattr(cli, "_load_reliability_profile", lambda _value: {
+        "inventory_page_size": 50,
+        "max_pages_per_run": 5000,
+        "max_total_requests_per_run": 50000,
+        "max_attempts": 4,
+        "max_response_bytes_per_request": 8388608,
+        "max_raw_bytes_per_run": 34359738368,
+        "max_raw_artifacts_per_run": 250000,
+        "minimum_free_disk_reserve_bytes": 8589934592,
+    })
+
+    count = cli._export_mermaid_diagrams(
+        _args(), output_dir=output_dir, media_assets=[first, second],
+    )
+
+    assert count == 2
+    assert len(list((output_dir / "diagrams").glob("*.mmd"))) == 2
 
 
 def test_zero_drawio_phase_persists_generation_bound_state_without_network(monkeypatch, tmp_path):
@@ -724,14 +1063,57 @@ def test_five_phases_run_sequentially_against_one_state_dir_and_run_id(monkeypat
         cli._export_phase(_args(**base, run_id=run_id, output_dir=str(output_dir)), state)
 
 
+_EXPECTED_ACTIVATION_FAILURE_CATEGORIES = {
+    CheckpointRunSelectionFailureCategory.RUN_OPERATION_INVALID:
+        "raw_generation_activation_run_operation_invalid",
+    CheckpointRunSelectionFailureCategory.RUN_NOT_FOUND:
+        "raw_generation_activation_run_not_found",
+    CheckpointRunSelectionFailureCategory.RUN_NOT_RESUMABLE:
+        "raw_generation_activation_run_not_resumable",
+    CheckpointRunSelectionFailureCategory.RUN_MATCH_AMBIGUOUS:
+        "raw_generation_activation_run_match_ambiguous",
+    CheckpointRunSelectionFailureCategory.INCOMPLETE_RUN_CONFLICT:
+        "raw_generation_activation_incomplete_run_conflict",
+}
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
-    tuple(cli._ACTIVATION_FAILURE_CATEGORIES.items()),
+    tuple(_EXPECTED_ACTIVATION_FAILURE_CATEGORIES.items()),
 )
 def test_activation_failure_preserves_locked_selection_category(source, expected):
     assert cli._activation_failure(CheckpointRunSelectionFailure(source)) == {
         "status": "failed",
         "failure_category": expected,
+    }
+
+
+def test_activation_failure_mapping_is_total_over_public_categories():
+    public_categories = {
+        value
+        for name, value in vars(CheckpointRunSelectionFailureCategory).items()
+        if name.isupper() and type(value) is str
+    }
+    assert public_categories == set(_EXPECTED_ACTIVATION_FAILURE_CATEGORIES)
+    assert cli._ACTIVATION_FAILURE_CATEGORIES == (
+        _EXPECTED_ACTIVATION_FAILURE_CATEGORIES
+    )
+
+
+def test_inventory_complete_activation_outcome_fails_closed():
+    roots = CanonicalIncludeRoots(("1000",))
+    snapshot = CrawlRunSnapshot(
+        RUN_ID,
+        RUN_ID,
+        ConfluenceCrawlFingerprint._from_digest("a" * 64),
+        CrawlRunStatus.INCOMPLETE,
+        InventoryPhaseStatus.PENDING,
+        roots,
+        (IncludeRootProgress.ROOT_PENDING,),
+    )
+    assert cli._activation_failure(CheckpointRunInventoryComplete(snapshot)) == {
+        "status": "failed",
+        "failure_category": "raw_generation_activation_run_operation_invalid",
     }
 
 
@@ -831,6 +1213,35 @@ def test_inventory_stream_failure_pauses_and_does_not_publish(monkeypatch, tmp_p
     assert calls == {"paused": 1, "published": 0}
 
 
+def test_inventory_hostile_activation_fails_before_publication(monkeypatch, tmp_path):
+    calls = {"published": 0}
+
+    class HostileSession:
+        @property
+        def stream_inventory_occurrences(self):
+            raise RuntimeError("must be sanitized")
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _InventoryPhaseComposition(HostileSession()),
+    )
+
+    def unexpected_publication(*_args, **_kwargs):
+        calls["published"] += 1
+        raise AssertionError("publication must not run")
+
+    monkeypatch.setattr(cli, "_atomic_json", unexpected_publication)
+    result = cli._inventory_phase(_inventory_phase_args(tmp_path), tmp_path.resolve())
+
+    assert result == {
+        "status": "failed",
+        "failure_category": "raw_generation_activation_run_operation_invalid",
+    }
+    assert calls == {"published": 0}
+
+
 def test_selection_publication_failure_uses_valid_inventory_fact(monkeypatch, tmp_path):
     calls = {"paused": 0, "published": 0}
     roots = CanonicalIncludeRoots(("1000",))
@@ -868,3 +1279,246 @@ def test_selection_publication_failure_uses_valid_inventory_fact(monkeypatch, tm
         "failure_category": "selection_publication",
     }
     assert calls == {"paused": 1, "published": 1}
+
+
+def test_invalid_inventory_selection_is_not_mislabeled_as_publication(
+    monkeypatch, tmp_path
+):
+    calls = {"paused": 0, "published": 0}
+    roots = CanonicalIncludeRoots(("2000",))
+    fact = InventoryRootCommit(
+        RUN_ID,
+        0,
+        "2000",
+        ConfluencePageMetadata("2000", "Other", "SPACE", source_version="1"),
+        roots,
+    )
+
+    class ValidButWrongScopeSession:
+        def stream_inventory_occurrences(self, *, batch_size):
+            return iter((fact,))
+
+        def pause_session(self):
+            calls["paused"] += 1
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _InventoryPhaseComposition(
+            ValidButWrongScopeSession()
+        ),
+    )
+
+    def unexpected_publication(*_args, **_kwargs):
+        calls["published"] += 1
+        raise AssertionError("invalid selection must not be published")
+
+    monkeypatch.setattr(cli, "_atomic_json", unexpected_publication)
+    result = cli._inventory_phase(_inventory_phase_args(tmp_path), tmp_path.resolve())
+
+    assert result == {
+        "status": "failed",
+        "failure_category": "inventory_selection_invalid",
+    }
+    assert calls == {"paused": 1, "published": 0}
+
+
+class _CapturePhaseSession:
+    def __init__(self, facts, *, stream_error=None):
+        self._facts = facts
+        self._stream_error = stream_error
+        self.paused = 0
+        self.completed = 0
+
+    def stream_inventory_occurrences(self, *, batch_size):
+        if self._stream_error is not None:
+            raise self._stream_error
+        return iter(self._facts)
+
+    def pause_session(self):
+        self.paused += 1
+
+    def complete_session(self):
+        self.completed += 1
+
+
+class _CapturePhaseComposition:
+    def __init__(self, outcome):
+        self.checkpoint_run_port = self
+        self._outcome = outcome
+        self.http_inner = object()
+        self.retry_profile = object()
+
+    def activate_raw_generation(self, request):
+        return _ActivationContext(self._outcome)
+
+    def guarded_raw_page_store(self, *, activation):
+        return object()
+
+
+def _capture_phase_fixture(monkeypatch, tmp_path, session, *, capture_result=None,
+                           capture_error=None):
+    state = (tmp_path / "state").resolve()
+    state.mkdir()
+    raw_root = (tmp_path / "raw").resolve()
+    raw_root.mkdir()
+    selection_path = cli._state_path(
+        state, str(RUN_ID), "inventory-selection.json"
+    )
+    cli._atomic_json(selection_path, _selection())
+    calls = {"capture_constructed": 0, "capture_run": 0}
+
+    class FakeCapture:
+        def __init__(self, **_kwargs):
+            calls["capture_constructed"] += 1
+
+        def run(self, **_kwargs):
+            calls["capture_run"] += 1
+            if capture_error is not None:
+                raise capture_error
+            return capture_result
+
+    monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.invalid/wiki")
+    monkeypatch.setattr(
+        confluence_pkg,
+        "compose_live_subtree",
+        lambda **_kwargs: _CapturePhaseComposition(session),
+    )
+    monkeypatch.setattr(
+        retry_transport_module,
+        "RetryingConfluenceHttpTransport",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        page_adapter_module,
+        "ConfluenceDataCenterPageAdapter",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        orphan_inspector_module,
+        "ConfluenceRawPageOrphanInspector",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        capture_pages_module,
+        "CaptureConfluenceSubtreePages",
+        FakeCapture,
+    )
+    args = _args(
+        raw_root=str(raw_root),
+        reliability_profile_path=str(APPROVED_PROFILE_PATH),
+        selection_path=str(selection_path),
+        stop_after_batches=None,
+    )
+    return args, state, calls
+
+
+def _capture_inventory_fact():
+    roots = CanonicalIncludeRoots(("1000",))
+    return InventoryRootCommit(
+        RUN_ID,
+        0,
+        "1000",
+        ConfluencePageMetadata("1000", "Root", "SPACE", source_version="7"),
+        roots,
+    )
+
+
+def test_capture_stream_failure_pauses_once_before_capture_side_effects(
+    monkeypatch, tmp_path
+):
+    session = _CapturePhaseSession(
+        (), stream_error=ValueError("sanitized stream failure")
+    )
+    args, state, calls = _capture_phase_fixture(
+        monkeypatch, tmp_path, session
+    )
+
+    result = cli._capture_pages_phase(args, state)
+
+    assert result == {"status": "failed", "failure_category": "inventory_stream"}
+    assert session.paused == 1
+    assert session.completed == 0
+    assert calls == {"capture_constructed": 0, "capture_run": 0}
+
+
+@pytest.mark.parametrize(
+    ("complete", "expected_status", "expected_pauses", "expected_completions"),
+    ((True, "complete", 0, 1), (False, "stopped", 1, 0)),
+)
+def test_capture_result_closes_checkpoint_session_by_result(
+    monkeypatch,
+    tmp_path,
+    complete,
+    expected_status,
+    expected_pauses,
+    expected_completions,
+):
+    session = _CapturePhaseSession((_capture_inventory_fact(),))
+    capture_result = PageCaptureResult(
+        captured=1 if complete else 0,
+        replayed=0,
+        skipped=0,
+        failed=0,
+        stopped=not complete,
+        expected_total=1,
+    )
+    args, state, calls = _capture_phase_fixture(
+        monkeypatch, tmp_path, session, capture_result=capture_result
+    )
+
+    result = cli._capture_pages_phase(args, state)
+
+    assert result["status"] == expected_status
+    assert session.paused == expected_pauses
+    assert session.completed == expected_completions
+    assert calls == {"capture_constructed": 1, "capture_run": 1}
+
+
+def test_capture_failure_is_not_mislabeled_and_pauses_for_resume(
+    monkeypatch, tmp_path
+):
+    class CaptureFailure(RuntimeError):
+        pass
+
+    session = _CapturePhaseSession((_capture_inventory_fact(),))
+    args, state, calls = _capture_phase_fixture(
+        monkeypatch,
+        tmp_path,
+        session,
+        capture_error=CaptureFailure("sanitized capture failure"),
+    )
+
+    with pytest.raises(CaptureFailure):
+        cli._capture_pages_phase(args, state)
+
+    # Capture failures deliberately pause the durable run so that a separately
+    # authorized phase resume can continue from committed page acknowledgements.
+    assert session.paused == 1
+    assert session.completed == 0
+    assert calls == {"capture_constructed": 1, "capture_run": 1}
+
+
+def test_phase_failure_is_logged_even_though_stdout_stays_a_fixed_contract(
+    capsys, caplog, tmp_path
+):
+    """The one-line stdout contract hides *why* a phase failed.
+
+    Every exception is collapsed into the same hardcoded payload, and the
+    wrapper reads a `failure_category` key this CLI never writes, so a real
+    failure reached operators as the single word "phase" with no trace
+    anywhere. stdout must stay byte-for-byte identical, but the cause has to
+    survive somewhere.
+    """
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="knowledgenexus.foundation.cli.confluence_subtree_corpus"):
+        result = main(["capture-drawio", "--state-dir", str(tmp_path), "--max-pages", "5000"])
+
+    assert result == 2
+    # The machine-read contract is unchanged.
+    assert capsys.readouterr().out == '{"status":"failed","error":"configuration"}\n'
+    # ...but the cause is now recoverable.
+    assert any(record.exc_info for record in caplog.records), "traceback was not logged"
+    assert "capture-drawio" in caplog.text

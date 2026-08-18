@@ -45,3 +45,39 @@ def test_capture_pages_publishes_each_page_and_resumes(tmp_path: Path):
     assert first["captured_pages"] == 3
     assert second["captured_pages"] == 0
     assert calls == ["1", "2", "3"]
+
+
+def test_extensionless_data_center_diagram_is_matched_but_preview_and_draft_are_not():
+    """Confluence Data Center names the diagram source without an extension.
+
+    A real page carries three files per diagram: the source with no extension,
+    a ".png" render and a "~....tmp" editor draft. The old extension whitelist
+    rejected the only one that matters, so every capture reported
+    "incomplete" without ever downloading anything.
+    """
+    from knowledgenexus.foundation.application.use_cases.confluence_subtree_corpus import (
+        is_drawio_attachment_name,
+    )
+
+    source = "Untitled Diagram-1786592716372"
+    assert is_drawio_attachment_name(source)
+    assert not is_drawio_attachment_name(source + ".png")
+    assert not is_drawio_attachment_name("~" + source + ".tmp")
+    # Named extensions keep working.
+    assert is_drawio_attachment_name("architecture.drawio")
+    assert is_drawio_attachment_name("architecture.DRAWIO.XML")
+    assert is_drawio_attachment_name("architecture.xml")
+    assert not is_drawio_attachment_name("payload.exe")
+    assert not is_drawio_attachment_name("")
+    assert not is_drawio_attachment_name(None)
+
+    ref = DrawioReference("2894336117", source, "4")
+    attachments = [
+        AttachmentMetadata("a1", "2894336117", "~" + source + ".tmp", "4"),
+        AttachmentMetadata("a2", "2894336117", source + ".png", "4"),
+        AttachmentMetadata("a3", "2894336117", source, "4"),
+    ]
+
+    matched = match_drawio_attachment(ref, attachments)
+
+    assert matched is not None and matched.attachment_id == "a3"

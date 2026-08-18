@@ -4,18 +4,17 @@
 
 ```text
 M7-C decision package: OWNER-APPROVED
-M7-C production implementation: AUTHORIZED FOR THE M7 ROADMAP
+M7-C production implementation: NOT AUTHORIZED
 Full M7 acceptance: NOT AVAILABLE
-M7-D raw-generation integration: AUTHORIZED BY FOCUSED STAGES
+M7-D raw-generation integration: BLOCKED
 M7 scale RSS threshold: PENDING REPRODUCIBLE BASELINE
 ```
 
 This record locks the owner choices needed to plan the durable-inventory M7-C
-slice. The owner authorized implementation of the full M7 roadmap in the
-current Codex turn. That authorization does not close any acceptance gate,
-select an RSS threshold, or authorize work outside M7. Every M7 stage still
-requires a bounded plan, plan review/revision, focused validation, and a fresh
-independent review before its status is recorded as complete.
+slice. It does not authorize production code, a live crawl, raw-generation
+work, a checkpoint migration, or a full M7 acceptance claim. A focused plan
+and a separate implementation authorization remain required for every M7-C
+production stage.
 
 Precedence: `contracts/foundation/schemas/` and the focused M7 specs remain
 authoritative. The clarifications mirrored into `CHECKPOINT_RESUME_SPEC.md`,
@@ -239,49 +238,14 @@ authorization:
 - complete a threat model covering caller-controlled configuration and durable
   checkpoint data, then add the resulting focused regression tests.
 
-### OD-C16. Deferred 100,000-page performance optimization
-
-The owner chooses to keep the current durability-first validation boundary and
-does not authorize a performance/durability optimization stage for the
-100,000-page offline scale gate at this time. The
-`m7-crawl-scale-acceptance-v2` profile remains acceptance-only, and the scale
-gate remains pending/incomplete.
-
-Any future optimization must be proposed as a separate owner-authorized stage
-and must re-review writer-lock/sidecar verification cadence, external-writer
-threat-model assumptions, invalidation rules, schema or index changes, and any
-RSS/working-set threshold. This decision changes no production behavior,
-profile values, or acceptance result.
-
-## 3. Full M7 roadmap authorization
-
-The owner authorized the complete M7 roadmap in the current Codex turn,
-including the remaining durable-inventory, raw-generation, live integration,
-and acceptance stages. This is implementation authorization only; it does not
-claim that any incomplete stage or gate has passed.
-
-The authorization is stage-bounded in execution: no stage may broaden its
-scope, change a contract or roadmap decision, or claim the 100k scale gate
-without the required focused plan, review, validation, and independent gate.
-The existing durability-first policy remains in force, and the RSS/working-set
-threshold remains pending a reproducible baseline.
-
-## 4. M7-D3 authorization registration
-
-M7-D3 was authorized and completed as an offline generation-scoped immutable
-raw-page envelope and store with typed resolve/publish/read operations. Its
-implementation remains bounded by its completed plan and review; later M7
-stages must not retroactively broaden it.
-
-## 5. Required closure boundaries
+## 3. Required closure boundaries
 
 An inventory-only M7-C acceptance suite may close only M7-C after independent
-approval. It cannot claim full M7 completion until all required M7 acceptance
-cases and the full M7 scale gate pass. M7-D raw-generation integration may
-proceed through separately reviewed stages under the full-roadmap
-authorization, without importing later-stage behavior into an earlier stage.
+approval. It cannot claim full M7 completion because raw-generation evidence,
+its acceptance cases, and the full M7 scale gate remain later work. M7-D
+raw-generation integration stays blocked until its own focused plan is approved.
 
-## 6. Durable recording and provenance
+## 4. Durable recording and provenance
 
 This committed record and its focused-spec clarifications are the durable source
 for these decisions. `.codex-workflow/`, checkpoint databases, raw artifacts,

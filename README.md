@@ -53,6 +53,16 @@ Health: http://localhost:8000/api/v1/health
 
 ```bash
 uv run pytest
+uv run pytest tests/eval -q   # two-layer eval unit tests (no API)
+```
+
+## Two-layer eval (Retrieval + Skill)
+
+See **[docs/EVAL_TWO_LAYER.md](docs/EVAL_TWO_LAYER.md)**.
+Team roadmap (chunk → skill → filter → hybrid): **[docs/SEARCH_QUALITY_ROADMAP.md](docs/SEARCH_QUALITY_ROADMAP.md)**.
+
+```bash
+uv run kn-eval --layer all --label baseline
 ```
 
 ## Project structure
@@ -92,8 +102,7 @@ Current Foundation status:
 - Foundation M5B-0: Confluence Data Center response shape confirmed through a
   sanitized offline evidence packet.
 - Foundation M5B-1: pure response parsing and metadata normalization complete.
-- Foundation M5B-2: Data Center HTTP adapter and pagination complete.
-- Foundation M5C: a small manually reviewed real inventory is the next step.
+- Foundation M5B-2: Data Center HTTP adapter and pagination is the next step.
 
 Install the dependencies used by the current Foundation implementation from the
 repository root:
@@ -125,6 +134,23 @@ consume only these published exports, never Foundation raw or working
 directories. The current Confluence work covers inventory metadata only; page
 bodies, rendered HTML, comments, attachments, and permissions remain outside
 the current milestone.
+
+## MCP Server (Cline Integration)
+
+KnowledgeNexus includes an MCP server (`mcp/`) that bridges Cline with the RAG platform, allowing AI assistants to search knowledge and export results.
+
+### Quick Setup
+
+```bash
+# 1. Build the MCP server
+cd mcp
+npm install
+npm run build
+
+# 2. Add to Cline MCP settings (see docs/MCP_SETUP.md for details)
+```
+
+See **[docs/MCP_SETUP.md](docs/MCP_SETUP.md)** for full setup instructions.
 
 ## License
 

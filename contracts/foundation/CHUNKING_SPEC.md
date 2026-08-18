@@ -90,6 +90,8 @@ Branch and commit hash are **not** part of `document_stable_key` or `chunk_id`; 
 | `code_symbol` | `qualified_name` (overloads: `qualified_name~{sha256(signature)[:8]}`) |
 | `code_symbol` (oversize split) | `qualified_name` + `#p{n}` |
 | `code_window` | `file_path` + `#w{n}` |
+| `diagram` | `drawio:{media_id}` |
+| `diagram` (oversize split) | `drawio:{media_id}#w{n}` |
 
 Consequence to keep in mind: editing one section or symbol changes only that unit's `normalized_text` (and possibly its window split), so its neighbours keep their IDs. Editing tokens *above* a `code_window` shifts window boundaries and will re-chunk the tail of that file — this is the accepted limitation for symbol-less files (§5.4).
 
@@ -152,6 +154,15 @@ If a section body exceeds `hard_maximum_tokens`, split it into windows at **para
   - **Budget.** A fragment is selected only when the complete breadcrumb-prefixed continuation is within `hard_maximum_tokens`, measured against the **widest** part number `N` can produce (`part=N/N`), so later parts cannot overflow the budget the earlier parts were cut for. Because `N` appears in the marker it is resolved as a fixed point over the fragment count; the count is monotonic in marker width, so it converges. If no character fits, the existing `unsplittable_table_row` category is retained.
   - `content_kind`, schema, and ordinary-table output remain unchanged.
 
+### 4.7 Draw.io Diagrams
+
+A draw.io diagram is captured and parsed as a Confluence attachment (not page structure), so it is not discovered by the §4 section walk. Its text is extracted separately by the media pipeline and turned into chunks after page chunking, using the same prose-windowing rules as §4.4 rather than new logic:
+
+- One diagram's `extracted_text` (vertex/edge labels, deterministically ordered) is treated as a single candidate body with no headings of its own. It links to the page that owns the attachment via that page's `document_id`, exactly like a section chunk from the same page.
+- If it fits within `hard_maximum_tokens`, it is emitted as one atomic chunk. Otherwise it is windowed exactly per §4.4 (paragraph-boundary packing toward `target_tokens`, `overlap_tokens` between windows, never exceeding `hard_maximum_tokens`).
+- `content_kind: diagram`; `part_index`/`part_total` set on oversize splits, as for `prose`.
+- A diagram whose attachment failed to download or parse contributes no chunk; that failure is already visible via the media asset's own `processing_status` and the phase's `drawio_assets_failed` count, so it is not duplicated as a chunking failure.
+
 ---
 
 ## 5. Code Chunking (Git source files)
@@ -201,6 +212,7 @@ A single function/method whose body exceeds `hard_maximum_tokens` is split into 
 | `code_block` | Fenced code block extracted from a wiki page (§4.5) |
 | `code_symbol` | Code chunk built around one symbol (§5.1, §5.3) |
 | `code_window` | Fixed line-window chunk for symbol-less files or oversize splits (§5.4) |
+| `diagram` | Draw.io attachment text, atomic or windowed (§4.7) |
 
 ---
 

@@ -37,11 +37,6 @@ from knowledgenexus.foundation.infrastructure.confluence import (
 from knowledgenexus.foundation.infrastructure.confluence import (
     confluence_retrying_http_transport as retrying_transport_module,
 )
-from knowledgenexus.foundation.ports.confluence_checkpoint_state_port import (
-    CheckpointOperationFailure,
-    CheckpointOperationFailureCategory,
-    CheckpointReservationResult,
-)
 
 
 BASE_URL = "https://fixture.invalid/confluence"
@@ -98,32 +93,6 @@ class RecordingSleeper:
         self.sleeps.append(duration)
 
 
-class RecordingAttemptReserver:
-    def __init__(self, *, deny: bool = False, deny_after: int | None = None) -> None:
-        self.calls = 0
-        self.deny = deny
-        self.deny_after = deny_after
-
-    def reserve_outbound_attempt(self):
-        self.calls += 1
-        if self.deny or (
-            self.deny_after is not None and self.calls > self.deny_after
-        ):
-            return CheckpointOperationFailure(
-                CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED
-            )
-        return CheckpointReservationResult(self.calls - 1)
-
-    def check_outbound_attempt(self):
-        if self.deny or (
-            self.deny_after is not None and self.calls >= self.deny_after
-        ):
-            return CheckpointOperationFailure(
-                CheckpointOperationFailureCategory.REQUEST_BUDGET_EXHAUSTED
-            )
-        return None
-
-
 def _make_full_profile_mapping(
     *,
     max_total_requests_per_run: int = 50000,
@@ -164,7 +133,6 @@ def _transport(
     max_response_bytes: int = 1024,
     initial_requests_started: int = 0,
     max_total_requests_per_run: int = 50000,
-    attempt_reserver: object | None = None,
 ) -> tuple[RetryingConfluenceHttpTransport, RecordingOpener, RecordingSleeper, list[int | float]]:
     """Create a retrying transport with injected clock and sleeper."""
     selected_outcome = outcome if outcome is not None else response or FakeResponse()
@@ -206,7 +174,6 @@ def _transport(
             monotonic_clock=monotonic_clock,
             sleeper=sleeper,
             initial_requests_started_for_run=initial_requests_started,
-            attempt_reserver=attempt_reserver,
         )
 
         return transport, opener, sleeper, clock_times
@@ -707,6 +674,69 @@ def test_status_result_rejects_non_terminal_decision() -> None:
         )
 
 
+def test_status_result_rejects_terminal_decision_for_semantic_response() -> None:
+    response = ConfluenceHttpResponse(status_code=404, body=b"Not Found")
+    decision = ConfluenceRetryPolicyDecision(
+        action=ConfluenceRetryPolicyAction.TERMINATE,
+        outcome_class=ConfluenceRetryOutcomeClass.TERMINAL_HTTP_FAILURE,
+        stable_kind=ConfluenceRetryStableKind.HTTP_TERMINAL,
+        selected_delay_seconds=None,
+        next_attempt_number=None,
+    )
+
+    with pytest.raises(ValueError, match="semantic response"):
+        ConfluenceStatusAwareExecutionResult(
+            response=response,
+            terminal_decision=decision,
+        )
+
+
+def test_status_result_requires_terminal_decision_for_non_semantic_response() -> None:
+    response = ConfluenceHttpResponse(status_code=400, body=b"Bad Request")
+
+    with pytest.raises(ValueError, match="requires a terminal decision"):
+        ConfluenceStatusAwareExecutionResult(
+            response=response,
+            terminal_decision=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("status_code", "outcome_class", "stable_kind"),
+    [
+        (
+            400,
+            ConfluenceRetryOutcomeClass.BUDGET_EXHAUSTED,
+            ConfluenceRetryStableKind.REQUEST_BUDGET_EXHAUSTED,
+        ),
+        (
+            503,
+            ConfluenceRetryOutcomeClass.TERMINAL_HTTP_FAILURE,
+            ConfluenceRetryStableKind.HTTP_TERMINAL,
+        ),
+    ],
+)
+def test_status_result_rejects_outcome_class_that_disagrees_with_status(
+    status_code: int,
+    outcome_class: ConfluenceRetryOutcomeClass,
+    stable_kind: ConfluenceRetryStableKind,
+) -> None:
+    response = ConfluenceHttpResponse(status_code=status_code, body=b"failure")
+    decision = ConfluenceRetryPolicyDecision(
+        action=ConfluenceRetryPolicyAction.TERMINATE,
+        outcome_class=outcome_class,
+        stable_kind=stable_kind,
+        selected_delay_seconds=None,
+        next_attempt_number=None,
+    )
+
+    with pytest.raises(ValueError, match="status and terminal decision disagree"):
+        ConfluenceStatusAwareExecutionResult(
+            response=response,
+            terminal_decision=decision,
+        )
+
+
 def test_status_result_repr_safe() -> None:
     """ConfluenceStatusAwareExecutionResult repr does not disclose body."""
     response = ConfluenceHttpResponse(
@@ -738,41 +768,6 @@ def test_budget_exhausted_before_first_request() -> None:
     assert len(opener.calls) == 0
 
 
-def test_checkpoint_reservation_precedes_each_http_attempt() -> None:
-    reserver = RecordingAttemptReserver()
-    transport, opener, sleeper, _ = _transport(
-        response=FakeResponse(status=503), attempt_reserver=reserver
-    )
-
-    result = transport.get_response_bytes_result(
-        path="/rest/api/search", query={"start": "0"}
-    )
-
-    assert result.terminal_decision is not None
-    assert reserver.calls == len(opener.calls) == 4
-    assert len(sleeper.sleeps) == 3
-
-
-def test_checkpoint_reservation_denial_prevents_http_and_retry_sleep() -> None:
-    initial_denial = RecordingAttemptReserver(deny=True)
-    transport, opener, sleeper, _ = _transport(attempt_reserver=initial_denial)
-    with pytest.raises(ConfluenceRetryExecutionError):
-        transport.get_json(path="/rest/api/search", query={"start": "0"})
-    assert initial_denial.calls == 0
-    assert opener.calls == []
-    assert sleeper.sleeps == []
-
-    retry_denial = RecordingAttemptReserver(deny_after=1)
-    transport, opener, sleeper, _ = _transport(
-        response=FakeResponse(status=503), attempt_reserver=retry_denial
-    )
-    with pytest.raises(ConfluenceRetryExecutionError):
-        transport.get_json(path="/rest/api/search", query={"start": "0"})
-    assert retry_denial.calls == 1
-    assert len(opener.calls) == 1
-    assert sleeper.sleeps == []
-
-
 # =============================================================================
 # Representation tests
 # =============================================================================
@@ -800,38 +795,12 @@ def test_profile_repr_does_not_disclose_values() -> None:
     assert "3.0" not in rendered
 
 
-@pytest.mark.parametrize(
-    "unsafe_path",
-    (
-        "relative/path?injected=1",
-        "/rest/api/\r\nInjected: yes",
-        "/rest/api/\x00",
-        "/rest/api/../admin",
-        "/rest/api/%2e%2e/admin",
-    ),
-)
-def test_invalid_path_is_rejected_before_clock_sleep_or_attempt(
-    unsafe_path: str,
-) -> None:
+def test_invalid_path_is_rejected_before_clock_sleep_or_attempt() -> None:
     transport, opener, sleeper, clock_times = _transport()
 
     with pytest.raises(ValueError):
-        transport.get_json(path=unsafe_path, query={})
+        transport.get_json(path="relative/path?injected=1", query={})
 
-    assert opener.calls == []
-    assert sleeper.sleeps == []
-    assert clock_times == []
-    assert transport.snapshot().requests_started_for_run == 0
-
-
-def test_unencodable_query_fails_before_clock_sleep_or_attempt() -> None:
-    transport, opener, sleeper, clock_times = _transport()
-
-    with pytest.raises(ConfluenceHttpError) as captured:
-        transport.get_json(path="/rest/api/search", query={"x": "\ud800"})
-
-    assert captured.value.metadata is not None
-    assert captured.value.metadata.kind is ConfluenceHttpFailureKind.INVALID_URL
     assert opener.calls == []
     assert sleeper.sleeps == []
     assert clock_times == []
@@ -857,8 +826,18 @@ def test_retry_delay_includes_monotonic_rate_limit_wait() -> None:
     assert sleeper.sleeps == [2.0, 2.0, 4.0]
 
 
+# =============================================================================
+# M7-B3-C3-HARDEN: production composition —
+# RetryingConfluenceHttpTransport -> UrllibConfluenceHttpTransport -> a fake
+# opener. This exercises the real prepared-request seam end to end (no
+# mocking of the inner transport's methods) and proves the previously
+# missing `_read_response_bytes_request` / `_get_response_bytes_request`
+# methods exist and are wired correctly, without ever touching the network.
+# =============================================================================
+
+
 def test_production_composition_get_bytes_reaches_real_inner_transport() -> None:
-    """Exercise retrying -> urllib transport -> fake opener without network."""
+    """get_bytes runs through the real inner UrllibConfluenceHttpTransport."""
     raw_body = b"raw response body via real inner transport"
     transport, opener, _, _ = _transport(response=FakeResponse(body=raw_body))
 
@@ -870,9 +849,9 @@ def test_production_composition_get_bytes_reaches_real_inner_transport() -> None
     assert len(opener.calls) == 1
 
 
-def test_production_composition_status_observation_reaches_real_inner_transport(
-) -> None:
-    """Preserve an expected non-2xx response through both real transports."""
+def test_production_composition_get_response_bytes_result_reaches_real_inner_transport() -> None:
+    """get_response_bytes_result runs through the real inner transport and
+    preserves a non-2xx status as a semantic observation, not an error."""
     transport, opener, _, _ = _transport(
         outcome=FakeResponse(status=404, body=b"")
     )

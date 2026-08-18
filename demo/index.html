@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KnowledgeNexus - Demo Client</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            color: #1a1a2e;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 8px; color: #16213e; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 14px; }
+
+        /* Config bar */
+        .config-bar {
+            background: #fff;
+            padding: 16px 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .config-bar label { font-weight: 600; font-size: 14px; white-space: nowrap; }
+        .config-bar input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        /* Status badge */
+        .status-bar { display: flex; gap: 16px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
+        .badge {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .badge.ok { background: #d4edda; color: #155724; }
+        .badge.error { background: #f8d7da; color: #721c24; }
+        .badge.pending { background: #fff3cd; color: #856404; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .dot.ok { background: #28a745; }
+        .dot.error { background: #dc3545; }
+        .dot.pending { background: #ffc107; }
+
+        /* Card */
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .card h2 { margin-bottom: 16px; font-size: 20px; color: #16213e; display: flex; align-items: center; gap: 8px; }
+
+        /* Form */
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .form-row { display: flex; gap: 16px; }
+        .form-row .form-group { flex: 1; }
+
+        /* Button */
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary { background: #4361ee; color: #fff; }
+        .btn-primary:hover { background: #3a56d4; }
+        .btn-success { background: #2ecc71; color: #fff; }
+        .btn-success:hover { background: #27ae60; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn:disabled { background: #aaa; cursor: not-allowed; }
+
+        /* Results */
+        .results-container { margin-top: 16px; }
+        /* Danh sách job ingest: khung chỉ đủ cao cho ~3 item, cuộn để xem thêm.
+           Job vẫn được theo dõi/poll bình thường dù không nằm trong khung nhìn. */
+        .scroll-list-3 { max-height: 420px; overflow-y: auto; padding-right: 4px; }
+        .result-item {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: #fafafa;
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        .result-title { font-weight: 700; font-size: 15px; color: #16213e; }
+        .result-score {
+            background: #4361ee;
+            color: #fff;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .result-content {
+            font-size: 14px;
+            color: #444;
+            line-height: 1.6;
+            margin-bottom: 8px;
+            white-space: pre-wrap;
+        }
+        .result-meta { font-size: 12px; color: #888; display: flex; gap: 12px; flex-wrap: wrap; }
+        .result-meta span { background: #eee; padding: 2px 8px; border-radius: 4px; }
+
+        /* Documents table */
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f8f9fa; font-weight: 700; color: #16213e; }
+        tr:hover { background: #f8f9fa; }
+
+        /* Loading */
+        .loading { text-align: center; padding: 30px; color: #666; }
+        .empty { text-align: center; padding: 30px; color: #999; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 600;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 9999;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #2ecc71; }
+        .toast.error { background: #e74c3c; }
+
+        .actions { display: flex; gap: 8px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 KnowledgeNexus Demo Client</h1>
+        <p class="subtitle">Website gọi API từ server KnowledgeNexus — Server phải đang chạy</p>
+
+        <!-- Config -->
+        <div class="config-bar" id="configBar" style="display:none;">
+            <label>📡 API Base URL:</label>
+            <input type="text" id="apiBaseUrl" value="" placeholder="http://<server-ip>:8000" />
+            <button class="btn btn-primary" style="padding:8px 16px;" onclick="saveApiBase()">💾 Lưu</button>
+        </div>
+
+        <!-- Status -->
+        <div class="status-bar">
+            <span class="badge pending" id="badgeHealth">
+                <span class="dot pending"></span> Chưa kiểm tra
+            </span>
+            <span class="badge pending" id="badgeSqlite">
+                <span class="dot pending"></span> SQLite: --
+            </span>
+            <span class="badge pending" id="badgeQdrant">
+                <span class="dot pending"></span> Qdrant: --
+            </span>
+            <span class="badge pending" id="badgeConfluence" title="Cấu hình ingest Confluence">
+                <span class="dot pending"></span> Confluence: --
+            </span>
+        </div>
+        <div id="confluenceConfigHint" style="margin-top:8px;color:#c0392b;font-size:13px;"></div>
+
+        <!-- Health Check -->
+        <div class="card">
+            <h2>1️⃣ Kiểm tra trạng thái Server</h2>
+            <button class="btn btn-primary" onclick="checkHealth()">Kiểm tra Health</button>
+        </div>
+
+        <!-- Retrieve -->
+        <div class="card">
+            <h2>2️⃣ Tìm kiếm (Retrieve)</h2>
+            <div class="form-group">
+                <label>Câu truy vấn (Query)</label>
+                <input type="text" id="queryInput" placeholder="Nhập câu hỏi hoặc từ khóa cần tìm..." />
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Top K (số kết quả)</label>
+                    <select id="topK">
+                        <option value="3">3</option>
+                        <option value="5" selected>5</option>
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Score Threshold (0-1)</label>
+                    <input type="number" id="scoreThreshold" value="0" min="0" max="1" step="0.1" />
+                </div>
+            </div>
+            <button class="btn btn-success" onclick="retrieve()">Tìm kiếm</button>
+            <div class="results-container" id="retrieveResults"></div>
+        </div>
+
+        <!-- Documents -->
+        <div class="card">
+            <h2>3️⃣ Danh sách Documents</h2>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Limit</label>
+                    <input type="number" id="docLimit" value="100" min="1" max="1000" />
+                </div>
+                <div class="form-group">
+                    <label>Offset</label>
+                    <input type="number" id="docOffset" value="0" min="0" />
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="listDocuments()">Tải danh sách</button>
+            <div id="documentsTable" style="margin-top:16px;"></div>
+        </div>
+
+        <!-- Store Stats -->
+        <div class="card">
+            <h2>4️⃣ Thống kê Store</h2>
+            <button class="btn btn-primary" onclick="getStoreStats()">Xem thống kê</button>
+            <div id="statsResult" style="margin-top:16px;"></div>
+        </div>
+
+        <!-- Ingest from URL -->
+        <div class="card">
+            <h2>5️⃣ Ingest cây trang Confluence từ URL</h2>
+            <div class="form-group">
+                <label>URL trang Confluence</label>
+                <input type="text" id="ingestUrlInput" onkeydown="handleIngestKey(event)"
+                    placeholder="https://confluence.example.com/pages/viewpage.action?pageId=12345" />
+            </div>
+            <button class="btn btn-success" id="ingestBtn" onclick="startIngest()">🚀 Bắt đầu Ingest</button>
+            <div id="ingestStatus" class="scroll-list-3" style="margin-top:16px;"></div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // ============ Auto-detect & remember API Base URL ============
+        // Priority:
+        //   1. If served via http(s):// → use same origin (server-hosted mode)
+        //   2. If localStorage has saved value → use it (file:// mode, user already set)
+        //   3. Fallback → http://localhost:8000 (file:// mode, first time)
+        (function initApiBase() {
+            const input = document.getElementById('apiBaseUrl');
+            const configBar = document.getElementById('configBar');
+            let url = null;
+
+            if (window.location.protocol.startsWith('http')) {
+                // Served from a web server — use same origin, hide config bar
+                url = window.location.origin;
+                configBar.style.display = 'none';
+            } else {
+                // file:// — show config bar so user can enter server IP
+                configBar.style.display = 'flex';
+                const saved = localStorage.getItem('kn_api_base');
+                if (saved) {
+                    url = saved;
+                } else {
+                    url = 'http://localhost:8000';
+                }
+            }
+            input.value = url;
+        })();
+
+
+        // Save API Base URL to localStorage (for file:// access mode)
+        function saveApiBase() {
+            const url = getApiBase();
+            localStorage.setItem('kn_api_base', url);
+            showToast('Đã lưu API URL: ' + url + '\nLần sau mở file sẽ tự dùng URL này.', 'success');
+            // Immediately test connection
+            checkHealth();
+        }
+
+        // ============ Helper ============
+        function getApiBase() {
+            return document.getElementById('apiBaseUrl').value.replace(/\/+$/, '');
+        }
+
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => { toast.className = 'toast'; }, 3000);
+        }
+
+        async function apiCall(method, path, body = null, timeoutMs = 120000) {
+            const url = getApiBase() + path;
+            const options = {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+            };
+            if (body) options.body = JSON.stringify(body);
+
+            // Use AbortController for timeout support (default 2 min for retrieve)
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            options.signal = controller.signal;
+
+            try {
+                const res = await fetch(url, options);
+                clearTimeout(timer);
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ detail: res.statusText }));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
+                return res;
+            } catch (e) {
+                clearTimeout(timer);
+                if (e.name === 'AbortError') {
+                    throw new Error('Request timed out (model có thể đang load lần đầu, vui lòng thử lại sau giây lát)');
+                }
+                throw e;
+            }
+        }
+
+
+        function setBadge(id, status, text) {
+            const badge = document.getElementById(id);
+            badge.className = `badge ${status}`;
+            badge.innerHTML = `<span class="dot ${status}"></span> ${text}`;
+        }
+
+        // ============ Health Check ============
+        async function checkHealth() {
+            setBadge('badgeHealth', 'pending', 'Đang kiểm tra...');
+            setBadge('badgeSqlite', 'pending', 'SQLite: --');
+            setBadge('badgeQdrant', 'pending', 'Qdrant: --');
+            try {
+                const res = await fetch(getApiBase() + '/api/v1/health');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                const overall = data.status === 'ok' ? 'ok' : 'error';
+                setBadge('badgeHealth', overall, `Server: ${data.status.toUpperCase()}`);
+                setBadge('badgeSqlite', data.sqlite === 'ok' ? 'ok' : 'error', `SQLite: ${data.sqlite.toUpperCase()}`);
+                setBadge('badgeQdrant', data.qdrant === 'ok' ? 'ok' : 'error', `Qdrant: ${data.qdrant.toUpperCase()}`);
+
+                // Ingest Confluence là tuỳ chọn nên không kéo status chung xuống,
+                // nhưng phải nhìn thấy được: thiếu cấu hình thì mọi submit sẽ bị
+                // từ chối 503, biết trước vẫn hơn là gửi rồi mới biết.
+                const confluenceOk = data.confluence_ingest === 'ok';
+                setBadge('badgeConfluence', confluenceOk ? 'ok' : 'error',
+                    `Confluence: ${confluenceOk ? 'OK' : 'CHƯA CẤU HÌNH'}`);
+                const hint = document.getElementById('confluenceConfigHint');
+                const problems = Array.isArray(data.confluence_ingest_problems)
+                    ? data.confluence_ingest_problems : [];
+                hint.innerHTML = confluenceOk ? '' :
+                    'Ingest Confluence chưa dùng được — sửa trong <code>.env</code> (xem <code>.env.example</code>) rồi khởi động lại server:<ul>'
+                    + problems.map(p => `<li>${escapeHtml(p)}</li>`).join('') + '</ul>';
+
+                showToast('Health check thành công!', 'success');
+            } catch (e) {
+                setBadge('badgeHealth', 'error', 'Server: ERROR');
+                setBadge('badgeSqlite', 'error', 'SQLite: --');
+                setBadge('badgeQdrant', 'error', 'Qdrant: --');
+                setBadge('badgeConfluence', 'error', 'Confluence: --');
+                showToast('Không kết nối được server: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Retrieve ============
+        async function retrieve() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) { showToast('Vui lòng nhập câu truy vấn', 'error'); return; }
+
+            const topK = parseInt(document.getElementById('topK').value);
+            const scoreThreshold = parseFloat(document.getElementById('scoreThreshold').value);
+            const container = document.getElementById('retrieveResults');
+            const btn = event?.target;
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang tìm...'; }
+            container.innerHTML = '<div class="loading">⏳ Đang tìm kiếm... (lần đầu có thể mất 30-60s để load BGE-M3 model)</div>';
+
+            try {
+                const res = await apiCall('POST', '/api/v1/retrieve', {
+                    query: query,
+                    top_k: topK,
+                    score_threshold: scoreThreshold,
+                    filters: {}
+                }, 180000); // 3 min timeout for first-time model load
+
+                const data = await res.json();
+
+                if (!data.results || data.results.length === 0) {
+                    container.innerHTML = '<div class="empty">Không tìm thấy kết quả nào.</div>';
+                    showToast('Không có kết quả', 'error');
+                    return;
+                }
+
+                container.innerHTML = data.results.map(r => `
+                    <div class="result-item">
+                        <div class="result-header">
+                            <div class="result-title">${escapeHtml(r.citation.title || 'Không có tiêu đề')}</div>
+                            <div class="result-score">Score: ${(r.score * 100).toFixed(1)}%</div>
+                        </div>
+                        <div class="result-content">${escapeHtml(r.content)}</div>
+                        <div class="result-meta">
+                            ${r.citation.source_type ? `<span>📎 ${escapeHtml(r.citation.source_type)}</span>` : ''}
+                            ${r.citation.source_id ? `<span>🆔 ${escapeHtml(r.citation.source_id)}</span>` : ''}
+                            ${r.citation.url ? `<span>🔗 <a href="${escapeHtml(r.citation.url)}" target="_blank">Link</a></span>` : ''}
+                            ${r.citation.file_path ? `<span>📄 ${escapeHtml(r.citation.file_path)}</span>` : ''}
+                            ${r.citation.language ? `<span>💻 ${escapeHtml(r.citation.language)}</span>` : ''}
+                            <span>📊 Chunk ${r.citation.chunk_index + 1}/${r.citation.total_chunks}</span>
+                        </div>
+                    </div>
+                `).join('');
+                showToast(`Tìm thấy ${data.total} kết quả!`, 'success');
+            } catch (e) {
+                container.innerHTML = '';
+                showToast('Lỗi: ' + e.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Tìm kiếm'; }
+            }
+        }
+
+        // ============ List Documents ============
+
+        async function listDocuments() {
+            const limit = document.getElementById('docLimit').value || 100;
+            const offset = document.getElementById('docOffset').value || 0;
+            const container = document.getElementById('documentsTable');
+            container.innerHTML = '<div class="loading">⏳ Đang tải...</div>';
+
+            try {
+                const res = await fetch(getApiBase() + `/api/v1/documents?limit=${limit}&offset=${offset}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                if (!data.documents || data.documents.length === 0) {
+                    container.innerHTML = '<div class="empty">Không có document nào.</div>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <p style="margin-bottom:10px;color:#666;">Tổng: <strong>${data.total}</strong> documents (hiển thị ${data.documents.length})</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Source Type</th>
+                                <th>URL</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.documents.map(d => `
+                                <tr>
+                                    <td title="${d.id}">${d.id.substring(0, 8)}...</td>
+                                    <td>${escapeHtml(d.title || '--')}</td>
+                                    <td>${escapeHtml(d.source_type || '--')}</td>
+                                    <td>${d.url ? `<a href="${escapeHtml(d.url)}" target="_blank">🔗</a>` : '--'}</td>
+                                    <td>${d.created_at ? new Date(d.created_at).toLocaleDateString() : '--'}</td>
+                                    <td>
+                                        <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
+                                            onclick="deleteDocument('${d.id}')">Xóa</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                showToast('Tải danh sách thành công!', 'success');
+            } catch (e) {
+                container.innerHTML = '';
+                showToast('Lỗi: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Delete Document ============
+        async function deleteDocument(docId) {
+            if (!confirm(`Xóa document ${docId}?`)) return;
+            try {
+                await apiCall('DELETE', `/api/v1/documents/${docId}`);
+                showToast('Đã xóa document!', 'success');
+                listDocuments(); // refresh
+            } catch (e) {
+                showToast('Lỗi: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Store Stats ============
+        async function getStoreStats() {
+            const container = document.getElementById('statsResult');
+            container.innerHTML = '<div class="loading">⏳ Đang tải...</div>';
+            try {
+                const res = await fetch(getApiBase() + '/api/v1/store/stats');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                container.innerHTML = `
+                    <table>
+                        <tbody>
+                            <tr><td colspan="2" style="font-weight:700;background:#f0f4ff;">📦 Qdrant (Vector DB)</td></tr>
+                            ${Object.entries(data.qdrant || {}).map(([k, v]) => `
+                                <tr><td style="padding-left:20px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>
+                            `).join('')}
+                            <tr><td colspan="2" style="font-weight:700;background:#f0f4ff;">🗄️ SQLite (Metadata DB)</td></tr>
+                            ${Object.entries(data.sqlite || {}).map(([k, v]) => `
+                                <tr><td style="padding-left:20px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                showToast('Tải thống kê thành công!', 'success');
+            } catch (e) {
+                container.innerHTML = '';
+                showToast('Lỗi: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Ingest từ URL (Confluence) — hỗ trợ nhiều job cùng lúc ============
+        // Backend xếp mọi submit vào một hàng đợi và xử lý tuần tự, nên UI ở đây
+        // không khoá nút "Bắt đầu Ingest": người dùng gửi liên tiếp nhiều URL, mỗi
+        // job có card riêng + vòng poll riêng khoá theo jobId. Job đang đợi tới lượt
+        // hiển thị PENDING (phase "queued") cho tới khi worker nhấc nó lên.
+        const ingestJobPolls = new Map(); // jobId -> {timer, failures, inFlight}
+        const TRACKED_INGEST_JOBS_KEY = 'kn_confluence_subtree_jobs';
+        const LEGACY_INGEST_JOB_KEY = 'kn_confluence_subtree_job'; // bản 1-job trước đây
+
+        function loadTrackedIngestJobIds() {
+            let ids = [];
+            try {
+                const parsed = JSON.parse(localStorage.getItem(TRACKED_INGEST_JOBS_KEY) || '[]');
+                if (Array.isArray(parsed)) ids = parsed.filter(id => typeof id === 'string');
+            } catch (e) {
+                ids = [];
+            }
+            // Nâng cấp từ bản chỉ theo dõi 1 job: job đang chạy dở lúc deploy vẫn
+            // được nối lại thay vì mất card. Chỉ chạy một lần rồi xoá khoá cũ.
+            const legacy = localStorage.getItem(LEGACY_INGEST_JOB_KEY);
+            if (legacy) {
+                localStorage.removeItem(LEGACY_INGEST_JOB_KEY);
+                if (!ids.includes(legacy)) {
+                    ids.push(legacy);
+                    localStorage.setItem(TRACKED_INGEST_JOBS_KEY, JSON.stringify(ids));
+                }
+            }
+            return ids;
+        }
+
+        function trackIngestJobId(jobId) {
+            const ids = loadTrackedIngestJobIds().filter(id => id !== jobId);
+            ids.push(jobId);
+            // Giữ lại 20 job gần nhất để localStorage không phình vô hạn.
+            localStorage.setItem(TRACKED_INGEST_JOBS_KEY, JSON.stringify(ids.slice(-20)));
+        }
+
+        function untrackIngestJobId(jobId) {
+            const ids = loadTrackedIngestJobIds().filter(id => id !== jobId);
+            localStorage.setItem(TRACKED_INGEST_JOBS_KEY, JSON.stringify(ids));
+        }
+
+        function ingestStatusClass(status) {
+            if (status === 'completed') return 'ok';
+            if (status === 'failed') return 'error';
+            return 'pending';
+        }
+
+        function ingestStatusLabel(job) {
+            const phase = (job.stats || {}).phase;
+            if (job.status === 'pending') return phase === 'queued' ? 'WAITING' : 'PENDING';
+            if (job.status === 'cancelled') return 'ĐÃ HUỶ';
+            if (job.status === 'paused') return 'TẠM DỪNG';
+            return String(job.status).toUpperCase();
+        }
+
+        // Thứ tự phase mà backend thực sự phát ra, dùng để hiện "bước k/n".
+        // Foundation chỉ báo ở ranh giới phase (khoảng 11 lần cho cả job), nên
+        // số bước là thứ duy nhất cho thấy job đang tiến, không phải treo.
+        const INGEST_PHASES = [
+            ['queued', 'Đang chờ trong hàng đợi'],
+            ['resolving_url', 'Phân giải URL'],
+            ['inventory', 'Kiểm kê cây trang'],
+            ['capture_pages', 'Tải trang về'],
+            ['process_pages', 'Xử lý nội dung'],
+            ['capture_drawio', 'Tải sơ đồ draw.io'],
+            ['export_packet', 'Dựng gói dữ liệu'],
+            ['publish_packet', 'Công bố gói'],
+            ['indexing_validate', 'Kiểm tra gói'],
+            ['indexing_embed', 'Sinh embedding'],
+            ['indexing_store', 'Ghi vào kho vector'],
+            ['completed', 'Hoàn tất'],
+        ];
+
+        function ingestPhaseText(stats) {
+            if (!stats.phase) return '';
+            if (['failed', 'cancelled', 'paused'].includes(stats.phase)) {
+                // Nói rõ dừng ở bước nào — nếu không thì phải vào máy chạy
+                // server đọc traceback mới biết.
+                const nhan = {cancelled: 'Đã huỷ ở bước', paused: 'Tạm dừng ở bước'}[stats.phase]
+                    || 'Thất bại ở bước';
+                const at = INGEST_PHASES.find(entry => entry[0] === stats.failed_phase);
+                return at ? `${nhan}: ${escapeHtml(at[1])}` : nhan.replace(' ở bước', '');
+            }
+            const index = INGEST_PHASES.findIndex(entry => entry[0] === stats.phase);
+            if (index < 0) return escapeHtml(stats.phase);
+            return `Bước ${index + 1}/${INGEST_PHASES.length} — ${escapeHtml(INGEST_PHASES[index][1])}`;
+        }
+
+        function ingestCounters(stats) {
+            // captured_pages là số của riêng lượt capture vừa xong (mỗi lượt 1
+            // batch), còn replayed_pages là số đã commit từ các lượt trước —
+            // cộng lại mới ra tiến độ thật, hiện riêng captured_pages sẽ tụt số.
+            // PATCH /ingest-jobs/{id} cho phép ghi stats tuỳ ý, nên mọi giá trị
+            // hiển thị đều phải escape kể cả khi bình thường chúng là số.
+            const num = value => escapeHtml(String(value));
+            const parts = [];
+            if (stats.requested_pages !== undefined) {
+                parts.push(`Cần lấy: ${num(stats.requested_pages)}`);
+            }
+            if (stats.captured_pages !== undefined) {
+                const captured = Number(stats.captured_pages) || 0;
+                const replayed = Number(stats.replayed_pages) || 0;
+                const total = stats.requested_pages;
+                parts.push(
+                    `Đã lấy: ${num(captured + replayed)}`
+                    + (total !== undefined ? `/${num(total)}` : '')
+                );
+            }
+            if (stats.capture_failed_pages) {
+                parts.push(`⚠️ Trang lỗi: ${num(stats.capture_failed_pages)}`);
+            }
+            if (stats.embedded_chunks !== undefined) {
+                const total = stats.total_chunks;
+                parts.push(`Embedding: ${num(stats.embedded_chunks)}${total !== undefined ? '/' + num(total) : ''}`);
+            }
+            if (stats.document_count !== undefined) parts.push(`Tài liệu: ${num(stats.document_count)}`);
+            if (stats.chunk_count !== undefined) parts.push(`Chunk: ${num(stats.chunk_count)}`);
+            if (stats.chunks_ingested !== undefined) parts.push(`✅ Đã nạp: ${num(stats.chunks_ingested)}`);
+            if (stats.chunks_failed) parts.push(`⚠️ Nạp lỗi: ${num(stats.chunks_failed)}`);
+            if (stats.embedding_model) parts.push(`🧠 ${escapeHtml(String(stats.embedding_model))}`);
+            return parts;
+        }
+
+        function renderIngestJobCard(job) {
+            const cls = ingestStatusClass(job.status);
+            const stats = job.stats || {};
+            // Job tam dung resume duoc y het job loi resume duoc: cung mot
+            // workspace do dang tren dia.
+            const resumable = ['failed', 'paused'].includes(job.status) && stats.resumable === true;
+            const dangChay = job.status === 'pending' || job.status === 'running';
+            // Dang xep hang thi chua lam gi -> "Huy". Dang chay thi da co
+            // workspace -> "Tam dung", va chay tiep duoc.
+            const nhanDung = job.status === 'running' ? '⏸ Tạm dừng job này' : '✖ Huỷ job này';
+            return `
+                <div class="result-item">
+                    <div class="result-header">
+                        <div class="result-title">Job ${escapeHtml(job.id.substring(0, 8))}...</div>
+                        <span class="badge ${cls}"><span class="dot ${cls}"></span> ${escapeHtml(ingestStatusLabel(job))}</span>
+                    </div>
+                    <div class="result-meta">
+                        ${stats.phase ? `<span>${ingestPhaseText(stats)}</span>` : ''}
+                        ${ingestCounters(stats).map(text => `<span>${text}</span>`).join('')}
+                    </div>
+                    ${job.error ? `<div class="result-content" style="color:#c0392b;">❌ ${escapeHtml(job.error)}</div>` : ''}
+                    ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Tiếp tục job này</button>` : ''}
+                    ${dangChay ? `<button class="btn" onclick="cancelIngest('${escapeHtml(job.id)}')">${nhanDung}</button>` : ''}
+                </div>
+            `;
+        }
+
+        function upsertIngestJobCard(job) {
+            const container = document.getElementById('ingestStatus');
+            const empty = container.querySelector('.empty');
+            if (empty) empty.remove();
+
+            const cardId = `ingest-job-${job.id}`;
+            const existing = document.getElementById(cardId);
+            const html = `<div id="${cardId}">${renderIngestJobCard(job)}</div>`;
+            if (existing) {
+                existing.outerHTML = html;
+            } else {
+                container.insertAdjacentHTML('afterbegin', html); // job mới nhất lên đầu
+            }
+        }
+
+        function removeIngestJobCard(jobId) {
+            const card = document.getElementById(`ingest-job-${jobId}`);
+            if (card) card.remove();
+        }
+
+        function stopIngestPolling(jobId) {
+            const state = ingestJobPolls.get(jobId);
+            if (!state) return;
+            if (state.timer) clearTimeout(state.timer);
+            ingestJobPolls.delete(jobId);
+        }
+
+        function pollIngestJob(jobId) {
+            stopIngestPolling(jobId); // tránh tạo trùng vòng poll nếu gọi lại
+            const state = { timer: null, failures: 0, inFlight: false };
+            ingestJobPolls.set(jobId, state);
+
+            const poll = async () => {
+                if (state.inFlight || ingestJobPolls.get(jobId) !== state) return;
+                state.inFlight = true;
+                try {
+                    const res = await fetch(getApiBase() + `/api/v1/ingest-jobs/${jobId}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const job = await res.json();
+                    state.failures = 0;
+                    upsertIngestJobCard(job);
+                    if (['completed', 'failed', 'cancelled', 'paused'].includes(job.status)) {
+                        const stats = job.stats || {};
+                        // Job resumable vẫn giữ card (kèm nút "Tiếp tục job này") và
+                        // giữ id trong localStorage; job kết thúc hẳn thì bỏ theo dõi.
+                        if (!(['failed', 'paused'].includes(job.status) && stats.resumable === true)) {
+                            untrackIngestJobId(jobId);
+                        }
+                        stopIngestPolling(jobId);
+                        const ten = job.id.substring(0, 8);
+                        const thongBao = {
+                            completed: [`Job ${ten}... hoàn tất!`, 'success'],
+                            cancelled: [`Job ${ten}... đã huỷ`, 'success'],
+                            paused: [`Job ${ten}... đã tạm dừng, bấm Tiếp tục để chạy nốt`, 'success'],
+                        }[job.status] || [`Job ${ten}... thất bại: ${job.error || ''}`, 'error'];
+                        showToast(thongBao[0], thongBao[1]);
+                    }
+                } catch (e) {
+                    if (String(e.message).includes('HTTP 404')) {
+                        untrackIngestJobId(jobId);
+                        removeIngestJobCard(jobId);
+                        stopIngestPolling(jobId);
+                        showToast('Không tìm thấy job đã lưu. Bạn có thể tạo job mới.', 'error');
+                        return;
+                    }
+                    state.failures += 1;
+                    showToast('Không thể cập nhật trạng thái job; sẽ thử lại.', 'error');
+                } finally {
+                    state.inFlight = false;
+                    if (ingestJobPolls.get(jobId) === state) {
+                        const delay = Math.min(30000, 2000 * (2 ** Math.min(state.failures, 4)));
+                        state.timer = setTimeout(poll, delay);
+                    }
+                }
+            };
+            poll();
+        }
+
+        function handleIngestKey(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                startIngest();
+            }
+        }
+
+        async function startIngest() {
+            const input = document.getElementById('ingestUrlInput');
+            const url = input.value.trim();
+            if (!url) { showToast('Vui lòng nhập URL', 'error'); return; }
+
+            const btn = document.getElementById('ingestBtn');
+            if (btn.disabled) return;
+            btn.disabled = true; // chỉ khoá trong lúc gửi request POST (rất nhanh)
+            try {
+                const res = await apiCall('POST', '/api/v1/ingest-jobs/confluence-subtrees', { url });
+                const job = await res.json();
+                // Server chống trùng qua active_key: gửi lại URL đang chạy sẽ trả về
+                // chính job cũ chứ không tạo job mới — đừng báo "đã tạo" cho trường hợp đó.
+                const isExisting = loadTrackedIngestJobIds().includes(job.id);
+                trackIngestJobId(job.id);
+                upsertIngestJobCard(job);
+                pollIngestJob(job.id);
+                input.value = ''; // sẵn sàng gõ URL tiếp theo ngay
+                showToast(
+                    isExisting
+                        ? `URL này đã có job ${job.id.substring(0, 8)}... đang chạy`
+                        : `Đã tạo job ${job.id.substring(0, 8)}..., đang xếp hàng xử lý`,
+                    isExisting ? 'error' : 'success'
+                );
+            } catch (e) {
+                showToast('Lỗi: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function cancelIngest(jobId) {
+            if (!jobId) return;
+            if (!confirm('Dừng job này? Job đang chạy sẽ dừng ở ranh giới bước tiếp theo (không tức thì) và có thể chạy tiếp sau đó. Job còn đang xếp hàng sẽ bị huỷ hẳn.')) return;
+            try {
+                const res = await apiCall('POST', `/api/v1/ingest-jobs/${jobId}/cancel`, {});
+                const job = await res.json();
+                upsertIngestJobCard(job);
+                showToast(
+                    job.status === 'cancelled'
+                        ? `Đã huỷ job ${job.id.substring(0, 8)}...`
+                        : `Đã gửi yêu cầu huỷ job ${job.id.substring(0, 8)}..., đang dừng`,
+                    'success'
+                );
+            } catch (e) {
+                showToast('Không huỷ được job: ' + e.message, 'error');
+            }
+        }
+
+        async function resumeIngest(jobId) {
+            if (!jobId) return;
+            try {
+                const res = await apiCall('POST', `/api/v1/ingest-jobs/${jobId}/resume`, {});
+                const job = await res.json();
+                trackIngestJobId(job.id);
+                upsertIngestJobCard(job);
+                pollIngestJob(job.id);
+                showToast(`Đã xếp lại job ${job.id.substring(0, 8)}... vào hàng đợi`, 'success');
+            } catch (e) {
+                showToast('Không thể tiếp tục job: ' + e.message, 'error');
+            }
+        }
+
+        // ============ Utils ============
+        function escapeHtml(str) {
+            // Bốn phép thay thế đầu trước đây thay ký tự bằng chính nó, nên hàm
+            // này thực chất không escape gì ngoài dấu nháy đơn — nội dung
+            // Confluence và stats do client PATCH vào đều đi thẳng vào DOM.
+            // Dấu & phải thay trước, nếu không sẽ escape chồng lên các thực thể vừa tạo.
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // Auto check health on load
+        window.addEventListener('load', () => {
+            checkHealth();
+            // Nối lại việc theo dõi mọi job còn dang dở sau khi reload trang.
+            loadTrackedIngestJobIds().forEach(pollIngestJob);
+        });
+    </script>
+</body>
+</html>

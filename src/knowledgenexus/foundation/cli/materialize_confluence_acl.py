@@ -48,7 +48,6 @@ from knowledgenexus.foundation.infrastructure.raw_store import (
 )
 from knowledgenexus.foundation.infrastructure.sidecars import (
     CAPTURED_M6B_EVIDENCE_KIND,
-    LoadedRestrictionSidecar,
     RestrictionSidecarLoadError,
     load_restriction_sidecar,
 )

@@ -1,0 +1,10 @@
+# Two-layer eval defaults (override via env KNOWLEDGENEXUS_API_URL)
+
+top_k: 10
+score_threshold: 0.0
+api_base_url: "http://localhost:8000"
+golden_path: "data/eval/golden/queries.jsonl"
+results_dir: "data/eval/results"
+# source_id is stable for data/eval/corpus (recommended for hybrid A/B).
+# Alternatives: document_id | chunk_id
+match_on: "source_id"

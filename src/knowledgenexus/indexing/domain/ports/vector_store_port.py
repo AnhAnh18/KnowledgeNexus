@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from knowledgenexus.indexing.domain.models.chunk import Chunk
+from knowledgenexus.indexing.domain.value_objects.embedding_vector import SparseVector
 from knowledgenexus.indexing.domain.value_objects.scored_chunk import ScoredChunk
 
 
@@ -14,11 +15,16 @@ class VectorStorePort(ABC):
     @abstractmethod
     async def search(
         self,
-        query_vector: list[float],
+        dense_vector: list[float],
         top_k: int,
         filters: dict[str, Any] | None = None,
+        sparse_vector: SparseVector | None = None,
     ) -> list[ScoredChunk]:
-        """Semantic search; returns chunk refs + scores (may be partial hydrate from repo)."""
+        """Semantic search; returns chunk refs + scores (may be partial hydrate from repo).
+
+        If sparse_vector is provided and the store supports hybrid, performs
+        dense + sparse search with RRF fusion.
+        """
         ...
 
     @abstractmethod

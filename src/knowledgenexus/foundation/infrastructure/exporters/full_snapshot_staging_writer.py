@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import logging
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
@@ -189,5 +190,5 @@ def _verify_machine_files(staging_path: Path) -> None:
 def _remove_owned_staging_path(staging_path: Path) -> None:
     try:
         shutil.rmtree(staging_path)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning("Failed to clean up staging path %s: %s", staging_path, e)

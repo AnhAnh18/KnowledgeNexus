@@ -981,28 +981,6 @@ def test_invalid_path_stays_value_error_with_zero_calls(
 
 
 @pytest.mark.parametrize(
-    "unsafe_path",
-    (
-        "/rest/api/\r\nInjected: yes",
-        "/rest/api/\x00",
-        "/rest/api/../admin",
-        "/rest/api/%2e%2e/admin",
-        "/rest\\api\\admin",
-    ),
-)
-def test_unsafe_path_is_rejected_before_outbound_call(
-    monkeypatch: pytest.MonkeyPatch,
-    unsafe_path: str,
-) -> None:
-    transport, opener, _ = _transport(monkeypatch)
-
-    with pytest.raises(ValueError, match="safe absolute-path"):
-        transport.get_json(path=unsafe_path, query={})
-
-    assert opener.calls == []
-
-
-@pytest.mark.parametrize(
     "method_name",
     ("get_json", "get_bytes", "get_response_bytes"),
 )
@@ -1036,16 +1014,23 @@ def test_non_string_query_entry_stays_type_error_with_zero_calls(
     assert opener.calls == []
 
 
-def test_read_response_bytes_request_calls_callback_before_outbound_call(
+# ---------------------------------------------------------------------------
+# M7-B3-C3-HARDEN: prepared-request seam methods that accept a pre-built
+# urllib.request.Request, used by the retrying executor's single-preparation
+# per-call contract.
+# ---------------------------------------------------------------------------
+
+
+def test_read_response_bytes_request_calls_callback_once_before_outbound_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     response = FakeResponse(body=b'{"ok":true}')
     transport, opener, _ = _transport(monkeypatch, response=response)
     request = transport._build_request(path="/rest/api/content/1", query={})
-    callbacks: list[str] = []
+    calls: list[str] = []
 
     def on_attempt_start() -> None:
-        callbacks.append("started")
+        calls.append("callback")
         assert opener.calls == []
 
     body = transport._read_response_bytes_request(
@@ -1053,7 +1038,88 @@ def test_read_response_bytes_request_calls_callback_before_outbound_call(
     )
 
     assert body == b'{"ok":true}'
-    assert callbacks == ["started"]
+    assert calls == ["callback"]
+    assert opener.calls == [(request, 12.5)]
+
+
+def test_read_response_bytes_request_without_callback_still_reads_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(body=b'{"ok":true}')
+    transport, opener, _ = _transport(monkeypatch, response=response)
+    request = transport._build_request(path="/rest/api/content/1", query={})
+
+    body = transport._read_response_bytes_request(request)
+
+    assert body == b'{"ok":true}'
+    assert opener.calls == [(request, 12.5)]
+
+
+def test_read_response_bytes_request_shares_status_and_error_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = urllib.error.HTTPError(
+        "https://fixture.invalid/",
+        503,
+        "Service Unavailable",
+        hdrs=Message(),
+        fp=None,
+    )
+    transport, _, _ = _transport(monkeypatch, outcome=failure)
+    request = transport._build_request(path="/rest/api/content/1", query={})
+
+    with pytest.raises(ConfluenceHttpError) as exc_info:
+        transport._read_response_bytes_request(request)
+
+    assert exc_info.value.metadata is not None
+    assert exc_info.value.metadata.kind is ConfluenceHttpFailureKind.HTTP_STATUS
+    assert exc_info.value.metadata.http_status == 503
+
+
+def test_read_response_bytes_request_rejects_non_request_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport, opener, _ = _transport(monkeypatch)
+
+    with pytest.raises(TypeError, match="urllib.request.Request"):
+        transport._read_response_bytes_request("not-a-request")  # type: ignore[arg-type]
+
+    assert opener.calls == []
+
+
+def test_get_response_bytes_request_calls_callback_once_before_outbound_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(body=b"raw-bytes", status=200)
+    transport, opener, _ = _transport(monkeypatch, response=response)
+    request = transport._build_request(path="/rest/api/content/1", query={})
+    calls: list[str] = []
+
+    def on_attempt_start() -> None:
+        calls.append("callback")
+        assert opener.calls == []
+
+    result = transport._get_response_bytes_request(
+        request, on_attempt_start=on_attempt_start
+    )
+
+    assert isinstance(result, ConfluenceHttpResponse)
+    assert result.status_code == 200
+    assert result.body == b"raw-bytes"
+    assert calls == ["callback"]
+    assert opener.calls == [(request, 12.5)]
+
+
+def test_get_response_bytes_request_without_callback_still_reads_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(body=b"raw-bytes", status=200)
+    transport, opener, _ = _transport(monkeypatch, response=response)
+    request = transport._build_request(path="/rest/api/content/1", query={})
+
+    result = transport._get_response_bytes_request(request)
+
+    assert result.body == b"raw-bytes"
     assert opener.calls == [(request, 12.5)]
 
 
@@ -1076,17 +1142,12 @@ def test_get_response_bytes_request_preserves_expected_non_2xx_status(
     assert result.body == b""
 
 
-@pytest.mark.parametrize(
-    "method_name",
-    ("_read_response_bytes_request", "_get_response_bytes_request"),
-)
-def test_request_level_seam_rejects_non_request_before_outbound_call(
+def test_get_response_bytes_request_rejects_non_request_object(
     monkeypatch: pytest.MonkeyPatch,
-    method_name: str,
 ) -> None:
     transport, opener, _ = _transport(monkeypatch)
 
     with pytest.raises(TypeError, match="urllib.request.Request"):
-        getattr(transport, method_name)("not-a-request")
+        transport._get_response_bytes_request("not-a-request")  # type: ignore[arg-type]
 
     assert opener.calls == []

@@ -190,15 +190,6 @@ def test_locked_workspace_initializes_reopens_and_preserves_lock_bytes(tmp_path)
         _assert_durability_pragmas(conn)
 
 
-def test_mutation_allows_sqlite_journal_lifecycle(tmp_path) -> None:
-    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
-        def transient_schema(transaction):
-            transaction._execute("CREATE TABLE transient_lifecycle(value INTEGER)")
-            transaction._execute("DROP TABLE transient_lifecycle")
-
-        workspace._mutate(transient_schema)
-
-
 def test_locked_workspace_allows_unrelated_sibling_directory_lifecycle(tmp_path) -> None:
     sibling = tmp_path.parent / f"{tmp_path.name}-unrelated-sibling"
     with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
@@ -209,6 +200,15 @@ def test_locked_workspace_allows_unrelated_sibling_directory_lifecycle(tmp_path)
             ) == (1,)
         finally:
             sibling.rmdir()
+
+
+def test_mutation_allows_sqlite_journal_lifecycle(tmp_path) -> None:
+    with module._open_locked_checkpoint_workspace(tmp_path) as workspace:
+        def transient_schema(transaction):
+            transaction._execute("CREATE TABLE transient_lifecycle(value INTEGER)")
+            transaction._execute("DROP TABLE transient_lifecycle")
+
+        workspace._mutate(transient_schema)
 
 
 def test_locked_workspace_orders_lock_before_connect_and_uses_strict_open_modes(
