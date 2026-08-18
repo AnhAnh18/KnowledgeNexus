@@ -45,9 +45,9 @@ mcp/node_modules/
 mcp/build/
 
 # External models (mounted via docker-compose.yml, not stored in repo)
-# Models are stored at D:/KnowledgeNexus_Models/ or other external location
-/KnowledgeNexus_Models/
-**/KnowledgeNexus_Models/
+# Models are stored at D:/KnowledgeNexus_Data/models/ or other external location
+/KnowledgeNexus_Data/
+**/KnowledgeNexus_Data/
 
 # Docker — exported offline image bundles (see docker/vendor/README.md)
 docker/vendor/*.tar

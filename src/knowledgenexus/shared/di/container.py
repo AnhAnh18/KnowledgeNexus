@@ -136,7 +136,7 @@ class AppContainer:
                 f"{configured!r}). Snapshot workspaces are written outside "
                 "version control by design, so the shipped default "
                 "'./data/confluence-snapshots' cannot be used as-is; set it to "
-                "something like 'D:/kn-data/confluence-snapshots'."
+                "something like 'D:/KnowledgeNexus_Data/confluence-snapshots'."
             ) from None
 
     def confluence_ingest_config_problems(self) -> list[str]:

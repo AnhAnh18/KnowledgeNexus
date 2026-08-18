@@ -3,7 +3,7 @@ REM Gathers the minimal set of files an offline/air-gapped target machine
 REM needs to run the Docker stack.
 REM 
 REM NOTE: Models are NOT included in this package. They are stored externally
-REM at D:/KnowledgeNexus_Models/ and mounted via docker-compose.yml volume.
+REM at D:/KnowledgeNexus_Data/models/ and mounted via docker-compose.yml volume.
 REM 
 REM Run scripts\docker-export-images.bat FIRST so docker\vendor\*.tar exist.
 setlocal enabledelayedexpansion
@@ -62,16 +62,16 @@ echo.
 echo     DEPLOYMENT INSTRUCTIONS:
 echo     ========================
 echo     1. Copy this zip file to the offline/air-gapped machine
-echo     2. Copy the models folder (D:/KnowledgeNexus_Models/) separately
+echo     2. Copy the models folder (D:/KnowledgeNexus_Data/models/) separately
 echo        - This is NOT included in the zip (too large, ~2.3GB)
 echo        - Share this folder once via network/USB
 echo     3. On the target machine, extract the zip
 echo     4. Run: scripts\docker-import-images.bat
-echo     5. Ensure models exist at D:/KnowledgeNexus_Models/ on target machine
+echo     5. Ensure models exist at D:/KnowledgeNexus_Data/models/ on target machine
 echo        (or update .env with the actual models path)
 echo     6. Run: docker compose up -d
 echo.
-echo     NOTE: The docker-compose.yml expects models at D:/KnowledgeNexus_Models/
+echo     NOTE: The docker-compose.yml expects models at D:/KnowledgeNexus_Data/models/
 echo           If your target machine uses a different path, update .env BEFORE
 echo           running docker compose up -d
 
