@@ -12,7 +12,7 @@ Clean Architecture RAG platform — hybrid **SQLite** (source of truth) + **Qdra
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) package manager
-- Qdrant (native binary, port 6333) — see below
+- Qdrant (native binary, port 6333)
 
 ## Setup
 
@@ -24,9 +24,7 @@ uv sync
 cp .env.example .env
 ```
 
-## Run Qdrant (native — no Docker until M6)
-
-Download from [Qdrant releases](https://github.com/qdrant/qdrant/releases) or:
+## Run Qdrant (native)
 
 ```bash
 # Windows (scoop)
@@ -36,7 +34,7 @@ scoop install qdrant
 brew install qdrant
 
 # Run
-qdrant --config-path ./config/qdrant  # or default on :6333
+qdrant --config-path ./config/qdrant
 ```
 
 ## Run API
@@ -53,104 +51,110 @@ Health: http://localhost:8000/api/v1/health
 
 ```bash
 uv run pytest
-uv run pytest tests/eval -q   # two-layer eval unit tests (no API)
+uv run pytest tests/eval -q   # two-layer eval unit tests
 ```
 
-## Two-layer eval (Retrieval + Skill)
-
-See **[docs/EVAL_TWO_LAYER.md](docs/EVAL_TWO_LAYER.md)**.  
-Team roadmap (chunk → skill → filter → hybrid): **[docs/SEARCH_QUALITY_ROADMAP.md](docs/SEARCH_QUALITY_ROADMAP.md)**.
-
-```bash
-uv run kn-eval --layer all --label baseline
-```
-
-## Project structure
+## Project Structure
 
 ```
-contracts/openapi.yaml     # API contract (M0)
-config/                    # Qdrant collection schema, defaults
-packages/domain/           # Domain layer (no external deps)
-services/api/              # FastAPI service
-tests/                     # Unit + integration tests
+KnowledgeNexus/
+├── src/         # Production Python code (knowledgenexus package)
+├── mcp/         # MCP server (TypeScript/Node.js)
+├── eval/        # Evaluation tooling (development only)
+├── tests/       # Unit and integration tests
+├── scripts/     # Utility scripts
+├── data/        # Data files
+├── docs/        # Documentation
+├── config/      # Configuration files
+└── docker/      # Docker configurations
 ```
-
-## Milestones
-
-| # | Deliverable |
-|---|-------------|
-| M0 | Foundation — domain, ports, OpenAPI, settings ✅ |
-| M1 | SQLite repos + Qdrant adapter + Store API |
-| M2 | Chunker, BGE-M3, Confluence parser |
-| M3 | MVP-1 — Ingest E2E |
-| M4 | MVP-2 — Retrieve + search |
-| M5 | MVP-3 — RAG chat |
-| M6 | Docker, MCP/URL/file connectors, PostgreSQL |
-
-## Foundation workstream
-
-The Foundation workstream in this repository builds the data-contract,
-deterministic export, and source-ingestion boundary used by later indexing and
-retrieval work. Its internal milestone labels, such as Foundation M5A or M5B,
-are workstream-local and do not replace the product milestones above.
-
-Current Foundation status:
-
-- Foundation M0-M4: contracts, deterministic record construction, and
-  full-snapshot export foundation complete.
-- Foundation M5A: deployment-independent Confluence inventory core complete.
-- Foundation M5B-0: Confluence Data Center response shape confirmed through a
-  sanitized offline evidence packet.
-- Foundation M5B-1: pure response parsing and metadata normalization complete.
-- Foundation M5B-2: Data Center HTTP adapter and pagination is the next step.
-
-Install the dependencies used by the current Foundation implementation from the
-repository root:
-
-```bash
-python -m pip install -r requirements.txt
-python -m pip install pytest
-python -m pytest tests/foundation tests/shared -q
-```
-
-`rfc3339-validator` is a declared runtime dependency because the Foundation
-schema validator enables JSON Schema `format: date-time` checking through
-`jsonschema.FormatChecker`. It is not only a test dependency.
-
-Foundation-specific repository areas are:
-
-```text
-contracts/foundation/          Foundation schemas and integration contracts
-src/knowledgenexus/foundation/ Foundation domain, application, ports, adapters
-src/knowledgenexus/shared/     Shared technical contract utilities
-tests/foundation/              Foundation unit and integration tests
-tests/shared/                  Shared contract utility tests
-data/exports/                  Published Foundation snapshots (runtime, ignored)
-```
-
-Foundation publishes snapshots under
-`data/exports/<dataset_name>/<dataset_version>/`. Later indexing code must
-consume only these published exports, never Foundation raw or working
-directories. The current Confluence work covers inventory metadata only; page
-bodies, rendered HTML, comments, attachments, and permissions remain outside
-the current milestone.
 
 ## MCP Server (Cline Integration)
 
-KnowledgeNexus includes an MCP server (`mcp/`) that bridges Cline with the RAG platform, allowing AI assistants to search knowledge and export results.
+KnowledgeNexus includes an MCP server (`mcp/`) that bridges Cline with the RAG platform.
 
 ### Quick Setup
 
 ```bash
-# 1. Build the MCP server
 cd mcp
 npm install
 npm run build
-
-# 2. Add to Cline MCP settings (see docs/MCP_SETUP.md for details)
 ```
 
 See **[docs/MCP_SETUP.md](docs/MCP_SETUP.md)** for full setup instructions.
+
+## Packaging & Deployment (Windows)
+
+### What gets packaged?
+
+| Directory | Included? |
+|-----------|-----------|
+| `src/` | ✅ Yes |
+| `mcp/` | ✅ Yes |
+| `start.bat` | ✅ Yes |
+| `eval/`, `tests/`, `docs/` | ❌ No |
+
+### Workflow
+
+```powershell
+# 1. Build the code package
+.\scripts\package-code.ps1
+
+# 2. Transfer packages/ to target machine
+
+# 3. Start the system
+.\start.bat start
+
+# 4. Stop the system
+.\start.bat stop
+
+# 5. For code updates only
+.\scripts\update-code.ps1
+```
+
+### Client Deployment Guide
+
+**1. Configure environment (.env file):**
+
+```bash
+# Database - use absolute path outside repo
+DATABASE_URL=sqlite:///D:/kn-data/knowledgenexus.db
+
+# Embedding model - must point to local model folder (provided with package)
+EMBEDDING_MODEL_PATH=D:/KnowledgeNexus_Models/bge-m3
+
+# Reranker model (optional)
+RERANKER_MODEL_PATH=D:/KnowledgeNexus_Models/bge-reranker-v2-m3
+
+# Confluence snapshots - must be absolute path outside repo
+CONFLUENCE_SNAPSHOT_ROOT=D:/kn-data/confluence-snapshots
+```
+
+**2. Create required directories:**
+
+```powershell
+mkdir D:\kn-data
+mkdir D:\kn-data\confluence-snapshots
+```
+
+**3. Copy model folders (provided separately):**
+
+```
+D:/KnowledgeNexus_Models/
+├── bge-m3/           # Embedding model
+└── bge-reranker-v2-m3/  # Reranker model (optional)
+```
+
+> **Note:** Auto-download from HuggingFace is not supported. Model folders must be provided.
+
+See **[docs/MCP_SETUP.md](docs/MCP_SETUP.md)** and **[docs/MCP_ARCHITECTURE.md](docs/MCP_ARCHITECTURE.md)** for details.
+
+## Documentation
+
+- **Two-layer Eval**: [docs/EVAL_TWO_LAYER.md](docs/EVAL_TWO_LAYER.md)
+- **Search Quality Roadmap**: [docs/SEARCH_QUALITY_ROADMAP.md](docs/SEARCH_QUALITY_ROADMAP.md)
+- **MCP Architecture**: [docs/MCP_ARCHITECTURE.md](docs/MCP_ARCHITECTURE.md)
+- **Integration Guide**: [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)
 
 ## License
 

@@ -26,7 +26,7 @@ embedding = [
 [project.scripts]
 knowledgenexus = "knowledgenexus.main:main"
 kn = "knowledgenexus.presentation.cli.agent.__main__:main"
-kn-eval = "knowledgenexus.eval.runner:main"
+kn-eval = "eval.runner:main"
 kn-foundation = "knowledgenexus.foundation.cli.main:main"
 kn-indexer = "knowledgenexus.indexing.cli.main:main"
 
@@ -36,6 +36,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/knowledgenexus"]
+# Note: eval/ is NOT included in the package - it's for development/testing only
 
 [tool.uv]
 dev-dependencies = [
