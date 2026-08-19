@@ -647,7 +647,7 @@ def test_powershell_entrypoint_exposes_two_required_operator_parameters() -> Non
     assert "[string]$Url" in text
     assert "[string]$OutputRoot" in text
     assert "CONFLUENCE_PAT" in text
-    assert "KN_TOKENIZER_ASSETS_DIR" in text
+    assert "EMBEDDING_MODEL_PATH" in text
     assert 'Join-Path $repositoryRoot "src"' in text
     assert "$env:PYTHONPATH" in text
     assert '"--url", $Url' in text

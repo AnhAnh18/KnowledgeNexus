@@ -1008,11 +1008,17 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Validate EMBEDDING_MODEL_PATH before proceeding
+    tokenizer_assets_dir = os.environ.get("EMBEDDING_MODEL_PATH")
+    if not tokenizer_assets_dir:
+        sys.stderr.write('{"category":"tokenizer","error":"EMBEDDING_MODEL_PATH environment variable is not set","status":"failed"}\n')
+        return 1
+    
     try:
         args = _parser().parse_args(argv)
         result = run(
             url=args.url, output_root=args.output_root,
-            tokenizer_assets_dir=os.environ.get("KN_TOKENIZER_ASSETS_DIR"),
+            tokenizer_assets_dir=tokenizer_assets_dir,
             max_pages=args.max_pages,
             allow_partial_processing=args.allow_partial_processing,
         )

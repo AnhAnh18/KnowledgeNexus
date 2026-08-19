@@ -99,6 +99,17 @@ if (Test-Path $configDir) {
     Write-Warning "Config directory not found at $configDir; skipping."
 }
 
+# Copy contracts/foundation/schemas directory (Foundation JSON schemas for validation)
+$schemasDir = Join-Path $repoRoot "contracts\foundation\schemas"
+if (Test-Path $schemasDir) {
+    $schemasStaging = Join-Path $staging "contracts\foundation\schemas"
+    New-Item -ItemType Directory -Path $schemasStaging -Force | Out-Null
+    Copy-Item -Path "$schemasDir\*" -Destination $schemasStaging -Recurse -Force
+    Write-Host "Contracts schemas directory copied to staging."
+} else {
+    Write-Warning "Contracts schemas directory not found at $schemasDir; skipping."
+}
+
 # Copy update-code.ps1 script (for client updates)
 $updateScript = Join-Path $repoRoot "scripts\update-code.ps1"
 if (Test-Path $updateScript) {

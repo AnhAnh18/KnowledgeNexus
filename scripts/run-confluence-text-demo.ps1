@@ -16,10 +16,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($env:CONFLUENCE_PAT)) {
-    throw "CONFLUENCE_PAT must be set in the current process environment."
+    throw "CONFLUENCE_PAT must be set in the current environment."
 }
-if ([string]::IsNullOrWhiteSpace($env:KN_TOKENIZER_ASSETS_DIR)) {
-    throw "KN_TOKENIZER_ASSETS_DIR must identify the pinned BGE-M3 tokenizer directory."
+if ([string]::IsNullOrWhiteSpace($env:EMBEDDING_MODEL_PATH)) {
+    throw "EMBEDDING_MODEL_PATH must identify the pinned BGE-M3 tokenizer directory."
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot

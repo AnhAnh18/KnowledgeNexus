@@ -59,6 +59,13 @@ if (Test-Path $configDir) {
     Remove-Item -Recurse -Force $configDir
 }
 
+# Remove old contracts/foundation/schemas directory
+$schemasDir = Join-Path $installDir "contracts\foundation\schemas"
+if (Test-Path $schemasDir) {
+    Write-Host "Removing old contracts/foundation/schemas/..."
+    Remove-Item -Recurse -Force $schemasDir
+}
+
 # Remove old configuration files
 $configFiles = @("pyproject.toml", "requirements.txt", "README.md", ".env.example", "start.bat")
 foreach ($cfg in $configFiles) {
