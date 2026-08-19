@@ -34,6 +34,9 @@ _DOCUMENTS_FILE = "documents.jsonl"
 _MEDIA_FILE = "media_assets.jsonl"
 _SUMMARY_FILE = "packet_summary.json"
 _PACKET_FILES = frozenset({_CHUNKS_FILE, _DOCUMENTS_FILE, _MEDIA_FILE, _SUMMARY_FILE})
+# Optional sidecar subdirectories the foundation exporter may add beside the
+# core files (e.g. drawio->mermaid ".mmd" sources). Tolerated, not required.
+_ALLOWED_PACKET_SUBDIRS = frozenset({"diagrams"})
 _PACKET_FORMAT = "confluence-subtree-indexing-packet-v1"
 
 # Foundation chunk_id/document_id values (e.g. "chunk:confluence:<hash>",
@@ -218,7 +221,11 @@ class IngestChunkingPacket:
         except Exception as exc:
             raise PacketFormatError("Packet path is unsafe") from exc
         names = {path.name for path in packet_path.iterdir()}
-        if names != _PACKET_FILES:
+        # The 4 core files must all be present, but the drawio->mermaid step now
+        # also writes an optional diagrams/ subdirectory of .mmd sidecars. An
+        # exact `!=` check rejected the whole packet the moment that dir
+        # appeared; require the core set and allow only the known sidecar.
+        if not _PACKET_FILES <= names or (names - _PACKET_FILES) - _ALLOWED_PACKET_SUBDIRS:
             raise PacketFormatError("Packet file set is invalid")
         for name in _PACKET_FILES:
             path = packet_path / name

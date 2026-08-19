@@ -153,6 +153,33 @@ class TestIngestChunkingPacketValidation:
         with pytest.raises(PacketFormatError, match="file set"):
             await use_case.execute(temp_packet_dir)
 
+    async def test_packet_with_allowed_and_disallowed_subdirs(self, temp_packet_dir, mock_embedder, mock_storage_service):
+        use_case = IngestChunkingPacket(mock_embedder, mock_storage_service)
+
+        # Write core files
+        for name in ["chunks.jsonl", "documents.jsonl", "media_assets.jsonl"]:
+            (temp_packet_dir / name).write_text("", encoding="utf-8")
+        
+        # Write valid packet summary
+        summary = {"format_version": "confluence-subtree-indexing-packet-v1"}
+        (temp_packet_dir / "packet_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+        # Now, _validate_packet_structure should pass if there are no subdirectories
+        assert use_case._validate_packet_structure(temp_packet_dir) == summary
+
+        # Create an allowed diagrams directory
+        diagrams_dir = temp_packet_dir / "diagrams"
+        diagrams_dir.mkdir()
+        # Should still pass
+        assert use_case._validate_packet_structure(temp_packet_dir) == summary
+
+        # Create a disallowed directory
+        bad_dir = temp_packet_dir / "unsupported_dir"
+        bad_dir.mkdir()
+        # Should raise PacketFormatError
+        with pytest.raises(PacketFormatError, match="Packet file set is invalid"):
+            use_case._validate_packet_structure(temp_packet_dir)
+
 
 class TestIngestChunkingPacketTransformation:
     """Test chunk transformation."""

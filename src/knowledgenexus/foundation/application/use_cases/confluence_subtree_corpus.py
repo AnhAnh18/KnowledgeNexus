@@ -126,7 +126,15 @@ def is_drawio_attachment_name(filename: object) -> bool:
 
 
 def match_drawio_attachment(reference: DrawioReference, attachments: Iterable[AttachmentMetadata]) -> AttachmentMetadata | None:
-    """Return one exact parent/name/version match; ambiguity fails closed."""
+    """Return one parent/name/version match; ambiguity fails closed.
+
+    Names are compared with surrounding whitespace stripped: Confluence stores a
+    draw.io source attachment with a leading space (a page's macro references
+    ``Relation`` while the stored source is ``" Relation"``), so an exact ``==``
+    matched zero candidates and failed the whole capture. Stripping both sides
+    fixes the space discrepancy; a genuine collision still trips the ambiguity
+    guard below and fails closed.
+    """
     if type(reference) is not DrawioReference:
         raise TypeError("reference is invalid")
     if type(attachments) not in (tuple, list):
@@ -134,7 +142,8 @@ def match_drawio_attachment(reference: DrawioReference, attachments: Iterable[At
     for item in attachments:
         if type(item) is not AttachmentMetadata:
             raise TypeError("attachment metadata is invalid")
-    candidates = tuple(a for a in attachments if type(a) is AttachmentMetadata and a.parent_page_id == reference.parent_page_id and a.filename == reference.filename and is_drawio_attachment_name(a.filename))
+    wanted = reference.filename.strip()
+    candidates = tuple(a for a in attachments if type(a) is AttachmentMetadata and a.parent_page_id == reference.parent_page_id and a.filename.strip() == wanted and is_drawio_attachment_name(a.filename))
     if len(candidates) > 1:
         raise ValueError("ambiguous drawio attachment")
     return candidates[0] if candidates else None
@@ -355,11 +364,16 @@ def capture_drawio_with_production_components(
         observation = None
         try:
             metadata = tuple(list_attachments(ref.parent_page_id))
+            # Compare names with surrounding whitespace stripped: Confluence
+            # stores a draw.io source with a leading space (macro references
+            # "Relation" while the stored source is " Relation"), so an exact
+            # "==" matched zero candidates and failed the whole capture.
+            wanted_filename = ref.filename.strip()
             candidates = tuple(
                 item for item in metadata
                 if type(item) is ConfluenceAttachmentObservation
                 and item.parent_page_id == ref.parent_page_id
-                and item.filename == ref.filename
+                and item.filename.strip() == wanted_filename
                 and is_drawio_attachment_name(item.filename)
             )
             if len(candidates) != 1:
@@ -401,7 +415,10 @@ def capture_drawio_with_production_components(
             if (
                 not asset
                 or asset.get("parent_document_id") != expected_parent_id
-                or asset.get("filename") != ref.filename
+                # The asset carries the real attachment filename (e.g. the
+                # leading-space " Relation"); compare stripped, consistent with
+                # how the reference was matched above.
+                or (asset.get("filename") or "").strip() != wanted_filename
                 or type(asset.get("media_id")) is not str
             ):
                 raise ValueError("media processor returned no asset")
@@ -530,7 +547,10 @@ def validate_drawio_capture_state(
         asset = assets_by_id[resolution["media_id"]]
         if (
             asset.get("parent_document_id") != DocumentIdGenerator.confluence_page_id(parent_page_id)
-            or asset.get("filename") != filename
+            # The asset keeps the real attachment filename (e.g. the
+            # leading-space " Relation") while the reference key uses the
+            # trimmed macro name; compare stripped, as elsewhere in this module.
+            or (asset.get("filename") or "").strip() != filename.strip()
         ):
             raise ValueError("drawio media asset binding is invalid")
     if (

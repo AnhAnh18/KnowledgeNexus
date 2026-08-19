@@ -34,6 +34,21 @@ def test_drawio_ambiguity_fails_closed():
         match_drawio_attachment(ref, rows)
 
 
+def test_drawio_name_comparison_strips_whitespace():
+    # Confluence can store files with leading/trailing spaces (e.g., " Relation" or "Relation ")
+    ref = DrawioReference("p1", "Relation", "1")
+    
+    # 1. Leading space in attachment filename
+    assert match_drawio_attachment(ref, [AttachmentMetadata("a", "p1", " Relation", "1")]).attachment_id == "a"
+    
+    # 2. Trailing space in attachment filename
+    assert match_drawio_attachment(ref, [AttachmentMetadata("b", "p1", "Relation ", "1")]).attachment_id == "b"
+
+    # 3. Leading/trailing space in reference filename
+    ref_with_space = DrawioReference("p1", " Relation ", "1")
+    assert match_drawio_attachment(ref_with_space, [AttachmentMetadata("c", "p1", "Relation", "1")]).attachment_id == "c"
+
+
 def test_capture_pages_publishes_each_page_and_resumes(tmp_path: Path):
     calls = []
     def fetch(page_id: str) -> bytes:
