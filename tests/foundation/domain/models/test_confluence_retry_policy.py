@@ -17,10 +17,13 @@ from knowledgenexus.foundation.domain.models.confluence_retry_policy import (
     confluence_request_budget_allow,
     confluence_request_budget_terminate,
 )
+from knowledgenexus.shared.config.settings import get_settings
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-PROFILE_PATH = REPOSITORY_ROOT / "contracts" / "foundation" / "crawl_reliability_profile.yaml"
+# Get paths from Settings (single source of truth)
+_settings = get_settings()
+REPOSITORY_ROOT = _settings.project_root
+PROFILE_PATH = _settings.confluence_reliability_profile_path
 
 
 def _load_raw_profile_mapping() -> dict:

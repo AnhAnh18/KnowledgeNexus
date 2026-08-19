@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     confluence_base_url: str | None = None
     confluence_pat: str | None = None
     confluence_raw_root: str = "./data/confluence-raw"
-    confluence_chunking_profile_path: str = "./contracts/foundation/embedding_profile.yaml"
     # External durable workspaces for URL-rooted Foundation packets.  This is
     # server policy, never an API parameter supplied by a browser.  No usable
     # default: the workspace guard rejects any path inside the repository, so
@@ -75,6 +74,16 @@ class Settings(BaseSettings):
         if self.retrieval_mode == RetrievalMode.HYBRID:
             return self.project_root / "config" / "qdrant.collection.hybrid.yaml"
         return self.project_root / "config" / "qdrant.collection.yaml"
+
+    @property
+    def confluence_chunking_profile_path(self) -> Path:
+        """Path for Confluence chunking profile."""
+        return self.project_root / "config" / "foundation" / "embedding_profile.yaml"
+
+    @property
+    def confluence_reliability_profile_path(self) -> Path:
+        """Path for Confluence reliability profile."""
+        return self.project_root / "config" / "foundation" / "crawl_reliability_profile.yaml"
 
 
 def get_settings() -> Settings:

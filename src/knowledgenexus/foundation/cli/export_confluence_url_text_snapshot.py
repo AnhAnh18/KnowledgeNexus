@@ -38,8 +38,13 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
 
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-_DEFAULT_CHUNKING_PROFILE = _REPOSITORY_ROOT / "contracts" / "foundation" / "embedding_profile.yaml"
-_DEFAULT_RELIABILITY_PROFILE = _REPOSITORY_ROOT / "contracts" / "foundation" / "crawl_reliability_profile.yaml"
+
+# Centralized profile paths - defined once from Settings
+from knowledgenexus.shared.config.settings import get_settings as _get_settings
+_settings = _get_settings()
+_DEFAULT_CHUNKING_PROFILE = _settings.confluence_chunking_profile_path
+_DEFAULT_RELIABILITY_PROFILE = _settings.confluence_reliability_profile_path
+
 _CONTEXT_FILE = "text-snapshot-context.json"
 _CONTEXT_FORMAT = "confluence-url-text-snapshot-context-v1"
 _PACKET_FILES = frozenset(
