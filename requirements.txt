@@ -6,3 +6,4 @@ portalocker==3.2.0
 tree-sitter==0.25.2
 tree-sitter-cpp==0.23.4
 tree-sitter-java==0.23.5
+FlagEmbedding>=1.2.0

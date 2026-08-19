@@ -89,6 +89,16 @@ if (Test-Path $portalDir) {
     Write-Warning "Portal directory not found at $portalDir; skipping."
 }
 
+# Copy config directory (configuration files)
+$configDir = Join-Path $repoRoot "config"
+if (Test-Path $configDir) {
+    $configStaging = Join-Path $staging "config"
+    Copy-Item -Path $configDir -Destination $configStaging -Recurse -Force
+    Write-Host "Config directory copied to staging."
+} else {
+    Write-Warning "Config directory not found at $configDir; skipping."
+}
+
 # Copy update-code.ps1 script (for client updates)
 $updateScript = Join-Path $repoRoot "scripts\update-code.ps1"
 if (Test-Path $updateScript) {
