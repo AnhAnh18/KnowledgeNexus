@@ -29,7 +29,7 @@ def _profile() -> ChunkingProfile:
     revision = "5617a9f61b028005a4858fdac845db406aefb181"
     repository = "https://huggingface.co/BAAI/bge-m3"
     return ChunkingProfile(
-        chunker_version="1.2.0", profile_status="provisional_until_benchmark", active_profile="medium",
+        chunker_version="1.3.0", profile_status="provisional_until_benchmark", active_profile="medium",
         model_name="BAAI/bge-m3", tokenizer_name="BAAI/bge-m3", tokenizer_family="SentencePiece / XLM-R",
         vector_dimension=1024, maximum_model_tokens=8192, target_tokens=450, minimum_tokens=96,
         hard_maximum_tokens=1000, overlap_tokens=64, code_window_target_tokens=450,

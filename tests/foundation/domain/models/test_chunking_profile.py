@@ -11,7 +11,7 @@ def _profile() -> ChunkingProfile:
     revision = "5617a9f61b028005a4858fdac845db406aefb181"
     repository = "https://huggingface.co/BAAI/bge-m3"
     return ChunkingProfile(
-        chunker_version="1.2.0",
+        chunker_version="1.3.0",
         profile_status="provisional_until_benchmark",
         active_profile="medium",
         model_name="BAAI/bge-m3",

@@ -67,3 +67,11 @@ class SqliteIngestJobRepository(IngestJobRepositoryPort):
             )
             model = result.scalar_one_or_none()
             return ingest_job_from_model(model) if model else None
+
+    async def get_recent_jobs(self, limit: int = 20) -> list[IngestJob]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(IngestJobModel).order_by(IngestJobModel.started_at.desc()).limit(limit)
+            )
+            models = result.scalars().all()
+            return [ingest_job_from_model(m) for m in models]

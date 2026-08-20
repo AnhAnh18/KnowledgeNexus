@@ -119,7 +119,7 @@ def _chunk(
     acl_tags: list[str] | None = None,
     jira_keys: list[str] | None = None,
     relation_ids: list[str] | None = None,
-    chunker_version: str = "1.2.0",
+    chunker_version: str = "1.3.0",
 ) -> dict[str, object]:
     return ChunkRecordBuilder.build(
         chunk_id=f"chunk:confluence:{index:016x}",
@@ -203,7 +203,7 @@ def _result(
 
 def _chunking_profile() -> ChunkingProfile:
     return ChunkingProfile(
-        chunker_version="1.2.0",
+        chunker_version="1.3.0",
         profile_status="provisional_until_benchmark",
         active_profile="medium",
         model_name="BAAI/bge-m3",
@@ -296,7 +296,7 @@ def test_success_projects_exact_streams_and_scopes() -> None:
             "page_ids": ["1000"],
         }
     }
-    assert projection.chunker_version == "1.2.0"
+    assert projection.chunker_version == "1.3.0"
     assert projection.active_profile == "medium"
     assert projection.profile_status == "provisional_until_benchmark"
     assert len(projection.config_hash) == 64

@@ -15,7 +15,7 @@ def test_chunking_spec_and_profile_lock_the_same_active_identity_and_budget() ->
     specification = (CONTRACT_ROOT / "CHUNKING_SPEC.md").read_text(encoding="utf-8")
 
     expected_fragments = (
-        "| chunker_version | 1.2.0 |",
+        "| chunker_version | 1.3.0 |",
         "`BAAI/bge-m3`",
         "| `target_tokens` | 450 |",
         "| `minimum_tokens` | 96 |",
@@ -27,7 +27,7 @@ def test_chunking_spec_and_profile_lock_the_same_active_identity_and_budget() ->
         "provisional_until_benchmark",
     )
     assert all(fragment in specification for fragment in expected_fragments)
-    assert profile.chunker_version == "1.2.0"
+    assert profile.chunker_version == "1.3.0"
     assert profile.model_name == profile.tokenizer_name == "BAAI/bge-m3"
     assert "| chunker_version | 1.1.0 |" not in specification
     assert "last normative locked profile (all-MiniLM" not in specification

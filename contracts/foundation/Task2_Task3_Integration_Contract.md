@@ -115,7 +115,7 @@ KnowledgeNexus's `ConfluenceParser` and `RecursiveChunker` (plan M2) and the dir
 ### C10 — bge-m3 alignment, chunking follows v7.4
 Part 2/3 use **bge-m3, 1024-dim** (matches Part 1). But for Part 1 sources:
 
-- Chunks arrive **pre-chunked**; KnowledgeNexus does not set its own chunk budget for them (no `1500 chars / 150 overlap` applied to Part 1 chunks). `chunker_version` (`1.2.0`) and the profile come from Part 1 (v7.4 D17) and are read from the manifest/records, not chosen by KnowledgeNexus.
+- Chunks arrive **pre-chunked**; KnowledgeNexus does not set its own chunk budget for them (no `1500 chars / 150 overlap` applied to Part 1 chunks). `chunker_version` (`1.3.0`) and the profile come from Part 1 and are read from the manifest/records, not chosen by KnowledgeNexus.
 - The Qdrant collection MUST be a fresh **1024-dim** collection. Never reuse a 384-dim (MiniLM-era) collection. The collection name should encode model+dim to prevent accidental reuse (see Open Questions).
 - Token counting for any KnowledgeNexus-owned (non-Part-1) chunking uses the bge-m3 tokenizer, consistent with v7.4.
 
@@ -192,7 +192,7 @@ Resolution: if `AKP_USE_LATEST=true`, read `${AKP_EXPORT_ROOT}/${AKP_DATASET_NAM
 - **Qdrant collection name for bge-m3** — encode model+dim to prevent 384-dim reuse, e.g. `spen_knowledge_poc__bge_m3__1024`. Confirm the convention.
 - **SQLite → PostgreSQL timing** — KnowledgeNexus plans SQLite → PostgreSQL later; fine, provided the relations/acl/symbols/media tables and C6 enforcement exist in both.
 - **Query-time ACL resolver owner** — the identity→principals resolver (incl. `repo:spen-sdk` → GitHub Enterprise team membership) is required for multi-user C6 and is currently unowned (mirrors v7.4 open question). Not blocking for a single-user PAT POC, but blocking before multi-user.
-- **Retrieval benchmark ownership** — Part 1 supplies the corpus and real anchors for the 37-item template; who runs Round 1 (dense sweep) / Round 2 (hybrid) and stamps the winning bge-m3 profile back into CHUNKING_SPEC §1 + `chunker_version 1.2.0`?
+- **Retrieval benchmark ownership** — Part 1 supplies the corpus and real anchors for the 37-item template; who runs Round 1 (dense sweep) / Round 2 (hybrid) and stamps the winning bge-m3 profile back into CHUNKING_SPEC §1 + the active `chunker_version`?
 - **API citation shape** — define the fields a Part 3 chat citation returns: at least `title`, `url`/`page_id` or `repo:file_path`, `chunk_id`, and `source_version`, so answers are traceable to a specific snapshot version.
 - **dataset handshake** — confirm the importer resolves the snapshot via `LATEST.txt` and records the consumed `dataset_version` in the ingest job (Section 1).
 - **Export transport** — in local single-repo development, `AKP_EXPORT_ROOT` resolves to `./data/exports`. For remote/dev-server deployment, decide whether snapshots are exchanged by shared mount, artifact download, or object storage. No second copy of `contracts/foundation` is introduced.

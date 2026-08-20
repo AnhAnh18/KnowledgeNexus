@@ -223,7 +223,7 @@ class BuildGitCodeDocuments:
             raise GitCodeBuildError(GitCodeBuildFailureCategory.INVALID_REQUEST)
         profile = request.chunking_profile
         if (
-            profile.chunker_version != "1.2.0"
+            profile.chunker_version != "1.3.0"
             or profile.active_profile != "medium"
             or profile.model_name != "BAAI/bge-m3"
             or profile.tokenizer_name != "BAAI/bge-m3"

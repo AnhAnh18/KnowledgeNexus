@@ -53,7 +53,7 @@ def _outcome() -> cli._RunOutcome:
         result=result,
         deterministic_repeat=True,
         active_profile="medium",
-        chunker_version="1.2.0",
+        chunker_version="1.3.0",
     )
 
 
@@ -70,7 +70,7 @@ def test_success_prints_aggregate_only_sorted_json(
     assert json.loads(captured.out) == {
         "status": "success",
         "profile": "medium",
-        "chunker_version": "1.2.0",
+        "chunker_version": "1.3.0",
         "chunk_count": 1,
         "schema_valid": True,
         "maximum_token_count": 27,
@@ -127,7 +127,7 @@ def test_chunking_failure_prints_only_category(
             ),
             deterministic_repeat=False,
             active_profile="medium",
-            chunker_version="1.2.0",
+            chunker_version="1.3.0",
         ),
         cli._RunOutcome(
             result=ChunkingResult(
@@ -136,7 +136,7 @@ def test_chunking_failure_prints_only_category(
             ),
             deterministic_repeat=True,
             active_profile="medium",
-            chunker_version="1.2.0",
+            chunker_version="1.3.0",
         ),
         cli._RunOutcome(
             result=ChunkingResult(
@@ -145,7 +145,7 @@ def test_chunking_failure_prints_only_category(
             ),
             deterministic_repeat=True,
             active_profile="medium",
-            chunker_version="1.2.0",
+            chunker_version="1.3.0",
         ),
     ],
 )
@@ -281,7 +281,7 @@ def test_real_pinned_bundle_composes_full_offline_pipeline_without_writes(
     summary = json.loads(capsys.readouterr().out)
     assert summary["status"] == "success"
     assert summary["profile"] == "medium"
-    assert summary["chunker_version"] == "1.2.0"
+    assert summary["chunker_version"] == "1.3.0"
     assert summary["chunk_count"] == 2
     assert summary["schema_valid"] is True
     assert summary["chunks_over_hard_max"] == 0

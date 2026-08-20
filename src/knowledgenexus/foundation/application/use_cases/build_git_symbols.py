@@ -26,7 +26,7 @@ from knowledgenexus.foundation.ports.tokenizer_port import TokenizerPort
 from knowledgenexus.shared.contracts.foundation.schema_validator import FoundationSchemaValidator
 
 
-_ACTIVE_CHUNKER_VERSION = "1.2.0"
+_ACTIVE_CHUNKER_VERSION = "1.3.0"
 _AUTHORITY_EXTENSIONS = frozenset({".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".java"})
 _LANGUAGE_BY_EXTENSION = {
     ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".h": "cpp", ".hh": "cpp",

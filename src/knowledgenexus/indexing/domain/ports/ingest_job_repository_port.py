@@ -24,3 +24,8 @@ class IngestJobRepositoryPort(ABC):
     @abstractmethod
     async def get_by_active_key(self, active_key: str) -> IngestJob | None:
         ...
+
+    @abstractmethod
+    async def get_recent_jobs(self, limit: int = 20) -> list[IngestJob]:
+        """Fetch the most recent ingest jobs from the database."""
+        ...

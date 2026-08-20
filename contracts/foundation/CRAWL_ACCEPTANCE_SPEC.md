@@ -135,7 +135,7 @@ expand_shape_profile_version: m7-confluence-inventory-expand-v1
 mapper_contract_version: m5b-confluence-inventory-mapper-v1
 raw_layout_contract_version: m7-raw-generation-layout-v1
 foundation_schema_version: "1.0"
-chunking_contract_version: 1.2.0
+chunking_contract_version: 1.3.0
 jira_relation_contract_version: m6e-jira-relations-v1
 acl_contract_version: m6f-acl-materialization-v1
 ```

@@ -957,7 +957,7 @@ def _fake_process_result(items):
             "token_count": 4,
             "acl_tags": ["restricted:unresolved"],
             "content_hash": hashlib.sha256(f"chunk-body-{item.page_id}".encode()).hexdigest(),
-            "chunker_version": "1.2.0",
+            "chunker_version": "1.3.0",
         })
     documents = tuple(documents)
     chunks = tuple(chunks)

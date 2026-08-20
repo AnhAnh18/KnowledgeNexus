@@ -80,6 +80,7 @@ class _Candidate:
     body: str
     unit_key: str
     code_block: WikiCodeBlock | None = None
+    code_ordinal: int | None = None
     table_block: WikiTableBlock | None = None
     table_ordinal: int | None = None
 
@@ -109,7 +110,9 @@ class _MetricState:
     prose_split_units: int = 0
     table_split_units: int = 0
     table_row_continuation_units: int = 0
+    table_header_continuation_units: int = 0
     code_split_units: int = 0
+    code_line_continuation_units: int = 0
     overlap_windows: int = 0
     tokenizer_boundary_fallbacks: int = 0
 
@@ -507,6 +510,7 @@ class BuildConfluenceChunks:
                         body=block.raw_text,
                         unit_key=f"{breadcrumb}#code{code_ordinal}",
                         code_block=block,
+                        code_ordinal=code_ordinal,
                     )
                 )
                 code_ordinal += 1
@@ -551,7 +555,7 @@ class BuildConfluenceChunks:
             bodies = self._split_prose(candidate, state)
         elif candidate.kind == "code_block":
             state.code_split_units += 1
-            bodies = self._split_code(candidate)
+            bodies = self._split_code(candidate, state)
         elif candidate.kind == "table":
             state.table_split_units += 1
             bodies = self._split_table(candidate, state)
@@ -834,9 +838,10 @@ class BuildConfluenceChunks:
             )
         return [paragraph, sentence, line, sorted(token_starts)]
 
-    def _split_code(self, candidate: _Candidate) -> list[str]:
+    def _split_code(self, candidate: _Candidate, state: _MetricState) -> list[str]:
         block = candidate.code_block
-        if block is None:
+        block_ordinal = candidate.code_ordinal
+        if block is None or block_ordinal is None:
             _fail(ConfluenceChunkingFailureCategory.CHUNKING_FAILED)
         lines = list(block.body_lines)
         if not lines:
@@ -846,6 +851,47 @@ class BuildConfluenceChunks:
         cursor = 0
         previous_window: list[str] = []
         while cursor < len(lines):
+            line = lines[cursor]
+            if self._count_exact(
+                candidate.breadcrumb,
+                self._code_body(block, [line]),
+            ) > self._profile.hard_maximum_tokens:
+                fence = _continuation_fence(line)
+
+                def body_for(fragment: str, index: int, total: int) -> str:
+                    marker = (
+                        f"[code-continuation v1 block={block_ordinal} line={cursor} "
+                        f"part={index + 1}/{total}]"
+                    )
+                    raw_lines = block.raw_text.split("\n")
+                    if len(raw_lines) < 2:
+                        _fail(ConfluenceChunkingFailureCategory.CHUNKING_FAILED)
+                    return "\n".join(
+                        [
+                            raw_lines[0],
+                            marker,
+                            fence,
+                            fragment + _CONTINUATION_TERMINATOR,
+                            fence,
+                            raw_lines[-1],
+                        ]
+                    )
+
+                windows.extend(
+                    self._fragment_exact(
+                        text=line,
+                        body_for=body_for,
+                        fail_category=(
+                            ConfluenceChunkingFailureCategory.UNSPLITTABLE_CODE_LINE
+                        ),
+                        breadcrumb=candidate.breadcrumb,
+                    )
+                )
+                state.code_line_continuation_units += 1
+                previous_window = []
+                cursor += 1
+                continue
+
             maximum_overlap = min(
                 self._profile.code_window_overlap_lines,
                 len(previous_window),
@@ -926,7 +972,12 @@ class BuildConfluenceChunks:
         if self._count_exact(candidate.breadcrumb, header_body) > (
             self._profile.hard_maximum_tokens
         ):
-            _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_HEADER)
+            state.table_header_continuation_units += 1
+            return self._split_table_all_continuations(
+                candidate=candidate,
+                block=block,
+                state=state,
+            )
         if not block.row_lines:
             _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_HEADER)
 
@@ -944,6 +995,7 @@ class BuildConfluenceChunks:
                         block=block,
                         row_ordinal=cursor,
                         row_line=block.row_lines[cursor],
+                        include_header=True,
                     )
                 )
                 cursor += 1
@@ -966,6 +1018,52 @@ class BuildConfluenceChunks:
             cursor = best_end
         return windows
 
+    def _split_table_all_continuations(
+        self,
+        *,
+        candidate: _Candidate,
+        block: WikiTableBlock,
+        state: _MetricState,
+    ) -> list[str]:
+        """Emit an over-budget header shell and every row as opaque continuations."""
+        table_ordinal = candidate.table_ordinal
+        if table_ordinal is None:
+            _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_HEADER)
+        header_shell = "\n".join([block.header_line, block.separator_line])
+        if not header_shell:
+            _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_HEADER)
+        fence = _continuation_fence(header_shell)
+
+        def body_for(fragment: str, index: int, total: int) -> str:
+            marker = (
+                f"[table-header-continuation v1 table={table_ordinal} column=0 "
+                f"part={index + 1}/{total}]"
+            )
+            return "\n".join(
+                [marker, fence, fragment + _CONTINUATION_TERMINATOR, fence]
+            )
+
+        emitted = self._fragment_exact(
+            text=header_shell,
+            body_for=body_for,
+            fail_category=(
+                ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_HEADER
+            ),
+            breadcrumb=candidate.breadcrumb,
+        )
+        for row_ordinal, row_line in enumerate(block.row_lines):
+            state.table_row_continuation_units += 1
+            emitted.extend(
+                self._split_oversized_table_row(
+                    candidate=candidate,
+                    block=block,
+                    row_ordinal=row_ordinal,
+                    row_line=row_line,
+                    include_header=False,
+                )
+            )
+        return emitted
+
     def _split_oversized_table_row(
         self,
         *,
@@ -973,6 +1071,7 @@ class BuildConfluenceChunks:
         block: WikiTableBlock,
         row_ordinal: int,
         row_line: str,
+        include_header: bool,
     ) -> list[str]:
         """Emit deterministic opaque continuations for each cell in an oversized row.
 
@@ -993,7 +1092,13 @@ class BuildConfluenceChunks:
 
         def flush() -> None:
             if packed:
-                emitted.append(self._continuation_body(block, packed))
+                emitted.append(
+                    self._continuation_body(
+                        block,
+                        packed,
+                        include_header=include_header,
+                    )
+                )
                 packed.clear()
 
         for column_ordinal, cell in enumerate(cells):
@@ -1006,7 +1111,12 @@ class BuildConfluenceChunks:
                 index=0,
                 total=1,
             )
-            if not self._continuation_fits(candidate, block, [whole]):
+            if not self._continuation_fits(
+                candidate,
+                block,
+                [whole],
+                include_header=include_header,
+            ):
                 flush()
                 emitted.extend(
                     self._split_oversized_cell(
@@ -1016,10 +1126,16 @@ class BuildConfluenceChunks:
                         row_ordinal=row_ordinal,
                         column_ordinal=column_ordinal,
                         cell=cell,
+                        include_header=include_header,
                     )
                 )
                 continue
-            if packed and not self._continuation_fits(candidate, block, [*packed, whole]):
+            if packed and not self._continuation_fits(
+                candidate,
+                block,
+                [*packed, whole],
+                include_header=include_header,
+            ):
                 flush()
             packed.append(whole)
         flush()
@@ -1034,6 +1150,7 @@ class BuildConfluenceChunks:
         row_ordinal: int,
         column_ordinal: int,
         cell: str,
+        include_header: bool,
     ) -> list[str]:
         """Fragment one over-budget cell into parts that each fit on their own."""
         fence = _continuation_fence(cell)
@@ -1052,46 +1169,57 @@ class BuildConfluenceChunks:
                         total=total,
                     )
                 ],
+                include_header=include_header,
             )
+        return self._fragment_exact(
+            text=cell,
+            body_for=body_for,
+            fail_category=ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW,
+            breadcrumb=candidate.breadcrumb,
+        )
+
+    def _fragment_exact(
+        self,
+        *,
+        text: str,
+        body_for: Callable[[str, int, int], str],
+        fail_category: ConfluenceChunkingFailureCategory,
+        breadcrumb: str,
+    ) -> list[str]:
+        """Split exact text into the fewest hard-max-safe continuation bodies."""
 
         def fits(fragment: str, total: int) -> bool:
             # Size against the widest part number this total can produce, so the
             # last parts cannot overflow the budget the first parts were cut for.
-            return (
-                self._count_exact(candidate.breadcrumb, body_for(fragment, total - 1, total))
-                <= self._profile.hard_maximum_tokens
-            )
+            return self._count_exact(
+                breadcrumb,
+                body_for(fragment, total - 1, total),
+            ) <= self._profile.hard_maximum_tokens
 
         total = 1
         for _ in range(_CONTINUATION_CONVERGENCE_LIMIT):
-            fragments = self._cell_fragments(cell, total, fits)
+            fragments: list[str] = []
+            offset = 0
+            while True:
+                remaining = text[offset:]
+                if not remaining:
+                    if not fragments:
+                        fragments.append("")
+                    break
+                best = self._longest_fitting_prefix(remaining, total, fits)
+                if best == 0:
+                    _fail(fail_category)
+                fragments.append(remaining[:best])
+                offset += best
             if len(fragments) == total:
                 break
             total = len(fragments)
         else:  # pragma: no cover - the width fixed point settles well inside the limit
-            _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW)
-        return [body_for(fragment, index, total) for index, fragment in enumerate(fragments)]
-
-    def _cell_fragments(
-        self,
-        cell: str,
-        total: int,
-        fits: Callable[[str, int], bool],
-    ) -> list[str]:
-        fragments: list[str] = []
-        offset = 0
-        while True:
-            remaining = cell[offset:]
-            if not remaining:
-                if not fragments:
-                    fragments.append("")
-                break
-            best = self._longest_fitting_prefix(remaining, total, fits)
-            if best == 0:
-                _fail(ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_ROW)
-            fragments.append(remaining[:best])
-            offset += best
-        return fragments
+            _fail(fail_category)
+        return [
+            body_for(fragment, index, total)
+            for index, fragment in enumerate(fragments)
+        ]
 
     @staticmethod
     def _longest_fitting_prefix(
@@ -1128,9 +1256,17 @@ class BuildConfluenceChunks:
         candidate: _Candidate,
         block: WikiTableBlock,
         entries: Sequence[str],
+        include_header: bool,
     ) -> bool:
         return (
-            self._count_exact(candidate.breadcrumb, self._continuation_body(block, entries))
+            self._count_exact(
+                candidate.breadcrumb,
+                self._continuation_body(
+                    block,
+                    entries,
+                    include_header=include_header,
+                ),
+            )
             <= self._profile.hard_maximum_tokens
         )
 
@@ -1153,8 +1289,14 @@ class BuildConfluenceChunks:
         return "\n".join([marker, fence, fragment + _CONTINUATION_TERMINATOR, fence])
 
     @staticmethod
-    def _continuation_body(block: WikiTableBlock, entries: Sequence[str]) -> str:
-        return "\n".join([block.header_line, block.separator_line, *entries])
+    def _continuation_body(
+        block: WikiTableBlock,
+        entries: Sequence[str],
+        *,
+        include_header: bool,
+    ) -> str:
+        prefix = [block.header_line, block.separator_line] if include_header else []
+        return "\n".join([*prefix, *entries])
 
     @staticmethod
     def _table_body(block: WikiTableBlock, rows: Sequence[str]) -> str:
@@ -1254,7 +1396,11 @@ class BuildConfluenceChunks:
             "prose_split_units": state.prose_split_units,
             "table_split_units": state.table_split_units,
             "table_row_continuation_units": state.table_row_continuation_units,
+            "table_header_continuation_units": (
+                state.table_header_continuation_units
+            ),
             "code_split_units": state.code_split_units,
+            "code_line_continuation_units": state.code_line_continuation_units,
             "overlap_windows": state.overlap_windows,
             "tokenizer_boundary_fallbacks": state.tokenizer_boundary_fallbacks,
             "minimum_token_count": min(token_counts, default=0),

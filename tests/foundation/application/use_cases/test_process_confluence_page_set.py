@@ -39,7 +39,7 @@ CRAWLED_AT = "2026-07-22T00:00:00Z"
 
 def _profile() -> ChunkingProfile:
     return ChunkingProfile(
-        chunker_version="1.2.0",
+        chunker_version="1.3.0",
         profile_status="provisional_until_benchmark",
         active_profile="medium",
         model_name="BAAI/bge-m3",
@@ -82,7 +82,13 @@ class _WordTokenizer:
         )
 
 
-def _raw(*, page_id: str, title: str, source_version: str = "7") -> bytes:
+def _raw(
+    *,
+    page_id: str,
+    title: str,
+    source_version: str = "7",
+    storage_value: str | None = None,
+) -> bytes:
     return json.dumps(
         {
             "id": page_id,
@@ -92,7 +98,10 @@ def _raw(*, page_id: str, title: str, source_version: str = "7") -> bytes:
             "version": {"number": int(source_version), "when": "2026-07-21T00:00:00Z"},
             "body": {
                 "storage": {
-                    "value": f"<h2>{title}</h2><p>Body for {title}</p>",
+                    "value": (
+                        storage_value
+                        or f"<h2>{title}</h2><p>Body for {title}</p>"
+                    ),
                     "representation": "storage",
                 }
             },
@@ -169,6 +178,81 @@ def test_page_set_is_ordered_schema_valid_and_repeatable() -> None:
         validator.validate_record("CanonicalDocument", document)
     for chunk in first.chunks:
         validator.validate_record("ChunkRecord", chunk)
+
+
+def test_page_set_processes_oversized_code_line_and_table_header_losslessly() -> None:
+    code_line = " ".join(f"code{index}" for index in range(2000))
+    header_text = " ".join(f"header{index}" for index in range(1500))
+    storage = (
+        "<h2>Pathological</h2>"
+        '<ac:structured-macro ac:name="code">'
+        f"<ac:plain-text-body><![CDATA[{code_line}]]></ac:plain-text-body>"
+        "</ac:structured-macro>"
+        "<table><tr>"
+        f"<th>{header_text}</th><th>Small</th>"
+        "</tr><tr><td>row value</td><td>ok</td></tr></table>"
+    )
+    envelope = ConfluenceRawPageEnvelope.capture(
+        run_id=RUN_ID,
+        page_id="1000",
+        source_version="7",
+        http_status=200,
+        body_bytes=_raw(
+            page_id="1000",
+            title="Page 1000",
+            storage_value=storage,
+        ),
+    )
+
+    result = _use_case(_Store({"1000": envelope})).execute(request=_request("1000"))
+
+    assert result.metrics.failed_pages == 0
+    assert result.metrics.succeeded_pages == 1
+    assert all(chunk["token_count"] <= 1000 for chunk in result.chunks)
+    code_chunks = [
+        chunk
+        for chunk in result.chunks
+        if "[code-continuation v1" in chunk["text"]
+    ]
+    header_chunks = [
+        chunk
+        for chunk in result.chunks
+        if "[table-header-continuation v1" in chunk["text"]
+    ]
+    row_chunks = [
+        chunk
+        for chunk in result.chunks
+        if "[table-continuation v1" in chunk["text"]
+    ]
+    assert code_chunks and header_chunks and row_chunks
+
+    code_fragments: list[str] = []
+    for chunk in code_chunks:
+        lines = chunk["text"].split("\n")
+        marker_index = next(
+            index
+            for index, line in enumerate(lines)
+            if line.startswith("[code-continuation v1")
+        )
+        fragment = "\n".join(lines[marker_index + 2 : -2])
+        assert fragment.endswith("[/]")
+        code_fragments.append(fragment[:-3])
+    assert "".join(code_fragments) == code_line
+
+    header_fragments: list[str] = []
+    for chunk in header_chunks:
+        lines = chunk["text"].split("\n")
+        marker_index = next(
+            index
+            for index, line in enumerate(lines)
+            if line.startswith("[table-header-continuation v1")
+        )
+        fragment = "\n".join(lines[marker_index + 2 : -1])
+        assert fragment.endswith("[/]")
+        header_fragments.append(fragment[:-3])
+    reconstructed_header_shell = "".join(header_fragments)
+    assert header_text in reconstructed_header_shell
+    assert "\n" in reconstructed_header_shell
 
 
 def test_page_set_rejects_later_failure_without_partial_result_or_leak() -> None:

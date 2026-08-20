@@ -38,7 +38,7 @@ from tests.fixtures.foundation.record_factories import (
 VALID_DATASET_VERSION = "v20260713-093015-123456Z"
 VALID_GENERATED_AT = "2026-07-13T09:30:15Z"
 VALID_CONFIG_HASH = "a" * 64
-VALID_CHUNKER_VERSION = "1.2.0"
+VALID_CHUNKER_VERSION = "1.3.0"
 VALID_SCHEMAS_VERSION = "1.0"
 EXPECTED_COMPLETE_FILES = EXPECTED_MACHINE_FILES | {"quality_report.md"}
 EXPECTED_COUNTS = {
@@ -61,7 +61,7 @@ EXPECTED_REPORT = (
     "- Generated at: `2026-07-13T09:30:15Z`\n"
     "- Manifest schema version: `1.0`\n"
     "- Schemas version: `1.0`\n"
-    "- Chunker version: `1.2.0`\n"
+    "- Chunker version: `1.3.0`\n"
     f"- Config hash: `{'a' * 64}`\n"
     "\n"
     "## Record Counts\n"

@@ -842,6 +842,31 @@
             }
         }
 
+        async function loadRecentIngestJobs() {
+            try {
+                const res = await fetch(getApiBase() + '/api/v1/ingest-jobs?limit=20');
+                if (!res.ok) throw new Error('API error');
+                const jobs = await res.json();
+                
+                // Clear container of default empty label if any
+                const container = document.getElementById('ingestStatus');
+                if (container) {
+                    const empty = container.querySelector('.empty');
+                    if (empty && jobs.length > 0) empty.remove();
+                }
+
+                // Render jobs (from oldest to newest, so inserting at begin puts newest at top)
+                jobs.reverse().forEach(job => {
+                    upsertIngestJobCard(job);
+                    if (['pending', 'running'].includes(job.status)) {
+                        pollIngestJob(job.id);
+                    }
+                });
+            } catch (e) {
+                console.error('Không thể tải danh sách job gần đây:', e);
+            }
+        }
+
         // ============ Utils ============
         function escapeHtml(str) {
             // Bốn phép thay thế đầu trước đây thay ký tự bằng chính nó, nên hàm
@@ -860,8 +885,8 @@
         // Auto check health on load
         window.addEventListener('load', () => {
             checkHealth();
-            // Nối lại việc theo dõi mọi job còn dang dở sau khi reload trang.
-            loadTrackedIngestJobIds().forEach(pollIngestJob);
+            // Nạp toàn bộ các job gần đây từ server và tự động theo dõi các job đang chạy.
+            loadRecentIngestJobs();
         });
     </script>
 </body>

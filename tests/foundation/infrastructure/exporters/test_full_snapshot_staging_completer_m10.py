@@ -28,7 +28,7 @@ def _scopes():
 
 def _quality() -> M10QualityReportInput:
     return M10QualityReportInput(
-        "medium", "provisional_until_benchmark", "1.2.0",
+        "medium", "provisional_until_benchmark", "1.3.0",
         {"documents": 1, "chunks": 1, "relations": 1, "acl": 1, "media_assets": 0, "symbols": 0, "sync_state": 0, "tombstones": 0},
         {"confluence": {"source_id": "src", "space_keys": ("SVMC",), "root_page_ids": ("123",), "page_ids": ("123",)}},
         {"relations_total": 1, "resolved": 0, "unresolved": 1, "unresolved_without_jira_api": 1, "deferred_mvp": 0, "unresolved_target": 0},
@@ -43,7 +43,7 @@ def _quality() -> M10QualityReportInput:
 
 def _write(staging: Path, *, tombstones=(), source_scopes=None):
     return FullSnapshotStagingWriter.write(
-        staging_path=staging, validator=FoundationSchemaValidator(), dataset_version="v20260805-000000-000000Z", generated_at="2026-08-05T00:00:00Z", config_hash="a" * 64, chunker_version="1.2.0", schemas_version="1.0",
+        staging_path=staging, validator=FoundationSchemaValidator(), dataset_version="v20260805-000000-000000Z", generated_at="2026-08-05T00:00:00Z", config_hash="a" * 64, chunker_version="1.3.0", schemas_version="1.0",
         documents=[build_sample_document_record()], chunks=[build_sample_chunk_record()], relations=[build_sample_relation_record()], acl=[build_sample_acl_record()], media_assets=[], symbols=[], sync_state=[], tombstones=tombstones, source_scopes=source_scopes or _scopes(),
     )
 

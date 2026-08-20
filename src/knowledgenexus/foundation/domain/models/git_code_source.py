@@ -652,7 +652,7 @@ class CodeDocumentPlan:
                 or chunk.get("acl_tags") != ["repo:spen-sdk"]
                 or chunk.get("content_kind") != "code_window"
                 or chunk.get("language") != _language_for_path(path)
-                or chunk.get("chunker_version") != "1.2.0"
+                or chunk.get("chunker_version") != "1.3.0"
                 or chunk.get("jira_keys") != []
                 or chunk.get("relation_ids") != []
                 or chunk.get("heading_path") != []

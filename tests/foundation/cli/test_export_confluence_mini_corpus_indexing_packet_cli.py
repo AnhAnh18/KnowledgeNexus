@@ -56,8 +56,8 @@ def test_packet_publish_writes_exact_deterministic_indexing_files(tmp_path: Path
 
     first = tmp_path / "first"
     second = tmp_path / "second"
-    cli._publish_packet(output_dir=first, result=result, chunker_version="1.2.0")
-    cli._publish_packet(output_dir=second, result=result, chunker_version="1.2.0")
+    cli._publish_packet(output_dir=first, result=result, chunker_version="1.3.0")
+    cli._publish_packet(output_dir=second, result=result, chunker_version="1.3.0")
 
     assert {path.name for path in first.iterdir()} == {
         "documents.jsonl",
@@ -87,7 +87,7 @@ def test_packet_publish_never_overwrites_existing_target(tmp_path: Path) -> None
         cli._publish_packet(
             output_dir=target,
             result=_result(),
-            chunker_version="1.2.0",
+            chunker_version="1.3.0",
         )
 
     assert marker.read_text(encoding="utf-8") == "keep"
@@ -116,7 +116,7 @@ def test_packet_failure_removes_owned_staging_directory(
         cli._publish_packet(
             output_dir=tmp_path / "packet",
             result=_result(),
-            chunker_version="1.2.0",
+            chunker_version="1.3.0",
         )
 
     assert str(raised.value) == ""

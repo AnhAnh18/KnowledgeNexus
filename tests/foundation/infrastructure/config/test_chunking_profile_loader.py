@@ -30,7 +30,7 @@ def _write_profile(tmp_path: Path, data: object) -> Path:
 def test_loads_active_repository_profile() -> None:
     profile = load_chunking_profile(PROFILE_PATH)
 
-    assert profile.chunker_version == "1.2.0"
+    assert profile.chunker_version == "1.3.0"
     assert profile.profile_status == "provisional_until_benchmark"
     assert profile.active_profile == "medium"
     assert profile.model_name == "BAAI/bge-m3"

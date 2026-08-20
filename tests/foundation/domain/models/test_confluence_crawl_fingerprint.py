@@ -104,7 +104,7 @@ def _config(**overrides: object) -> ConfluenceSourceConfig:
 
 def test_literal_golden_vector() -> None:
     result = build_confluence_crawl_fingerprint("https://example.test/wiki", _config(), PROFILE_V1)
-    assert result.value == "b91ed774ea11757f69a21ab7269f1f15798e9d762aeaa3dbfd8c96df4eacb74b"
+    assert result.value == "59fa059b4a074e90d0895e04b423463095c253b837b23f28d17b158d4b98aa87"
 
 
 def test_literal_nested_digest_golden_vectors() -> None:
@@ -268,6 +268,6 @@ def test_unicode_is_utf8_and_not_normalized() -> None:
     )
     result = build_confluence_crawl_fingerprint("https://EXAMPLE.TEST/base", config, PROFILE_V1)
     assert len(result.value) == 64
-    assert result.value == "bc91c7ce729543eb70997f1a380fe5fa76477c47b8db077f79c81944f418e677"
+    assert result.value == "12744be623c3e86e1c9af22c49ed709df9bf551bb1eed327a35e906002f3af86"
     assert "example.test" not in repr(result)
     assert "R\\u00f6\\u00f6t" not in repr(result)

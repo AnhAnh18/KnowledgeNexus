@@ -557,6 +557,16 @@ async def resume_confluence_subtree_ingest_job(
     return _to_response(job)
 
 
+@router.get("", response_model=list[IngestJobResponse])
+async def list_recent_ingest_jobs(
+    limit: int = 20,
+    container: AppContainer = Depends(_container),
+) -> list[IngestJobResponse]:
+    """Retrieve a list of the most recent ingest jobs."""
+    jobs = await container.ingest_job_repo.get_recent_jobs(limit=limit)
+    return [_to_response(job) for job in jobs]
+
+
 @router.get("/{job_id}", response_model=IngestJobResponse)
 async def get_ingest_job(
     job_id: str,

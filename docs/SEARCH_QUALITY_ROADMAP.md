@@ -78,7 +78,7 @@ One clear chunk profile; clean normalized text; every chunk change → re-ingest
 
 ### Current state
 
-- Spec: `contracts/foundation/CHUNKING_SPEC.md` (`chunker_version` 1.2.0, medium provisional).
+- Spec: `contracts/foundation/CHUNKING_SPEC.md` (`chunker_version` 1.3.0, medium provisional).
 - Markdown/eval scripts (`ingest_*.py`) chunk by **character** 1500/150 — differs from Foundation token budget → needs alignment / documentation.
 
 ### Checklist

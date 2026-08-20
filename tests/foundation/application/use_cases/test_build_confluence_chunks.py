@@ -101,7 +101,7 @@ def _profile(
     overlap_lines: int = 1,
 ):
     base = ChunkingProfile(
-        chunker_version="1.2.0",
+        chunker_version="1.3.0",
         profile_status="provisional_until_benchmark",
         active_profile="medium",
         model_name="BAAI/bge-m3",
@@ -235,7 +235,7 @@ def test_atomic_prose_maps_exact_schema_fields_and_omits_wiki_nulls() -> None:
     assert record["acl_tags"] == ["restricted:unresolved"]
     assert record["jira_keys"] == []
     assert record["relation_ids"] == []
-    assert record["chunker_version"] == "1.2.0"
+    assert record["chunker_version"] == "1.3.0"
     assert record["content_hash"] == ContentHasher.hash_text(str(record["text"]))
     for absent in (
         "repo",
@@ -544,6 +544,85 @@ def test_single_unsplittable_code_line_fails_without_disclosure() -> None:
     assert "SECRET" not in str(captured.value)
 
 
+def _reconstruct_code_line(records) -> str:
+    fragments: list[str] = []
+    for record in records:
+        lines = _body(record).split("\n")
+        for index, line in enumerate(lines):
+            if not line.startswith("[code-continuation v1"):
+                continue
+            fence = lines[index + 1]
+            assert lines[-2] == fence
+            fragment = "\n".join(lines[index + 2 : -2])
+            assert fragment.endswith("[/]")
+            fragments.append(fragment[:-3])
+    return "".join(fragments)
+
+
+def test_oversized_code_line_splits_losslessly_and_deterministically() -> None:
+    line = "const payload = `" + ("x" * 500) + "`;"
+    body = f"## Code\n\n```ts\n{line}\n```"
+    profile = _profile(target=100, hard=140, overlap=4, code_target=100)
+
+    first = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+    second = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+
+    assert len(first.records) > 1
+    assert all(record["content_kind"] == "code_block" for record in first.records)
+    assert all(
+        record["token_count"] <= profile.hard_maximum_tokens
+        for record in first.records
+    )
+    assert {record["part_total"] for record in first.records} == {
+        len(first.records)
+    }
+    assert _reconstruct_code_line(first.records) == line
+    assert first.metrics["code_line_continuation_units"] == 1
+    assert first.metrics["oversize_splits"] == 1
+    assert [record["chunk_id"] for record in first.records] == [
+        record["chunk_id"] for record in second.records
+    ]
+    assert [record["content_hash"] for record in first.records] == [
+        record["content_hash"] for record in second.records
+    ]
+
+
+def test_code_line_at_exact_hard_max_remains_atomic() -> None:
+    line = "x" * 40
+    body = f"## Code\n\n```\n{line}\n```"
+    exact_text = "Doc › Code\n\n```\n" + line + "\n```"
+    hard = len(exact_text)
+    result = _execute(
+        body,
+        tokenizer=_CharacterTokenizer(),
+        profile=_profile(
+            target=hard - 1,
+            hard=hard,
+            overlap=4,
+            code_target=hard - 1,
+        ),
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0]["token_count"] == hard
+    assert "code-continuation" not in result.records[0]["text"]
+    assert "part_index" not in result.records[0]
+
+
+def test_code_continuation_with_no_character_capacity_still_fails_closed() -> None:
+    body = "## Code\n\n```\n" + ("x" * 100) + "\n```"
+    with pytest.raises(ConfluenceChunkingError) as captured:
+        _execute(
+            body,
+            tokenizer=_IndivisibleTokenizer(),
+            profile=_profile(target=30, hard=50, overlap=4, code_target=30),
+        )
+
+    assert captured.value.category is (
+        ConfluenceChunkingFailureCategory.UNSPLITTABLE_CODE_LINE
+    )
+
+
 def test_table_row_groups_repeat_header_without_row_overlap() -> None:
     body = (
         "## Table\n\n| H |\n| --- |\n"
@@ -574,6 +653,62 @@ def test_unsplittable_table_header_fails_closed() -> None:
     assert captured.value.category is (
         ConfluenceChunkingFailureCategory.UNSPLITTABLE_TABLE_HEADER
     )
+
+
+def _reconstruct_table_header(records) -> str:
+    fragments: list[str] = []
+    for record in records:
+        lines = _body(record).split("\n")
+        if not lines[0].startswith("[table-header-continuation v1"):
+            continue
+        fence = lines[1]
+        assert lines[-1] == fence
+        fragment = "\n".join(lines[2:-1])
+        assert fragment.endswith("[/]")
+        fragments.append(fragment[:-3])
+    return "".join(fragments)
+
+
+def test_oversized_table_header_emits_entire_table_as_continuations() -> None:
+    header = "| " + ("H" * 420) + " | B |"
+    separator = "| " + ("-" * 420) + " | --- |"
+    rows = ("| r0a | r0b |", "| r1a | r1b |")
+    body = "\n".join(["## Table", "", header, separator, *rows])
+    profile = _profile(target=130, hard=180, overlap=4, code_target=130)
+
+    first = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+    second = _execute(body, tokenizer=_CharacterTokenizer(), profile=profile)
+
+    assert all(record["content_kind"] == "table" for record in first.records)
+    assert all(
+        record["token_count"] <= profile.hard_maximum_tokens
+        for record in first.records
+    )
+    assert _reconstruct_table_header(first.records) == f"{header}\n{separator}"
+    assert first.metrics["table_header_continuation_units"] == 1
+    assert first.metrics["table_row_continuation_units"] == len(rows)
+    assert first.metrics["chunks_over_hard_max"] == 0
+    bodies = [_body(record) for record in first.records]
+    assert all(
+        header not in emitted and separator not in emitted
+        for emitted in bodies
+        if "[table-continuation v1" in emitted
+    )
+    for row_ordinal in range(len(rows)):
+        row_records = [
+            record
+            for record in first.records
+            if f"row={row_ordinal} " in _body(record)
+        ]
+        assert row_records
+        assert _reconstruct_cell(row_records, 0) == f" r{row_ordinal}a "
+        assert _reconstruct_cell(row_records, 1) == f" r{row_ordinal}b "
+    assert [record["chunk_id"] for record in first.records] == [
+        record["chunk_id"] for record in second.records
+    ]
+    assert [record["content_hash"] for record in first.records] == [
+        record["content_hash"] for record in second.records
+    ]
 
 
 def test_unsplittable_table_row_fails_closed() -> None:

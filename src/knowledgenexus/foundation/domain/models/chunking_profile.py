@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 
 
-_EXPECTED_CHUNKER_VERSION = "1.2.0"
+_EXPECTED_CHUNKER_VERSION = "1.3.0"
 _EXPECTED_MODEL_NAME = "BAAI/bge-m3"
 _EXPECTED_TOKENIZER_FAMILY = "SentencePiece / XLM-R"
 _EXPECTED_PROFILE_STATUS = "provisional_until_benchmark"

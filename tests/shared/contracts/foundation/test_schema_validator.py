@@ -43,7 +43,7 @@ def valid_chunk_record() -> dict[str, object]:
         "acl_tags": ["space:SVMC"],
         "source_version": "42",
         "content_hash": "0" * 64,
-        "chunker_version": "1.2.0",
+        "chunker_version": "1.3.0",
         "updated_at": "2026-07-08T00:00:00Z",
     }
 
@@ -58,7 +58,7 @@ def valid_manifest_record(
         "export_mode": "full_snapshot",
         "generated_at": generated_at,
         "config_hash": "0" * 64,
-        "chunker_version": "1.2.0",
+        "chunker_version": "1.3.0",
         "schemas_version": "foundation-schemas-1",
         "counts": {
             "documents": 1,

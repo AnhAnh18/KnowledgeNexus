@@ -17,8 +17,50 @@ set "QDRANT_PORT=6333"
 set "API_URL=http://%API_HOST%:%API_PORT%"
 set "QDRANT_START_BAT=C:\qdrant\QdrantStart.bat"
 
-REM Auto-detect Python command (try 'python' first, fall back to 'py')
-where python >nul 2>&1 && set "PYTHON_CMD=python" || set "PYTHON_CMD=py"
+REM --- Auto-detect Python Command (Multi-layered Robust Detection) ---
+set "PYTHON_CMD="
+
+REM 1. Check if virtual environment (.venv) exists in the project root
+if exist "%PROJECT_ROOT%\.venv\Scripts\python.exe" (
+    set "PYTHON_CMD=%PROJECT_ROOT%\.venv\Scripts\python.exe"
+    goto :python_detected
+)
+if exist "%PROJECT_ROOT%\venv\Scripts\python.exe" (
+    set "PYTHON_CMD=%PROJECT_ROOT%\venv\Scripts\python.exe"
+    goto :python_detected
+)
+
+REM 2. Scan %LocalAppData%\Programs\Python\Python* for the latest Python installation
+if defined LocalAppData (
+    for /f "delims=" %%I in ('dir /b /ad "%LocalAppData%\Programs\Python\Python*" 2^>nul') do (
+        if exist "%LocalAppData%\Programs\Python\%%I\python.exe" (
+            set "PYTHON_CMD=%LocalAppData%\Programs\Python\%%I\python.exe"
+        )
+    )
+    if defined PYTHON_CMD goto :python_detected
+)
+
+REM 3. Fallback to Windows Python Launcher 'py' if available
+where py >nul 2>&1
+if !errorlevel! equ 0 (
+    set "PYTHON_CMD=py"
+    goto :python_detected
+)
+
+REM 4. Fallback to 'python' from PATH if it works (validating it's not the Microsoft Store stub)
+where python >nul 2>&1
+if !errorlevel! equ 0 (
+    python -c "import sys" >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "PYTHON_CMD=python"
+        goto :python_detected
+    )
+)
+
+REM 5. Final fallback
+set "PYTHON_CMD=python"
+
+:python_detected
 echo       Using Python command: %PYTHON_CMD%
 
 REM --- MCP HTTP Server Configuration ---

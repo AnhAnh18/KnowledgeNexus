@@ -92,7 +92,7 @@ class _FixedRawPageReader(RawPageReadPort):
 
 def _profile_identity(profile: ChunkingProfile) -> str:
     expected_values = {
-        "chunker_version": "1.2.0",
+        "chunker_version": "1.3.0",
         "profile_status": "provisional_until_benchmark",
         "active_profile": "medium",
         "model_name": "BAAI/bge-m3",

@@ -199,3 +199,30 @@ async def test_terminal_update_releases_active_key(session_factory):
     next_job, created = await repo.create_or_get_active(_make_job(job_id="job-b", active_key=key))
     assert created is True
     assert next_job.id == "job-b"
+
+
+@pytest.mark.asyncio
+async def test_get_recent_jobs(session_factory):
+    repo = SqliteIngestJobRepository(session_factory)
+
+    # Create 3 jobs with different start times
+    job1 = _make_job(job_id="job-1", started_at=datetime(2026, 7, 15, 10, 0, 0, tzinfo=UTC))
+    job2 = _make_job(job_id="job-2", started_at=datetime(2026, 7, 15, 10, 10, 0, tzinfo=UTC))
+    job3 = _make_job(job_id="job-3", started_at=datetime(2026, 7, 15, 10, 20, 0, tzinfo=UTC))
+
+    await repo.create(job1)
+    await repo.create(job2)
+    await repo.create(job3)
+
+    # Fetch with limit = 2
+    recent = await repo.get_recent_jobs(limit=2)
+    assert len(recent) == 2
+    assert recent[0].id == "job-3"  # Newest first
+    assert recent[1].id == "job-2"
+
+    # Fetch all
+    all_jobs = await repo.get_recent_jobs(limit=10)
+    assert len(all_jobs) == 3
+    assert all_jobs[0].id == "job-3"
+    assert all_jobs[1].id == "job-2"
+    assert all_jobs[2].id == "job-1"

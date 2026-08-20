@@ -22,7 +22,7 @@ from knowledgenexus.foundation.domain.rules.confluence_page_id import (
 )
 
 
-ACTIVE_PAGE_SET_PROFILE_IDENTITY = "bge-m3:medium:chunker-1.2.0"
+ACTIVE_PAGE_SET_PROFILE_IDENTITY = "bge-m3:medium:chunker-1.3.0"
 _RFC3339 = re.compile(
     r"^(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})T"
     r"(?P<time>[0-9]{2}:[0-9]{2}:[0-9]{2})"

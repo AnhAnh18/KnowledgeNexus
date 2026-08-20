@@ -49,7 +49,7 @@ def _chunks() -> tuple[dict[str, object], ...]:
             language="unknown",
             token_count=2,
             acl_tags=["space:SPEN"],
-            chunker_version="1.2.0",
+            chunker_version="1.3.0",
             title="Design page",
             space_key="SPEN",
             page_id="1000",

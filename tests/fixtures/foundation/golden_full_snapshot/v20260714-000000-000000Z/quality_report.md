@@ -7,7 +7,7 @@
 - Generated at: `2026-07-14T00:00:00.000000Z`
 - Manifest schema version: `1.0`
 - Schemas version: `1.0`
-- Chunker version: `1.2.0`
+- Chunker version: `1.3.0`
 - Config hash: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
 
 ## Record Counts

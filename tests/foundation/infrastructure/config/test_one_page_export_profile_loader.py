@@ -44,7 +44,7 @@ def test_loads_the_real_active_contract_profiles() -> None:
         embedding_profile_path=EMBEDDING_PROFILE_PATH,
         jira_relation_profile_path=JIRA_PROFILE_PATH,
     )
-    assert bundle.chunking_profile.chunker_version == "1.2.0"
+    assert bundle.chunking_profile.chunker_version == "1.3.0"
     assert bundle.jira_relation_profile.allowed_project_keys == ("SVMCSPEN",)
     assert len(bundle.config_hash) == 64
 

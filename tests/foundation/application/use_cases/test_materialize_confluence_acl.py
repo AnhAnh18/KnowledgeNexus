@@ -109,7 +109,7 @@ def _chunk(index: int, space_key: str | None) -> dict[str, object]:
         language="unknown",
         token_count=7,
         acl_tags=["restricted:unresolved"],
-        chunker_version="1.2.0",
+        chunker_version="1.3.0",
         title="Fixture Foundation",
         heading_path=["Fixture Foundation"],
         space_key=space_key,

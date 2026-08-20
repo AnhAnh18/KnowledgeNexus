@@ -5,7 +5,7 @@ Chunking specification for the AI Knowledge Platform — Part 1 (Knowledge Found
 | Field | Value |
 |---|---|
 | Status | Normative |
-| chunker_version | 1.2.0 |
+| chunker_version | 1.3.0 |
 | Embedding model (selected by Task 2) | `BAAI/bge-m3` — multilingual SentencePiece / XLM-R tokenizer, 8192-token model context |
 | Applies to | ChunkRecord (`schemas/chunk_record.schema.json`) |
 | Parent spec | AI_Knowledge_Platform_Master_Spec_v7_1.md §16.3 |
@@ -18,7 +18,7 @@ This document is authoritative for how `chunks.jsonl` is produced. Where this fi
 
 ## 0.1 Migration status *(v7.4)*
 
-BGE-M3 is the active model/tokenizer identity and `chunker_version` 1.2.0 is locked. The medium profile in §1 is active but remains `provisional_until_benchmark`: M6D implements it exactly and does not tune it from a single page. Any later budget change requires an explicit profile migration and a new `config_hash`; a semantic chunking change also requires a `chunker_version` bump.
+BGE-M3 is the active model/tokenizer identity and `chunker_version` 1.3.0 is locked. The medium profile in §1 is active but remains `provisional_until_benchmark`: M6D implements it exactly and does not tune it from a single page. Any later budget change requires an explicit profile migration and a new `config_hash`; a semantic chunking change also requires a `chunker_version` bump.
 
 ## 1. Tokenizer and Budget
 
@@ -36,7 +36,7 @@ The active profile is `medium`. It is an operationally locked input to M6D, not 
 | `code_window_max_lines` | 40 | Secondary guard so a token-packed window never spans an unreadable number of lines. |
 | `code_window_overlap_lines` | 4 | Line overlap between consecutive code windows. |
 
-`minimum_tokens` is a merge *hint*, not an invariant: a standalone short section with no valid merge target may be emitted below it. `hard_maximum_tokens` is an invariant: the quality report MUST report `chunks_over_hard_max = 0`. A single code line that cannot fit under the hard maximum together with its breadcrumb and valid fences fails closed as `unsplittable_code_line`; it is never split or truncated.
+`minimum_tokens` is a merge *hint*, not an invariant: a standalone short section with no valid merge target may be emitted below it. `hard_maximum_tokens` is an invariant: the quality report MUST report `chunks_over_hard_max = 0`. Oversized Confluence code lines and table headers use the lossless continuation envelopes in §4.5 and §4.6; they fail closed only when even one character cannot fit with the required envelope.
 
 > **Model coupling and provisional budget.** BGE-M3 supports a larger multilingual context, but the 450/96/1000/64 profile remains provisional until the two-round retrieval benchmark. The POC does not raise the budget based on a single live page. A model/tokenizer identity change is a chunker-configuration change and requires a `chunker_version` bump plus `full_snapshot` (`config_invalidated`, master spec §16.2).
 
@@ -141,18 +141,20 @@ If a section body exceeds `hard_maximum_tokens`, split it into windows at **para
 ### 4.5 Fenced Code Blocks Inside Pages
 
 - A fenced code block (from a Confluence `code` macro or literal fence) that fits within `hard_maximum_tokens` becomes one chunk with `content_kind: code_block`, breadcrumb prefixed, language tag preserved in the body.
-- If it exceeds `hard_maximum_tokens`, split into token-packed complete-line windows (accumulate lines up to `code_window_target_tokens`, never exceeding `hard_maximum_tokens` or `code_window_max_lines`, with `code_window_overlap_lines` overlap), each part `content_kind: code_block`, with `part_index`/`part_total`. The breadcrumb and valid repeated fences count toward every window. A single over-budget line fails closed as `unsplittable_code_line`; it is never divided or truncated.
+- If it exceeds `hard_maximum_tokens`, split into token-packed complete-line windows (accumulate lines up to `code_window_target_tokens`, never exceeding `hard_maximum_tokens` or `code_window_max_lines`, with `code_window_overlap_lines` overlap), each part `content_kind: code_block`, with `part_index`/`part_total`. The breadcrumb and valid repeated fences count toward every window.
+- **Oversized-code-line fallback (continuation envelope `v1`).** When a single code line exceeds the hard maximum together with the breadcrumb and repeated fences, that line is represented as deterministic opaque continuations rather than failing. Each continuation is a `content_kind: code_block` chunk that repeats the exact opening/closing fence and carries a marker `[code-continuation v1 block=B line=L part=P/N]`, followed by a dynamically sized backtick fence wrapping one fragment of the line's exact text, terminated by `[/]`. Fragments are emitted in source order; `part_index`/`part_total` are set. Budget is measured against the widest part number `N` can produce and resolved as a fixed point over the fragment count. If no character fits, `unsplittable_code_line` is retained.
 - Code blocks identified by the M6D-C structural parser remain isolated code candidates. M6D-D never reparses or folds them into surrounding prose.
 
 ### 4.6 Tables
 
 - A Markdown table that fits within `hard_maximum_tokens` is emitted atomically as one `content_kind: table` chunk (breadcrumb prefixed).
-- A larger table is split into **row-groups**, each group repeating the header row and the alignment row so every chunk is a valid, self-describing table. `part_index`/`part_total` set; `content_kind: table`. A table row is never split across chunks. A single row that cannot fit with breadcrumb and repeated header/alignment fails closed as `unsplittable_table_row`.
+- A larger table is split into **row-groups**, each group repeating the header row and the alignment row so every chunk is a valid, self-describing table. `part_index`/`part_total` set; `content_kind: table`. A table row is never split across ordinary row-group chunks. A single row that cannot fit with breadcrumb and repeated header/alignment routes to the continuation fallback below.
 - **Oversized-row fallback (continuation envelope `v1`).** When an individual row exceeds the hard maximum, the row is represented as deterministic cell continuations rather than truncated or dropped. A continuation chunk repeats the exact header/alignment shell and then carries one or more entries, each of which is a marker of the form `[table-continuation v1 table=T row=R column=C header_ordinal=C part=P/N]` followed by a dynamically sized backtick fence wrapping one fragment of that cell's exact normalized text. Cells are emitted in row-major order and fragments in source order.
   - **Fragment terminator.** Every fragment line ends with the literal terminator `[/]`. Normalization (§3) right-strips each line, so without it a fragment ending in whitespace would lose that whitespace and glue the surrounding words together. Readers strip exactly one trailing `[/]` per fragment line; concatenating the stripped fragments for `(T,R,C)` reconstructs the original cell text exactly. Header, marker, fence, and terminator are context and are excluded from reconstruction.
   - **Packing.** Cells that fit alongside the header shell are packed into as few continuation chunks as possible, so a wide row with one oversized cell does not turn each narrow neighbour into its own near-empty chunk. Only a cell that cannot fit in a chunk of its own is fragmented across parts.
   - **Budget.** A fragment is selected only when the complete breadcrumb-prefixed continuation is within `hard_maximum_tokens`, measured against the **widest** part number `N` can produce (`part=N/N`), so later parts cannot overflow the budget the earlier parts were cut for. Because `N` appears in the marker it is resolved as a fixed point over the fragment count; the count is monotonic in marker width, so it converges. If no character fits, the existing `unsplittable_table_row` category is retained.
   - `content_kind`, schema, and ordinary-table output remain unchanged.
+- **Oversized-header fallback (continuation envelope `v1`).** If the exact header-plus-alignment shell exceeds the hard maximum, the table is emitted entirely as continuation units. The exact shell is fragmented under markers `[table-header-continuation v1 table=T column=0 part=P/N]`; concatenating its fragments in part order and stripping one trailing `[/]` from each reconstructs `header_line + "\n" + separator_line` exactly. Every data row then uses the existing row/cell continuation envelope without an inline repeated header. No self-describing row-group windows are produced for that table. The same fixed-point and widest-part-number budget rules apply; if no character fits, `unsplittable_table_header` is retained.
 
 ### 4.7 Draw.io Diagrams
 
@@ -225,7 +227,7 @@ Chunking participates in incremental sync as defined in master spec §18.3. Rest
    - `chunk_id` present in both → unchanged; **not re-emitted** in a `delta` export.
    - `chunk_id` new → emitted.
    - `chunk_id` absent from the new set → **tombstoned** with reason `content_updated` (master spec §16.2).
-3. **chunker_version stamped.** Every ChunkRecord carries `chunker_version`; `manifest.json` carries the `chunker_version` used for the run. A change to `chunker_version` invalidates all chunks (`config_invalidated`) and forces a `full_snapshot` (master spec §16.1, §16.2). Version history: `1.0.0` used a model-agnostic `cl100k_base` budget (target 450 / hard maximum 1000); `1.1.0` used all-MiniLM-L6-v2 WordPiece (target 200 / hard maximum 240); `1.2.0` locks BAAI/bge-m3 and the provisional medium profile (target 450 / minimum 96 / hard maximum 1000 / overlap upper bound 64). Selecting another model/tokenizer or changing semantic splitting behavior requires a later version.
+3. **chunker_version stamped.** Every ChunkRecord carries `chunker_version`; `manifest.json` carries the `chunker_version` used for the run. A change to `chunker_version` invalidates all chunks (`config_invalidated`) and forces a `full_snapshot` (master spec §16.1, §16.2). Version history: `1.0.0` used a model-agnostic `cl100k_base` budget (target 450 / hard maximum 1000); `1.1.0` used all-MiniLM-L6-v2 WordPiece (target 200 / hard maximum 240); `1.2.0` locked BAAI/bge-m3 and the provisional medium profile (target 450 / minimum 96 / hard maximum 1000 / overlap upper bound 64); `1.3.0` adds lossless continuation envelopes for oversized Confluence code lines (§4.5) and oversized table headers (§4.6). The 1.2.0 → 1.3.0 change is `config_invalidated` and forces a `full_snapshot`. Selecting another model/tokenizer or changing semantic splitting behavior requires a later version.
 4. **ACL-only change.** If page content is identical but restrictions changed, the same `chunk_id`s are re-emitted with updated `acl_tags` — no tombstones (master spec §18.3).
 
 ---
@@ -250,9 +252,11 @@ The chunking stage contributes the following to `quality_report.md`:
 | `fallback_window_files` | Files chunked by the symbol-less fallback (§5.4). |
 | `empty_sections_skipped` | Heading sections whose normalized body was empty. |
 | `table_row_continuation_units` | Table rows that needed the §4.6 oversized-row continuation fallback. A persistently non-zero count on ordinary content is the signal to revisit `hard_maximum_tokens` in the round-1 budget sweep. |
+| `table_header_continuation_units` | Tables whose header/alignment shell needed the §4.6 oversized-header continuation fallback. |
+| `code_line_continuation_units` | Code lines that needed the §4.5 oversized-code-line continuation fallback. |
 | `token_count_p50` / `token_count_p95` | Chunk token-count distribution, for tuning against `target_tokens`. |
 
-For `chunker_version` 1.2.0, p50 and p95 use deterministic ascending
+For `chunker_version` 1.3.0, p50 and p95 use deterministic ascending
 nearest-rank selection with no interpolation. For an empty collection the
 value is `0`; otherwise, for `p_percent` in `{50, 95}` and `n = len(values)`,
 the 1-based rank is `(p_percent * n + 99) // 100` and the reported value is
