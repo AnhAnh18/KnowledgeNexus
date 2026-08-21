@@ -309,7 +309,8 @@ class MediaMaterializationResult:
             seen_media_ids.add(media_id)
             copied_assets.append(copied)
         ordinals = tuple(intent.ordinal for intent in validated_intents)
-        if ordinals != tuple(range(1, len(ordinals) + 1)):
+        parent_document_ids = {record["parent_document_id"] for record in copied_assets}
+        if len(parent_document_ids) <= 1 and ordinals != tuple(range(1, len(ordinals) + 1)):
             raise ValueError("relation ordinals are invalid")
         seen_relation_keys: set[tuple[str, str, str]] = set()
         for intent in validated_intents:
@@ -320,9 +321,6 @@ class MediaMaterializationResult:
         media_ids = tuple(record["media_id"] for record in copied_assets)
         if media_ids != tuple(sorted(media_ids)):
             raise ValueError("asset ordering is invalid")
-        parent_document_ids = {record["parent_document_id"] for record in copied_assets}
-        if len(parent_document_ids) > 1 and validated_intents:
-            raise ValueError("cross-page relation state is invalid")
         for intent in validated_intents:
             if intent.source_document_id not in parent_document_ids:
                 raise ValueError("relation source is not represented")

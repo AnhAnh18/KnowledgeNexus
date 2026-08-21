@@ -276,7 +276,7 @@ class _ReplayMediaStage:
         for asset in batch.assets:
             parent = asset["parent_document_id"]
             ordinals[parent] = ordinals.get(parent, 0) + 1
-            intents.append(MediaRelationIntent(ordinals[parent], parent, asset.get("media_id"), "drawio", "embeds_media", "unresolved_target", "drawio-state"))
+            intents.append(MediaRelationIntent(ordinals[parent], parent, asset.get("media_id"), "drawio", "embeds_media", "unresolved_target", asset.get("media_id")))
         metadata_assets = tuple(_relation_media_asset(asset) for asset in batch.assets)
         metadata = MediaMaterializationResult(assets=metadata_assets, relation_intents=tuple(intents))
         return {"media_result": metadata, "media_assets": tuple(batch.assets), "assets": metadata_assets}
