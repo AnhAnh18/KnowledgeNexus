@@ -9,21 +9,12 @@ read back by `ConfluenceRawPageGenerationStore` / `ProcessConfluencePageSet`.
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 from knowledgenexus.foundation.domain.models.confluence_crawl_run import CrawlRunId
 from knowledgenexus.foundation.domain.models.confluence_raw_page_artifact import (
     ConfluenceRawPageEnvelope,
-)
-from knowledgenexus.foundation.infrastructure.confluence import (
-    ConfluenceDataCenterPageAdapter,
-    UrllibConfluenceHttpTransport,
-)
-from knowledgenexus.foundation.infrastructure.processors import (
-    ConfluenceDataCenterRawPageMapper,
-)
-from knowledgenexus.foundation.infrastructure.raw_store import (
-    ConfluenceRawPageGenerationStore,
 )
 
 
@@ -36,10 +27,14 @@ def fetch_confluence_page_live(
     raw_root: Path,
 ) -> None:
     """Fetch `page_id` live from Confluence and publish it into `raw_root`."""
-    transport = UrllibConfluenceHttpTransport(base_url=base_url, personal_access_token=pat)
-    page_fetcher = ConfluenceDataCenterPageAdapter(transport=transport)
-    page_mapper = ConfluenceDataCenterRawPageMapper()
-    generation_store = ConfluenceRawPageGenerationStore(raw_root=raw_root)
+    confluence = importlib.import_module("knowledgenexus.foundation.infrastructure.confluence")
+    processors = importlib.import_module("knowledgenexus.foundation.infrastructure.processors")
+    raw_store = importlib.import_module("knowledgenexus.foundation.infrastructure.raw_store")
+
+    transport = confluence.UrllibConfluenceHttpTransport(base_url=base_url, personal_access_token=pat)
+    page_fetcher = confluence.ConfluenceDataCenterPageAdapter(transport=transport)
+    page_mapper = processors.ConfluenceDataCenterRawPageMapper()
+    generation_store = raw_store.ConfluenceRawPageGenerationStore(raw_root=raw_root)
 
     response = page_fetcher.fetch_page_response_raw(page_id=page_id)
     source = page_mapper.map_page(raw_bytes=response.body, expected_page_id=page_id)
