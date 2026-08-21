@@ -45,7 +45,7 @@ def test_simple_profile_derives_git_and_approved_profiles_from_checkout() -> Non
     assert 'Split-Path -Parent $PSScriptRoot' in text
     assert 'rev-parse HEAD' in text
     assert 'symbolic-ref --quiet --short HEAD' in text
-    assert 'Join-Path $script:RepoRoot "contracts/foundation/embedding_profile.yaml"' in text
+    assert 'Join-Path $script:RepoRoot "config/foundation/embedding_profile.yaml"' in text
     assert 'Join-Path $outputRoot "state"' in text
     assert 'Join-Path $outputRoot "snapshot-a"' in text
     assert 'Join-Path $outputRoot "snapshot-b"' in text

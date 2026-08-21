@@ -779,8 +779,8 @@ try {
         Fail-Gate "configuration"
     }
 
-    $approvedReliability = Join-Path $script:RepoRoot "contracts/foundation/crawl_reliability_profile.yaml"
-    $approvedChunking = Join-Path $script:RepoRoot "contracts/foundation/embedding_profile.yaml"
+    $approvedReliability = Join-Path $script:RepoRoot "config/foundation/crawl_reliability_profile.yaml"
+    $approvedChunking = Join-Path $script:RepoRoot "config/foundation/embedding_profile.yaml"
     $approvedJira = Join-Path $script:RepoRoot "contracts/foundation/jira_relation_profile.yaml"
     $reliability = Assert-PlainExistingPath (Full-Path $(if ($isSimpleProfile) { $approvedReliability } else { $script:Config.reliability_profile_path })) $false
     $chunking = Assert-PlainExistingPath (Full-Path $(if ($isSimpleProfile) { $approvedChunking } else { $script:Config.chunking_profile_path })) $false
