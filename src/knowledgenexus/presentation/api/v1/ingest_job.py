@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import uuid4
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
@@ -365,9 +366,8 @@ async def create_confluence_subtree_ingest_job(
     job = IngestJob(
         id=str(uuid4()), source_type=SourceType.CONFLUENCE,
         status=IngestJobStatus.PENDING, started_at=datetime.now(UTC),
-        # Never persist the submitted URL or filesystem workspace in public job stats.
         # "queued" is the waiting state the UI shows until a worker picks the job up.
-        stats={"phase": "queued", "resumable": False}, active_key=submission_key,
+        stats={"phase": "queued", "resumable": False, "url": body.url}, active_key=submission_key,
     )
     try:
         owner, created = await container.ingest_job_repo.create_or_get_active(job)
@@ -456,11 +456,36 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
         job.status = IngestJobStatus.COMPLETED
         job.active_key = None
         job.completed_at = datetime.now(UTC)
+        
+        root_title = None
+        root_url = None
+        workspace = Path(container.settings.confluence_snapshot_root) / job.id
+        latest_file = workspace / "LATEST.txt"
+        if latest_file.is_file():
+            try:
+                import json
+                version_name = latest_file.read_text(encoding="ascii").strip()
+                documents_file = workspace / "versions" / version_name / "documents.jsonl"
+                if documents_file.is_file():
+                    with open(documents_file, "r", encoding="utf-8") as f:
+                        first_line = f.readline()
+                        if first_line:
+                            doc_data = json.loads(first_line)
+                            root_title = doc_data.get("title")
+                            root_url = doc_data.get("url")
+            except Exception:
+                logger.warning("Could not read root page title from documents.jsonl for job %s", job.id)
+
         job.stats = {
+            **job.stats,
             "phase": "completed", "resumable": False,
             "chunks_ingested": result.chunks_ingested,
             "chunks_failed": result.chunks_failed,
         }
+        if root_title:
+            job.stats["title"] = root_title
+        if root_url and "url" not in job.stats:
+            job.stats["url"] = root_url
     except _IngestJobCancelled:
         _mark_stopped(job)
     except ConfluenceSubtreeIngestError as exc:

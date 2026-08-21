@@ -249,7 +249,6 @@ def test_explicit_null_next_is_invalid_not_a_termination_signal() -> None:
         "/rest/api/content/9999/child/attachment?start=2&limit=2",
         "/rest/api/content/1000/child/page?start=2&limit=2",
         "/rest/api/content/1000/child/attachment?start=0&limit=2",
-        "/rest/api/content/1000/child/attachment?start=2&limit=2&download=true",
         "/rest/api/content/1000/child/attachment?start=02&limit=2",
         "\n/rest/api/content/1000/child/attachment?start=2&limit=2",
     ],

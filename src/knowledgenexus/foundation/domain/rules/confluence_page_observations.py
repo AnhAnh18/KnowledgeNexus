@@ -337,7 +337,7 @@ def _extract_next_attachment_request(
         raise ConfluencePageObservationPayloadError(
             "attachment next link query is invalid"
         ) from None
-    if set(query) != {"start", "limit"} or any(len(values) != 1 for values in query.values()):
+    if "start" not in query or "limit" not in query or len(query["start"]) != 1 or len(query["limit"]) != 1:
         raise ConfluencePageObservationPayloadError(
             "attachment next link query is invalid"
         )

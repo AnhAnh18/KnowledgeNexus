@@ -543,14 +543,14 @@
             }
         }
 
-        // ============ Ingest từ URL (Confluence) — hỗ trợ nhiều job cùng lúc ============
-        // Backend xếp mọi submit vào một hàng đợi và xử lý tuần tự, nên UI ở đây
-        // không khoá nút "Bắt đầu Ingest": người dùng gửi liên tiếp nhiều URL, mỗi
-        // job có card riêng + vòng poll riêng khoá theo jobId. Job đang đợi tới lượt
-        // hiển thị PENDING (phase "queued") cho tới khi worker nhấc nó lên.
+        // ============ Ingest from URL (Confluence) — support multiple concurrent jobs ============
+        // The backend processes all submissions sequentially in a queue.
+        // Therefore, the "Start Ingest" button is not locked; users can submit multiple URLs consecutively.
+        // Each job gets its own card and independent polling loop tied to its jobId.
+        // Queued jobs show a WAITING status (phase "queued") until a worker picks them up.
         const ingestJobPolls = new Map(); // jobId -> {timer, failures, inFlight}
         const TRACKED_INGEST_JOBS_KEY = 'kn_confluence_subtree_jobs';
-        const LEGACY_INGEST_JOB_KEY = 'kn_confluence_subtree_job'; // bản 1-job trước đây
+        const LEGACY_INGEST_JOB_KEY = 'kn_confluence_subtree_job'; // Legacy single-job key
 
         function loadTrackedIngestJobIds() {
             let ids = [];
@@ -560,8 +560,7 @@
             } catch (e) {
                 ids = [];
             }
-            // Nâng cấp từ bản chỉ theo dõi 1 job: job đang chạy dở lúc deploy vẫn
-            // được nối lại thay vì mất card. Chỉ chạy một lần rồi xoá khoá cũ.
+            // Upgrade from the legacy single-job tracker so ongoing jobs are not lost.
             const legacy = localStorage.getItem(LEGACY_INGEST_JOB_KEY);
             if (legacy) {
                 localStorage.removeItem(LEGACY_INGEST_JOB_KEY);
@@ -576,7 +575,7 @@
         function trackIngestJobId(jobId) {
             const ids = loadTrackedIngestJobIds().filter(id => id !== jobId);
             ids.push(jobId);
-            // Giữ lại 20 job gần nhất để localStorage không phình vô hạn.
+            // Retain the 20 most recent jobs to prevent localStorage from growing indefinitely.
             localStorage.setItem(TRACKED_INGEST_JOBS_KEY, JSON.stringify(ids.slice(-20)));
         }
 
@@ -594,75 +593,70 @@
         function ingestStatusLabel(job) {
             const phase = (job.stats || {}).phase;
             if (job.status === 'pending') return phase === 'queued' ? 'WAITING' : 'PENDING';
-            if (job.status === 'cancelled') return 'ĐÃ HUỶ';
-            if (job.status === 'paused') return 'TẠM DỪNG';
+            if (job.status === 'cancelled') return 'CANCELLED';
+            if (job.status === 'paused') return 'PAUSED';
             return String(job.status).toUpperCase();
         }
 
-        // Thứ tự phase mà backend thực sự phát ra, dùng để hiện "bước k/n".
-        // Foundation chỉ báo ở ranh giới phase (khoảng 11 lần cho cả job), nên
-        // số bước là thứ duy nhất cho thấy job đang tiến, không phải treo.
+        // Ordered phases emitted by the backend, used to display "Step X/N".
+        // Since Foundation only reports at phase boundaries, the step count is
+        // the only indicator of active progress (so it doesn't look frozen).
         const INGEST_PHASES = [
-            ['queued', 'Đang chờ trong hàng đợi'],
-            ['resolving_url', 'Phân giải URL'],
-            ['inventory', 'Kiểm kê cây trang'],
-            ['capture_pages', 'Tải trang về'],
-            ['process_pages', 'Xử lý nội dung'],
-            ['capture_drawio', 'Tải sơ đồ draw.io'],
-            ['export_packet', 'Dựng gói dữ liệu'],
-            ['publish_packet', 'Công bố gói'],
-            ['indexing_validate', 'Kiểm tra gói'],
-            ['indexing_embed', 'Sinh embedding'],
-            ['indexing_store', 'Ghi vào kho vector'],
-            ['completed', 'Hoàn tất'],
+            ['queued', 'Waiting in queue'],
+            ['resolving_url', 'Resolving URL'],
+            ['inventory', 'Inventorying page tree'],
+            ['capture_pages', 'Capturing pages'],
+            ['process_pages', 'Processing page content'],
+            ['capture_drawio', 'Capturing Draw.io diagrams'],
+            ['export_packet', 'Exporting data packet'],
+            ['publish_packet', 'Publishing packet'],
+            ['indexing_validate', 'Validating indexing packet'],
+            ['indexing_embed', 'Generating chunk embeddings'],
+            ['indexing_store', 'Storing in Vector DB'],
+            ['completed', 'Completed'],
         ];
 
         function ingestPhaseText(stats) {
             if (!stats.phase) return '';
             if (['failed', 'cancelled', 'paused'].includes(stats.phase)) {
-                // Nói rõ dừng ở bước nào — nếu không thì phải vào máy chạy
-                // server đọc traceback mới biết.
-                const nhan = {cancelled: 'Đã huỷ ở bước', paused: 'Tạm dừng ở bước'}[stats.phase]
-                    || 'Thất bại ở bước';
+                const label = {cancelled: 'Cancelled at step', paused: 'Paused at step'}[stats.phase]
+                    || 'Failed at step';
                 const at = INGEST_PHASES.find(entry => entry[0] === stats.failed_phase);
-                return at ? `${nhan}: ${escapeHtml(at[1])}` : nhan.replace(' ở bước', '');
+                return at ? `${label}: ${escapeHtml(at[1])}` : label.replace(' at step', '');
             }
             const index = INGEST_PHASES.findIndex(entry => entry[0] === stats.phase);
             if (index < 0) return escapeHtml(stats.phase);
-            return `Bước ${index + 1}/${INGEST_PHASES.length} — ${escapeHtml(INGEST_PHASES[index][1])}`;
+            return `Step ${index + 1}/${INGEST_PHASES.length} — ${escapeHtml(INGEST_PHASES[index][1])}`;
         }
 
         function ingestCounters(stats) {
-            // captured_pages là số của riêng lượt capture vừa xong (mỗi lượt 1
-            // batch), còn replayed_pages là số đã commit từ các lượt trước —
-            // cộng lại mới ra tiến độ thật, hiện riêng captured_pages sẽ tụt số.
-            // PATCH /ingest-jobs/{id} cho phép ghi stats tuỳ ý, nên mọi giá trị
-            // hiển thị đều phải escape kể cả khi bình thường chúng là số.
+            // captured_pages is for the current batch only, while replayed_pages
+            // represents previously committed pages — sum them for true progress.
             const num = value => escapeHtml(String(value));
             const parts = [];
             if (stats.requested_pages !== undefined) {
-                parts.push(`Cần lấy: ${num(stats.requested_pages)}`);
+                parts.push(`Required: ${num(stats.requested_pages)}`);
             }
             if (stats.captured_pages !== undefined) {
                 const captured = Number(stats.captured_pages) || 0;
                 const replayed = Number(stats.replayed_pages) || 0;
                 const total = stats.requested_pages;
                 parts.push(
-                    `Đã lấy: ${num(captured + replayed)}`
+                    `Captured: ${num(captured + replayed)}`
                     + (total !== undefined ? `/${num(total)}` : '')
                 );
             }
             if (stats.capture_failed_pages) {
-                parts.push(`⚠️ Trang lỗi: ${num(stats.capture_failed_pages)}`);
+                parts.push(`⚠️ Failed Pages: ${num(stats.capture_failed_pages)}`);
             }
             if (stats.embedded_chunks !== undefined) {
                 const total = stats.total_chunks;
                 parts.push(`Embedding: ${num(stats.embedded_chunks)}${total !== undefined ? '/' + num(total) : ''}`);
             }
-            if (stats.document_count !== undefined) parts.push(`Tài liệu: ${num(stats.document_count)}`);
-            if (stats.chunk_count !== undefined) parts.push(`Chunk: ${num(stats.chunk_count)}`);
-            if (stats.chunks_ingested !== undefined) parts.push(`✅ Đã nạp: ${num(stats.chunks_ingested)}`);
-            if (stats.chunks_failed) parts.push(`⚠️ Nạp lỗi: ${num(stats.chunks_failed)}`);
+            if (stats.document_count !== undefined) parts.push(`Documents: ${num(stats.document_count)}`);
+            if (stats.chunk_count !== undefined) parts.push(`Chunks: ${num(stats.chunk_count)}`);
+            if (stats.chunks_ingested !== undefined) parts.push(`✅ Ingested: ${num(stats.chunks_ingested)}`);
+            if (stats.chunks_failed) parts.push(`⚠️ Failed: ${num(stats.chunks_failed)}`);
             if (stats.embedding_model) parts.push(`🧠 ${escapeHtml(String(stats.embedding_model))}`);
             return parts;
         }
@@ -670,17 +664,25 @@
         function renderIngestJobCard(job) {
             const cls = ingestStatusClass(job.status);
             const stats = job.stats || {};
-            // Job tam dung resume duoc y het job loi resume duoc: cung mot
-            // workspace do dang tren dia.
+            // A paused job is resumable in the same way a failed-resumable job is (has local workspace).
             const resumable = ['failed', 'paused'].includes(job.status) && stats.resumable === true;
-            const dangChay = job.status === 'pending' || job.status === 'running';
-            // Dang xep hang thi chua lam gi -> "Huy". Dang chay thi da co
-            // workspace -> "Tam dung", va chay tiep duoc.
-            const nhanDung = job.status === 'running' ? '⏸ Tạm dừng job này' : '✖ Huỷ job này';
+            const running = job.status === 'pending' || job.status === 'running';
+            const cancelLabel = job.status === 'running' ? '⏸ Pause job' : '✖ Cancel job';
+            
+            // Build clickable hyperlink for job title
+            const shortId = job.id.substring(0, 8);
+            let linkHtml = `Job ${escapeHtml(shortId)}`;
+            if (stats.url) {
+                const displayTitle = stats.title || stats.url;
+                linkHtml = `Job ${escapeHtml(shortId)}: <a href="${escapeHtml(stats.url)}" target="_blank" style="color: #4361ee; text-decoration: underline; font-weight: 600;">${escapeHtml(displayTitle)}</a>`;
+            } else if (stats.title) {
+                linkHtml = `Job ${escapeHtml(shortId)}: <span style="font-weight: 600;">${escapeHtml(stats.title)}</span>`;
+            }
+
             return `
                 <div class="result-item">
                     <div class="result-header">
-                        <div class="result-title">Job ${escapeHtml(job.id.substring(0, 8))}...</div>
+                        <div class="result-title">${linkHtml}</div>
                         <span class="badge ${cls}"><span class="dot ${cls}"></span> ${escapeHtml(ingestStatusLabel(job))}</span>
                     </div>
                     <div class="result-meta">
@@ -688,8 +690,8 @@
                         ${ingestCounters(stats).map(text => `<span>${text}</span>`).join('')}
                     </div>
                     ${job.error ? `<div class="result-content" style="color:#c0392b;">❌ ${escapeHtml(job.error)}</div>` : ''}
-                    ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Tiếp tục job này</button>` : ''}
-                    ${dangChay ? `<button class="btn" onclick="cancelIngest('${escapeHtml(job.id)}')">${nhanDung}</button>` : ''}
+                    ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Resume job</button>` : ''}
+                    ${running ? `<button class="btn" onclick="cancelIngest('${escapeHtml(job.id)}')">${cancelLabel}</button>` : ''}
                 </div>
             `;
         }
@@ -705,7 +707,7 @@
             if (existing) {
                 existing.outerHTML = html;
             } else {
-                container.insertAdjacentHTML('afterbegin', html); // job mới nhất lên đầu
+                container.insertAdjacentHTML('afterbegin', html); // Insert newest job card at the top
             }
         }
 

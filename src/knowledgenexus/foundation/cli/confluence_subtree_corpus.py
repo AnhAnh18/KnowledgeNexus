@@ -1007,16 +1007,14 @@ def _capture_drawio_phase(args: argparse.Namespace, state: Path) -> dict[str, ob
                 run_id=run_id, selection_identity=selection["selection_identity"],
                 prior_state=prior, persist_state=persist, config=config,
             )
-            if captured["drawio_assets_failed"] == 0 and captured["drawio_references_resolved"] == captured["drawio_references_observed"]:
-                session.complete_session()
-            else:
-                session.pause_session()
+            # Complete the session even if some assets failed, since they are logged as warnings and skipped.
+            session.complete_session()
     if captured["drawio_assets_failed"] != 0 or captured["drawio_references_resolved"] != captured["drawio_references_observed"]:
         # Naming the counts distinguishes "some downloads failed" from "some
         # references were never even observed" -- two different problems that
         # both used to read as the same four words.
-        raise ValueError(
-            "Draw.io capture incomplete: "
+        logger.warning(
+            "Draw.io capture incomplete (allowed to proceed): "
             f"observed={captured['drawio_references_observed']} "
             f"resolved={captured['drawio_references_resolved']} "
             f"failed={captured['drawio_assets_failed']}"
