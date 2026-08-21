@@ -995,13 +995,14 @@ def test_five_phases_run_sequentially_against_one_state_dir_and_run_id(monkeypat
 
     # Phase 1: inventory -- real checkpoint DB, real fingerprint/run-id, root included.
     # The first call starts the run and drives the underlying crawl loop to
-    # completion inside one session, but (matching production: activation
-    # snapshots are captured once and are not refreshed by later commits) it
-    # reports the pre-crawl snapshot and cannot yet publish a selection. A
-    # second, resumed call observes the now-complete state and publishes it --
-    # this two-call polling shape is the real, intended operator flow.
+    # completion inside one session, and (refreshed by our bug fix to reload
+    # the completed snapshot) it successfully reports the completed snapshot and
+    # publishes the selection immediately. A second, resumed call observes the
+    # already-complete state and reads it back identically.
     first_inventory_call = cli._inventory_phase(_args(**base), state)
-    assert first_inventory_call["selected_pages"] == 0
+    assert first_inventory_call["status"] == "complete"
+    assert first_inventory_call["selected_pages"] == 2
+    assert first_inventory_call["run_id"] is not None
 
     inventory_result = cli._inventory_phase(_args(**base, resume_unique=True), state)
     assert inventory_result["status"] == "complete"

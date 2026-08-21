@@ -726,6 +726,13 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
     snapshot = result.snapshot
     if snapshot is None:
         raise ValueError("inventory snapshot missing")
+    if result.status == "completed":
+        from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import CheckpointRunInventoryComplete
+        with composition.checkpoint_run_port.resume_explicit_run_id(
+            ResumeExplicitRunRequest(run_id=snapshot.run_id, **common)
+        ) as outcome:
+            if isinstance(outcome, CheckpointRunInventoryComplete):
+                snapshot = outcome.snapshot
     if snapshot.inventory_phase.value != "complete":
         return {"status": result.status, "phase": "inventory", "selected_pages": 0}
     activation_request = ActivateRawGenerationRequest(run_id=snapshot.run_id, **common)
