@@ -17,7 +17,7 @@ from knowledgenexus.foundation.domain.models import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-PROFILE_PATH = REPOSITORY_ROOT / "contracts" / "foundation" / "embedding_profile.yaml"
+PROFILE_PATH = REPOSITORY_ROOT / "config" / "foundation" / "embedding_profile.yaml"
 
 
 def _argv() -> list[str]:

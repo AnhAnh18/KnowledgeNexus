@@ -45,8 +45,8 @@ category when false. Do not return the path list or blob hashes.
 
 ## Profile and asset preflight
 
-Use the exact committed `contracts/foundation/crawl_reliability_profile.yaml`
-and `contracts/foundation/embedding_profile.yaml`. The BGE-M3 bundle must be
+Use the exact committed `config/foundation/crawl_reliability_profile.yaml`
+and `config/foundation/embedding_profile.yaml`. The BGE-M3 bundle must be
 an explicit external directory matching the committed profile; implicit cache
 or network fallback is forbidden. If the bundle is absent, asset-backed tests
 must fail or be reported not run, never silently skip as passed.

@@ -12,7 +12,7 @@ from knowledgenexus.foundation.infrastructure.config import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-PROFILE_PATH = REPOSITORY_ROOT / "contracts" / "foundation" / "embedding_profile.yaml"
+PROFILE_PATH = REPOSITORY_ROOT / "config" / "foundation" / "embedding_profile.yaml"
 
 
 def _profile_mapping() -> dict[str, object]:

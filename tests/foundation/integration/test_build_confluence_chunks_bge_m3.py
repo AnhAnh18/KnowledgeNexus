@@ -23,7 +23,7 @@ from knowledgenexus.shared.contracts.foundation.schema_validator import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-PROFILE_PATH = REPOSITORY_ROOT / "contracts" / "foundation" / "embedding_profile.yaml"
+PROFILE_PATH = REPOSITORY_ROOT / "config" / "foundation" / "embedding_profile.yaml"
 
 
 def test_real_bge_m3_forced_split_is_exact_schema_valid_and_deterministic(

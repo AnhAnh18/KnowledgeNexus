@@ -143,7 +143,7 @@ def test_capture_delta_inventory_phase_writes_raw_then_derived_artifact(tmp_path
     monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://example.test")
     monkeypatch.setattr(confluence_infra, "compose_live_subtree", lambda **kwargs: _FakeComposition(session))
     monkeypatch.setattr(retry_infra, "RetryingConfluenceHttpTransport", lambda **kwargs: transport)
-    profile = Path("contracts/foundation/crawl_reliability_profile.yaml").resolve()
+    profile = Path("config/foundation/crawl_reliability_profile.yaml").resolve()
     argv = [
         "capture-delta-inventory", "--state-dir", str(state), "--max-pages", "10",
         "--batch-size", "1", "--raw-root", str(raw), "--run-id", str(RUN),

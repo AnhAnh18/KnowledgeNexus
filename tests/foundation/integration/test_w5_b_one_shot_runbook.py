@@ -258,17 +258,19 @@ def test_simple_profile_reaches_offline_preflight_without_manual_git_fields(
         pytest.skip("PowerShell or Git is unavailable")
     repo = tmp_path / "repo" / "KnowledgeNexus"
     scripts = repo / "scripts"
+    config_dir = repo / "config" / "foundation"
     contracts = repo / "contracts" / "foundation"
     scripts.mkdir(parents=True)
+    config_dir.mkdir(parents=True)
     contracts.mkdir(parents=True)
     shutil.copy2(SCRIPT, scripts / SCRIPT.name)
-    (contracts / "crawl_reliability_profile.yaml").write_text(
+    (config_dir / "crawl_reliability_profile.yaml").write_text(
         "minimum_request_interval_seconds: 3.0\n"
         "max_total_requests_per_run: 50000\n"
         "minimum_free_disk_reserve_bytes: 1\n",
         encoding="utf-8",
     )
-    (contracts / "embedding_profile.yaml").write_text("profile: test\n", encoding="utf-8")
+    (config_dir / "embedding_profile.yaml").write_text("profile: test\n", encoding="utf-8")
     (contracts / "jira_relation_profile.yaml").write_text("profile: test\n", encoding="utf-8")
     subprocess.run([git, "init", "-q", str(repo)], check=True)
     subprocess.run([git, "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
@@ -397,20 +399,22 @@ def test_recovery_only_audits_existing_snapshots_without_exporter_invocation(
     if powershell is None or git is None:
         pytest.skip("PowerShell or Git is unavailable")
     repo = tmp_path / "repo"
+    config_dir = repo / "config" / "foundation"
     contracts = repo / "contracts" / "foundation"
     scripts = repo / "scripts"
+    config_dir.mkdir(parents=True)
     contracts.mkdir(parents=True)
     scripts.mkdir(parents=True)
     shutil.copytree(ROOT / "src", repo / "src")
     shutil.copy2(SCRIPT, scripts / SCRIPT.name)
     shutil.copytree(ROOT / "contracts" / "foundation" / "schemas", contracts / "schemas")
-    (contracts / "crawl_reliability_profile.yaml").write_text(
+    (config_dir / "crawl_reliability_profile.yaml").write_text(
         "minimum_request_interval_seconds: 3.0\n"
         "max_total_requests_per_run: 50000\n"
         "minimum_free_disk_reserve_bytes: 8589934592\n",
         encoding="utf-8",
     )
-    (contracts / "embedding_profile.yaml").write_text("profile: test\n", encoding="utf-8")
+    (config_dir / "embedding_profile.yaml").write_text("profile: test\n", encoding="utf-8")
     (contracts / "jira_relation_profile.yaml").write_text("profile: test\n", encoding="utf-8")
     subprocess.run([git, "init", "-q", str(repo)], check=True)
     subprocess.run([git, "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
@@ -452,8 +456,8 @@ def test_recovery_only_audits_existing_snapshots_without_exporter_invocation(
         "state_dir": str(state),
         "max_pages": 5000,
         "raw_root": str(raw),
-        "reliability_profile_path": str(contracts / "crawl_reliability_profile.yaml"),
-        "chunking_profile_path": str(contracts / "embedding_profile.yaml"),
+        "reliability_profile_path": str(config_dir / "crawl_reliability_profile.yaml"),
+        "chunking_profile_path": str(config_dir / "embedding_profile.yaml"),
         "jira_relation_profile_path": str(contracts / "jira_relation_profile.yaml"),
         "tokenizer_assets_dir": str(tmp_path / "not-used-tokenizer"),
         "space_key": "SPACE",

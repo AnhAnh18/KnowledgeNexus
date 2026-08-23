@@ -11,7 +11,7 @@ CONTRACT_ROOT = REPOSITORY_ROOT / "contracts" / "foundation"
 
 
 def test_chunking_spec_and_profile_lock_the_same_active_identity_and_budget() -> None:
-    profile = load_chunking_profile(CONTRACT_ROOT / "embedding_profile.yaml")
+    profile = load_chunking_profile(REPOSITORY_ROOT / "config" / "foundation" / "embedding_profile.yaml")
     specification = (CONTRACT_ROOT / "CHUNKING_SPEC.md").read_text(encoding="utf-8")
 
     expected_fragments = (

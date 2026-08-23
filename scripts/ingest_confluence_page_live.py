@@ -24,7 +24,7 @@ Hoặc ghi đè bất kỳ tham số nào nếu cần:
     python scripts/ingest_confluence_page_live.py \\
         --url "https://confluence-mx.sec.samsung.net/spaces/SVMC/pages/2113438062/SPen+Work+principles" \\
         --raw-root "./data/confluence-raw" \\
-        --profile-path "contracts/foundation/embedding_profile.yaml" \\
+        --profile-path "config/foundation/embedding_profile.yaml" \\
         --tokenizer-assets-dir "D:\\Tools\\BAAI_bge-m3"
 """
 
@@ -80,7 +80,7 @@ _DEFAULT_URL = (
     "SPen+Work+principles"
 )
 _DEFAULT_RAW_ROOT = _REPO_ROOT / "data" / "confluence-raw"
-_DEFAULT_PROFILE_PATH = _REPO_ROOT / "contracts" / "foundation" / "embedding_profile.yaml"
+_DEFAULT_PROFILE_PATH = _REPO_ROOT / "config" / "foundation" / "embedding_profile.yaml"
 
 
 def _parse_args(*, default_tokenizer_assets_dir: str | None) -> argparse.Namespace:

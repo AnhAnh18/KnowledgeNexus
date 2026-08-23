@@ -65,7 +65,7 @@ from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-APPROVED_PROFILE_PATH = REPO_ROOT / "contracts" / "foundation" / "crawl_reliability_profile.yaml"
+APPROVED_PROFILE_PATH = REPO_ROOT / "config" / "foundation" / "crawl_reliability_profile.yaml"
 
 
 main = cli.main

@@ -10,7 +10,7 @@ from knowledgenexus.foundation.cli import materialize_confluence_acl as cli
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 CHUNK_PROFILE_PATH = (
-    REPOSITORY_ROOT / "contracts" / "foundation" / "embedding_profile.yaml"
+    REPOSITORY_ROOT / "config" / "foundation" / "embedding_profile.yaml"
 )
 JIRA_PROFILE_PATH = (
     REPOSITORY_ROOT / "contracts" / "foundation" / "jira_relation_profile.yaml"

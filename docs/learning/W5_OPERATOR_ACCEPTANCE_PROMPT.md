@@ -72,8 +72,8 @@ contracts/foundation/DELTA_SECOND_SYNC_SPEC.md
 contracts/foundation/CRAWL_RELIABILITY_SPEC.md
 contracts/foundation/RETRY_POLICY_SPEC.md
 contracts/foundation/RAW_GENERATION_SPEC.md
-contracts/foundation/embedding_profile.yaml
-contracts/foundation/crawl_reliability_profile.yaml
+config/foundation/embedding_profile.yaml
+config/foundation/crawl_reliability_profile.yaml
 docs/learning/CONFLUENCE_FOUNDATION_CLOSEOUT_PLAN.md
 docs/learning/CONFLUENCE_AUTOMATION_READINESS.md
 docs/learning/W1W2_PROMPT_M10_OPERATOR_PIPELINE.md

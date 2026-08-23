@@ -200,7 +200,7 @@ minimum_free_disk_reserve_bytes: 8589934592
 ```
 
 These values are materialized by M7-A2 in
-`contracts/foundation/crawl_reliability_profile.yaml`. The profile remains a
+`config/foundation/crawl_reliability_profile.yaml`. The profile remains a
 contract artifact and authorizes no runtime behavior. Values may change only
 through a new `profile_version` and, because the fingerprint is derived from
 effective configuration (§2.K), a new crawl fingerprint.
