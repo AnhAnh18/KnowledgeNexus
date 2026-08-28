@@ -95,6 +95,8 @@
         .btn-primary:hover { background: #3a56d4; }
         .btn-success { background: #2ecc71; color: #fff; }
         .btn-success:hover { background: #27ae60; }
+        .btn-secondary { background: #6c757d; color: #fff; }
+        .btn-secondary:hover { background: #5a6268; }
         .btn-danger { background: #e74c3c; color: #fff; }
         .btn-danger:hover { background: #c0392b; }
         .btn:disabled { background: #aaa; cursor: not-allowed; }
@@ -272,6 +274,7 @@
             </div>
             <button class="btn btn-success" id="ingestBtn" onclick="startIngest()">🚀 Bắt đầu Ingest</button>
             <button class="btn btn-primary" id="syncPreviewBtn" onclick="startSyncPreview()">🔄 Sync (preview)</button>
+            <button class="btn btn-secondary" id="syncAllBtn" onclick="startSyncAll()">🔄 Sync All</button>
             <div id="ingestStatus" class="scroll-list-3" style="margin-top:16px;"></div>
         </div>
     </div>
@@ -744,11 +747,10 @@
             // actually found something to do.
             const applicable = stats.kind === 'sync_preview' && job.status === 'completed'
                 && stats.url && (stats.new_pages || stats.changed_pages || stats.deleted_pages);
-            // Offer a per-URL sync check on any completed root that has been
-            // ingested or previously synced — so the operator picks exactly
-            // which link to sync from its own card, not the top input box.
-            const canSyncThis = job.status === 'completed' && stats.url
-                && (stats.kind === 'subtree' || stats.kind === 'sync_apply');
+            // Offer a per-URL sync check on any completed card that has a URL,
+            // so the operator picks exactly which link to sync from its own
+            // card, not the top input box.
+            const canSyncThis = job.status === 'completed' && stats.url;
             
             // Build clickable hyperlink for job title
             const shortId = job.id.substring(0, 8);
@@ -905,7 +907,7 @@
                 trackIngestJobId(job.id);
                 upsertIngestJobCard(job);
                 pollIngestJob(job.id);
-                showToast(message, 'success');
+                if (message) showToast(message, 'success');  // bulk callers pass '' to stay quiet
             } catch (e) {
                 showToast('Could not create sync job: ' + e.message, 'error');
             } finally {
@@ -926,6 +928,40 @@
                 'Sync check queued; the index is not modified.',
                 fromCard ? null : 'syncPreviewBtn',
             );
+        }
+
+        // Sync All is preview-only across every root, never apply: a bulk
+        // delete without per-root review would be too easy to trigger by
+        // accident. The operator still applies each root from its own card.
+        async function startSyncAll() {
+            const btn = document.getElementById('syncAllBtn');
+            btn.disabled = true;
+            try {
+                const res = await fetch(getApiBase() + '/api/v1/ingest-jobs?limit=100');
+                if (!res.ok) throw new Error('API error');
+                const jobs = await res.json();
+                // One preview per distinct ingested root. A root is a completed
+                // ingest or a prior sync; dedupe on the canonical URL so the
+                // same root is not previewed twice.
+                const roots = new Map();
+                for (const job of jobs) {
+                    const s = job.stats || {};
+                    const url = s.canonical_url || s.url;
+                    if (job.status === 'completed' && url
+                        && ['subtree', 'sync_apply', 'sync_preview'].includes(s.kind)) {
+                        roots.set(url, true);
+                    }
+                }
+                if (roots.size === 0) { showToast('No ingested roots to sync', 'error'); return; }
+                for (const url of roots.keys()) {
+                    await submitSyncJob(url, '/api/v1/ingest-jobs/confluence-subtrees/sync-preview', '', null);
+                }
+                showToast(`Queued sync check for ${roots.size} root(s); the index is not modified.`, 'success');
+            } catch (e) {
+                showToast('Sync All failed: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         async function startSyncApply(url) {
