@@ -136,6 +136,13 @@
         }
         .result-meta { font-size: 12px; color: #888; display: flex; gap: 12px; flex-wrap: wrap; }
         .result-meta span { background: #eee; padding: 2px 8px; border-radius: 4px; }
+        /* Sync summary: its own block so it never inherits result-content's
+           pre-wrap, which rendered the template's indentation literally. */
+        .sync-summary { font-size: 14px; color: #444; margin: 8px 0; }
+        .sync-summary .counts { display: flex; gap: 8px; flex-wrap: wrap; }
+        .sync-summary .counts span { background: #eef2ff; padding: 3px 10px; border-radius: 6px; }
+        .sync-summary .removed { margin-top: 6px; }
+        .sync-summary .warn { color: #b26a00; margin-bottom: 6px; }
 
         /* Documents table */
         table { width: 100%; border-collapse: collapse; }
@@ -675,20 +682,19 @@
         function renderSyncSummary(stats) {
             if (stats.new_pages === undefined) return '';
             const num = value => escapeHtml(String(value ?? 0));
-            const baseline = stats.baseline_found === false
-                ? '<div style="color:#b26a00;">⚠️ Chưa có bản index trước cho URL này — không thể tính trang bị xoá.</div>'
+            const warn = stats.baseline_found === false
+                ? '<div class="warn">⚠️ Chưa có bản index trước cho URL này — không thể tính trang bị xoá.</div>'
                 : '';
-            return `
-                <div class="result-content">
-                    ${baseline}
-                    <div>🆕 Trang mới: <b>${num(stats.new_pages)}</b> ·
-                         ✏️ Trang thay đổi: <b>${num(stats.changed_pages)}</b> ·
-                         🗑️ Trang đã xoá: <b>${num(stats.deleted_pages)}</b> ·
-                         ➖ Không đổi: <b>${num(stats.unchanged_pages)}</b></div>
-                    ${stats.tombstoned_pages !== undefined
-                        ? `<div>Đã gỡ khỏi index: <b>${num(stats.tombstoned_pages)}</b> trang</div>` : ''}
-                </div>
-            `;
+            const removed = stats.tombstoned_pages !== undefined
+                ? `<div class="removed">Đã gỡ khỏi index: <b>${num(stats.tombstoned_pages)}</b> trang</div>`
+                : '';
+            // Kept on one line so no indentation leaks into the rendered HTML.
+            return `<div class="sync-summary">${warn}<div class="counts">`
+                + `<span>🆕 Trang mới: <b>${num(stats.new_pages)}</b></span>`
+                + `<span>✏️ Thay đổi: <b>${num(stats.changed_pages)}</b></span>`
+                + `<span>🗑️ Đã xoá: <b>${num(stats.deleted_pages)}</b></span>`
+                + `<span>➖ Không đổi: <b>${num(stats.unchanged_pages)}</b></span>`
+                + `</div>${removed}</div>`;
         }
 
         function renderIngestJobCard(job) {
