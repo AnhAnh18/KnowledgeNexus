@@ -14,6 +14,55 @@ contracts. Every phase still runs over the full inventory and produces the same
 full packet; the unchanged pages are simply captured from disk instead of the
 network.
 
+## Why reuse, not "crawl only the changed/deleted pages"
+
+The intuitive design — hand the crawler a short list of just the changed and
+new pages, skip everything else — was rejected on purpose. It fights the crawl
+contract in three places, none of which is a local edit:
+
+1. **You must list the whole tree anyway.** You cannot know which pages changed,
+   are new, or were deleted without enumerating the current tree and comparing
+   versions. The inventory phase already does this, and it is cheap — it reads
+   page metadata/versions through the search API, not page bodies. So the only
+   thing worth avoiding is the **body fetch**, not the listing. Baseline reuse
+   avoids exactly that and nothing else.
+
+2. **Capture is bound to its full inventory.** `CaptureConfluenceSubtreePages`
+   captures every occurrence the inventory streamed, and the capture-pages phase
+   rejects a selection that does not match that stream
+   (`selection binding mismatch`). Handing it a narrowed page list is refused by
+   contract. Relaxing that check is not one line: `selection_identity` is a hash
+   that threads through capture → process → export → drawio, and every phase
+   re-derives and re-validates it against the full streamed inventory.
+
+3. **The checkpoint model has no notion of a "partial-but-complete" crawl.** A
+   raw generation is complete only when the whole inventory is captured; a
+   subset leaves the session *paused* (resume later), and `export` requires
+   `page_corpus_complete`. So "complete a generation that only fetched the
+   changed pages" contradicts the model — it would either refuse to complete or
+   require rewriting the completeness invariant, which is reviewed, `PASS`-gated
+   contract code (see `.local_ai/ROADMAP.md`, `IMPLEMENTATION_STATE.md`).
+
+And the delta building blocks do **not** cover this: `CaptureDeltaInventory`
+only probes `prior − current` (pages that vanished) to classify
+`SOURCE_DELETED` / `ACCESS_REVOKED` / `MOVED_OUT_OF_SCOPE`. It is a deletion
+classifier, never an incremental fetch of changed pages, and it reads a
+different (dataset) snapshot format than the live-sync packet. See
+`LIVE_SYNC_APPROACH_B_SURVEY.md` §3.
+
+**Deletions** are handled without any of this: the version diff (inventory vs
+baseline packet) already tells us which pages disappeared, and `execute_sync`
+tombstones them directly in the index (chunks + vectors + document row). We do
+not need the crawler to "crawl a deleted page" — a deleted page has nothing to
+crawl; the diff is the signal, and the tombstone is a delete against our own
+stores.
+
+So the reuse design keeps the entire reviewed pipeline intact (full inventory,
+full capture, full packet, full fidelity) and removes only the one thing that is
+both expensive and genuinely redundant: re-downloading the body of a page whose
+version did not move. It is the smallest change that captures the real saving
+without touching a single contract invariant.
+
 ## Why this is safe
 
 - `ConfluencePageFetchPort` is a one-method protocol: `fetch_page_raw(page_id)
