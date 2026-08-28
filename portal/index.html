@@ -271,7 +271,7 @@
                     placeholder="https://confluence.example.com/pages/viewpage.action?pageId=12345" />
             </div>
             <button class="btn btn-success" id="ingestBtn" onclick="startIngest()">🚀 Bắt đầu Ingest</button>
-            <button class="btn btn-primary" id="syncPreviewBtn" onclick="startSyncPreview()">🔄 Đồng bộ (kiểm tra trước)</button>
+            <button class="btn btn-primary" id="syncPreviewBtn" onclick="startSyncPreview()">🔄 Sync (preview)</button>
             <div id="ingestStatus" class="scroll-list-3" style="margin-top:16px;"></div>
         </div>
     </div>
@@ -691,24 +691,24 @@
             // to the index yet, or is it only a preview of what would change?
             let status = '';
             if (done && stats.kind === 'sync_apply') {
-                status = '<div class="sync-state applied">✅ ĐÃ đồng bộ vào index</div>';
+                status = '<div class="sync-state applied">✅ Synced to index</div>';
             } else if (done && stats.kind === 'sync_preview') {
                 status = hasChanges
-                    ? '<div class="sync-state pending">⏳ Mới KIỂM TRA — chưa áp dụng. Bấm “Áp dụng đồng bộ” bên dưới để cập nhật index.</div>'
-                    : '<div class="sync-state applied">✅ Index đã khớp nguồn — không cần đồng bộ.</div>';
+                    ? '<div class="sync-state pending">⏳ Preview only — not applied. Click “Apply sync” below to update the index.</div>'
+                    : '<div class="sync-state applied">✅ Index matches the source — no sync needed.</div>';
             }
             const warn = stats.baseline_found === false
-                ? '<div class="warn">⚠️ Chưa có bản index trước cho URL này — không thể tính trang bị xoá.</div>'
+                ? '<div class="warn">⚠️ No prior index for this URL — deleted pages cannot be computed.</div>'
                 : '';
             const removed = stats.tombstoned_pages !== undefined
-                ? `<div class="removed">Đã gỡ khỏi index: <b>${num(stats.tombstoned_pages)}</b> trang</div>`
+                ? `<div class="removed">Removed from index: <b>${num(stats.tombstoned_pages)}</b> page(s)</div>`
                 : '';
             // Kept on one line so no indentation leaks into the rendered HTML.
             return `<div class="sync-summary">${status}${warn}<div class="counts">`
-                + `<span>🆕 Trang mới: <b>${num(stats.new_pages)}</b></span>`
-                + `<span>✏️ Thay đổi: <b>${num(stats.changed_pages)}</b></span>`
-                + `<span>🗑️ Đã xoá: <b>${num(stats.deleted_pages)}</b></span>`
-                + `<span>➖ Không đổi: <b>${num(stats.unchanged_pages)}</b></span>`
+                + `<span>🆕 New: <b>${num(stats.new_pages)}</b></span>`
+                + `<span>✏️ Changed: <b>${num(stats.changed_pages)}</b></span>`
+                + `<span>🗑️ Deleted: <b>${num(stats.deleted_pages)}</b></span>`
+                + `<span>➖ Unchanged: <b>${num(stats.unchanged_pages)}</b></span>`
                 + `</div>${removed}</div>`;
         }
 
@@ -716,18 +716,18 @@
         // on without reading the server console. Not exhaustive — unknown
         // categories fall through to the raw string.
         const INGEST_ERROR_HINTS = {
-            configuration: 'Sai cấu hình (PAT/URL/đường dẫn model). Kiểm tra .env rồi khởi động lại.',
-            url_origin: 'URL không cùng máy chủ Confluence đã cấu hình.',
-            capture_incomplete: 'Tải trang chưa xong (thường do mạng). Bấm “Resume” để chạy tiếp.',
-            indexing_partial: 'Một số chunk embed lỗi. Bấm “Resume” để thử lại.',
-            unexpected: 'Lỗi ngoài dự kiến. Xem log server; job có thể Resume.',
-            sync_preview: 'Không kiểm tra được thay đổi (thường do phân giải URL). Thử lại.',
+            configuration: 'Bad configuration (PAT/URL/model path). Check .env and restart.',
+            url_origin: 'URL is not on the configured Confluence host.',
+            capture_incomplete: 'Page capture did not finish (usually network). Click “Resume”.',
+            indexing_partial: 'Some chunks failed to embed. Click “Resume” to retry.',
+            unexpected: 'Unexpected error. Check server logs; the job can be resumed.',
+            sync_preview: 'Could not check for changes (usually URL resolution). Try again.',
         };
 
         function renderIngestError(job, stats) {
             if (!job.error) return '';
             const hint = INGEST_ERROR_HINTS[job.error];
-            const phase = stats.failed_phase ? ` (ở bước: ${escapeHtml(String(stats.failed_phase))})` : '';
+            const phase = stats.failed_phase ? ` (at step: ${escapeHtml(String(stats.failed_phase))})` : '';
             const detail = hint ? `<div style="font-size:13px;">${escapeHtml(hint)}</div>` : '';
             return `<div class="result-content" style="color:#c0392b;">`
                 + `❌ ${escapeHtml(job.error)}${phase}${detail}</div>`;
@@ -744,6 +744,11 @@
             // actually found something to do.
             const applicable = stats.kind === 'sync_preview' && job.status === 'completed'
                 && stats.url && (stats.new_pages || stats.changed_pages || stats.deleted_pages);
+            // Offer a per-URL sync check on any completed root that has been
+            // ingested or previously synced — so the operator picks exactly
+            // which link to sync from its own card, not the top input box.
+            const canSyncThis = job.status === 'completed' && stats.url
+                && (stats.kind === 'subtree' || stats.kind === 'sync_apply');
             
             // Build clickable hyperlink for job title
             const shortId = job.id.substring(0, 8);
@@ -767,7 +772,8 @@
                     </div>
                     ${renderSyncSummary(job, stats)}
                     ${renderIngestError(job, stats)}
-                    ${applicable ? `<button class="btn btn-success" onclick="startSyncApply('${escapeHtml(stats.url)}')">✅ Áp dụng đồng bộ</button>` : ''}
+                    ${applicable ? `<button class="btn btn-success" onclick="startSyncApply('${escapeHtml(stats.url)}')">✅ Apply sync</button>` : ''}
+                    ${canSyncThis ? `<button class="btn btn-primary" onclick="startSyncPreview('${escapeHtml(stats.url)}')">🔄 Sync this URL</button>` : ''}
                     ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Resume job</button>` : ''}
                     ${running ? `<button class="btn" onclick="cancelIngest('${escapeHtml(job.id)}')">${cancelLabel}</button>` : ''}
                 </div>
@@ -901,32 +907,38 @@
                 pollIngestJob(job.id);
                 showToast(message, 'success');
             } catch (e) {
-                showToast('Không thể tạo job đồng bộ: ' + e.message, 'error');
+                showToast('Could not create sync job: ' + e.message, 'error');
             } finally {
                 if (btn) btn.disabled = false;
             }
         }
 
-        async function startSyncPreview() {
-            const url = document.getElementById('ingestUrlInput').value.trim();
-            if (!url) { showToast('Vui lòng nhập URL', 'error'); return; }
+        // `url` lets a job card sync its own root directly; with no argument it
+        // falls back to whatever is in the top input box.
+        async function startSyncPreview(url) {
+            // Only the top-bar button is disabled while submitting; a per-card
+            // call passes its own url and has no button to toggle.
+            const fromCard = Boolean(url);
+            url = (url || document.getElementById('ingestUrlInput').value).trim();
+            if (!url) { showToast('Please enter a URL', 'error'); return; }
             await submitSyncJob(
                 url, '/api/v1/ingest-jobs/confluence-subtrees/sync-preview',
-                'Đã xếp hàng kiểm tra thay đổi; index chưa bị sửa.', 'syncPreviewBtn',
+                'Sync check queued; the index is not modified.',
+                fromCard ? null : 'syncPreviewBtn',
             );
         }
 
         async function startSyncApply(url) {
-            if (!url) { showToast('Job này không có URL để đồng bộ', 'error'); return; }
+            if (!url) { showToast('This job has no URL to sync', 'error'); return; }
             // Apply is the only action here that can remove data, so it is
             // confirmed explicitly rather than inheriting the preview's consent.
             if (!confirm(
-                'Áp dụng đồng bộ sẽ crawl lại cây trang, index lại các trang mới/thay đổi '
-                + 'và XOÁ khỏi index các trang đã bị xoá ở Confluence. Tiếp tục?'
+                'Apply sync will re-crawl the page tree, re-index new/changed pages, '
+                + 'and DELETE from the index any pages removed on Confluence. Continue?'
             )) return;
             await submitSyncJob(
                 url, '/api/v1/ingest-jobs/confluence-subtrees/sync-apply',
-                'Đã xếp hàng job đồng bộ.', null,
+                'Sync job queued.', null,
             );
         }
 
