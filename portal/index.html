@@ -143,6 +143,9 @@
         .sync-summary .counts span { background: #eef2ff; padding: 3px 10px; border-radius: 6px; }
         .sync-summary .removed { margin-top: 6px; }
         .sync-summary .warn { color: #b26a00; margin-bottom: 6px; }
+        .sync-state { font-weight: 600; padding: 6px 10px; border-radius: 6px; margin-bottom: 8px; }
+        .sync-state.applied { background: #e6f4ea; color: #1e7e34; }
+        .sync-state.pending { background: #fff4e5; color: #b26a00; }
 
         /* Documents table */
         table { width: 100%; border-collapse: collapse; }
@@ -268,7 +271,7 @@
                     placeholder="https://confluence.example.com/pages/viewpage.action?pageId=12345" />
             </div>
             <button class="btn btn-success" id="ingestBtn" onclick="startIngest()">🚀 Bắt đầu Ingest</button>
-            <button class="btn btn-primary" id="syncPreviewBtn" onclick="startSyncPreview()">🔎 Kiểm tra thay đổi</button>
+            <button class="btn btn-primary" id="syncPreviewBtn" onclick="startSyncPreview()">🔄 Đồng bộ (kiểm tra trước)</button>
             <div id="ingestStatus" class="scroll-list-3" style="margin-top:16px;"></div>
         </div>
     </div>
@@ -679,9 +682,21 @@
 
         // A sync result is the only thing in this UI that can report deletions,
         // so it gets its own line rather than being folded into the counters.
-        function renderSyncSummary(stats) {
+        function renderSyncSummary(job, stats) {
             if (stats.new_pages === undefined) return '';
             const num = value => escapeHtml(String(value ?? 0));
+            const hasChanges = stats.new_pages || stats.changed_pages || stats.deleted_pages;
+            const done = job.status === 'completed';
+            // The one thing a card must answer: has this actually been applied
+            // to the index yet, or is it only a preview of what would change?
+            let status = '';
+            if (done && stats.kind === 'sync_apply') {
+                status = '<div class="sync-state applied">✅ ĐÃ đồng bộ vào index</div>';
+            } else if (done && stats.kind === 'sync_preview') {
+                status = hasChanges
+                    ? '<div class="sync-state pending">⏳ Mới KIỂM TRA — chưa áp dụng. Bấm “Áp dụng đồng bộ” bên dưới để cập nhật index.</div>'
+                    : '<div class="sync-state applied">✅ Index đã khớp nguồn — không cần đồng bộ.</div>';
+            }
             const warn = stats.baseline_found === false
                 ? '<div class="warn">⚠️ Chưa có bản index trước cho URL này — không thể tính trang bị xoá.</div>'
                 : '';
@@ -689,12 +704,33 @@
                 ? `<div class="removed">Đã gỡ khỏi index: <b>${num(stats.tombstoned_pages)}</b> trang</div>`
                 : '';
             // Kept on one line so no indentation leaks into the rendered HTML.
-            return `<div class="sync-summary">${warn}<div class="counts">`
+            return `<div class="sync-summary">${status}${warn}<div class="counts">`
                 + `<span>🆕 Trang mới: <b>${num(stats.new_pages)}</b></span>`
                 + `<span>✏️ Thay đổi: <b>${num(stats.changed_pages)}</b></span>`
                 + `<span>🗑️ Đã xoá: <b>${num(stats.deleted_pages)}</b></span>`
                 + `<span>➖ Không đổi: <b>${num(stats.unchanged_pages)}</b></span>`
                 + `</div>${removed}</div>`;
+        }
+
+        // Demo-only: turn a raw failure category into a hint an operator can act
+        // on without reading the server console. Not exhaustive — unknown
+        // categories fall through to the raw string.
+        const INGEST_ERROR_HINTS = {
+            configuration: 'Sai cấu hình (PAT/URL/đường dẫn model). Kiểm tra .env rồi khởi động lại.',
+            url_origin: 'URL không cùng máy chủ Confluence đã cấu hình.',
+            capture_incomplete: 'Tải trang chưa xong (thường do mạng). Bấm “Resume” để chạy tiếp.',
+            indexing_partial: 'Một số chunk embed lỗi. Bấm “Resume” để thử lại.',
+            unexpected: 'Lỗi ngoài dự kiến. Xem log server; job có thể Resume.',
+            sync_preview: 'Không kiểm tra được thay đổi (thường do phân giải URL). Thử lại.',
+        };
+
+        function renderIngestError(job, stats) {
+            if (!job.error) return '';
+            const hint = INGEST_ERROR_HINTS[job.error];
+            const phase = stats.failed_phase ? ` (ở bước: ${escapeHtml(String(stats.failed_phase))})` : '';
+            const detail = hint ? `<div style="font-size:13px;">${escapeHtml(hint)}</div>` : '';
+            return `<div class="result-content" style="color:#c0392b;">`
+                + `❌ ${escapeHtml(job.error)}${phase}${detail}</div>`;
         }
 
         function renderIngestJobCard(job) {
@@ -729,8 +765,8 @@
                         ${stats.phase ? `<span>${ingestPhaseText(stats)}</span>` : ''}
                         ${ingestCounters(stats).map(text => `<span>${text}</span>`).join('')}
                     </div>
-                    ${renderSyncSummary(stats)}
-                    ${job.error ? `<div class="result-content" style="color:#c0392b;">❌ ${escapeHtml(job.error)}</div>` : ''}
+                    ${renderSyncSummary(job, stats)}
+                    ${renderIngestError(job, stats)}
                     ${applicable ? `<button class="btn btn-success" onclick="startSyncApply('${escapeHtml(stats.url)}')">✅ Áp dụng đồng bộ</button>` : ''}
                     ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Resume job</button>` : ''}
                     ${running ? `<button class="btn" onclick="cancelIngest('${escapeHtml(job.id)}')">${cancelLabel}</button>` : ''}
