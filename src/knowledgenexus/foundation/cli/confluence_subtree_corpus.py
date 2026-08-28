@@ -369,6 +369,12 @@ def _parser() -> argparse.ArgumentParser:
         phase.add_argument("--dataset-root")
         if name == "capture-pages":
             phase.add_argument("--stop-after-batches", type=_positive_int)
+            # Incremental live-sync reuse: serve unchanged pages from a prior
+            # generation's raw evidence instead of re-fetching them. All three
+            # must be present together; absent means a normal full crawl.
+            phase.add_argument("--reuse-baseline-raw-root")
+            phase.add_argument("--reuse-baseline-run-id")
+            phase.add_argument("--reuse-unchanged-path")
     return parser
 
 
@@ -834,6 +840,60 @@ def _inventory_phase(args: argparse.Namespace, state: Path) -> dict[str, object]
     return {"status": "complete", "phase": "inventory", "selected_pages": len(selection["items"]), "run_id": str(snapshot.run_id)}
 
 
+def _load_reuse_baseline_bodies(
+    args: argparse.Namespace, selection_items: tuple[ConfluencePageWorkItem, ...]
+) -> dict[str, bytes]:
+    """Load baseline raw bodies for pages whose version has not changed.
+
+    Returns an empty map unless all three reuse inputs are present. A page is
+    reused only when the baseline version passed in matches the version this
+    run selected AND the baseline raw evidence loads; anything else is left to a
+    live fetch, so a pruned or moved baseline degrades safely rather than
+    poisoning the crawl.
+    """
+    raw_root = getattr(args, "reuse_baseline_raw_root", None)
+    run_id_value = getattr(args, "reuse_baseline_run_id", None)
+    unchanged_path = getattr(args, "reuse_unchanged_path", None)
+    if not raw_root or not run_id_value or not unchanged_path:
+        return {}
+    from knowledgenexus.foundation.infrastructure.raw_store import (
+        ConfluenceRawPageGenerationStore,
+    )
+
+    baseline_run_id = _require_run_id(run_id_value)
+    rows = _read_json(Path(unchanged_path))
+    if type(rows) is not list:
+        raise ValueError("reuse unchanged file is invalid")
+    baseline_versions: dict[str, str] = {}
+    for row in rows:
+        if type(row) is not dict:
+            raise ValueError("reuse unchanged row is invalid")
+        page_id, version = row.get("page_id"), row.get("source_version")
+        if type(page_id) is not str or not page_id or type(version) is not str or not version:
+            raise ValueError("reuse unchanged row is invalid")
+        baseline_versions[page_id] = version
+    current_versions = {item.page_id: item.expected_source_version for item in selection_items}
+    store = ConfluenceRawPageGenerationStore(raw_root=Path(raw_root))
+    bodies: dict[str, bytes] = {}
+    for page_id, baseline_version in baseline_versions.items():
+        # Only reuse when the source version genuinely did not move; a mismatch
+        # means the page changed and must be fetched live.
+        if current_versions.get(page_id) != baseline_version:
+            continue
+        try:
+            envelope = store.read_page(run_id=baseline_run_id, page_id=page_id)
+        except Exception:
+            continue
+        if (
+            envelope.http_status == 200
+            and envelope.source_version == baseline_version
+            and type(envelope.body_bytes) is bytes
+            and envelope.body_bytes
+        ):
+            bodies[page_id] = envelope.body_bytes
+    return bodies
+
+
 def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, object]:
     if not args.raw_root or not args.run_id:
         raise ValueError("live page capture inputs are required")
@@ -853,6 +913,7 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
     from knowledgenexus.foundation.ports.confluence_checkpoint_run_port import ActivateRawGenerationRequest
     composition = compose_live_subtree(raw_root=Path(args.raw_root), checkpoint_workspace=state, reliability_profile=profile, max_search_pages=profile["max_inventory_windows_per_root"])
     request = ActivateRawGenerationRequest(workspace=state, run_id=run_id, endpoint_url=os.environ.get("CONFLUENCE_BASE_URL", ""), source_config=source_config, reliability_profile=profile)
+    baseline_bodies = _load_reuse_baseline_bodies(args, selection_items)
     activation_failure = None
     stream_failed = False
     captured = None
@@ -883,10 +944,16 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
                         if candidate != selection_payload:
                             raise ValueError("selection binding mismatch")
                         transport = RetryingConfluenceHttpTransport(inner=composition.http_inner, profile=composition.retry_profile, monotonic_clock=time.monotonic, sleeper=time.sleep, attempt_reserver=session)
+                        page_fetcher = ConfluenceDataCenterPageAdapter(transport=transport)
+                        if baseline_bodies:
+                            from knowledgenexus.foundation.infrastructure.confluence.baseline_aware_page_fetcher import (
+                                BaselineAwarePageFetcher,
+                            )
+                            page_fetcher = BaselineAwarePageFetcher(inner=page_fetcher, baseline_bodies=baseline_bodies)
                         use_case = CaptureConfluenceSubtreePages(
                             state_session=session,
                             orphan_inspector=ConfluenceRawPageOrphanInspector(raw_root=Path(args.raw_root)),
-                            page_fetcher=ConfluenceDataCenterPageAdapter(transport=transport),
+                            page_fetcher=page_fetcher,
                             raw_page_store=composition.guarded_raw_page_store(activation=session),
                             max_pages=config.max_pages,
                         )
@@ -914,7 +981,13 @@ def _capture_pages_phase(args: argparse.Namespace, state: Path) -> dict[str, obj
             "status": "failed",
             "failure_category": "raw_generation_activation_run_operation_invalid",
         }
-    return _capture_pages_result_payload(captured)
+    payload = _capture_pages_result_payload(captured)
+    if baseline_bodies:
+        # Pages served from baseline evidence rather than the network. `replayed`
+        # already counts pages found in this generation's own store; this counts
+        # the ones a live crawl would have re-fetched but this sync did not.
+        payload["reused_baseline"] = len(baseline_bodies)
+    return payload
 
 
 def _capture_pages_result_payload(captured: object) -> dict[str, object]:

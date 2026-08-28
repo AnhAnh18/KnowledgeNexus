@@ -210,3 +210,86 @@ async def test_sync_without_a_baseline_indexes_the_whole_packet(
     assert result.baseline_found is False
     assert packet_ingestor.selections == [None]
     assert result.plan.new_page_ids == ("1",)
+
+
+@pytest.mark.asyncio
+async def test_sync_passes_baseline_versions_for_reuse_and_reports_reused_pages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = (tmp_path / "snapshots").resolve()
+    tokenizer = (tmp_path / "tokenizer").resolve()
+    tokenizer.mkdir()
+    baseline = root / "baseline"
+    _publish_documents(baseline, [_row("1", "v1"), _row("2", "v1"), _row("3", "v1")])
+    (baseline / ".raw").mkdir(parents=True)
+    packet_ingestor = _PacketIngestor()
+    monkeypatch.delenv("CONFLUENCE_PAT", raising=False)
+    seen: dict[str, object] = {}
+
+    def snapshot_run(**kwargs: object) -> dict[str, object]:
+        seen.update(kwargs)
+        workspace = Path(str(kwargs["output_root"]))
+        # Page 3 deleted, page 1 changed, page 2 unchanged, page 4 new.
+        _publish_documents(workspace, [_row("1", "v2"), _row("2", "v1"), _row("4", "v1")])
+        return {"status": "complete"}
+
+    async def report(payload: object) -> None:
+        assert type(payload) is dict
+
+    async def delete_page(page_id: str, document_id: str) -> None:
+        pass
+
+    use_case = IngestConfluenceSubtreeFromUrl(
+        snapshot_root=root, tokenizer_assets_dir=tokenizer, max_pages=200,
+        confluence_pat="test-pat", packet_ingestor=packet_ingestor, snapshot_run=snapshot_run,
+    )
+    result = await use_case.execute_sync(
+        job_id="job-reuse", canonical_url="https://example.test/spaces/TEST/pages/1",
+        report_progress=report, baseline_workspace=baseline, delete_page=delete_page,
+    )
+
+    reuse = seen["reuse_baseline"]
+    assert isinstance(reuse, dict)
+    assert reuse["run_id"] == "test"  # version name confluence-test
+    assert reuse["raw_root"] == str(baseline / ".raw")
+    # The full baseline version map is handed over; the capture phase filters to
+    # the pages that are genuinely unchanged.
+    assert reuse["versions"] == {"1": "v1", "2": "v1", "3": "v1"}
+    # Exactly the unchanged page (2) is counted as reused.
+    assert result.stats()["reused_pages"] == 1
+    assert result.plan.unchanged_page_ids == ("2",)
+
+
+@pytest.mark.asyncio
+async def test_first_sync_without_baseline_passes_no_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = (tmp_path / "snapshots").resolve()
+    tokenizer = (tmp_path / "tokenizer").resolve()
+    tokenizer.mkdir()
+    packet_ingestor = _PacketIngestor()
+    monkeypatch.delenv("CONFLUENCE_PAT", raising=False)
+    seen: dict[str, object] = {}
+
+    def snapshot_run(**kwargs: object) -> dict[str, object]:
+        seen.update(kwargs)
+        _publish_documents(Path(str(kwargs["output_root"])), [_row("1", "v1")])
+        return {"status": "complete"}
+
+    async def report(payload: object) -> None:
+        assert type(payload) is dict
+
+    async def delete_page(page_id: str, document_id: str) -> None:
+        raise AssertionError("no deletes without a baseline")
+
+    use_case = IngestConfluenceSubtreeFromUrl(
+        snapshot_root=root, tokenizer_assets_dir=tokenizer, max_pages=200,
+        confluence_pat="test-pat", packet_ingestor=packet_ingestor, snapshot_run=snapshot_run,
+    )
+    result = await use_case.execute_sync(
+        job_id="job-first", canonical_url="https://example.test/spaces/TEST/pages/1",
+        report_progress=report, baseline_workspace=None, delete_page=delete_page,
+    )
+
+    assert seen["reuse_baseline"] is None
+    assert result.stats()["reused_pages"] == 0

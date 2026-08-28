@@ -22,6 +22,7 @@ from knowledgenexus.indexing.application.use_cases.ingest_chunking_packet import
 from knowledgenexus.indexing.application.use_cases.confluence_sync_state import (
     SyncPlan,
     build_sync_plan,
+    published_packet_dir,
     read_packet_pages,
 )
 from knowledgenexus.foundation.ports.path_safety import (
@@ -38,6 +39,7 @@ class SubtreeSyncResult:
     plan: SyncPlan
     deleted_pages: int
     baseline_found: bool
+    reused_pages: int = 0
 
     def stats(self) -> dict[str, int | bool]:
         return {
@@ -46,6 +48,10 @@ class SubtreeSyncResult:
             "chunks_ingested": self.ingestion.chunks_ingested,
             "chunks_failed": self.ingestion.chunks_failed,
             "baseline_found": self.baseline_found,
+            # Unchanged pages served from baseline raw evidence instead of a
+            # network re-fetch. Equal to the unchanged count when the baseline
+            # raw store is intact.
+            "reused_pages": self.reused_pages,
         }
 
 
@@ -120,7 +126,8 @@ class IngestConfluenceSubtreeFromUrl:
         )
 
     async def _publish_packet(
-        self, *, job_id: str, canonical_url: str, report_progress: ProgressReporter
+        self, *, job_id: str, canonical_url: str, report_progress: ProgressReporter,
+        reuse_baseline: dict[str, object] | None = None,
     ) -> Path:
         if type(job_id) is not str or not job_id:
             raise ConfluenceSubtreeIngestError("job", resumable=False)
@@ -151,6 +158,7 @@ class IngestConfluenceSubtreeFromUrl:
                             max_pages=self._max_pages,
                             allow_partial_processing=False,
                             progress_callback=report_from_worker,
+                            reuse_baseline=reuse_baseline,
                         )
                     finally:
                         if prior_pat is None:
@@ -221,6 +229,31 @@ class IngestConfluenceSubtreeFromUrl:
         })
         return ingestion
 
+    def _reuse_baseline(self, baseline_workspace: Path | None) -> dict[str, object] | None:
+        """Describe the baseline raw evidence the capture phase may reuse.
+
+        Returns ``None`` unless the baseline has a published packet: the capture
+        phase only reuses a page whose version still matches, so passing the
+        full baseline version map is safe -- changed and vanished pages simply
+        fall through to a live fetch.
+        """
+        if baseline_workspace is None:
+            return None
+        packet = published_packet_dir(baseline_workspace)
+        if packet is None:
+            return None
+        # Version name is ``confluence-<run_id>`` by construction; the run id is
+        # what keys the raw store the unchanged bodies live in.
+        run_id = packet.name.removeprefix("confluence-")
+        pages = read_packet_pages(baseline_workspace)
+        if not run_id or not pages:
+            return None
+        return {
+            "raw_root": str(baseline_workspace / ".raw"),
+            "run_id": run_id,
+            "versions": {page_id: state.source_version for page_id, state in pages.items()},
+        }
+
     async def execute_sync(
         self, *, job_id: str, canonical_url: str, report_progress: ProgressReporter,
         baseline_workspace: Path | None,
@@ -228,12 +261,13 @@ class IngestConfluenceSubtreeFromUrl:
     ) -> SubtreeSyncResult:
         """Re-publish a root and reconcile the index against the last packet.
 
-        The Foundation contract binds a capture run to the whole inventory it
-        crawled, so a sync still lists and fetches the entire subtree -- the
-        crawl cannot legally be narrowed to the changed pages.  What a sync
-        does avoid is *embedding*, which dominates the wall clock on a large
-        root: only pages whose ``source_version`` moved (plus pages that are
-        genuinely new) are embedded and stored.
+        The capture contract binds a run to the whole inventory it crawled, so
+        the pipeline still *lists* and *processes* the entire subtree.  What a
+        sync avoids is the two most expensive parts: embedding (only pages whose
+        ``source_version`` moved, plus new pages, are embedded and stored) and,
+        when a baseline is present, the *network fetch* of unchanged page
+        bodies -- those are served from the baseline's raw evidence via
+        ``reuse_baseline`` instead of being re-fetched.
 
         Pages that vanished from the source are tombstoned: their chunks,
         vectors and document row are deleted, which a plain re-ingest can
@@ -245,8 +279,10 @@ class IngestConfluenceSubtreeFromUrl:
         the index until it is resumed -- the packet is already published by
         then, so a resume skips the crawl and only repeats the indexing.
         """
+        reuse_baseline = self._reuse_baseline(baseline_workspace)
         packet_dir = await self._publish_packet(
             job_id=job_id, canonical_url=canonical_url, report_progress=report_progress,
+            reuse_baseline=reuse_baseline,
         )
         workspace = self._snapshot_root / job_id
         current = read_packet_pages(workspace)
@@ -280,4 +316,8 @@ class IngestConfluenceSubtreeFromUrl:
         return SubtreeSyncResult(
             ingestion=ingestion, plan=plan,
             deleted_pages=len(plan.deleted_page_ids), baseline_found=True,
+            # Reuse applies exactly to the pages present in both at the same
+            # version; when the baseline raw store is intact this is the count
+            # of network fetches avoided.
+            reused_pages=len(plan.unchanged_page_ids) if reuse_baseline else 0,
         )

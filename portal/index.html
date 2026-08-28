@@ -705,13 +705,17 @@
             const removed = stats.tombstoned_pages !== undefined
                 ? `<div class="removed">Removed from index: <b>${num(stats.tombstoned_pages)}</b> page(s)</div>`
                 : '';
+            // Unchanged pages served from the baseline instead of re-fetched.
+            const reused = stats.reused_pages
+                ? `<div class="removed">Reused from baseline (no re-fetch): <b>${num(stats.reused_pages)}</b> page(s)</div>`
+                : '';
             // Kept on one line so no indentation leaks into the rendered HTML.
             return `<div class="sync-summary">${status}${warn}<div class="counts">`
                 + `<span>🆕 New: <b>${num(stats.new_pages)}</b></span>`
                 + `<span>✏️ Changed: <b>${num(stats.changed_pages)}</b></span>`
                 + `<span>🗑️ Deleted: <b>${num(stats.deleted_pages)}</b></span>`
                 + `<span>➖ Unchanged: <b>${num(stats.unchanged_pages)}</b></span>`
-                + `</div>${removed}</div>`;
+                + `</div>${removed}${reused}</div>`;
         }
 
         // Demo-only: turn a raw failure category into a hint an operator can act

@@ -754,6 +754,45 @@ def _process_pages_best_effort(
     )
 
 
+def _reuse_baseline_capture_args(
+    reuse_baseline: Mapping[str, object], state: Path
+) -> list[str]:
+    """Materialise the reuse inputs into capture-pages CLI flags.
+
+    ``reuse_baseline`` carries the baseline raw root, its run id, and a
+    ``versions`` map of the unchanged pages. Returns an empty list unless all
+    three are usable, so the caller silently falls back to a full crawl rather
+    than half-configuring reuse.
+    """
+    raw_root = reuse_baseline.get("raw_root")
+    run_id = reuse_baseline.get("run_id")
+    versions = reuse_baseline.get("versions")
+    if not isinstance(raw_root, str) or not raw_root:
+        return []
+    if not isinstance(run_id, str) or not run_id:
+        return []
+    if not isinstance(versions, Mapping) or not versions:
+        return []
+    rows = [
+        {"page_id": page_id, "source_version": version}
+        for page_id, version in versions.items()
+        if isinstance(page_id, str) and page_id and isinstance(version, str) and version
+    ]
+    if not rows:
+        return []
+    unchanged_path = state / "reuse-unchanged.json"
+    serialized = json.dumps(
+        rows, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8") + b"\n"
+    _atomic_write(unchanged_path, serialized, replace=True)
+    return [
+        "--reuse-baseline-raw-root", raw_root,
+        "--reuse-baseline-run-id", run_id,
+        "--reuse-unchanged-path", str(unchanged_path),
+    ]
+
+
 def run(
     *, url: object, output_root: object, tokenizer_assets_dir: object,
     max_pages: object = 5_000,
@@ -762,6 +801,7 @@ def run(
     short_space_resolver: Callable[[str, str], object] | None = None,
     partial_processor: Callable[..., _PartialProcessingResult] | None = None,
     progress_callback: Callable[[Mapping[str, object]], object] | None = None,
+    reuse_baseline: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     if type(max_pages) is not int or max_pages <= 0 or max_pages > 5_000:
         raise TextSnapshotOperatorError("page_bound")
@@ -875,6 +915,13 @@ def run(
         return result
 
     capture_args = ["capture-pages", *common, "--run-id", run_id, "--stop-after-batches", "1"]
+    # Incremental live sync: hand the capture phase the accepted baseline's raw
+    # evidence for unchanged pages so it serves them from disk instead of the
+    # network. Written once here, beside the workspace, and passed by path.
+    if reuse_baseline is not None:
+        reuse_args = _reuse_baseline_capture_args(reuse_baseline, state)
+        if reuse_args:
+            capture_args.extend(reuse_args)
     maximum_batches = (max_pages + 99) // 100
     # A bounded capture invocation deliberately stops immediately after it
     # commits a batch.  When that batch is the final one, a subsequent
