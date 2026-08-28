@@ -240,3 +240,69 @@ async def test_confluence_subtree_rejects_ip_literal_before_job_creation(api_cli
 
     assert response.status_code == 400
     ingest_job_repo.create_or_get_active.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_apply_queues_a_sync_task_under_the_subtree_submission_key(api_client):
+    client, ingest_job_repo = api_client
+    ingest_job_repo.create_or_get_active.side_effect = lambda job: (job, True)
+    import importlib
+    ingest_module = importlib.import_module("knowledgenexus.presentation.api.v1.ingest_job")
+    container = ingest_module.get_container()
+    queue = container.get_confluence_ingest_queue()
+
+    url = "https://confluence.example.test/spaces/ENG/pages/123"
+    response = await client.post("/api/v1/ingest-jobs/confluence-subtrees/sync-apply", json={"url": url})
+
+    assert response.status_code == 202
+    assert response.json()["stats"]["kind"] == "sync_apply"
+    task = queue.get_nowait()
+    assert task.kind == "sync_apply"
+    assert task.url == url
+    # A sync and a plain ingest of the same root must contend for one key, so
+    # they can never mutate the same index concurrently.
+    submitted = ingest_job_repo.create_or_get_active.call_args.args[0]
+    assert submitted.active_key == ingest_module._submission_key(url)
+
+
+@pytest.mark.asyncio
+async def test_sync_preview_queues_a_read_only_task(api_client):
+    client, ingest_job_repo = api_client
+    ingest_job_repo.create_or_get_active.side_effect = lambda job: (job, True)
+    import importlib
+    ingest_module = importlib.import_module("knowledgenexus.presentation.api.v1.ingest_job")
+    queue = ingest_module.get_container().get_confluence_ingest_queue()
+
+    response = await client.post(
+        "/api/v1/ingest-jobs/confluence-subtrees/sync-preview",
+        json={"url": "https://confluence.example.test/spaces/ENG/pages/123"},
+    )
+
+    assert response.status_code == 202
+    assert queue.get_nowait().kind == "sync_preview"
+
+
+@pytest.mark.asyncio
+async def test_resume_keeps_a_sync_job_a_sync_job(api_client, monkeypatch):
+    client, ingest_job_repo = api_client
+    job = _make_job(job_id="job-sync", status=IngestJobStatus.FAILED)
+    job.stats = {"phase": "failed", "resumable": True, "kind": "sync_apply"}
+    ingest_job_repo.get_by_id.return_value = job
+    import importlib
+    ingest_module = importlib.import_module("knowledgenexus.presentation.api.v1.ingest_job")
+    container = ingest_module.get_container()
+    canonical = "https://confluence.example.test/spaces/ENG/pages/123"
+    ingestor = MagicMock()
+    ingestor.resume_url.return_value = canonical
+    container.get_confluence_subtree_ingestor = lambda: ingestor
+
+    async def fake_resolve(url, _container):
+        return ("https://confluence.example.test", "ENG", "123")
+
+    monkeypatch.setattr(ingest_module, "_resolve_canonical_url", fake_resolve)
+    queue = container.get_confluence_ingest_queue()
+
+    response = await client.post("/api/v1/ingest-jobs/job-sync/resume")
+
+    assert response.status_code == 202
+    assert queue.get_nowait().kind == "sync_apply"

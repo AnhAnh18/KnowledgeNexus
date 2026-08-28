@@ -139,6 +139,16 @@ class AppContainer:
                 "something like 'D:/KnowledgeNexus_Data/confluence-snapshots'."
             ) from None
 
+    def confluence_snapshot_root(self) -> Path:
+        """The validated root every Foundation workspace lives under.
+
+        Sync needs it to find the last published packet for a root, and must
+        resolve it exactly the way the ingestor does -- a raw settings string
+        would point somewhere else the moment the configured value is
+        relative or unnormalised.
+        """
+        return self._validated_snapshot_root()
+
     def confluence_ingest_config_problems(self) -> list[str]:
         """List every setting the subtree ingest needs but does not have.
 

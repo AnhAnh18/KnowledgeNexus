@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import hashlib
+import json
 import ipaddress
 import os
 from dataclasses import dataclass
@@ -20,6 +21,13 @@ from knowledgenexus.indexing.domain.models.ingest_job import IngestJob, IngestJo
 from knowledgenexus.indexing.application.use_cases.ingest_confluence_subtree_from_url import (
     ConfluenceSubtreeIngestError,
 )
+from knowledgenexus.indexing.application.use_cases.confluence_sync_state import (
+    RootIdentity,
+    find_baseline_workspace,
+    published_packet_dir,
+)
+from knowledgenexus.indexing.application.use_cases.ingest_chunking_packet import document_uuid
+from knowledgenexus.indexing.application.use_cases.preview_confluence_sync import preview_sync
 from knowledgenexus.shared.di.container import AppContainer, get_container
 from knowledgenexus.presentation.api.v1.schemas.ingest_job_schema import (
     CreateIngestJobRequest,
@@ -53,9 +61,11 @@ def _to_response(job: IngestJob) -> IngestJobResponse:
 class ConfluenceIngestTask:
     """One queued unit of work for `confluence_ingest_worker`.
 
-    `kind` selects the runner: a single page (`"page"`) or a whole subtree
-    (`"subtree"`).  Both kinds share one queue so submissions are drained in
-    arrival order regardless of which endpoint created them.
+    `kind` selects the runner: a single page (`"page"`), a whole subtree
+    (`"subtree"`), a read-only sync preview (`"sync_preview"`), or a sync that
+    reconciles an already indexed root (`"sync_apply"`).  All kinds share one
+    queue so submissions are drained in arrival order regardless of which
+    endpoint created them.
     """
 
     kind: str
@@ -69,6 +79,11 @@ class ConfluenceIngestTask:
 # while making memory/CPU contention harder to reason about. Raise this if
 # ingestion needs to scale beyond one job at a time.
 CONFLUENCE_INGEST_WORKER_COUNT = 1
+
+# Sync previews build throwaway inventory state. They are kept under their own
+# directory inside the snapshot root so baseline discovery, which scans that
+# root for published packets, never has to reason about them.
+_SYNC_PREVIEW_DIR = ".sync-preview"
 
 
 async def confluence_ingest_worker(container: AppContainer) -> None:
@@ -86,6 +101,10 @@ async def confluence_ingest_worker(container: AppContainer) -> None:
         try:
             if task.kind == "subtree":
                 await _run_confluence_subtree_ingest_job(task.job_id, task.url, container)
+            elif task.kind == "sync_preview":
+                await _run_confluence_sync_preview_job(task.job_id, task.url, container)
+            elif task.kind == "sync_apply":
+                await _run_confluence_sync_apply_job(task.job_id, task.url, container)
             else:
                 await _run_confluence_page_ingest_job(task.job_id, task.url, container)
         except Exception:
@@ -148,6 +167,9 @@ async def _set_progress(job: IngestJob, container: AppContainer, payload: object
         "resolving_url", "inventory", "capture_pages", "process_pages",
         "capture_drawio", "export_packet", "publish_packet", "indexing_validate",
         "indexing_embed", "indexing_store", "completed",
+        # Sync-only phases: the diff decision, and the deletion of pages the
+        # source no longer has.
+        "sync_plan", "tombstone",
     }
     if payload["phase"] not in allowed:
         raise ValueError("progress")
@@ -185,7 +207,7 @@ def _require_configured_ingest(container: AppContainer) -> None:
 _RESUMABLE_FROM_PHASES = frozenset({
     "inventory", "capture_pages", "process_pages", "capture_drawio",
     "export_packet", "publish_packet", "indexing_validate", "indexing_embed",
-    "indexing_store",
+    "indexing_store", "sync_plan", "tombstone",
 })
 
 
@@ -367,7 +389,8 @@ async def create_confluence_subtree_ingest_job(
         id=str(uuid4()), source_type=SourceType.CONFLUENCE,
         status=IngestJobStatus.PENDING, started_at=datetime.now(UTC),
         # "queued" is the waiting state the UI shows until a worker picks the job up.
-        stats={"phase": "queued", "resumable": False, "url": body.url}, active_key=submission_key,
+        stats={"phase": "queued", "resumable": False, "url": body.url, "kind": "subtree"},
+        active_key=submission_key,
     )
     try:
         owner, created = await container.ingest_job_repo.create_or_get_active(job)
@@ -377,6 +400,90 @@ async def create_confluence_subtree_ingest_job(
         return _to_response(owner)
     await container.get_confluence_ingest_queue().put(
         ConfluenceIngestTask(kind="subtree", job_id=job.id, url=body.url)
+    )
+    return _to_response(job)
+
+
+@router.post(
+    "/confluence-subtrees/sync-preview",
+    response_model=IngestJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_confluence_sync_preview_job(
+    body: IngestConfluenceUrlRequest,
+    container: AppContainer = Depends(_container),
+) -> IngestJobResponse:
+    """Queue a read-only inventory diff for a previously ingested URL."""
+    _require_configured_ingest(container)
+    try:
+        submission_key = "sync-preview:" + _submission_key(body.url)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid Confluence URL",
+        )
+    job = IngestJob(
+        id=str(uuid4()), source_type=SourceType.CONFLUENCE,
+        status=IngestJobStatus.PENDING, started_at=datetime.now(UTC),
+        stats={
+            "phase": "queued", "resumable": False, "url": body.url,
+            "kind": "sync_preview", "sync_preview": True,
+        },
+        active_key=hashlib.sha256(submission_key.encode("ascii")).hexdigest(),
+    )
+    try:
+        owner, created = await container.ingest_job_repo.create_or_get_active(job)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="sync preview unavailable",
+        )
+    if not created:
+        return _to_response(owner)
+    await container.get_confluence_ingest_queue().put(
+        ConfluenceIngestTask(kind="sync_preview", job_id=job.id, url=body.url)
+    )
+    return _to_response(job)
+
+
+@router.post(
+    "/confluence-subtrees/sync-apply",
+    response_model=IngestJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_confluence_sync_apply_job(
+    body: IngestConfluenceUrlRequest,
+    container: AppContainer = Depends(_container),
+) -> IngestJobResponse:
+    """Queue a sync that reconciles the index with the live subtree.
+
+    Unlike a plain re-ingest this also removes pages the source no longer has,
+    and it embeds only the pages whose version moved -- so it is the only
+    submission that can leave the index *smaller* than it found it.  It shares
+    the subtree submission key, so a sync and an ingest of the same root
+    cannot run at the same time.
+    """
+    _require_configured_ingest(container)
+    try:
+        submission_key = _submission_key(body.url)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid Confluence URL",
+        )
+    job = IngestJob(
+        id=str(uuid4()), source_type=SourceType.CONFLUENCE,
+        status=IngestJobStatus.PENDING, started_at=datetime.now(UTC),
+        stats={"phase": "queued", "resumable": False, "url": body.url, "kind": "sync_apply"},
+        active_key=submission_key,
+    )
+    try:
+        owner, created = await container.ingest_job_repo.create_or_get_active(job)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="sync unavailable",
+        )
+    if not created:
+        return _to_response(owner)
+    await container.get_confluence_ingest_queue().put(
+        ConfluenceIngestTask(kind="sync_apply", job_id=job.id, url=body.url)
     )
     return _to_response(job)
 
@@ -413,6 +520,29 @@ async def _run_confluence_page_ingest_job(job_id: str, url: str, container: AppC
     await container.ingest_job_repo.update(job)
 
 
+def _packet_root_page(workspace: Path, job_id: str) -> tuple[str | None, str | None]:
+    """Read the root page's title and URL from the packet a job published.
+
+    The first documents row is the root by construction. Only that line is
+    read: a 5k-page packet's documents.jsonl is far too large to pull into
+    memory for two strings.
+    """
+    packet = published_packet_dir(workspace)
+    if packet is None:
+        return None, None
+    try:
+        with open(packet / "documents.jsonl", encoding="utf-8") as stream:
+            row = json.loads(stream.readline())
+        title, url = row.get("title"), row.get("url")
+    except Exception:
+        logger.warning("Could not read root page title from documents.jsonl for job %s", job_id)
+        return None, None
+    return (
+        title if isinstance(title, str) else None,
+        url if isinstance(url, str) else None,
+    )
+
+
 async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: AppContainer) -> None:
     job = await container.ingest_job_repo.get_by_id(job_id)
     if job is None:
@@ -443,42 +573,19 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
                 await container.ingest_job_repo.update(job)
                 return
         canonical_url = f"{base_url}/spaces/{space_key}/pages/{page_id}"
-        # Same reason as the single-page runner: the first call loads BGE-M3
-        # from disk, so keep that off the event loop.
         ingestor = await asyncio.to_thread(container.get_confluence_subtree_ingestor)
-
         async def report(payload: object) -> None:
             await _set_progress(job, container, payload)
-
-        result = await ingestor.execute(
-            job_id=job.id, canonical_url=canonical_url, report_progress=report,
-        )
+        result = await ingestor.execute(job_id=job.id, canonical_url=canonical_url, report_progress=report)
         job.status = IngestJobStatus.COMPLETED
         job.active_key = None
         job.completed_at = datetime.now(UTC)
-        
-        root_title = None
-        root_url = None
-        workspace = Path(container.settings.confluence_snapshot_root) / job.id
-        latest_file = workspace / "LATEST.txt"
-        if latest_file.is_file():
-            try:
-                import json
-                version_name = latest_file.read_text(encoding="ascii").strip()
-                documents_file = workspace / "versions" / version_name / "documents.jsonl"
-                if documents_file.is_file():
-                    with open(documents_file, "r", encoding="utf-8") as f:
-                        first_line = f.readline()
-                        if first_line:
-                            doc_data = json.loads(first_line)
-                            root_title = doc_data.get("title")
-                            root_url = doc_data.get("url")
-            except Exception:
-                logger.warning("Could not read root page title from documents.jsonl for job %s", job.id)
-
+        root_title, root_url = _packet_root_page(
+            container.confluence_snapshot_root() / job.id, job.id
+        )
         job.stats = {
-            **job.stats,
-            "phase": "completed", "resumable": False,
+            **job.stats, "phase": "completed", "resumable": False,
+            "kind": "subtree", "canonical_url": canonical_url,
             "chunks_ingested": result.chunks_ingested,
             "chunks_failed": result.chunks_failed,
         }
@@ -489,23 +596,148 @@ async def _run_confluence_subtree_ingest_job(job_id: str, url: str, container: A
     except _IngestJobCancelled:
         _mark_stopped(job)
     except ConfluenceSubtreeIngestError as exc:
-        # Foundation turns any progress-callback exception into its own
-        # category, so a cancellation arrives here disguised as a phase
-        # failure. The flag is the only reliable way to tell them apart.
         if job.id in _CANCEL_REQUESTED:
             _mark_stopped(job)
         else:
             _mark_failed(job, category=exc.category, resumable=exc.resumable)
     except RuntimeError:
-        # Misconfiguration (credentials, tokenizer assets, snapshot root).
-        # Retrying cannot help until an operator changes the settings, so say
-        # so rather than reporting an "unexpected" resumable failure.
         logger.exception("Confluence subtree ingest job %s is misconfigured", job_id)
         _mark_failed(job, category="configuration", resumable=False)
     except Exception:
-        # Never swallow the cause silently: without this the only trace of a
-        # genuine crash was the bare string "unexpected" on the job.
         logger.exception("Confluence subtree ingest job %s failed unexpectedly", job_id)
+        _mark_failed(job, category="unexpected", resumable=True)
+    finally:
+        _CANCEL_REQUESTED.discard(job.id)
+    await container.ingest_job_repo.update(job)
+
+
+async def _resolve_root_identity(url: str, container: AppContainer) -> RootIdentity:
+    base_url, space_key, page_id = await _resolve_canonical_url(url, container)
+    return RootIdentity(base_url, space_key, page_id)
+
+
+def _baseline_workspace(
+    identity: RootIdentity, container: AppContainer, *, exclude: str
+) -> Path | None:
+    """Locate the packet a sync should diff against.
+
+    Discovery reads the snapshot root rather than the job table on purpose:
+    the baseline is whatever was last *published on disk* for this root, so it
+    still resolves after the job database has been reset or pruned.
+    """
+    return find_baseline_workspace(
+        snapshot_root=container.confluence_snapshot_root(),
+        identity=identity,
+        exclude=frozenset({exclude}),
+    )
+
+
+async def _run_confluence_sync_preview_job(job_id: str, url: str, container: AppContainer) -> None:
+    """Inventory a previously ingested root and report a non-mutating diff."""
+    job = await container.ingest_job_repo.get_by_id(job_id)
+    if job is None:
+        return
+    job.status = IngestJobStatus.RUNNING
+    await container.ingest_job_repo.update(job)
+    try:
+        await _set_progress(job, container, {"phase": "inventory"})
+        identity = await _resolve_root_identity(url, container)
+        snapshot_root = container.confluence_snapshot_root()
+        # Preview workspaces are throwaway inventory state, not snapshots, so
+        # they live in their own subdirectory: baseline discovery scans the
+        # snapshot root and must never mistake one for a published packet.
+        workspace = snapshot_root / _SYNC_PREVIEW_DIR / job.id
+        result = await asyncio.to_thread(
+            preview_sync,
+            url=identity.canonical_url,
+            workspace=workspace,
+            snapshot_root=snapshot_root,
+            max_pages=container.settings.confluence_max_pages,
+            reliability_profile=container.settings.confluence_reliability_profile_path,
+            tokenizer_assets_dir=(
+                Path(container.settings.embedding_model_path)
+                if container.settings.embedding_model_path else None
+            ),
+            confluence_pat=container.settings.confluence_pat,
+        )
+        job.stats = {
+            **job.stats, **result, "url": identity.canonical_url,
+            "kind": "sync_preview", "resumable": False,
+            # A preview never mutates the index, so it always *completes*; a
+            # missing baseline is an answer ("this root has no packet yet"),
+            # not a failure the operator has to retry.
+            "phase": "completed",
+        }
+        job.status = IngestJobStatus.COMPLETED
+        job.error = None
+    except ConfluenceSubtreeIngestError as exc:
+        logger.warning("Sync preview job %s could not resolve its root: %s", job_id, exc.category)
+        _mark_failed(job, category=exc.category, resumable=False)
+    except Exception:
+        logger.exception("Confluence sync preview job %s failed", job_id)
+        _mark_failed(job, category="sync_preview", resumable=False)
+    job.completed_at = datetime.now(UTC)
+    job.active_key = None
+    await container.ingest_job_repo.update(job)
+
+
+async def _run_confluence_sync_apply_job(job_id: str, url: str, container: AppContainer) -> None:
+    """Re-publish a root and reconcile the index, tombstones included."""
+    job = await container.ingest_job_repo.get_by_id(job_id)
+    if job is None:
+        return
+    # A job cancelled while it sat in the queue must never start.
+    if job.status in (IngestJobStatus.CANCELLED, IngestJobStatus.PAUSED) or job.id in _CANCEL_REQUESTED:
+        _CANCEL_REQUESTED.discard(job.id)
+        _mark_stopped(job)
+        await container.ingest_job_repo.update(job)
+        return
+    job.status = IngestJobStatus.RUNNING
+    await container.ingest_job_repo.update(job)
+    try:
+        await _set_progress(job, container, {"phase": "resolving_url"})
+        identity = await _resolve_root_identity(url, container)
+        baseline = _baseline_workspace(identity, container, exclude=job.id)
+        ingestor = await asyncio.to_thread(container.get_confluence_subtree_ingestor)
+
+        async def report(payload: object) -> None:
+            await _set_progress(job, container, payload)
+
+        async def delete_page(page_id: str, document_id: str) -> None:
+            # Two passes on purpose. Deleting by document id is the exact
+            # cascade -- chunks, vectors and the documents row -- but it only
+            # reaches records that carry the derived document id. The
+            # source_id pass also sweeps chunks written for this page before
+            # that id existed, so a tombstone leaves nothing behind either way.
+            await container.chunk_storage.delete_by_source_id(SourceType.CONFLUENCE, page_id)
+            await container.chunk_storage.delete_by_document_id(str(document_uuid(document_id)))
+
+        result = await ingestor.execute_sync(
+            job_id=job.id, canonical_url=identity.canonical_url, report_progress=report,
+            baseline_workspace=baseline, delete_page=delete_page,
+        )
+        job.status = IngestJobStatus.COMPLETED
+        job.active_key = None
+        job.error = None
+        job.completed_at = datetime.now(UTC)
+        job.stats = {
+            **job.stats, **result.stats(), "phase": "completed", "resumable": False,
+            "kind": "sync_apply", "url": identity.canonical_url,
+            "canonical_url": identity.canonical_url,
+            "baseline_workspace": str(baseline) if baseline else None,
+        }
+    except _IngestJobCancelled:
+        _mark_stopped(job)
+    except ConfluenceSubtreeIngestError as exc:
+        if job.id in _CANCEL_REQUESTED:
+            _mark_stopped(job)
+        else:
+            _mark_failed(job, category=exc.category, resumable=exc.resumable)
+    except RuntimeError:
+        logger.exception("Confluence sync job %s is misconfigured", job_id)
+        _mark_failed(job, category="configuration", resumable=False)
+    except Exception:
+        logger.exception("Confluence sync job %s failed unexpectedly", job_id)
         _mark_failed(job, category="unexpected", resumable=True)
     finally:
         _CANCEL_REQUESTED.discard(job.id)
@@ -570,14 +802,19 @@ async def resume_confluence_subtree_ingest_job(
         job.status = IngestJobStatus.PENDING
         job.completed_at = None
         job.error = None
-        job.stats = {"phase": "queued", "resumable": False}
+        # A resumed sync must stay a sync: re-queuing it as a plain subtree
+        # ingest would silently drop the tombstone step, leaving pages that
+        # were deleted at the source alive in the index forever.
+        kind = job.stats.get("kind")
+        kind = kind if kind in ("subtree", "sync_apply") else "subtree"
+        job.stats = {"phase": "queued", "resumable": False, "kind": kind, "url": canonical_url}
         await container.ingest_job_repo.update(job)
     except ConfluenceSubtreeIngestError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.category)
     except Exception:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="resume unavailable")
     await container.get_confluence_ingest_queue().put(
-        ConfluenceIngestTask(kind="subtree", job_id=job.id, url=canonical_url)
+        ConfluenceIngestTask(kind=kind, job_id=job.id, url=canonical_url)
     )
     return _to_response(job)
 

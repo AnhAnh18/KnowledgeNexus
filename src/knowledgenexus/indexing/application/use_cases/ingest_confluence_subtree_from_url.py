@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from typing import Awaitable, Callable, Mapping
@@ -18,10 +19,34 @@ from knowledgenexus.indexing.application.use_cases.ingest_chunking_packet import
     IngestChunkingPacket,
     IngestionResult,
 )
+from knowledgenexus.indexing.application.use_cases.confluence_sync_state import (
+    SyncPlan,
+    build_sync_plan,
+    read_packet_pages,
+)
 from knowledgenexus.foundation.ports.path_safety import (
     require_plain_directory_chain,
     require_plain_file,
 )
+
+
+@dataclass(frozen=True)
+class SubtreeSyncResult:
+    """What one sync run actually did to the index."""
+
+    ingestion: IngestionResult
+    plan: SyncPlan
+    deleted_pages: int
+    baseline_found: bool
+
+    def stats(self) -> dict[str, int | bool]:
+        return {
+            **self.plan.counts(),
+            "tombstoned_pages": self.deleted_pages,
+            "chunks_ingested": self.ingestion.chunks_ingested,
+            "chunks_failed": self.ingestion.chunks_failed,
+            "baseline_found": self.baseline_found,
+        }
 
 
 class ConfluenceSubtreeIngestError(Exception):
@@ -86,6 +111,17 @@ class IngestConfluenceSubtreeFromUrl:
     async def execute(
         self, *, job_id: str, canonical_url: str, report_progress: ProgressReporter
     ) -> IngestionResult:
+        """Publish the packet for a root and ingest all of it."""
+        packet_dir = await self._publish_packet(
+            job_id=job_id, canonical_url=canonical_url, report_progress=report_progress,
+        )
+        return await self._ingest_packet(
+            packet_dir, report_progress=report_progress, include_document_ids=None,
+        )
+
+    async def _publish_packet(
+        self, *, job_id: str, canonical_url: str, report_progress: ProgressReporter
+    ) -> Path:
         if type(job_id) is not str or not job_id:
             raise ConfluenceSubtreeIngestError("job", resumable=False)
         workspace = self._snapshot_root / job_id
@@ -152,6 +188,12 @@ class IngestConfluenceSubtreeFromUrl:
             require_plain_directory_chain(packet_dir)
         except (OSError, UnicodeDecodeError, ValueError):
             raise ConfluenceSubtreeIngestError("publication", resumable=True) from None
+        return packet_dir
+
+    async def _ingest_packet(
+        self, packet_dir: Path, *, report_progress: ProgressReporter,
+        include_document_ids: frozenset[str] | None,
+    ) -> IngestionResult:
         await report_progress({"phase": "indexing_validate"})
         try:
             await report_progress({"phase": "indexing_embed"})
@@ -166,7 +208,9 @@ class IngestConfluenceSubtreeFromUrl:
                     "total_chunks": total_chunks,
                 })
 
-            ingestion = await self._packet_ingestor.execute(packet_dir, report_embedding)
+            ingestion = await self._packet_ingestor.execute(
+                packet_dir, report_embedding, include_document_ids=include_document_ids,
+            )
         except Exception as exc:
             category = "indexing"
             raise ConfluenceSubtreeIngestError(category, resumable=True) from None
@@ -176,3 +220,64 @@ class IngestConfluenceSubtreeFromUrl:
             "phase": "indexing_store", "chunks_ingested": ingestion.chunks_ingested,
         })
         return ingestion
+
+    async def execute_sync(
+        self, *, job_id: str, canonical_url: str, report_progress: ProgressReporter,
+        baseline_workspace: Path | None,
+        delete_page: Callable[[str, str], Awaitable[None]],
+    ) -> SubtreeSyncResult:
+        """Re-publish a root and reconcile the index against the last packet.
+
+        The Foundation contract binds a capture run to the whole inventory it
+        crawled, so a sync still lists and fetches the entire subtree -- the
+        crawl cannot legally be narrowed to the changed pages.  What a sync
+        does avoid is *embedding*, which dominates the wall clock on a large
+        root: only pages whose ``source_version`` moved (plus pages that are
+        genuinely new) are embedded and stored.
+
+        Pages that vanished from the source are tombstoned: their chunks,
+        vectors and document row are deleted, which a plain re-ingest can
+        never do because a packet only describes what still exists.
+
+        Changed pages are purged before their replacement is written, because
+        a shorter revision leaves chunks behind that nothing would otherwise
+        remove.  If the job dies in that window those pages are missing from
+        the index until it is resumed -- the packet is already published by
+        then, so a resume skips the crawl and only repeats the indexing.
+        """
+        packet_dir = await self._publish_packet(
+            job_id=job_id, canonical_url=canonical_url, report_progress=report_progress,
+        )
+        workspace = self._snapshot_root / job_id
+        current = read_packet_pages(workspace)
+        baseline = read_packet_pages(baseline_workspace) if baseline_workspace else {}
+        plan = build_sync_plan(baseline=baseline, current=current)
+        await report_progress({"phase": "sync_plan", **plan.counts()})
+        # With no baseline there is nothing to diff against and nothing to
+        # tombstone: this is a first ingest wearing a sync's clothes, so index
+        # the whole packet rather than silently indexing nothing.
+        if not baseline:
+            ingestion = await self._ingest_packet(
+                packet_dir, report_progress=report_progress, include_document_ids=None,
+            )
+            return SubtreeSyncResult(
+                ingestion=ingestion, plan=plan, deleted_pages=0, baseline_found=False,
+            )
+        purged = (*plan.deleted_page_ids, *plan.changed_page_ids)
+        if purged:
+            await report_progress({"phase": "tombstone", "purged_pages": len(purged)})
+            for page_id in purged:
+                # A deleted page only exists in the baseline; a changed one is
+                # in both and carries the same document id either way.
+                state = current.get(page_id) or baseline[page_id]
+                await delete_page(page_id, state.document_id)
+        include = frozenset(
+            current[page_id].document_id for page_id in plan.touched_page_ids
+        )
+        ingestion = await self._ingest_packet(
+            packet_dir, report_progress=report_progress, include_document_ids=include,
+        )
+        return SubtreeSyncResult(
+            ingestion=ingestion, plan=plan,
+            deleted_pages=len(plan.deleted_page_ids), baseline_found=True,
+        )

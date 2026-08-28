@@ -67,8 +67,16 @@ class ChunkStorageService:
         await self._vector_store.delete_by_source_id(source_type, source_id)
 
     async def delete_by_document_id(self, document_id: str) -> None:
+        """Delete a document and all derived chunks/vectors as one cascade.
+
+        The repositories currently commit independently, so callers should
+        invoke this only after a successful replacement is staged. The
+        operation is idempotent and safe to retry after an interrupted job.
+        """
         await self._chunk_repo.delete_by_document_id(document_id)
         await self._vector_store.delete_by_document_id(document_id)
+        if self._document_repo is not None:
+            await self._document_repo.delete(document_id)
 
     async def get_stats(self) -> dict[str, Any]:
         qdrant_stats = await self._vector_store.get_stats()

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from knowledgenexus.indexing.domain.enums.source_type import SourceType
 from knowledgenexus.indexing.domain.models.chunk import Chunk, ChunkPayload, CoreChunkMetadata
@@ -79,6 +79,16 @@ class ChunkTransformationError(ChunkingPacketError):
     pass
 
 
+def document_uuid(foundation_document_id: str) -> UUID:
+    """The domain id a Foundation document_id is stored under.
+
+    Ingestion derives every document/chunk key from this UUID5, so anything
+    that has to *remove* what ingestion wrote -- a sync tombstone, say -- must
+    derive it the same way rather than reimplementing the namespace.
+    """
+    return uuid5(_DOCUMENT_ID_NAMESPACE, foundation_document_id)
+
+
 class IngestChunkingPacket:
     """Ingest Foundation chunking packet into Qdrant.
 
@@ -103,7 +113,8 @@ class IngestChunkingPacket:
         self._storage_service = chunk_storage_service
 
     async def execute(
-        self, packet_path: Path, report_progress: EmbedProgressReporter | None = None
+        self, packet_path: Path, report_progress: EmbedProgressReporter | None = None,
+        include_document_ids: frozenset[str] | None = None,
     ) -> IngestionResult:
         """Execute packet ingestion.
 
@@ -111,6 +122,14 @@ class IngestChunkingPacket:
             packet_path: Path to Foundation packet directory
             report_progress: Optional async callback invoked periodically while
                 chunks are embedded, as ``report(embedded_chunks=, total_chunks=)``.
+            include_document_ids: Optional Foundation document_id allowlist. The
+                whole packet is still validated as one closed set -- a partial
+                packet is never trusted -- but only chunks belonging to these
+                documents are embedded and stored. This is what makes a sync
+                run cheap: embedding is the longest phase of the pipeline and
+                unchanged pages do not need it. Document rows are written for
+                the whole packet regardless, since they cost no embedding and
+                keep the documents table consistent with what was published.
 
         Returns:
             IngestionResult with ingestion metrics
@@ -127,6 +146,16 @@ class IngestChunkingPacket:
         media_assets = self._load_media_assets(packet_path / _MEDIA_FILE)
         self._validate_published_packet(summary, documents, chunk_records, media_assets)
         logger.info("Loaded %d chunk records from packet", len(chunk_records))
+        if include_document_ids is not None:
+            selected = [
+                record for record in chunk_records
+                if record.get("document_id") in include_document_ids
+            ]
+            logger.info(
+                "Sync selection keeps %d of %d chunk records (%d documents)",
+                len(selected), len(chunk_records), len(include_document_ids),
+            )
+            chunk_records = selected
         return await self._execute_records_strict(chunk_records, documents, report_progress)
 
     async def execute_records(

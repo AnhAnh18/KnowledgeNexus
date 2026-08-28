@@ -261,6 +261,7 @@
                     placeholder="https://confluence.example.com/pages/viewpage.action?pageId=12345" />
             </div>
             <button class="btn btn-success" id="ingestBtn" onclick="startIngest()">🚀 Bắt đầu Ingest</button>
+            <button class="btn btn-primary" id="syncPreviewBtn" onclick="startSyncPreview()">🔎 Kiểm tra thay đổi</button>
             <div id="ingestStatus" class="scroll-list-3" style="margin-top:16px;"></div>
         </div>
     </div>
@@ -616,6 +617,13 @@
             ['completed', 'Completed'],
         ];
 
+        // Sync-only phases. They are deliberately kept out of INGEST_PHASES so
+        // the "Step X/N" counter of a normal ingest keeps its meaning.
+        const SYNC_PHASE_LABELS = {
+            sync_plan: 'So sánh với bản đã index',
+            tombstone: 'Xoá các trang đã bị xoá ở nguồn',
+        };
+
         function ingestPhaseText(stats) {
             if (!stats.phase) return '';
             if (['failed', 'cancelled', 'paused'].includes(stats.phase)) {
@@ -624,6 +632,7 @@
                 const at = INGEST_PHASES.find(entry => entry[0] === stats.failed_phase);
                 return at ? `${label}: ${escapeHtml(at[1])}` : label.replace(' at step', '');
             }
+            if (SYNC_PHASE_LABELS[stats.phase]) return escapeHtml(SYNC_PHASE_LABELS[stats.phase]);
             const index = INGEST_PHASES.findIndex(entry => entry[0] === stats.phase);
             if (index < 0) return escapeHtml(stats.phase);
             return `Step ${index + 1}/${INGEST_PHASES.length} — ${escapeHtml(INGEST_PHASES[index][1])}`;
@@ -661,6 +670,27 @@
             return parts;
         }
 
+        // A sync result is the only thing in this UI that can report deletions,
+        // so it gets its own line rather than being folded into the counters.
+        function renderSyncSummary(stats) {
+            if (stats.new_pages === undefined) return '';
+            const num = value => escapeHtml(String(value ?? 0));
+            const baseline = stats.baseline_found === false
+                ? '<div style="color:#b26a00;">⚠️ Chưa có bản index trước cho URL này — không thể tính trang bị xoá.</div>'
+                : '';
+            return `
+                <div class="result-content">
+                    ${baseline}
+                    <div>🆕 Trang mới: <b>${num(stats.new_pages)}</b> ·
+                         ✏️ Trang thay đổi: <b>${num(stats.changed_pages)}</b> ·
+                         🗑️ Trang đã xoá: <b>${num(stats.deleted_pages)}</b> ·
+                         ➖ Không đổi: <b>${num(stats.unchanged_pages)}</b></div>
+                    ${stats.tombstoned_pages !== undefined
+                        ? `<div>Đã gỡ khỏi index: <b>${num(stats.tombstoned_pages)}</b> trang</div>` : ''}
+                </div>
+            `;
+        }
+
         function renderIngestJobCard(job) {
             const cls = ingestStatusClass(job.status);
             const stats = job.stats || {};
@@ -668,6 +698,10 @@
             const resumable = ['failed', 'paused'].includes(job.status) && stats.resumable === true;
             const running = job.status === 'pending' || job.status === 'running';
             const cancelLabel = job.status === 'running' ? '⏸ Pause job' : '✖ Cancel job';
+            // Only a finished preview offers to apply itself, and only when it
+            // actually found something to do.
+            const applicable = stats.kind === 'sync_preview' && job.status === 'completed'
+                && stats.url && (stats.new_pages || stats.changed_pages || stats.deleted_pages);
             
             // Build clickable hyperlink for job title
             const shortId = job.id.substring(0, 8);
@@ -689,7 +723,9 @@
                         ${stats.phase ? `<span>${ingestPhaseText(stats)}</span>` : ''}
                         ${ingestCounters(stats).map(text => `<span>${text}</span>`).join('')}
                     </div>
+                    ${renderSyncSummary(stats)}
                     ${job.error ? `<div class="result-content" style="color:#c0392b;">❌ ${escapeHtml(job.error)}</div>` : ''}
+                    ${applicable ? `<button class="btn btn-success" onclick="startSyncApply('${escapeHtml(stats.url)}')">✅ Áp dụng đồng bộ</button>` : ''}
                     ${resumable ? `<button class="btn" onclick="resumeIngest('${escapeHtml(job.id)}')">↻ Resume job</button>` : ''}
                     ${running ? `<button class="btn" onclick="cancelIngest('${escapeHtml(job.id)}')">${cancelLabel}</button>` : ''}
                 </div>
@@ -810,6 +846,46 @@
             } finally {
                 btn.disabled = false;
             }
+        }
+
+        async function submitSyncJob(url, path, message, btnId) {
+            const btn = btnId ? document.getElementById(btnId) : null;
+            if (btn) btn.disabled = true;
+            try {
+                const res = await apiCall('POST', path, { url });
+                const job = await res.json();
+                trackIngestJobId(job.id);
+                upsertIngestJobCard(job);
+                pollIngestJob(job.id);
+                showToast(message, 'success');
+            } catch (e) {
+                showToast('Không thể tạo job đồng bộ: ' + e.message, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function startSyncPreview() {
+            const url = document.getElementById('ingestUrlInput').value.trim();
+            if (!url) { showToast('Vui lòng nhập URL', 'error'); return; }
+            await submitSyncJob(
+                url, '/api/v1/ingest-jobs/confluence-subtrees/sync-preview',
+                'Đã xếp hàng kiểm tra thay đổi; index chưa bị sửa.', 'syncPreviewBtn',
+            );
+        }
+
+        async function startSyncApply(url) {
+            if (!url) { showToast('Job này không có URL để đồng bộ', 'error'); return; }
+            // Apply is the only action here that can remove data, so it is
+            // confirmed explicitly rather than inheriting the preview's consent.
+            if (!confirm(
+                'Áp dụng đồng bộ sẽ crawl lại cây trang, index lại các trang mới/thay đổi '
+                + 'và XOÁ khỏi index các trang đã bị xoá ở Confluence. Tiếp tục?'
+            )) return;
+            await submitSyncJob(
+                url, '/api/v1/ingest-jobs/confluence-subtrees/sync-apply',
+                'Đã xếp hàng job đồng bộ.', null,
+            );
         }
 
         async function cancelIngest(jobId) {
