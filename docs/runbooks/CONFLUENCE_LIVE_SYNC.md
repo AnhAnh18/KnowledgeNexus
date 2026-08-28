@@ -29,7 +29,10 @@ nên đây là chỗ tiết kiệm thời gian thật sự ở lần chạy th�
 
 Lưu ý về giới hạn: hợp đồng của Foundation ràng buộc một lần capture vào **toàn bộ**
 inventory mà nó đã crawl, nên `sync-apply` vẫn crawl và fetch lại cả cây trang.
-Không thể thu hẹp phần crawl xuống chỉ các trang đã đổi.
+Không thể thu hẹp phần crawl xuống chỉ các trang đã đổi. Đây là "Approach A".
+Khả năng crawl tăng dần (chỉ fetch trang đổi/mới) đã được khảo sát ở
+[docs/LIVE_SYNC_APPROACH_B_SURVEY.md](../LIVE_SYNC_APPROACH_B_SURVEY.md) —
+kết luận: cần đụng contract Foundation (raw-generation), rủi ro cao, chưa làm.
 
 ## 3. Baseline được tìm như thế nào
 
